@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -79,8 +80,15 @@ func runServer(command *cobra.Command, arguments []string) error {
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
 
-	if googleWebClientID == "" || jwtSigningKey == "" {
-		return errors.New("missing required configuration: google_web_client_id or jwt_signing_key")
+	missingConfiguration := make([]string, 0, 2)
+	if googleWebClientID == "" {
+		missingConfiguration = append(missingConfiguration, "google_web_client_id")
+	}
+	if jwtSigningKey == "" {
+		missingConfiguration = append(missingConfiguration, "jwt_signing_key")
+	}
+	if len(missingConfiguration) > 0 {
+		return fmt.Errorf("missing required configuration: %s", strings.Join(missingConfiguration, ", "))
 	}
 
 	gin.SetMode(gin.ReleaseMode)

@@ -48,6 +48,25 @@ func TestRunServerMissingConfig(t *testing.T) {
 	}
 }
 
+func TestRunServerMissingSigningKeyReportsField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	viper.Set("google_web_client_id", "provided-client-id")
+
+	err := runServer(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatalf("expected configuration error when jwt_signing_key missing")
+	}
+
+	expectedMessage := "missing required configuration: jwt_signing_key"
+	if err.Error() != expectedMessage {
+		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
+}
+
 func TestRunServerSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
