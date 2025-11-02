@@ -173,7 +173,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 ## 9. CLI and Server Lifecycle
 
-- Cobra command `authservice` exposes configuration as flags.
+- Cobra command `tauth` exposes configuration as flags.
 - Graceful shutdown listens for `SIGINT`/`SIGTERM`, allowing 10s for in-flight requests.
 - zap middleware logs method, path, status, IP, and latency for each request.
 - Integration tests use the exported CLI wiring to spin up in-memory servers (`go test ./...`).

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	webassets "github.com/tyemirov/authservice/web"
+	webassets "github.com/tyemirov/tauth/web"
 )
 
 func TestServeEmbeddedStaticJS(t *testing.T) {

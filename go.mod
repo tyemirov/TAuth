@@ -1,4 +1,4 @@
-module github.com/tyemirov/authservice
+module github.com/tyemirov/tauth
 
 go 1.25
 
