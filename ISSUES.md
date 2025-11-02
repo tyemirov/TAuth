@@ -18,7 +18,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 - [x] [TA-300] The app doesn't recognize the provided google web client ID — Clarified CLI validation to list only missing configuration keys and added coverage ensuring `jwt_signing_key` absence is reported precisely.
 - [x] [TA-301] Align `/api/me` with the documented profile contract — Reworked `HandleWhoAmI` to use session claims, surface stored profiles with expiry metadata, provide domain error for missing users, and emit zap warnings/errors for anomalies.
-- [ ] [TA-302] Tighten CORS configuration when credentials are enabled — Parameterise allowed origins, prevent wildcard credentials, and surface warnings for unsafe origins when `APP_ENABLE_CORS` is active.
+- [x] [TA-302] Tighten CORS configuration when credentials are enabled — Required explicit origin lists for credentialed CORS, added CLI flag `--cors_allowed_origins`, and error out on unsafe wildcard configurations.
 ```
 00:45:49 tyemirov@computercat:~/Development/Research/TAuth [master] $ go run ./... --google_web_client_id "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
 Error: missing required configuration: google_web_client_id or jwt_signing_key

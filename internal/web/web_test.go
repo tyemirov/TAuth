@@ -48,7 +48,11 @@ func TestPermissiveCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	router.Use(PermissiveCORS())
+	middleware, err := PermissiveCORS([]string{"http://localhost"})
+	if err != nil {
+		t.Fatalf("unexpected error configuring CORS: %v", err)
+	}
+	router.Use(middleware)
 	router.OPTIONS("/resource", func(contextGin *gin.Context) {
 		contextGin.Status(http.StatusNoContent)
 	})
@@ -61,8 +65,17 @@ func TestPermissiveCORS(t *testing.T) {
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 from preflight, got %d", recorder.Code)
 	}
-	if recorder.Header().Get("Access-Control-Allow-Origin") == "" {
-		t.Fatalf("CORS headers missing")
+	if origin := recorder.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost" {
+		t.Fatalf("unexpected allowed origin header: %q", origin)
+	}
+}
+
+func TestPermissiveCORSRejectsBlankOrigins(t *testing.T) {
+	if _, err := PermissiveCORS(nil); err == nil {
+		t.Fatalf("expected error for nil origin list")
+	}
+	if _, err := PermissiveCORS([]string{"  "}); err == nil {
+		t.Fatalf("expected error for whitespace origin")
 	}
 }
 
