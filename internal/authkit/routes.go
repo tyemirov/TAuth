@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"google.golang.org/api/idtoken"
+	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
+	"google.golang.org/api/idtoken"
 )
 
 type GoogleTokenValidator interface {
@@ -267,32 +267,9 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		recordMetric(metricAuthLogoutSuccess)
 	})
 
-	router.GET("/me", func(contextGin *gin.Context) {
-		sessionCookie, cookieErr := contextGin.Request.Cookie(configuration.SessionCookieName)
-		if cookieErr != nil || sessionCookie == nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-		parsedToken, parseErr := jwt.ParseWithClaims(sessionCookie.Value, &JwtCustomClaims{}, func(parsed *jwt.Token) (interface{}, error) {
-			return configuration.AppJWTSigningKey, nil
-		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
-		if parseErr != nil || parsedToken == nil || !parsedToken.Valid {
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-		claims, ok := parsedToken.Claims.(*JwtCustomClaims)
-		if !ok || claims.Issuer != configuration.AppJWTIssuer {
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-		contextGin.JSON(http.StatusOK, gin.H{
-			"user_id":    claims.UserID,
-			"user_email": claims.UserEmail,
-			"display":    claims.UserDisplayName,
-			"roles":      claims.UserRoles,
-			"expires":    claims.ExpiresAt.Time,
-		})
-	})
+	whoAmI := router.Group("/")
+	whoAmI.Use(RequireSession(configuration))
+	whoAmI.GET("/me", web.HandleWhoAmI(users, configuredLogger))
 }
 
 func writeSessionCookie(contextGin *gin.Context, configuration ServerConfig, sessionToken string, expiresAt time.Time) {
