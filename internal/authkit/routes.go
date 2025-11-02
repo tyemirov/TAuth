@@ -13,16 +13,44 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
-type googleTokenValidator interface {
+type GoogleTokenValidator interface {
 	Validate(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error)
 }
 
-var newGoogleTokenValidator = func(ctx context.Context) (googleTokenValidator, error) {
+var newGoogleTokenValidator = func(ctx context.Context) (GoogleTokenValidator, error) {
 	return idtoken.NewValidator(ctx)
+}
+
+// NewGoogleTokenValidator exposes the default validator constructor.
+func NewGoogleTokenValidator(ctx context.Context) (GoogleTokenValidator, error) {
+	return newGoogleTokenValidator(ctx)
+}
+
+var configuredGoogleValidator GoogleTokenValidator
+var configuredClock Clock
+
+// ProvideGoogleTokenValidator injects a singleton validator for auth routes.
+func ProvideGoogleTokenValidator(validator GoogleTokenValidator) {
+	configuredGoogleValidator = validator
+}
+
+// ProvideClock injects the clock used for minting tokens and expirations.
+func ProvideClock(clock Clock) {
+	configuredClock = clock
 }
 
 // MountAuthRoutes registers /auth/google, /auth/refresh, /auth/logout, and /me.
 func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore) {
+	validator := configuredGoogleValidator
+	var validatorInitErr error
+	if validator == nil {
+		validator, validatorInitErr = newGoogleTokenValidator(context.Background())
+	}
+	clock := configuredClock
+	if clock == nil {
+		clock = NewSystemClock()
+	}
+
 	router.POST("/auth/google", func(contextGin *gin.Context) {
 		var inbound struct {
 			GoogleIDToken string `json:"google_id_token"`
@@ -38,8 +66,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		validator, validatorErr := newGoogleTokenValidator(context.Background())
-		if validatorErr != nil {
+		if validatorInitErr != nil {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
@@ -69,20 +96,21 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
 		if mintErr != nil {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, time.Now().UTC().Add(configuration.RefreshTTL).Unix(), "")
+		refreshDeadline := clock.Now().UTC().Add(configuration.RefreshTTL)
+		_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, refreshDeadline.Unix(), "")
 		if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
 		writeSessionCookie(contextGin, configuration, sessionToken, sessionExpiresAt)
-		writeRefreshCookie(contextGin, configuration, refreshOpaque, time.Now().UTC().Add(configuration.RefreshTTL))
+		writeRefreshCookie(contextGin, configuration, refreshOpaque, refreshDeadline)
 
 		contextGin.JSON(http.StatusOK, gin.H{
 			"user_id":    applicationUserID,
@@ -104,7 +132,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		if time.Unix(expiresUnix, 0).Before(time.Now().UTC()) {
+		if time.Unix(expiresUnix, 0).Before(clock.Now().UTC()) {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
@@ -115,13 +143,14 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
 		if mintErr != nil {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, time.Now().UTC().Add(configuration.RefreshTTL).Unix(), currentTokenID)
+		refreshDeadline := clock.Now().UTC().Add(configuration.RefreshTTL)
+		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, refreshDeadline.Unix(), currentTokenID)
 		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -132,7 +161,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		}
 
 		writeSessionCookie(contextGin, configuration, sessionToken, sessionExpiresAt)
-		writeRefreshCookie(contextGin, configuration, newOpaque, time.Now().UTC().Add(configuration.RefreshTTL))
+		writeRefreshCookie(contextGin, configuration, newOpaque, refreshDeadline)
 
 		contextGin.Status(http.StatusNoContent)
 	})

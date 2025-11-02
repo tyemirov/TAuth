@@ -23,6 +23,10 @@ var serveHTTP = func(server *http.Server) error {
 	return server.ListenAndServe()
 }
 
+var buildGoogleTokenValidator = func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+	return authkit.NewGoogleTokenValidator(ctx)
+}
+
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
 		os.Exit(1)
@@ -72,6 +76,7 @@ const (
 	configCodeInvalidSessionTTL       = "config.invalid_session_ttl"
 	configCodeInvalidRefreshTTL       = "config.invalid_refresh_ttl"
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"
+	configCodeGoogleValidatorInit     = "config.google_validator_init"
 )
 
 type contextKey string
@@ -187,6 +192,17 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if enableCORS {
 		serverConfig.SameSiteMode = http.SameSiteNoneMode
 	}
+
+	validator, validatorErr := buildGoogleTokenValidator(command.Context())
+	if validatorErr != nil {
+		return fmt.Errorf("%s: %w", configCodeGoogleValidatorInit, validatorErr)
+	}
+	authkit.ProvideGoogleTokenValidator(validator)
+	defer authkit.ProvideGoogleTokenValidator(nil)
+
+	clock := authkit.NewSystemClock()
+	authkit.ProvideClock(clock)
+	defer authkit.ProvideClock(nil)
 
 	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore)
 

@@ -38,7 +38,7 @@ func (validator *fakeGoogleValidator) Validate(ctx context.Context, token string
 	return result.payload, nil
 }
 
-func withValidatorFactory(t *testing.T, factory func(context.Context) (googleTokenValidator, error)) func() {
+func withValidatorFactory(t *testing.T, factory func(context.Context) (GoogleTokenValidator, error)) func() {
 	t.Helper()
 	previous := newGoogleTokenValidator
 	newGoogleTokenValidator = factory
@@ -164,7 +164,7 @@ func TestAuthLifecycle(t *testing.T) {
 		},
 	}
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -272,7 +272,7 @@ func TestAuthLifecycle(t *testing.T) {
 func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -344,7 +344,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return nil, errors.New("factory_failure")
 	})
 	MountAuthRoutes(router, config, userStore, refreshStore)
@@ -358,7 +358,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	}
 	restoreValidator()
 
-	restoreValidator = withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator = withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"bad-token": {
@@ -412,7 +412,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 		},
 	}
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{results: results}, nil
 	})
 	defer restoreValidator()
@@ -440,7 +440,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 func TestRefreshAndLogoutGuards(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -549,7 +549,7 @@ func TestAuthGoogleMissingToken(t *testing.T) {
 func TestAuthGoogleUserStoreError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -585,7 +585,7 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 func TestAuthGoogleRefreshIssueError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -725,7 +725,7 @@ func TestRequireSessionIssuerMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	config := newTestServerConfig()
-	token, _, err := MintAppJWT("user", "user@example.com", "User", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+	token, _, err := MintAppJWT(NewSystemClock(), "user", "user@example.com", "User", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 	if err != nil {
 		t.Fatalf("failed to mint token: %v", err)
 	}
