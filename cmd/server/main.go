@@ -14,9 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/tyemirov/authservice/internal/authkit"
-	"github.com/tyemirov/authservice/internal/web"
-	webassets "github.com/tyemirov/authservice/web"
+	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/web"
+	webassets "github.com/tyemirov/tauth/web"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +32,7 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "authservice",
+		Use:   "tauth",
 		Short: "Auth service with Google Sign-In verification, JWT sessions, and rotating refresh tokens",
 		RunE:  runServer,
 	}
