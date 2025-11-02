@@ -19,7 +19,17 @@ import (
 	"go.uber.org/zap"
 )
 
+var serveHTTP = func(server *http.Server) error {
+	return server.ListenAndServe()
+}
+
 func main() {
+	if err := newRootCommand().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "authservice",
 		Short: "Auth service with Google Sign-In verification, JWT sessions, and rotating refresh tokens",
@@ -49,9 +59,7 @@ func main() {
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func runServer(command *cobra.Command, arguments []string) error {
@@ -155,7 +163,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}()
 
 	logger.Info("listening", zap.String("addr", listenAddr))
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveHTTP(server); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen error: %w", err)
 	}
 	return nil

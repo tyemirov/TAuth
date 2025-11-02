@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"time"
 )
 
 const refreshOpaqueByteLength = 32
+
+var refreshTokenRandomSource io.Reader = rand.Reader
 
 func newRefreshTokenID(now time.Time) string {
 	nowString := now.UTC().Format(time.RFC3339Nano)
@@ -17,7 +20,7 @@ func newRefreshTokenID(now time.Time) string {
 
 func generateRefreshOpaque() (string, string, error) {
 	randomBytes := make([]byte, refreshOpaqueByteLength)
-	if _, err := rand.Read(randomBytes); err != nil {
+	if _, err := io.ReadFull(refreshTokenRandomSource, randomBytes); err != nil {
 		return "", "", fmt.Errorf("refresh_store.random: %w", err)
 	}
 	opaque := base64.RawURLEncoding.EncodeToString(randomBytes)
