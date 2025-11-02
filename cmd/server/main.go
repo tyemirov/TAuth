@@ -50,6 +50,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().Bool("dev_insecure_http", false, "Allow insecure HTTP for local dev")
 	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
+	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
 	_ = viper.BindPFlag("cookie_domain", rootCmd.Flags().Lookup("cookie_domain"))
@@ -60,6 +61,7 @@ func newRootCommand() *cobra.Command {
 	_ = viper.BindPFlag("dev_insecure_http", rootCmd.Flags().Lookup("dev_insecure_http"))
 	_ = viper.BindPFlag("database_url", rootCmd.Flags().Lookup("database_url"))
 	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
+	_ = viper.BindPFlag("cors_allowed_origins", rootCmd.Flags().Lookup("cors_allowed_origins"))
 
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
@@ -154,6 +156,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	devInsecureHTTP := viper.GetBool("dev_insecure_http")
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
+	corsAllowedOrigins := viper.GetStringSlice("cors_allowed_origins")
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -161,7 +164,11 @@ func runServer(command *cobra.Command, arguments []string) error {
 	router.Use(zapLoggerMiddleware(logger))
 
 	if enableCORS {
-		router.Use(web.PermissiveCORS())
+		corsMiddleware, corsErr := web.PermissiveCORS(corsAllowedOrigins)
+		if corsErr != nil {
+			return corsErr
+		}
+		router.Use(corsMiddleware)
 	}
 
 	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {

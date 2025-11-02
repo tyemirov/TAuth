@@ -2,7 +2,9 @@ package web
 
 import (
 	"embed"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -22,13 +24,24 @@ func ServeEmbeddedStaticJS(contextGin *gin.Context, filesystem embed.FS, path st
 }
 
 // PermissiveCORS enables cross-origin requests. Only enable if needed.
-func PermissiveCORS() gin.HandlerFunc {
+func PermissiveCORS(allowedOrigins []string) (gin.HandlerFunc, error) {
+	sanitized := make([]string, 0, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			sanitized = append(sanitized, trimmed)
+		}
+	}
+	if len(sanitized) == 0 {
+		return nil, fmt.Errorf("web.cors.invalid_origins: at least one explicit origin is required when credentials are allowed")
+	}
+
 	return cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     sanitized,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "X-Requested-With", "X-Client"},
 		ExposeHeaders:    []string{"Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
-	})
+	}), nil
 }

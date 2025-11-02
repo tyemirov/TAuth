@@ -181,6 +181,7 @@ func TestRunServerSuccess(t *testing.T) {
 	viper.Set("dev_insecure_http", true)
 	viper.Set("database_url", "sqlite://file::memory:?cache=shared")
 	viper.Set("enable_cors", true)
+	viper.Set("cors_allowed_origins", []string{"http://localhost"})
 
 	config, err := LoadServerConfig()
 	if err != nil {
@@ -217,6 +218,7 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	viper.Set("session_ttl", time.Minute)
 	viper.Set("refresh_ttl", time.Hour)
 	viper.Set("dev_insecure_http", true)
+	viper.Set("cors_allowed_origins", []string{"http://localhost"})
 
 	config, err := LoadServerConfig()
 	if err != nil {
