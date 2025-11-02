@@ -10,7 +10,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 ## BugFixes (300–399)
 
-- [ ] [TA-300] The app doesn't recognize the provided google web client ID 
+- [x] [TA-300] The app doesn't recognize the provided google web client ID — Clarified CLI validation to list only missing configuration keys and added coverage ensuring `jwt_signing_key` absence is reported precisely.
 ```
 00:45:49 tyemirov@computercat:~/Development/Research/TAuth [master] $ go run ./... --google_web_client_id "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
 Error: missing required configuration: google_web_client_id or jwt_signing_key
