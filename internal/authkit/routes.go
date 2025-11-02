@@ -2,6 +2,7 @@ package authkit
 
 import (
 	"context"
+	"errors"
 
 	"net"
 	"net/http"
@@ -155,7 +156,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		if revokeErr := refreshTokens.Revoke(contextGin, currentTokenID); revokeErr != nil {
+		if revokeErr := refreshTokens.Revoke(contextGin, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
@@ -171,7 +172,9 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		if cookieErr == nil && refreshCookie != nil && strings.TrimSpace(refreshCookie.Value) != "" {
 			_, tokenID, _, validateErr := refreshTokens.Validate(contextGin, refreshCookie.Value)
 			if validateErr == nil && tokenID != "" {
-				_ = refreshTokens.Revoke(contextGin, tokenID)
+				if revokeErr := refreshTokens.Revoke(contextGin, tokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
+					// best effort: continue logout even if revoke fails
+				}
 			}
 		}
 		clearCookie(contextGin, configuration.SessionCookieName, configuration.CookieDomain, configuration.SameSiteMode)
