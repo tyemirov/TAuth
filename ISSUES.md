@@ -12,7 +12,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-203] Harmonize refresh token store error semantics — Unified sentinel errors across memory/sqlite stores, wrapped errors with context codes, and surfaced an idempotent revoke contract for logging.
 - [x] [TA-204] Expand auth logging and metrics hooks — Injected zap logger and metrics recorder into auth routes, added structured warnings/errors, and incremented counters for login, refresh, and logout flows.
 - [x] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Added TLS-backed `httptest.Server` flows covering login→refresh→logout, tampered sessions, and revoked tokens with metrics assertions.
-- [ ] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Automate browser flows ensuring the client dispatches the documented DOM events across authentication transitions.
+- [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
 
 ## BugFixes (300–399)
 
