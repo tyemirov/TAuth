@@ -14,13 +14,22 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tyemirov/authservice/internal/authkit"
-	"github.com/tyemirov/authservice/internal/authkitpg"
 	"github.com/tyemirov/authservice/internal/web"
 	webassets "github.com/tyemirov/authservice/web"
 	"go.uber.org/zap"
 )
 
+var serveHTTP = func(server *http.Server) error {
+	return server.ListenAndServe()
+}
+
 func main() {
+	if err := newRootCommand().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "authservice",
 		Short: "Auth service with Google Sign-In verification, JWT sessions, and rotating refresh tokens",
@@ -34,7 +43,7 @@ func main() {
 	rootCmd.Flags().Duration("session_ttl", 15*time.Minute, "Access token TTL")
 	rootCmd.Flags().Duration("refresh_ttl", 60*24*time.Hour, "Refresh token TTL")
 	rootCmd.Flags().Bool("dev_insecure_http", false, "Allow insecure HTTP for local dev")
-	rootCmd.Flags().String("postgres_url", "", "PostgreSQL URL for refresh tokens (leave empty to use in-memory store)")
+	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
@@ -44,15 +53,13 @@ func main() {
 	_ = viper.BindPFlag("session_ttl", rootCmd.Flags().Lookup("session_ttl"))
 	_ = viper.BindPFlag("refresh_ttl", rootCmd.Flags().Lookup("refresh_ttl"))
 	_ = viper.BindPFlag("dev_insecure_http", rootCmd.Flags().Lookup("dev_insecure_http"))
-	_ = viper.BindPFlag("postgres_url", rootCmd.Flags().Lookup("postgres_url"))
+	_ = viper.BindPFlag("database_url", rootCmd.Flags().Lookup("database_url"))
 	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
 
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func runServer(command *cobra.Command, arguments []string) error {
@@ -69,7 +76,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	sessionTTL := viper.GetDuration("session_ttl")
 	refreshTTL := viper.GetDuration("refresh_ttl")
 	devInsecureHTTP := viper.GetBool("dev_insecure_http")
-	postgresURL := viper.GetString("postgres_url")
+	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
 
 	if googleWebClientID == "" || jwtSigningKey == "" {
@@ -96,16 +103,13 @@ func runServer(command *cobra.Command, arguments []string) error {
 	userStore := web.NewInMemoryUsers()
 	var refreshStore authkit.RefreshTokenStore
 
-	if postgresURL != "" {
-		pool, poolErr := authkitpg.BuildPool(context.Background(), postgresURL)
-		if poolErr != nil {
-			return poolErr
+	if databaseURL != "" {
+		persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+		if storeErr != nil {
+			return storeErr
 		}
-		if err := authkitpg.EnsureSchema(context.Background(), pool); err != nil {
-			return err
-		}
-		refreshStore = authkitpg.NewPostgresRefreshTokenStore(pool)
-		logger.Info("using postgres refresh token store")
+		refreshStore = persistentStore
+		logger.Info("using persistent refresh token store", zap.String("driver", persistentStore.Driver()))
 	} else {
 		refreshStore = authkit.NewMemoryRefreshTokenStore()
 		logger.Info("using in-memory refresh token store")
@@ -159,7 +163,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}()
 
 	logger.Info("listening", zap.String("addr", listenAddr))
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveHTTP(server); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen error: %w", err)
 	}
 	return nil

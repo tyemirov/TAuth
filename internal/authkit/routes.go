@@ -13,6 +13,14 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
+type googleTokenValidator interface {
+	Validate(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error)
+}
+
+var newGoogleTokenValidator = func(ctx context.Context) (googleTokenValidator, error) {
+	return idtoken.NewValidator(ctx)
+}
+
 // MountAuthRoutes registers /auth/google, /auth/refresh, /auth/logout, and /me.
 func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore) {
 	router.POST("/auth/google", func(contextGin *gin.Context) {
@@ -30,7 +38,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		validator, validatorErr := idtoken.NewValidator(context.Background())
+		validator, validatorErr := newGoogleTokenValidator(context.Background())
 		if validatorErr != nil {
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
