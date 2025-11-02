@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -46,6 +47,53 @@ func TestRunServerMissingConfig(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected configuration error")
 	}
+
+	expectedMessage := "config.uninitialized_server_config: server configuration not prepared; PreRunE must execute before RunE"
+	if err.Error() != expectedMessage {
+		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
+}
+
+func TestLoadServerConfigRequiresGoogleClientID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	viper.Set("jwt_signing_key", "signing-secret")
+	viper.Set("session_ttl", time.Minute)
+	viper.Set("refresh_ttl", time.Hour)
+
+	_, err := LoadServerConfig()
+	if err == nil {
+		t.Fatalf("expected error when google_web_client_id is missing")
+	}
+	expectedMessage := "config.missing_google_web_client_id: google_web_client_id must be provided"
+	if err.Error() != expectedMessage {
+		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
+}
+
+func TestLoadServerConfigRequiresPositiveSessionTTL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	viper.Set("google_web_client_id", "client")
+	viper.Set("jwt_signing_key", "signing-secret")
+	viper.Set("session_ttl", 0)
+	viper.Set("refresh_ttl", time.Hour)
+
+	_, err := LoadServerConfig()
+	if err == nil {
+		t.Fatalf("expected error when session_ttl is non-positive")
+	}
+
+	expectedMessage := "config.invalid_session_ttl: session_ttl must be greater than zero"
+	if err.Error() != expectedMessage {
+		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
 }
 
 func TestRunServerMissingSigningKeyReportsField(t *testing.T) {
@@ -56,12 +104,12 @@ func TestRunServerMissingSigningKeyReportsField(t *testing.T) {
 
 	viper.Set("google_web_client_id", "provided-client-id")
 
-	err := runServer(&cobra.Command{}, nil)
+	_, err := LoadServerConfig()
 	if err == nil {
 		t.Fatalf("expected configuration error when jwt_signing_key missing")
 	}
 
-	expectedMessage := "missing required configuration: jwt_signing_key"
+	expectedMessage := "config.missing_jwt_signing_key: jwt_signing_key must be provided"
 	if err.Error() != expectedMessage {
 		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
 	}
@@ -91,7 +139,15 @@ func TestRunServerSuccess(t *testing.T) {
 	viper.Set("database_url", "sqlite://file::memory:?cache=shared")
 	viper.Set("enable_cors", true)
 
-	if err := runServer(&cobra.Command{}, nil); err != nil {
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
 	}
 }
@@ -114,7 +170,15 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	viper.Set("refresh_ttl", time.Hour)
 	viper.Set("dev_insecure_http", true)
 
-	if err := runServer(&cobra.Command{}, nil); err != nil {
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed with in-memory store, got %v", err)
 	}
 }

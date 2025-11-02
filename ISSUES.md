@@ -7,7 +7,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 ## Improvements (200–299)
 
 - [x] [TA-200] Use GORM and abstract away the flavor of the DB through GORM. If the DB url sent through an envionment variable specifies postgres protocol, then use postgres, if sqlite, then use sqlite, etc — Resolved with `NewDatabaseRefreshTokenStore` (GORM, Postgres/SQLite), mandatory `--database_url` / `APP_DATABASE_URL`, legacy Postgres-only store removed, docs + tests added
-- [ ] [TA-201] Harden configuration lifecycle and smart constructors — Introduce a `LoadServerConfig` smart constructor, validate TTLs and cookie names in `PreRunE`, and emit structured zap errors with stable codes when configuration is invalid.
+- [x] [TA-201] Harden configuration lifecycle and smart constructors — Added `LoadServerConfig` smart constructor invoked from `PreRunE`, validated TTLs and required identifiers, and surfaced structured `config.*` error codes before server start.
 - [ ] [TA-202] Inject Google token validator dependencies and wrap JWT errors — Define a `GoogleTokenValidator` interface, inject a singleton validator and clock from the CLI, and wrap JWT mint failures with context-rich error codes.
 - [ ] [TA-203] Harmonize refresh token store error semantics — Share typed sentinel errors across store implementations, add contextual error wrapping in the memory store, and expose an idempotent revocation helper.
 - [ ] [TA-204] Expand auth logging and metrics hooks — Pass a logger into `MountAuthRoutes` to record unexpected store/validator failures with stable codes and instrument `/auth/*` endpoints with counters.

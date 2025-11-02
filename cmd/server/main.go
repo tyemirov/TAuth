@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -32,9 +31,10 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "tauth",
-		Short: "Auth service with Google Sign-In verification, JWT sessions, and rotating refresh tokens",
-		RunE:  runServer,
+		Use:     "tauth",
+		Short:   "Auth service with Google Sign-In verification, JWT sessions, and rotating refresh tokens",
+		PreRunE: prepareServerConfig,
+		RunE:    runServer,
 	}
 
 	rootCmd.Flags().String("listen_addr", ":8080", "HTTP listen address")
@@ -63,6 +63,71 @@ func newRootCommand() *cobra.Command {
 	return rootCmd
 }
 
+const (
+	sessionCookieName = "app_session"
+	refreshCookieName = "app_refresh"
+
+	configCodeMissingGoogleClientID   = "config.missing_google_web_client_id"
+	configCodeMissingJWTSigningKey    = "config.missing_jwt_signing_key"
+	configCodeInvalidSessionTTL       = "config.invalid_session_ttl"
+	configCodeInvalidRefreshTTL       = "config.invalid_refresh_ttl"
+	configCodeUninitializedServerConf = "config.uninitialized_server_config"
+)
+
+type contextKey string
+
+const serverConfigContextKey contextKey = "serverConfig"
+
+func prepareServerConfig(command *cobra.Command, arguments []string) error {
+	serverConfig, loadErr := LoadServerConfig()
+	if loadErr != nil {
+		return loadErr
+	}
+	existingContext := command.Context()
+	if existingContext == nil {
+		existingContext = context.Background()
+	}
+	command.SetContext(context.WithValue(existingContext, serverConfigContextKey, serverConfig))
+	return nil
+}
+
+func configError(code, message string) error {
+	return fmt.Errorf("%s: %s", code, message)
+}
+
+func LoadServerConfig() (authkit.ServerConfig, error) {
+	googleWebClientID := viper.GetString("google_web_client_id")
+	if googleWebClientID == "" {
+		return authkit.ServerConfig{}, configError(configCodeMissingGoogleClientID, "google_web_client_id must be provided")
+	}
+
+	jwtSigningKey := viper.GetString("jwt_signing_key")
+	if jwtSigningKey == "" {
+		return authkit.ServerConfig{}, configError(configCodeMissingJWTSigningKey, "jwt_signing_key must be provided")
+	}
+
+	sessionTTL := viper.GetDuration("session_ttl")
+	if sessionTTL <= 0 {
+		return authkit.ServerConfig{}, configError(configCodeInvalidSessionTTL, "session_ttl must be greater than zero")
+	}
+
+	refreshTTL := viper.GetDuration("refresh_ttl")
+	if refreshTTL <= 0 {
+		return authkit.ServerConfig{}, configError(configCodeInvalidRefreshTTL, "refresh_ttl must be greater than zero")
+	}
+
+	return authkit.ServerConfig{
+		GoogleWebClientID: googleWebClientID,
+		AppJWTSigningKey:  []byte(jwtSigningKey),
+		AppJWTIssuer:      "mprlab-auth",
+		CookieDomain:      viper.GetString("cookie_domain"),
+		SessionCookieName: sessionCookieName,
+		RefreshCookieName: refreshCookieName,
+		SessionTTL:        sessionTTL,
+		RefreshTTL:        refreshTTL,
+	}, nil
+}
+
 func runServer(command *cobra.Command, arguments []string) error {
 	logger, loggerErr := zap.NewProduction()
 	if loggerErr != nil {
@@ -70,26 +135,20 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	defer func() { _ = logger.Sync() }()
 
+	commandContext := command.Context()
+	var contextValue any
+	if commandContext != nil {
+		contextValue = commandContext.Value(serverConfigContextKey)
+	}
+	serverConfig, ok := contextValue.(authkit.ServerConfig)
+	if !ok {
+		return configError(configCodeUninitializedServerConf, "server configuration not prepared; PreRunE must execute before RunE")
+	}
+
 	listenAddr := viper.GetString("listen_addr")
-	googleWebClientID := viper.GetString("google_web_client_id")
-	jwtSigningKey := viper.GetString("jwt_signing_key")
-	cookieDomain := viper.GetString("cookie_domain")
-	sessionTTL := viper.GetDuration("session_ttl")
-	refreshTTL := viper.GetDuration("refresh_ttl")
 	devInsecureHTTP := viper.GetBool("dev_insecure_http")
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
-
-	missingConfiguration := make([]string, 0, 2)
-	if googleWebClientID == "" {
-		missingConfiguration = append(missingConfiguration, "google_web_client_id")
-	}
-	if jwtSigningKey == "" {
-		missingConfiguration = append(missingConfiguration, "jwt_signing_key")
-	}
-	if len(missingConfiguration) > 0 {
-		return fmt.Errorf("missing required configuration: %s", strings.Join(missingConfiguration, ", "))
-	}
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -123,31 +182,16 @@ func runServer(command *cobra.Command, arguments []string) error {
 		logger.Info("using in-memory refresh token store")
 	}
 
-	sameSiteMode := http.SameSiteStrictMode
+	serverConfig.AllowInsecureHTTP = devInsecureHTTP
+	serverConfig.SameSiteMode = http.SameSiteStrictMode
 	if enableCORS {
-		sameSiteMode = http.SameSiteNoneMode
+		serverConfig.SameSiteMode = http.SameSiteNoneMode
 	}
 
-	configuration := authkit.ServerConfig{
-		GoogleWebClientID: googleWebClientID,
-		AppJWTSigningKey:  []byte(jwtSigningKey),
-		AppJWTIssuer:      "mprlab-auth",
-		CookieDomain:      cookieDomain,
-
-		SessionCookieName: "app_session",
-		RefreshCookieName: "app_refresh",
-
-		SessionTTL: sessionTTL,
-		RefreshTTL: refreshTTL,
-
-		SameSiteMode:      sameSiteMode,
-		AllowInsecureHTTP: devInsecureHTTP,
-	}
-
-	authkit.MountAuthRoutes(router, configuration, userStore, refreshStore)
+	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore)
 
 	protected := router.Group("/api")
-	protected.Use(authkit.RequireSession(configuration))
+	protected.Use(authkit.RequireSession(serverConfig))
 	protected.GET("/me", web.HandleWhoAmI())
 
 	server := &http.Server{
