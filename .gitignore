@@ -1,6 +1,7 @@
 PLAN.md
 .env
 node_modules/
+tools/
 
 *.json
 !package.json
