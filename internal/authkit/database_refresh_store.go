@@ -18,9 +18,6 @@ var (
 	// ErrUnsupportedDialect indicates that no GORM dialector is available for the scheme.
 	ErrUnsupportedDialect = errors.New("refresh_store.unsupported_dialect")
 
-	errTokenNotFound       = errors.New("refresh_store.not_found")
-	errTokenRevoked        = errors.New("refresh_store.revoked")
-	errTokenExpired        = errors.New("refresh_store.expired")
 	errEmptyOpaqueToken    = errors.New("refresh_store.empty_token")
 	errEmptyDatabaseURL    = errors.New("refresh_store.empty_database_url")
 	errSQLiteEmptyPath     = errors.New("refresh_store.sqlite.empty_path")
@@ -103,23 +100,23 @@ func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, applicationUs
 // Validate locates a refresh token by its opaque value.
 func (store *DatabaseRefreshTokenStore) Validate(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
 	if strings.TrimSpace(tokenOpaque) == "" {
-		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, errEmptyOpaqueToken)
+		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenEmptyOpaque)
 	}
 	hashValue := hashOpaque(tokenOpaque)
 	var record refreshTokenRecord
 	err := store.db.WithContext(ctx).Where("token_hash = ?", hashValue).Take(&record).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, errTokenNotFound)
+			return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenNotFound)
 		}
 		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, err)
 	}
 	now := time.Now().UTC()
 	if record.RevokedAtUnix != 0 {
-		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, errTokenRevoked)
+		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenRevoked)
 	}
 	if time.Unix(record.ExpiresUnix, 0).Before(now) {
-		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, errTokenExpired)
+		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenExpired)
 	}
 	return record.UserID, record.TokenID, record.ExpiresUnix, nil
 }
@@ -137,10 +134,13 @@ func (store *DatabaseRefreshTokenStore) Revoke(ctx context.Context, tokenID stri
 		var record refreshTokenRecord
 		findErr := store.db.WithContext(ctx).Where("token_id = ?", tokenID).Take(&record).Error
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, errTokenNotFound)
+			return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, ErrRefreshTokenNotFound)
 		}
 		if findErr != nil {
 			return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, findErr)
+		}
+		if record.RevokedAtUnix != 0 {
+			return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, ErrRefreshTokenAlreadyRevoked)
 		}
 		return nil
 	}

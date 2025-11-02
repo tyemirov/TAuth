@@ -3,7 +3,7 @@ package authkit
 import (
 	"context"
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -42,7 +42,7 @@ func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, applicationUser
 	tokenID := store.nextID()
 	opaque, hashValue, err := store.randomOpaque()
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("refresh_store.issue.memory: %w", err)
 	}
 	nowUnix := time.Now().UTC().Unix()
 
@@ -68,17 +68,17 @@ func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tokenOpaque 
 	hashValue := store.hash(tokenOpaque)
 	tokenID, ok := store.byHash[hashValue]
 	if !ok {
-		return "", "", 0, errors.New("not_found")
+		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	rec := store.byID[tokenID]
 	if rec == nil {
-		return "", "", 0, errors.New("not_found")
+		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
-		return "", "", 0, errors.New("revoked")
+		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenRevoked)
 	}
 	if time.Unix(rec.ExpiresUnix, 0).Before(time.Now().UTC()) {
-		return "", "", 0, errors.New("expired")
+		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenExpired)
 	}
 	return rec.UserID, rec.TokenID, rec.ExpiresUnix, nil
 }
@@ -90,10 +90,10 @@ func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tokenID string
 
 	rec := store.byID[tokenID]
 	if rec == nil {
-		return errors.New("not_found")
+		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
-		return nil
+		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenAlreadyRevoked)
 	}
 	rec.RevokedAtUnix = time.Now().UTC().Unix()
 	return nil
