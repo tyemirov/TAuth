@@ -55,8 +55,9 @@ export APP_LISTEN_ADDR=":8080"
 export APP_GOOGLE_WEB_CLIENT_ID="your_web_client_id.apps.googleusercontent.com"
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
 export APP_COOKIE_DOMAIN="localhost"
-# Optional: Postgres for refresh tokens:
-# export APP_POSTGRES_URL="postgres://user:pass@localhost:5432/authdb?sslmode=disable"
+# Optional: Persistent refresh tokens (Postgres or SQLite):
+# export APP_DATABASE_URL="postgres://user:pass@localhost:5432/authdb?sslmode=disable"
+# export APP_DATABASE_URL="sqlite://file:./auth.db"
 # Optional cross-origin UI local dev (not recommended for prod):
 # export APP_ENABLE_CORS="true"
 # export APP_DEV_INSECURE_HTTP="true"
@@ -101,8 +102,7 @@ After that, `auth-client.js` keeps the user logged in silently.
 .
 ├─ cmd/server/                # main service (Gin, graceful shutdown, logging)
 ├─ internal/
-│  ├─ authkit/                # core auth (JWT, routes, memory refresh store)
-│  ├─ authkitpg/              # Postgres refresh token store + schema
+│  ├─ authkit/                # core auth (JWT, routes, refresh token stores)
 │  └─ web/                    # static serving, demo user store, CORS helper
 └─ web/
    └─ auth-client.js          # reusable frontend module (hydration + refresh)
@@ -165,7 +165,7 @@ await logout(); // clears server cookies and transitions UI to signed-out
 * **Rotate refresh tokens** on every refresh:
 
   * **In-memory** store for dev (`internal/authkit`).
-  * **PostgreSQL** store for prod (`internal/authkitpg`), with hashed opaque tokens.
+  * **GORM-backed** store for prod (`internal/authkit`), supports Postgres (`postgres://`) or SQLite (`sqlite://`).
 
 Protected routes use:
 
@@ -188,7 +188,7 @@ Environment (via Viper):
 | `APP_COOKIE_DOMAIN`        | Cookie domain (empty = host-only)                | `app.example.com`                                   |
 | `APP_SESSION_TTL`          | Access token TTL                                 | `15m`                                               |
 | `APP_REFRESH_TTL`          | Refresh token TTL                                | `1440h` (60 days)                                   |
-| `APP_POSTGRES_URL`         | Postgres URL for refresh tokens                  | `postgres://user:pass@host:5432/db?sslmode=disable` |
+| `APP_DATABASE_URL`         | Database URL for refresh tokens (postgres/sqlite) | `postgres://user:pass@host:5432/db?sslmode=disable` |
 | `APP_ENABLE_CORS`          | `true` to enable permissive CORS (split origins) | `false`                                             |
 | `APP_DEV_INSECURE_HTTP`    | Allow non-HTTPS (local only)                     | `false`                                             |
 

@@ -2,8 +2,6 @@ package authkit
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"sync"
@@ -103,20 +101,15 @@ func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tokenID string
 
 func (store *MemoryRefreshTokenStore) nextID() string {
 	store.sequenceID++
-	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	return base64.RawURLEncoding.EncodeToString([]byte(timestamp)) + "-" + base64.RawURLEncoding.EncodeToString([]byte{byte(store.sequenceID % 255)})
+	timestampID := newRefreshTokenID(time.Now().UTC())
+	sequenceFragment := base64.RawURLEncoding.EncodeToString([]byte{byte(store.sequenceID % 255)})
+	return timestampID + "-" + sequenceFragment
 }
 
 func (store *MemoryRefreshTokenStore) randomOpaque() (string, string, error) {
-	randomBytes := make([]byte, 32)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return "", "", err
-	}
-	opaque := base64.RawURLEncoding.EncodeToString(randomBytes)
-	return opaque, store.hash(opaque), nil
+	return generateRefreshOpaque()
 }
 
 func (store *MemoryRefreshTokenStore) hash(opaque string) string {
-	sum := sha256.Sum256([]byte(opaque))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
+	return hashOpaque(opaque)
 }
