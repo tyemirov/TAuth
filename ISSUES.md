@@ -10,7 +10,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-201] Harden configuration lifecycle and smart constructors — Added `LoadServerConfig` smart constructor invoked from `PreRunE`, validated TTLs and required identifiers, and surfaced structured `config.*` error codes before server start.
 - [x] [TA-202] Inject Google token validator dependencies and wrap JWT errors — Introduced injectable Google validator/clock with CLI wiring, tightened route time handling, and wrapped JWT mint failures with `jwt.mint.failure` codes.
 - [x] [TA-203] Harmonize refresh token store error semantics — Unified sentinel errors across memory/sqlite stores, wrapped errors with context codes, and surfaced an idempotent revoke contract for logging.
-- [ ] [TA-204] Expand auth logging and metrics hooks — Pass a logger into `MountAuthRoutes` to record unexpected store/validator failures with stable codes and instrument `/auth/*` endpoints with counters.
+- [x] [TA-204] Expand auth logging and metrics hooks — Injected zap logger and metrics recorder into auth routes, added structured warnings/errors, and incremented counters for login, refresh, and logout flows.
 - [ ] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Build an `httptest.Server` suite covering `/auth/google → /auth/refresh → /auth/logout` and tampered session scenarios to raise coverage toward the ≥95% goal.
 - [ ] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Automate browser flows ensuring the client dispatches the documented DOM events across authentication transitions.
 
