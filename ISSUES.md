@@ -4,7 +4,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 ## Features (100–199)
 
-- [ ] [TA-100] Develop a new HTML header using mpr-ui that incorporates TAuth. The header shall be in mpr-ui repo. The header shall allow to login a user, display its avatar and the name, expose user id, email etc for the consumption by the rest of the app.
+- [x] [TA-100] Develop a new HTML header using mpr-ui that incorporates TAuth. The header shall be in mpr-ui repo. The header shall allow to login a user, display its avatar and the name, expose user id, email etc for the consumption by the rest of the app. — Added the reusable `mpr-ui` auth header component with avatar/name rendering, emitted dataset attributes for downstream consumers, surfaced `avatar_url` through `/auth/google` and `/me`, refreshed demo + docs, and staged Puppeteer coverage (skipped in CI until Chromium is available).
 - [ ] [TA-101] Add a reusable Go client validator package under /pkg for validating TAuth session cookies (app_session) in other apps — verify HS256 with APP_JWT_SIGNING_KEY, check issuer and time claims, expose typed claims accessors, and provide an optional Gin middleware adapter; include docs and tests.
 
 ## Improvements (200–299)

@@ -33,6 +33,7 @@ type JwtCustomClaims struct {
 	UserID          string   `json:"user_id"`
 	UserEmail       string   `json:"user_email"`
 	UserDisplayName string   `json:"user_display_name"`
+	UserAvatarURL   string   `json:"user_avatar_url"`
 	UserRoles       []string `json:"user_roles"`
 	jwt.RegisteredClaims
 }
@@ -61,6 +62,14 @@ func (claims *JwtCustomClaims) GetUserDisplayName() string {
 	return claims.UserDisplayName
 }
 
+// GetUserAvatarURL returns the avatar URL stored in the claims.
+func (claims *JwtCustomClaims) GetUserAvatarURL() string {
+	if claims == nil {
+		return ""
+	}
+	return claims.UserAvatarURL
+}
+
 // GetUserRoles returns the role slice associated with the claims.
 func (claims *JwtCustomClaims) GetUserRoles() []string {
 	if claims == nil {
@@ -78,7 +87,7 @@ func (claims *JwtCustomClaims) GetExpiresAt() time.Time {
 }
 
 // MintAppJWT creates a signed HS256 access token using the provided clock.
-func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDisplayName string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
+func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(applicationUserID) == "" {
 		return "", time.Time{}, fmt.Errorf("%w: subject must be non-empty", errJWTMintFailure)
 	}
@@ -89,6 +98,7 @@ func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDis
 		UserID:          applicationUserID,
 		UserEmail:       userEmail,
 		UserDisplayName: userDisplayName,
+		UserAvatarURL:   userAvatarURL,
 		UserRoles:       userRoles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issuer,

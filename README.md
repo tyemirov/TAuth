@@ -62,6 +62,21 @@ await fetch("/auth/google", {
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
+Successful exchanges populate `/me` with a rich profile:
+
+```json
+{
+  "user_id": "google:12345",
+  "user_email": "user@example.com",
+  "display": "Example User",
+  "avatar_url": "https://lh3.googleusercontent.com/a/AEdFTp7...",
+  "roles": ["user"],
+  "expires": "2024-05-30T12:34:56.000Z"
+}
+```
+
+Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mpr-ui header component).
+
 ---
 
 ## Deploy with confidence

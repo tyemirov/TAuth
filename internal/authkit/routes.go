@@ -176,6 +176,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		userEmail, _ := payload.Claims["email"].(string)
 		emailVerified, _ := payload.Claims["email_verified"].(bool)
 		userDisplayName, _ := payload.Claims["name"].(string)
+		userAvatarURL, _ := payload.Claims["picture"].(string)
 
 		if googleSub == "" || userEmail == "" || !emailVerified {
 			recordMetric(metricAuthLoginFailure)
@@ -184,7 +185,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(contextGin, googleSub, userEmail, userDisplayName)
+		applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(contextGin, googleSub, userEmail, userDisplayName, userAvatarURL)
 		if upsertErr != nil || applicationUserID == "" {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.user_store", upsertErr)
@@ -192,7 +193,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
 		if mintErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.mint_jwt", mintErr)
@@ -216,6 +217,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			"user_id":    applicationUserID,
 			"user_email": userEmail,
 			"display":    userDisplayName,
+			"avatar_url": userAvatarURL,
 			"roles":      userRoles,
 		})
 		recordMetric(metricAuthLoginSuccess)
@@ -244,7 +246,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		userEmail, userDisplayName, userRoles, profileErr := users.GetUserProfile(contextGin, applicationUserID)
+		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, applicationUserID)
 		if profileErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthWarning("auth.refresh.profile", profileErr)
@@ -252,7 +254,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
 		if mintErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.mint_jwt", mintErr)

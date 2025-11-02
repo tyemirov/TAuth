@@ -4,8 +4,8 @@ import "context"
 
 // UserStore persists and retrieves application users.
 type UserStore interface {
-	UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (applicationUserID string, userRoles []string, err error)
-	GetUserProfile(ctx context.Context, applicationUserID string) (userEmail string, userDisplayName string, userRoles []string, err error)
+	UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+	GetUserProfile(ctx context.Context, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
 
 // RefreshTokenStore manages long-lived refresh tokens.
