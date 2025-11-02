@@ -6,7 +6,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 ## Improvements (200–299)
 
-- [ ] [TA-200] Use GORM and abstract away the flavor of the DB through GORM. If the DB url sent through an envionment variable specifies postgres protocol, then use postgres, if sqlite, then use sqlite
+- [ ] [TA-200] Use GORM and abstract away the flavor of the DB through GORM. If the DB url sent through an envionment variable specifies postgres protocol, then use postgres, if sqlite, then use sqlite, etc
 
 ## BugFixes (300–399)
 
