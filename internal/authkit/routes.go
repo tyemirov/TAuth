@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,9 +34,17 @@ var configuredClock Clock
 var configuredLogger *zap.Logger
 var configuredMetrics MetricsRecorder
 
+var validatorCache struct {
+	sync.RWMutex
+	value GoogleTokenValidator
+}
+
 // ProvideGoogleTokenValidator injects a singleton validator for auth routes.
 func ProvideGoogleTokenValidator(validator GoogleTokenValidator) {
 	configuredGoogleValidator = validator
+	validatorCache.Lock()
+	validatorCache.value = nil
+	validatorCache.Unlock()
 }
 
 // ProvideClock injects the clock used for minting tokens and expirations.
@@ -51,6 +60,32 @@ func ProvideLogger(logger *zap.Logger) {
 // ProvideMetrics sets the metrics recorder used for auth route counters.
 func ProvideMetrics(recorder MetricsRecorder) {
 	configuredMetrics = recorder
+}
+
+func resolveGoogleValidator(ctx context.Context) (GoogleTokenValidator, error) {
+	if configuredGoogleValidator != nil {
+		return configuredGoogleValidator, nil
+	}
+
+	validatorCache.RLock()
+	cached := validatorCache.value
+	validatorCache.RUnlock()
+	if cached != nil {
+		return cached, nil
+	}
+
+	validatorCache.Lock()
+	defer validatorCache.Unlock()
+	if validatorCache.value != nil {
+		return validatorCache.value, nil
+	}
+
+	validator, err := newGoogleTokenValidator(ctx)
+	if err != nil {
+		return nil, err
+	}
+	validatorCache.value = validator
+	return validator, nil
 }
 
 const (
@@ -92,11 +127,6 @@ func logAuthError(code string, err error, fields ...zap.Field) {
 
 // MountAuthRoutes registers /auth/google, /auth/refresh, /auth/logout, and /me.
 func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore) {
-	validator := configuredGoogleValidator
-	var validatorInitErr error
-	if validator == nil {
-		validator, validatorInitErr = newGoogleTokenValidator(context.Background())
-	}
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -121,9 +151,10 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		if validatorInitErr != nil {
+		validator, validatorErr := resolveGoogleValidator(context.Background())
+		if validatorErr != nil {
 			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.validator_init", validatorInitErr)
+			logAuthError("auth.login.validator_init", validatorErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
