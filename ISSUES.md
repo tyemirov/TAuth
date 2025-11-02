@@ -12,4 +12,6 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 ## Maintenance (400–499)
 
+- [ ] [TA-400] Review the code and prepare a comprehensive ARCHITECTURE.md file with the overview of the app architecture, sufficient for understanding of a mid to senior software engineer.
+
 ## Planning
