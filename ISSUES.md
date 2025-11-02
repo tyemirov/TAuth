@@ -7,10 +7,18 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 ## Improvements (200–299)
 
 - [x] [TA-200] Use GORM and abstract away the flavor of the DB through GORM. If the DB url sent through an envionment variable specifies postgres protocol, then use postgres, if sqlite, then use sqlite, etc — Resolved with `NewDatabaseRefreshTokenStore` (GORM, Postgres/SQLite), mandatory `--database_url` / `APP_DATABASE_URL`, legacy Postgres-only store removed, docs + tests added
+- [ ] [TA-201] Harden configuration lifecycle and smart constructors — Introduce a `LoadServerConfig` smart constructor, validate TTLs and cookie names in `PreRunE`, and emit structured zap errors with stable codes when configuration is invalid.
+- [ ] [TA-202] Inject Google token validator dependencies and wrap JWT errors — Define a `GoogleTokenValidator` interface, inject a singleton validator and clock from the CLI, and wrap JWT mint failures with context-rich error codes.
+- [ ] [TA-203] Harmonize refresh token store error semantics — Share typed sentinel errors across store implementations, add contextual error wrapping in the memory store, and expose an idempotent revocation helper.
+- [ ] [TA-204] Expand auth logging and metrics hooks — Pass a logger into `MountAuthRoutes` to record unexpected store/validator failures with stable codes and instrument `/auth/*` endpoints with counters.
+- [ ] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Build an `httptest.Server` suite covering `/auth/google → /auth/refresh → /auth/logout` and tampered session scenarios to raise coverage toward the ≥95% goal.
+- [ ] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Automate browser flows ensuring the client dispatches the documented DOM events across authentication transitions.
 
 ## BugFixes (300–399)
 
 - [x] [TA-300] The app doesn't recognize the provided google web client ID — Clarified CLI validation to list only missing configuration keys and added coverage ensuring `jwt_signing_key` absence is reported precisely.
+- [ ] [TA-301] Align `/api/me` with the documented profile contract — Update `HandleWhoAmI` to resolve `auth_claims`, return the stored profile, replace `http.ErrNoCookie` with a domain error, and log anomalies via zap.
+- [ ] [TA-302] Tighten CORS configuration when credentials are enabled — Parameterise allowed origins, prevent wildcard credentials, and surface warnings for unsafe origins when `APP_ENABLE_CORS` is active.
 ```
 00:45:49 tyemirov@computercat:~/Development/Research/TAuth [master] $ go run ./... --google_web_client_id "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
 Error: missing required configuration: google_web_client_id or jwt_signing_key
