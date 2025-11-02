@@ -1,3 +1,7 @@
 PLAN.md
+.env
+node_modules/
 
 *.json
+!package.json
+!package-lock.json

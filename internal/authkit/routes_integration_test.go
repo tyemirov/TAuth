@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/api/idtoken"
 )
 
@@ -379,6 +381,114 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	failureRouter.ServeHTTP(failureResponse, failureRequest)
 	if failureResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for invalid google token, got %d", failureResponse.Code)
+	}
+}
+
+func TestAuthGoogleSuccessMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	metrics := NewCounterMetrics()
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+
+	core, observed := observer.New(zap.InfoLevel)
+	ProvideLogger(zap.New(core))
+	defer ProvideLogger(nil)
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload: &idtoken.Payload{Claims: map[string]interface{}{
+						"iss":            "https://accounts.google.com",
+						"sub":            "sub-success",
+						"email":          "user@example.com",
+						"email_verified": true,
+						"name":           "User",
+					}},
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore)
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected success, got %d", response.Code)
+	}
+	if metrics.Count(metricAuthLoginSuccess) != 1 {
+		t.Fatalf("expected auth.login.success metric to increment")
+	}
+	if observed.Len() != 0 {
+		t.Fatalf("did not expect warnings on successful login")
+	}
+}
+
+func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	metrics := NewCounterMetrics()
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+
+	core, observed := observer.New(zap.WarnLevel)
+	ProvideLogger(zap.New(core))
+	defer ProvideLogger(nil)
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload: &idtoken.Payload{Claims: map[string]interface{}{
+						"iss":            "https://accounts.google.com",
+						"sub":            "sub-fail",
+						"email":          "user@example.com",
+						"email_verified": true,
+						"name":           "User",
+					}},
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := &failingUserStore{upsertErr: errors.New("upsert-fail")}
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore)
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", response.Code)
+	}
+	if metrics.Count(metricAuthLoginFailure) != 1 {
+		t.Fatalf("expected auth.login.failure metric to increment")
+	}
+	warnLogs := observed.FilterMessage("auth")
+	if warnLogs.Len() == 0 {
+		t.Fatalf("expected warning log for user store failure")
+	}
+	if warnLogs.All()[0].Context[0].Key != "code" || warnLogs.All()[0].Context[0].String != "auth.login.user_store" {
+		t.Fatalf("expected auth.login.user_store code, got %v", warnLogs.All()[0].Context)
 	}
 }
 

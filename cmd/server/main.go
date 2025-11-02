@@ -204,6 +204,13 @@ func runServer(command *cobra.Command, arguments []string) error {
 	authkit.ProvideClock(clock)
 	defer authkit.ProvideClock(nil)
 
+	authkit.ProvideLogger(logger)
+	defer authkit.ProvideLogger(nil)
+
+	metricsRecorder := authkit.NewCounterMetrics()
+	authkit.ProvideMetrics(metricsRecorder)
+	defer authkit.ProvideMetrics(nil)
+
 	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore)
 
 	protected := router.Group("/api")

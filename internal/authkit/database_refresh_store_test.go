@@ -86,13 +86,13 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 	}
 
 	secondRevokeErr := store.Revoke(context.Background(), tokenID)
-	if secondRevokeErr != nil {
-		t.Fatalf("expected idempotent revoke, got %v", secondRevokeErr)
+	if !errors.Is(secondRevokeErr, ErrRefreshTokenAlreadyRevoked) {
+		t.Fatalf("expected ErrRefreshTokenAlreadyRevoked, got %v", secondRevokeErr)
 	}
 
 	missingRevokeErr := store.Revoke(context.Background(), "missing-token")
-	if !errors.Is(missingRevokeErr, errTokenNotFound) {
-		t.Fatalf("expected errTokenNotFound, got %v", missingRevokeErr)
+	if !errors.Is(missingRevokeErr, ErrRefreshTokenNotFound) {
+		t.Fatalf("expected ErrRefreshTokenNotFound, got %v", missingRevokeErr)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestDatabaseRefreshTokenStoreValidateNotFound(t *testing.T) {
 	if validateErr == nil {
 		t.Fatalf("expected error for unknown refresh token")
 	}
-	if !errors.Is(validateErr, errTokenNotFound) {
-		t.Fatalf("expected errTokenNotFound, got %v", validateErr)
+	if !errors.Is(validateErr, ErrRefreshTokenNotFound) {
+		t.Fatalf("expected ErrRefreshTokenNotFound, got %v", validateErr)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestDatabaseRefreshTokenStoreValidateEmptyToken(t *testing.T) {
 		t.Fatalf("unexpected error creating store: %v", err)
 	}
 	_, _, _, validateErr := store.Validate(context.Background(), "   ")
-	if !errors.Is(validateErr, errEmptyOpaqueToken) {
-		t.Fatalf("expected errEmptyOpaqueToken, got %v", validateErr)
+	if !errors.Is(validateErr, ErrRefreshTokenEmptyOpaque) {
+		t.Fatalf("expected ErrRefreshTokenEmptyOpaque, got %v", validateErr)
 	}
 }
