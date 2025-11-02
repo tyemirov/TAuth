@@ -44,8 +44,14 @@ func withValidatorFactory(t *testing.T, factory func(context.Context) (GoogleTok
 	t.Helper()
 	previous := newGoogleTokenValidator
 	newGoogleTokenValidator = factory
+	validatorCache.Lock()
+	validatorCache.value = nil
+	validatorCache.Unlock()
 	return func() {
 		newGoogleTokenValidator = previous
+		validatorCache.Lock()
+		validatorCache.value = nil
+		validatorCache.Unlock()
 	}
 }
 
