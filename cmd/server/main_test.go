@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/tyemirov/tauth/internal/authkit"
 	"go.uber.org/zap"
+	"google.golang.org/api/idtoken"
 )
 
 func TestZapLoggerMiddleware(t *testing.T) {
@@ -115,6 +118,41 @@ func TestRunServerMissingSigningKeyReportsField(t *testing.T) {
 	}
 }
 
+func TestRunServerValidatorInitFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return nil, errors.New("validator_fail")
+	})
+	defer restoreValidator()
+
+	viper.Set("listen_addr", ":0")
+	viper.Set("google_web_client_id", "client")
+	viper.Set("jwt_signing_key", "signing-secret")
+	viper.Set("session_ttl", time.Minute)
+	viper.Set("refresh_ttl", time.Hour)
+
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	if err := runServer(command, nil); err == nil || err.Error() != "config.google_validator_init: validator_fail" {
+		t.Fatalf("expected google validator init error, got %v", err)
+	}
+}
+
 func TestRunServerSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -128,6 +166,11 @@ func TestRunServerSuccess(t *testing.T) {
 		return http.ErrServerClosed
 	})
 	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
 
 	viper.Set("listen_addr", ":0")
 	viper.Set("google_web_client_id", "client")
@@ -163,6 +206,11 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	})
 	defer restoreServe()
 
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
 	viper.Set("listen_addr", ":0")
 	viper.Set("google_web_client_id", "client")
 	viper.Set("jwt_signing_key", "signing-secret")
@@ -196,5 +244,19 @@ func withServeHTTPStub(stub func(server *http.Server) error) func() {
 	serveHTTP = stub
 	return func() {
 		serveHTTP = previous
+	}
+}
+
+type noopGoogleValidator struct{}
+
+func (noopGoogleValidator) Validate(ctx context.Context, token string, audience string) (*idtoken.Payload, error) {
+	return &idtoken.Payload{}, nil
+}
+
+func withGoogleValidatorBuilderStub(stub func(ctx context.Context) (authkit.GoogleTokenValidator, error)) func() {
+	previous := buildGoogleTokenValidator
+	buildGoogleTokenValidator = stub
+	return func() {
+		buildGoogleTokenValidator = previous
 	}
 }
