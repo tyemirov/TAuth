@@ -114,9 +114,33 @@ class StubCustomEvent {
   }
 }
 
-async function loadAuthHeader(options) {
-  const scriptPath = path.join(__dirname, "..", "tools", "mpr-ui", "mpr-ui.js");
-  const source = await fs.readFile(scriptPath, "utf8");
+const MPR_UI_AUTH_HEADER_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
+const MODULE_FIXTURE_PATH = path.join(
+  __dirname,
+  "fixtures",
+  "mpr-ui-auth-header.js",
+);
+
+async function loadModuleFromCdn() {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("global fetch is unavailable for loading mpr-ui auth header");
+  }
+  const response = await globalThis.fetch(MPR_UI_AUTH_HEADER_CDN_URL);
+  if (!response.ok) {
+    throw new Error(
+      `failed to load mpr-ui auth header from CDN: ${response.status} ${response.statusText}`,
+    );
+  }
+  return response.text();
+}
+
+async function loadAuthHeader(options = {}) {
+  const sourceLoader =
+    typeof options.loadModuleSource === "function"
+      ? options.loadModuleSource
+      : loadModuleFromCdn;
+  const source = await sourceLoader();
 
   const rootElement = options.rootElement || new StubElement("div");
   const events = [];
@@ -247,6 +271,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     fetch,
     google: googleStub,
     initAuthClient,
+    loadModuleSource: () => fs.readFile(MODULE_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {
@@ -320,6 +345,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
     fetch,
     google: googleStub,
     initAuthClient,
+    loadModuleSource: () => fs.readFile(MODULE_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {});
