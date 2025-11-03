@@ -6,6 +6,7 @@
     baseUrl: "",
     loginPath: "/auth/google",
     logoutPath: "/auth/logout",
+    noncePath: "/auth/nonce",
     siteName: "",
     siteLink: "",
   };
@@ -108,6 +109,36 @@
     var hasEmittedUnauthenticated = false;
     var lastAuthenticatedSignature = null;
 
+    function requestNonceToken() {
+      return global
+        .fetch(joinUrl(options.baseUrl, options.noncePath), {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        })
+        .then(function (response) {
+          if (!response || typeof response.json !== "function") {
+            throw new Error("invalid response from nonce endpoint");
+          }
+          if (!response.ok) {
+            var nonceError = new Error("nonce issuance failed");
+            nonceError.status = response.status;
+            throw nonceError;
+          }
+          return response.json();
+        })
+        .then(function (payload) {
+          var nonceToken =
+            payload && payload.nonce ? String(payload.nonce) : "";
+          if (!nonceToken) {
+            throw new Error("nonce payload missing");
+          }
+          return nonceToken;
+        });
+    }
+
     function updateDatasetFromProfile(profile) {
       Object.keys(ATTRIBUTE_MAP).forEach(function (key) {
         var attributeName = ATTRIBUTE_MAP[key];
@@ -195,16 +226,21 @@
     }
 
     function exchangeCredential(credential) {
-      var payload = JSON.stringify({ google_id_token: credential });
-      return global
-        .fetch(joinUrl(options.baseUrl, options.loginPath), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
-          },
-          body: payload,
+      return requestNonceToken()
+        .then(function (nonceToken) {
+          var payload = JSON.stringify({
+            google_id_token: credential,
+            nonce_token: nonceToken,
+          });
+          return global.fetch(joinUrl(options.baseUrl, options.loginPath), {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: payload,
+          });
         })
         .then(function (response) {
           if (!response || typeof response.json !== "function") {

@@ -282,12 +282,40 @@
                         });
                         return;
                     }
+                    const nonceResponse = await fetch("/auth/nonce", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: {
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
+                    });
+                    if (!nonceResponse.ok) {
+                        setOutput({
+                            error: "auth_nonce_failed",
+                            status: nonceResponse.status,
+                        });
+                        return;
+                    }
+                    const noncePayload = await nonceResponse.json();
+                    const nonceToken =
+                        noncePayload && noncePayload.nonce
+                            ? String(noncePayload.nonce)
+                            : "";
+                    if (!nonceToken) {
+                        setOutput({ error: "auth_nonce_missing" });
+                        return;
+                    }
+
                     const exchangeResponse = await fetch("/auth/google", {
                         method: "POST",
                         credentials: "include",
-                        headers: { "Content-Type": "application/json" },
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
                         body: JSON.stringify({
                             google_id_token: googleIdToken,
+                            nonce_token: nonceToken,
                         }),
                     });
                     if (!exchangeResponse.ok) {

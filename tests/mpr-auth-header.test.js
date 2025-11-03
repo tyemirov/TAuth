@@ -235,6 +235,17 @@ function createFetchStub(responses) {
       method: (options.method || "GET").toUpperCase(),
       body: options.body ? JSON.parse(options.body) : undefined,
     });
+    if (descriptor.url && descriptor.url !== url) {
+      throw new Error(
+        `expected fetch to ${descriptor.url} but received ${url}`,
+      );
+    }
+    const expectedMethod = (descriptor.method || "GET").toUpperCase();
+    if (expectedMethod !== (options.method || "GET").toUpperCase()) {
+      throw new Error(
+        `expected method ${expectedMethod} for ${url}, got ${options.method}`,
+      );
+    }
     if (descriptor.status >= 200 && descriptor.status < 300) {
       return {
         ok: true,
@@ -266,8 +277,24 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   };
 
   const fetch = createFetchStub([
-    { status: 200, body: loginProfile }, // /auth/google
-    { status: 204, body: {} }, // /auth/logout
+    {
+      url: "https://auth.example.com/auth/nonce",
+      method: "POST",
+      status: 200,
+      body: { nonce: "nonce-123" },
+    },
+    {
+      url: "https://auth.example.com/auth/google",
+      method: "POST",
+      status: 200,
+      body: loginProfile,
+    },
+    {
+      url: "https://auth.example.com/auth/logout",
+      method: "POST",
+      status: 204,
+      body: {},
+    },
   ]);
 
   const initAuthCalls = [];
@@ -325,9 +352,13 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   assert.equal(rootElement.getAttribute("data-user-id"), null);
 
   await controller.handleCredential({ credential: "token-123" });
-  assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/google");
-  assert.deepEqual(fetch.calls[0].body, { google_id_token: "token-123" });
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
+  assert.deepEqual(fetch.calls[1].url, "https://auth.example.com/auth/google");
+  assert.deepEqual(fetch.calls[1].body, {
+    google_id_token: "token-123",
+    nonce_token: "nonce-123",
+  });
 
   assert.equal(controller.state.status, "authenticated");
   assert.equal(
@@ -348,8 +379,8 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   );
 
   await controller.signOut();
-  assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[1].url, "https://auth.example.com/auth/logout");
+  assert.equal(fetch.calls.length, 3);
+  assert.equal(fetch.calls[2].url, "https://auth.example.com/auth/logout");
   assert.equal(controller.state.status, "unauthenticated");
   assert.equal(rootElement.getAttribute("data-user-id"), null);
 
