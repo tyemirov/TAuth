@@ -16,7 +16,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-204] Expand auth logging and metrics hooks — Injected zap logger and metrics recorder into auth routes, added structured warnings/errors, and incremented counters for login, refresh, and logout flows.
 - [x] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Added TLS-backed `httptest.Server` flows covering login→refresh→logout, tampered sessions, and revoked tokens with metrics assertions.
 - [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
-- [ ] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example
+- [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, added `/static/mpr-ui.js`, and hydrated the demo with support/status links.
 - [ ] [TA-208] Enforce nonce validation in `/auth/google` — Prevent ID token replay by requiring a client-provided `nonce`, verifying it matches the `nonce` claim in the Google ID token, and binding it to a one-time server-issued nonce (e.g., signed cookie or short-lived cache) with TTL; update docs and add tests.
 
 ## BugFixes (300–399)

@@ -174,6 +174,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {
 		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
 	})
+	router.GET("/static/mpr-ui.js", func(contextGin *gin.Context) {
+		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "mpr-ui.js")
+	})
 
 	router.GET("/demo", func(contextGin *gin.Context) {
 		contextGin.File("web/demo.html")

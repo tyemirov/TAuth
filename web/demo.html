@@ -12,6 +12,7 @@
         ></script>
         <!-- Your co-hosted auth client -->
         <script src="/static/auth-client.js"></script>
+        <script defer src="/static/mpr-ui.js"></script>
         <style>
             html,
             body {
@@ -157,6 +158,7 @@
                 </p>
             </section>
         </div>
+        <div id="appFooter"></div>
 
         <script>
             // ----- DOM references
@@ -169,6 +171,31 @@
             const callApiButtonElement =
                 document.getElementById("callApiButton");
             const logoutButtonElement = document.getElementById("logoutButton");
+            const footerElement = document.getElementById("appFooter");
+
+            if (
+                footerElement &&
+                window.MPRUI &&
+                typeof window.MPRUI.renderFooter === "function"
+            ) {
+                window.MPRUI.renderFooter(footerElement, {
+                    lines: [
+                        "Support: support@mprlab.com",
+                        "Status: https://status.mprlab.com",
+                    ],
+                    links: [
+                        {
+                            label: "Privacy",
+                            href: "https://mprlab.com/privacy",
+                        },
+                        {
+                            label: "Terms of Service",
+                            href: "https://mprlab.com/terms",
+                        },
+                    ],
+                    copyrightName: "Marco Polo Research Lab",
+                });
+            }
 
             function show(element) {
                 element.classList.remove("hidden");

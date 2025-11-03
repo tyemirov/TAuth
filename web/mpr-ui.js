@@ -290,7 +290,246 @@
     return createAuthHeader(host, options || {});
   }
 
+  function escapeHtml(value) {
+    if (value === null || value === undefined) {
+      return "";
+    }
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  var FOOTER_ROOT_CLASS = "mpr-footer";
+  var FOOTER_STYLE_ID = "mpr-ui-footer-styles";
+  var FOOTER_STYLE_MARKUP =
+    "." +
+    FOOTER_ROOT_CLASS +
+    "{margin-top:48px;padding:32px 0;border-top:1px solid #e2e8f0;font-size:14px;line-height:1.6;color:#475569;background:#f8fafc}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__container{max-width:960px;margin:0 auto;padding:0 20px;display:flex;flex-direction:column;gap:16px}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__lines{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__links{display:flex;flex-wrap:wrap;gap:12px;align-items:center}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__link{color:#1b6ef3;text-decoration:none;font-weight:500}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__link:hover{text-decoration:underline}" +
+    "." +
+    FOOTER_ROOT_CLASS +
+    "__copyright{margin:0;color:#64748b}";
+
+  function normalizeFooterOptions(raw) {
+    var source = raw || {};
+    var lines = Array.isArray(source.lines)
+      ? source.lines
+          .map(function (line) {
+            return typeof line === "string" ? line.trim() : "";
+          })
+          .filter(function (line) {
+            return line.length > 0;
+          })
+      : [];
+    var links = Array.isArray(source.links)
+      ? source.links
+          .map(function (link) {
+            if (!link || typeof link !== "object") {
+              return null;
+            }
+            var label =
+              typeof link.label === "string" ? link.label.trim() : "";
+            var href = typeof link.href === "string" ? link.href.trim() : "";
+            if (!label || !href) {
+              return null;
+            }
+            return { label: label, href: href };
+          })
+          .filter(function (entry) {
+            return entry !== null;
+          })
+      : [];
+    var copyrightName =
+      typeof source.copyrightName === "string"
+        ? source.copyrightName.trim()
+        : "";
+    var year =
+      typeof source.year === "number" && isFinite(source.year)
+        ? Math.floor(source.year)
+        : new Date().getFullYear();
+    return {
+      lines: lines,
+      links: links,
+      copyrightName: copyrightName,
+      year: year,
+    };
+  }
+
+  function ensureFooterStyles(documentObject) {
+    if (!documentObject || typeof documentObject.createElement !== "function") {
+      return;
+    }
+    if (
+      documentObject.getElementById &&
+      documentObject.getElementById(FOOTER_STYLE_ID)
+    ) {
+      return;
+    }
+    if (!documentObject.head || typeof documentObject.head.appendChild !== "function") {
+      return;
+    }
+    var styleElement = documentObject.createElement("style");
+    styleElement.type = "text/css";
+    styleElement.id = FOOTER_STYLE_ID;
+    if (styleElement.styleSheet) {
+      styleElement.styleSheet.cssText = FOOTER_STYLE_MARKUP;
+    } else {
+      styleElement.appendChild(
+        documentObject.createTextNode(FOOTER_STYLE_MARKUP),
+      );
+    }
+    documentObject.head.appendChild(styleElement);
+  }
+
+  function buildFooterMarkup(options) {
+    var html = '<div class="' + FOOTER_ROOT_CLASS + '__container">';
+    if (options.lines.length > 0) {
+      html += '<ul class="' + FOOTER_ROOT_CLASS + '__lines">';
+      for (var index = 0; index < options.lines.length; index += 1) {
+        html +=
+          '<li class="' +
+          FOOTER_ROOT_CLASS +
+          '__line">' +
+          escapeHtml(options.lines[index]) +
+          "</li>";
+      }
+      html += "</ul>";
+    }
+    if (options.links.length > 0) {
+      html +=
+        '<nav class="' +
+        FOOTER_ROOT_CLASS +
+        '__links" aria-label="Footer links">';
+      for (var linkIndex = 0; linkIndex < options.links.length; linkIndex += 1) {
+        var link = options.links[linkIndex];
+        html +=
+          '<a class="' +
+          FOOTER_ROOT_CLASS +
+          '__link" href="' +
+          escapeHtml(link.href) +
+          '">' +
+          escapeHtml(link.label) +
+          "</a>";
+      }
+      html += "</nav>";
+    }
+    html +=
+      '<p class="' +
+      FOOTER_ROOT_CLASS +
+      '__copyright">&copy; ' +
+      options.year +
+      " " +
+      escapeHtml(options.copyrightName || "") +
+      "</p>";
+    html += "</div>";
+    return html;
+  }
+
+  function applyFooterClass(host) {
+    if (!host) {
+      return;
+    }
+    if (host.classList && typeof host.classList.add === "function") {
+      host.classList.add(FOOTER_ROOT_CLASS);
+      return;
+    }
+    if (typeof host.className === "string") {
+      if (host.className.indexOf(FOOTER_ROOT_CLASS) === -1) {
+        host.className = (host.className + " " + FOOTER_ROOT_CLASS).trim();
+      }
+      return;
+    }
+    host.className = FOOTER_ROOT_CLASS;
+  }
+
+  function resolveHost(target) {
+    if (typeof target !== "string") {
+      return target;
+    }
+    if (!global.document || typeof global.document.querySelector !== "function") {
+      return null;
+    }
+    return global.document.querySelector(target);
+  }
+
+  function renderFooter(target, options) {
+    var host = resolveHost(target);
+    if (!host || typeof host !== "object") {
+      throw new Error("renderFooter requires a host element");
+    }
+    var normalized = normalizeFooterOptions(options);
+    ensureFooterStyles(global.document || (global.window && global.window.document));
+    applyFooterClass(host);
+    host.innerHTML = buildFooterMarkup(normalized);
+    return {
+      update: function (nextOptions) {
+        normalized = normalizeFooterOptions(nextOptions);
+        host.innerHTML = buildFooterMarkup(normalized);
+      },
+      destroy: function () {
+        host.innerHTML = "";
+      },
+    };
+  }
+
+  function mprFooter(options) {
+    var normalized = normalizeFooterOptions(options);
+    return {
+      init: function () {
+        var element =
+          (this && this.$el) ||
+          (this && this.el) ||
+          (this && this.element) ||
+          (this && this.host) ||
+          null;
+        if (!element) {
+          throw new Error("mprFooter requires a root element");
+        }
+        this.__mprFooterController = renderFooter(element, normalized);
+      },
+      update: function (nextOptions) {
+        normalized = normalizeFooterOptions(
+          arguments.length > 0 ? nextOptions : normalized,
+        );
+        if (
+          this.__mprFooterController &&
+          typeof this.__mprFooterController.update === "function"
+        ) {
+          this.__mprFooterController.update(normalized);
+        }
+      },
+      destroy: function () {
+        if (
+          this.__mprFooterController &&
+          typeof this.__mprFooterController.destroy === "function"
+        ) {
+          this.__mprFooterController.destroy();
+          this.__mprFooterController = null;
+        }
+      },
+    };
+  }
+
   var namespace = ensureNamespace(global);
   namespace.createAuthHeader = createAuthHeader;
   namespace.renderAuthHeader = renderAuthHeader;
+  namespace.renderFooter = renderFooter;
+  namespace.mprFooter = mprFooter;
 })(typeof window !== "undefined" ? window : globalThis);
