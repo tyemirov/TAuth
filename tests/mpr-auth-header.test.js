@@ -148,7 +148,8 @@ class StubCustomEvent {
 }
 
 async function loadAuthHeader(options) {
-  const cdnFetch = options.cdnFetch || globalThis.fetch;
+  const resolvedOptions = options || {};
+  const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
   if (typeof cdnFetch !== "function") {
     throw new Error("fetch API required to load mpr-ui auth header from CDN");
   }
@@ -163,21 +164,22 @@ async function loadAuthHeader(options) {
   }
   const source = await response.text();
 
-  const rootElement = options.rootElement || new StubElement("div");
+  const rootElement =
+    resolvedOptions.rootElement || new StubElement("div");
   const events = [];
 
   const context = {
     document: new StubDocument(),
     CustomEvent: StubCustomEvent,
     console,
-    fetch: options.fetch,
+    fetch: resolvedOptions.fetch,
     setTimeout,
     clearTimeout,
   };
   context.window = context;
   context.window.MPRUI = {};
-  context.window.google = options.google;
-  context.window.initAuthClient = options.initAuthClient;
+  context.window.google = resolvedOptions.google;
+  context.window.initAuthClient = resolvedOptions.initAuthClient;
   context.window.CustomEvent = StubCustomEvent;
   context.window.HTMLElement = StubElement;
   context.HTMLElement = StubElement;
