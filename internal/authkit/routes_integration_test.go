@@ -140,6 +140,7 @@ func newTestServerConfig() ServerConfig {
 		RefreshCookieName: "app_refresh",
 		SessionTTL:        time.Minute,
 		RefreshTTL:        15 * time.Minute,
+		NonceTTL:          5 * time.Minute,
 		SameSiteMode:      http.SameSiteStrictMode,
 		AllowInsecureHTTP: true,
 	}
@@ -161,8 +162,46 @@ func addCookies(request *http.Request, cookies map[string]*http.Cookie, names ..
 	}
 }
 
+func issueNonceForTest(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/auth/nonce", nil)
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /auth/nonce, got %d", recorder.Code)
+	}
+	var payload struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode nonce payload: %v", err)
+	}
+	if payload.Nonce == "" {
+		t.Fatalf("nonce payload empty")
+	}
+	return payload.Nonce
+}
+
+func prepareLoginBody(t *testing.T, router http.Handler, payload *idtoken.Payload, token string) []byte {
+	t.Helper()
+	nonce := issueNonceForTest(t, router)
+	payload.Claims["nonce"] = nonce
+	body, err := json.Marshal(map[string]string{
+		"google_id_token": token,
+		"nonce_token":     nonce,
+	})
+	if err != nil {
+		t.Fatalf("marshal login payload: %v", err)
+	}
+	return body
+}
+
 func TestAuthLifecycle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
 
 	payload := &idtoken.Payload{
 		Claims: map[string]interface{}{
@@ -172,6 +211,7 @@ func TestAuthLifecycle(t *testing.T) {
 			"email_verified": true,
 			"name":           "Test User",
 			"picture":        "https://example.com/avatar.png",
+			"nonce":          "",
 		},
 	}
 
@@ -187,14 +227,11 @@ func TestAuthLifecycle(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	config := newTestServerConfig()
-	userStore := newTestUserStore()
-	refreshStore := NewMemoryRefreshTokenStore()
-
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token","nonce":"n"}`))
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	loginRequest.Header.Set("Content-Type", "application/json")
 	loginResponse := httptest.NewRecorder()
 	router.ServeHTTP(loginResponse, loginRequest)
@@ -286,20 +323,20 @@ func TestAuthLifecycle(t *testing.T) {
 func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-https",
+		"email":          "https@example.com",
+		"email_verified": true,
+		"name":           "Secure",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
-					payload: &idtoken.Payload{
-						Claims: map[string]interface{}{
-							"iss":            "https://accounts.google.com",
-							"sub":            "sub-https",
-							"email":          "https@example.com",
-							"email_verified": true,
-							"name":           "Secure",
-							"picture":        "https://example.com/avatar.png",
-						},
-					},
+					payload:          payload,
 					expectedAudience: "client-id",
 				},
 			},
@@ -313,9 +350,10 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	plainRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	plainBody := prepareLoginBody(t, router, payload, "valid-token")
+	plainRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(plainBody))
 	plainRequest.Header.Set("Content-Type", "application/json")
 	plainResponse := httptest.NewRecorder()
 	router.ServeHTTP(plainResponse, plainRequest)
@@ -323,7 +361,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 		t.Fatalf("expected https_required rejection, got %d", plainResponse.Code)
 	}
 
-	forwardedRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	forwardedBody := prepareLoginBody(t, router, payload, "valid-token")
+	forwardedRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(forwardedBody))
 	forwardedRequest.Header.Set("Content-Type", "application/json")
 	forwardedRequest.Header.Set("X-Forwarded-Proto", "https")
 	forwardedResponse := httptest.NewRecorder()
@@ -332,7 +371,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 		t.Fatalf("expected 200 with forwarded https, got %d", forwardedResponse.Code)
 	}
 
-	forwardedHeaderRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	forwardedHeaderBody := prepareLoginBody(t, router, payload, "valid-token")
+	forwardedHeaderRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(forwardedHeaderBody))
 	forwardedHeaderRequest.Header.Set("Content-Type", "application/json")
 	forwardedHeaderRequest.Header.Set("Forwarded", "proto=https;host=example.com")
 	forwardedHeaderResponse := httptest.NewRecorder()
@@ -341,7 +381,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 		t.Fatalf("expected 200 with Forwarded https, got %d", forwardedHeaderResponse.Code)
 	}
 
-	localhostRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	localhostBody := prepareLoginBody(t, router, payload, "valid-token")
+	localhostRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(localhostBody))
 	localhostRequest.Header.Set("Content-Type", "application/json")
 	localhostRequest.Host = "localhost:8080"
 	localhostResponse := httptest.NewRecorder()
@@ -362,9 +403,11 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return nil, errors.New("factory_failure")
 	})
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	dummyPayload := &idtoken.Payload{Claims: map[string]interface{}{"nonce": ""}}
+	body := prepareLoginBody(t, router, dummyPayload, "valid-token")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -373,12 +416,16 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	}
 	restoreValidator()
 
+	badPayload := &idtoken.Payload{Claims: map[string]interface{}{
+		"nonce": "",
+	}}
 	restoreValidator = withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"bad-token": {
 					err:              errors.New("invalid"),
 					expectedAudience: "client-id",
+					payload:          badPayload,
 				},
 			},
 		}, nil
@@ -386,9 +433,9 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	defer restoreValidator()
 
 	failureRouter := gin.New()
-	MountAuthRoutes(failureRouter, config, userStore, refreshStore)
-
-	failureRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"bad-token"}`))
+	MountAuthRoutes(failureRouter, config, userStore, refreshStore, nil)
+	failureBody := prepareLoginBody(t, failureRouter, badPayload, "bad-token")
+	failureRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(failureBody))
 	failureRequest.Header.Set("Content-Type", "application/json")
 	failureResponse := httptest.NewRecorder()
 	failureRouter.ServeHTTP(failureResponse, failureRequest)
@@ -408,18 +455,20 @@ func TestAuthGoogleSuccessMetrics(t *testing.T) {
 	ProvideLogger(zap.New(core))
 	defer ProvideLogger(nil)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-success",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "User",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
-					payload: &idtoken.Payload{Claims: map[string]interface{}{
-						"iss":            "https://accounts.google.com",
-						"sub":            "sub-success",
-						"email":          "user@example.com",
-						"email_verified": true,
-						"name":           "User",
-						"picture":        "https://example.com/avatar.png",
-					}},
+					payload:          payload,
 					expectedAudience: "client-id",
 				},
 			},
@@ -432,9 +481,9 @@ func TestAuthGoogleSuccessMetrics(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
-
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -461,18 +510,20 @@ func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
 	ProvideLogger(zap.New(core))
 	defer ProvideLogger(nil)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-fail",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "User",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
-					payload: &idtoken.Payload{Claims: map[string]interface{}{
-						"iss":            "https://accounts.google.com",
-						"sub":            "sub-fail",
-						"email":          "user@example.com",
-						"email_verified": true,
-						"name":           "User",
-						"picture":        "https://example.com/avatar.png",
-					}},
+					payload:          payload,
 					expectedAudience: "client-id",
 				},
 			},
@@ -485,9 +536,10 @@ func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -520,6 +572,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email_verified": true,
 					"name":           "Example",
 					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
 				},
 			},
 			expectedAudience: "client-id",
@@ -533,6 +586,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email_verified": false,
 					"name":           "Example",
 					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
 				},
 			},
 			expectedAudience: "client-id",
@@ -548,13 +602,15 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	for token, expectedStatus := range map[string]int{
 		"wrong-issuer": http.StatusUnauthorized,
 		"unverified":   http.StatusUnauthorized,
 	} {
-		request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"`+token+`"}`))
+		payload := results[token].payload
+		body := prepareLoginBody(t, router, payload, token)
+		request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
@@ -567,20 +623,21 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 func TestRefreshAndLogoutGuards(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-refresh",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "Refresh",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
+
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
-					payload: &idtoken.Payload{
-						Claims: map[string]interface{}{
-							"iss":            "https://accounts.google.com",
-							"sub":            "sub-refresh",
-							"email":          "user@example.com",
-							"email_verified": true,
-							"name":           "Refresh",
-							"picture":        "https://example.com/avatar.png",
-						},
-					},
+					payload:          payload,
 					expectedAudience: "client-id",
 				},
 			},
@@ -591,8 +648,9 @@ func TestRefreshAndLogoutGuards(t *testing.T) {
 	config := newTestServerConfig()
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
+
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	noCookieResponse := httptest.NewRecorder()
 	router.ServeHTTP(noCookieResponse, httptest.NewRequest(http.MethodPost, "/auth/refresh", nil))
@@ -600,7 +658,8 @@ func TestRefreshAndLogoutGuards(t *testing.T) {
 		t.Fatalf("expected 401 when refresh cookie missing, got %d", noCookieResponse.Code)
 	}
 
-	loginReq := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginResp := httptest.NewRecorder()
 	router.ServeHTTP(loginResp, loginReq)
@@ -645,7 +704,7 @@ func TestAuthGoogleBindJSONFailure(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString("{"))
 	request.Header.Set("Content-Type", "application/json")
@@ -663,9 +722,10 @@ func TestAuthGoogleMissingToken(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":""}`))
+	nonce := issueNonceForTest(t, router)
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"","nonce_token":"`+nonce+`"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -674,21 +734,79 @@ func TestAuthGoogleMissingToken(t *testing.T) {
 	}
 }
 
+func TestAuthGoogleMissingNonce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when nonce token missing, got %d", response.Code)
+	}
+}
+
+func TestAuthGoogleNonceMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-mismatch",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "Mismatch",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "expected-nonce",
+	}}
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{"valid-token": {payload: payload, expectedAudience: "client-id"}},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	// prepareLoginBody sets matching nonce; overwrite to force mismatch.
+	body = []byte(`{"google_id_token":"valid-token","nonce_token":"mismatch"}`)
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when nonce mismatches, got %d", response.Code)
+	}
+}
+
 func TestAuthGoogleUserStoreError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-err",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "Example",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
-					payload: &idtoken.Payload{Claims: map[string]interface{}{
-						"iss":            "https://accounts.google.com",
-						"sub":            "sub-err",
-						"email":          "user@example.com",
-						"email_verified": true,
-						"name":           "Example",
-						"picture":        "https://example.com/avatar.png",
-					}},
+					payload:          payload,
 					expectedAudience: "client-id",
 				},
 			},
@@ -700,9 +818,10 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 	userStore := &failingUserStore{upsertErr: errors.New("upsert_fail")}
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -714,21 +833,18 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 func TestAuthGoogleRefreshIssueError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-refresh-err",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "Example",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
-			results: map[string]validatorResult{
-				"valid-token": {
-					payload: &idtoken.Payload{Claims: map[string]interface{}{
-						"iss":            "https://accounts.google.com",
-						"sub":            "sub-refresh-err",
-						"email":          "user@example.com",
-						"email_verified": true,
-						"name":           "Example",
-						"picture":        "https://example.com/avatar.png",
-					}},
-					expectedAudience: "client-id",
-				},
-			},
+			results: map[string]validatorResult{"valid-token": {payload: payload, expectedAudience: "client-id"}},
 		}, nil
 	})
 	defer restoreValidator()
@@ -741,9 +857,10 @@ func TestAuthGoogleRefreshIssueError(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
-	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	body := prepareLoginBody(t, router, payload, "valid-token")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -763,7 +880,7 @@ func TestAuthRefreshExpiredToken(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "expired"})
@@ -785,7 +902,7 @@ func TestAuthRefreshProfileFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})
@@ -811,7 +928,7 @@ func TestAuthRefreshIssueFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})
@@ -840,7 +957,7 @@ func TestAuthRefreshRevokeFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})

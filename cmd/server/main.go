@@ -51,6 +51,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
 	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
+	rootCmd.Flags().Duration("nonce_ttl", 5*time.Minute, "Nonce lifetime for Google Sign-In exchanges")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
 	_ = viper.BindPFlag("cookie_domain", rootCmd.Flags().Lookup("cookie_domain"))
@@ -62,6 +63,7 @@ func newRootCommand() *cobra.Command {
 	_ = viper.BindPFlag("database_url", rootCmd.Flags().Lookup("database_url"))
 	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
 	_ = viper.BindPFlag("cors_allowed_origins", rootCmd.Flags().Lookup("cors_allowed_origins"))
+	_ = viper.BindPFlag("nonce_ttl", rootCmd.Flags().Lookup("nonce_ttl"))
 
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
@@ -123,6 +125,11 @@ func LoadServerConfig() (authkit.ServerConfig, error) {
 		return authkit.ServerConfig{}, configError(configCodeInvalidRefreshTTL, "refresh_ttl must be greater than zero")
 	}
 
+	nonceTTL := 5 * time.Minute
+	if configuredNonceTTL := viper.GetDuration("nonce_ttl"); configuredNonceTTL > 0 {
+		nonceTTL = configuredNonceTTL
+	}
+
 	return authkit.ServerConfig{
 		GoogleWebClientID: googleWebClientID,
 		AppJWTSigningKey:  []byte(jwtSigningKey),
@@ -132,6 +139,7 @@ func LoadServerConfig() (authkit.ServerConfig, error) {
 		RefreshCookieName: refreshCookieName,
 		SessionTTL:        sessionTTL,
 		RefreshTTL:        refreshTTL,
+		NonceTTL:          nonceTTL,
 	}, nil
 }
 
@@ -203,6 +211,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 		serverConfig.SameSiteMode = http.SameSiteNoneMode
 	}
 
+	nonceStore := authkit.NewMemoryNonceStore(serverConfig.NonceTTL)
+
 	validator, validatorErr := buildGoogleTokenValidator(command.Context())
 	if validatorErr != nil {
 		return fmt.Errorf("%s: %w", configCodeGoogleValidatorInit, validatorErr)
@@ -221,7 +231,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	authkit.ProvideMetrics(metricsRecorder)
 	defer authkit.ProvideMetrics(nil)
 
-	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore)
+	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore, nonceStore)
 
 	protected := router.Group("/api")
 	protected.Use(authkit.RequireSession(serverConfig))
