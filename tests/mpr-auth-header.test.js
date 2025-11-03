@@ -1,8 +1,41 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const vm = require("node:vm");
 const path = require("node:path");
 const fs = require("node:fs/promises");
-const vm = require("node:vm");
+
+const MPR_UI_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
+const CDN_FIXTURE_PATH = path.join(
+  __dirname,
+  "fixtures",
+  "mpr-ui-auth-header.js",
+);
+
+let cachedCdnFixturePromise = null;
+
+async function loadCdnFixture() {
+  if (!cachedCdnFixturePromise) {
+    cachedCdnFixturePromise = fs.readFile(CDN_FIXTURE_PATH, "utf8");
+  }
+  return cachedCdnFixturePromise;
+}
+
+async function createCdnFetchStub() {
+  const scriptSource = await loadCdnFixture();
+  return async (url) => {
+    if (url !== MPR_UI_CDN_URL) {
+      throw new Error(`unexpected CDN request to ${url}`);
+    }
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return scriptSource;
+      },
+    };
+  };
+}
 
 class ClassList {
   constructor(element) {
@@ -115,8 +148,20 @@ class StubCustomEvent {
 }
 
 async function loadAuthHeader(options) {
-  const scriptPath = path.join(__dirname, "..", "tools", "mpr-ui", "mpr-ui.js");
-  const source = await fs.readFile(scriptPath, "utf8");
+  const cdnFetch = options.cdnFetch || globalThis.fetch;
+  if (typeof cdnFetch !== "function") {
+    throw new Error("fetch API required to load mpr-ui auth header from CDN");
+  }
+  const response = await cdnFetch(MPR_UI_CDN_URL);
+  if (!response || typeof response.text !== "function") {
+    throw new Error("invalid response when loading mpr-ui auth header");
+  }
+  if (response.ok === false) {
+    throw new Error(
+      `failed to load mpr-ui auth header from CDN (status ${response.status})`,
+    );
+  }
+  const source = await response.text();
 
   const rootElement = options.rootElement || new StubElement("div");
   const events = [];
@@ -244,6 +289,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
+    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
@@ -317,6 +363,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
+    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
