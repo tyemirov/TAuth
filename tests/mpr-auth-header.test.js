@@ -6,23 +6,19 @@ const fs = require("node:fs/promises");
 
 const MPR_UI_CDN_URL =
   "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
-const CDN_FIXTURE_PATH = path.join(
-  __dirname,
-  "fixtures",
-  "mpr-ui-auth-header.js",
-);
+const LOCAL_ASSET_PATH = path.join(__dirname, "..", "web", "mpr-ui.js");
 
-let cachedCdnFixturePromise = null;
+let cachedLocalAssetPromise = null;
 
-async function loadCdnFixture() {
-  if (!cachedCdnFixturePromise) {
-    cachedCdnFixturePromise = fs.readFile(CDN_FIXTURE_PATH, "utf8");
+async function loadLocalAsset() {
+  if (!cachedLocalAssetPromise) {
+    cachedLocalAssetPromise = fs.readFile(LOCAL_ASSET_PATH, "utf8");
   }
-  return cachedCdnFixturePromise;
+  return cachedLocalAssetPromise;
 }
 
 async function createCdnFetchStub() {
-  const scriptSource = await loadCdnFixture();
+  const scriptSource = await loadLocalAsset();
   return async (url) => {
     if (url !== MPR_UI_CDN_URL) {
       throw new Error(`unexpected CDN request to ${url}`);
@@ -148,7 +144,7 @@ class StubCustomEvent {
 }
 
 async function loadAuthHeader(options = {}) {
-  const defaultScriptPath = path.join(__dirname, "..", "web", "mpr-ui.js");
+  const defaultScriptPath = LOCAL_ASSET_PATH;
 
   let source = null;
   if (options.useLocalAsset !== false) {
@@ -182,11 +178,14 @@ async function loadAuthHeader(options = {}) {
   const rootElement = options.rootElement || new StubElement("div");
   const events = [];
 
+  const fetchImpl =
+    typeof options.fetch === "function" ? options.fetch : undefined;
+
   const context = {
     document: new StubDocument(),
     CustomEvent: StubCustomEvent,
     console,
-    fetch: options.fetch,
+    fetch: fetchImpl,
     setTimeout,
     clearTimeout,
   };
@@ -197,6 +196,9 @@ async function loadAuthHeader(options = {}) {
   context.window.CustomEvent = StubCustomEvent;
   context.window.HTMLElement = StubElement;
   context.HTMLElement = StubElement;
+  if (fetchImpl) {
+    context.window.fetch = fetchImpl;
+  }
 
   vm.createContext(context);
   vm.runInContext(source, context);

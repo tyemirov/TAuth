@@ -4,6 +4,8 @@
 
   var DEFAULT_OPTIONS = {
     baseUrl: "",
+    loginPath: "/auth/google",
+    logoutPath: "/auth/logout",
     siteName: "",
     siteLink: "",
   };
@@ -15,9 +17,19 @@
     avatar_url: "data-user-avatar-url",
   };
 
+  function ensureNamespace(target) {
+    if (!target.MPRUI) {
+      target.MPRUI = {};
+    }
+    return target.MPRUI;
+  }
+
   function joinUrl(baseUrl, path) {
     if (!baseUrl) {
       return path;
+    }
+    if (!path) {
+      return baseUrl;
     }
     if (baseUrl.endsWith("/") && path.startsWith("/")) {
       return baseUrl + path.slice(1);
@@ -29,112 +41,137 @@
   }
 
   function toStringOrNull(value) {
-    if (value === undefined || value === null) {
-      return null;
-    }
-    return String(value);
+    return value === undefined || value === null ? null : String(value);
   }
 
-  function ensureMprUiRoot(globalObject) {
-    if (!globalObject.MPRUI) {
-      globalObject.MPRUI = {};
+  function setAttributeOrRemove(element, name, value) {
+    var normalized = toStringOrNull(value);
+    if (normalized === null) {
+      element.removeAttribute(name);
+      return;
     }
-    return globalObject.MPRUI;
+    element.setAttribute(name, normalized);
   }
 
-  function safeCustomEvent(globalObject, type, detail) {
+  function createCustomEvent(globalObject, type, detail) {
     var EventCtor = globalObject.CustomEvent;
     if (typeof EventCtor === "function") {
       return new EventCtor(type, { detail: detail, bubbles: true });
     }
-    var event = globalObject.document.createEvent("CustomEvent");
-    event.initCustomEvent(type, true, false, detail);
-    return event;
+    if (
+      globalObject.document &&
+      typeof globalObject.document.createEvent === "function"
+    ) {
+      var legacyEvent = globalObject.document.createEvent("CustomEvent");
+      legacyEvent.initCustomEvent(type, true, false, detail);
+      return legacyEvent;
+    }
+    return { type: type, detail: detail, bubbles: true };
   }
 
-  function createAuthHeader(rootElement, passedOptions) {
+  function dispatchEvent(element, type, detail) {
+    if (!element || typeof element.dispatchEvent !== "function") {
+      return;
+    }
+    var event = createCustomEvent(global, type, detail || {});
+    try {
+      element.dispatchEvent(event);
+    } catch (_error) {}
+  }
+
+  function promptGoogleIfAvailable(globalObject) {
+    var google = globalObject.google;
+    if (
+      google &&
+      google.accounts &&
+      google.accounts.id &&
+      typeof google.accounts.id.prompt === "function"
+    ) {
+      try {
+        google.accounts.id.prompt();
+      } catch (_ignore) {}
+    }
+  }
+
+  function createAuthHeader(rootElement, rawOptions) {
     if (!rootElement || typeof rootElement.dispatchEvent !== "function") {
       throw new Error("MPRUI.createAuthHeader requires a DOM element");
     }
 
-    var options = Object.assign({}, DEFAULT_OPTIONS, passedOptions || {});
+    var options = Object.assign({}, DEFAULT_OPTIONS, rawOptions || {});
     var state = {
       status: "unauthenticated",
       profile: null,
+      options: options,
     };
     var pendingProfile = null;
     var hasEmittedUnauthenticated = false;
     var lastAuthenticatedSignature = null;
 
-    function dispatch(type, detail) {
-      var event = safeCustomEvent(global, type, detail || {});
-      rootElement.dispatchEvent(event);
-    }
-
-    function setAttribute(name, value) {
-      if (value === null) {
-        rootElement.removeAttribute(name);
-      } else {
-        rootElement.setAttribute(name, value);
-      }
-    }
-
     function updateDatasetFromProfile(profile) {
       Object.keys(ATTRIBUTE_MAP).forEach(function (key) {
         var attributeName = ATTRIBUTE_MAP[key];
-        setAttribute(attributeName, toStringOrNull(profile ? profile[key] : null));
+        setAttributeOrRemove(
+          rootElement,
+          attributeName,
+          profile ? profile[key] : null,
+        );
       });
     }
 
     function markAuthenticated(profile) {
-      var signature = JSON.stringify(profile || {});
-      if (state.status === "authenticated" && signature === lastAuthenticatedSignature) {
-        state.profile = profile || null;
-        return;
-      }
-      state.status = "authenticated";
-      state.profile = profile || null;
-      lastAuthenticatedSignature = signature;
-      updateDatasetFromProfile(profile || {});
-      dispatch("mpr-ui:auth:authenticated", { profile: state.profile });
-    }
-
-    function promptGoogleIfAvailable() {
-      if (
-        global.google &&
-        global.google.accounts &&
-        global.google.accounts.id &&
-        typeof global.google.accounts.id.prompt === "function"
-      ) {
-        try {
-          global.google.accounts.id.prompt();
-        } catch (_ignore) {}
-      }
-    }
-
-    function markUnauthenticated() {
+      var normalized = profile || null;
+      var signature = JSON.stringify(normalized || {});
       var shouldEmit =
-        state.status !== "unauthenticated" ||
-        state.profile !== null ||
-        !hasEmittedUnauthenticated;
+        state.status !== "authenticated" ||
+        lastAuthenticatedSignature !== signature;
+      state.status = "authenticated";
+      state.profile = normalized;
+      lastAuthenticatedSignature = signature;
+      hasEmittedUnauthenticated = false;
+      updateDatasetFromProfile(normalized);
+      if (shouldEmit) {
+        dispatchEvent(rootElement, "mpr-ui:auth:authenticated", {
+          profile: normalized,
+        });
+      }
+    }
+
+    function markUnauthenticated(config) {
+      var parameters = config || {};
+      var emit = parameters.emit !== false;
+      var prompt = parameters.prompt !== false;
+      var shouldEmit =
+        emit &&
+        (state.status !== "unauthenticated" ||
+          state.profile !== null ||
+          !hasEmittedUnauthenticated);
       state.status = "unauthenticated";
       state.profile = null;
       lastAuthenticatedSignature = null;
       updateDatasetFromProfile(null);
       if (shouldEmit) {
-        dispatch("mpr-ui:auth:unauthenticated", {});
+        dispatchEvent(rootElement, "mpr-ui:auth:unauthenticated", {
+          profile: null,
+        });
         hasEmittedUnauthenticated = true;
       }
-      promptGoogleIfAvailable();
+      if (prompt) {
+        promptGoogleIfAvailable(global);
+      }
     }
 
     function emitError(code, extra) {
-      var detail = Object.assign({ code: code }, extra || {});
-      dispatch("mpr-ui:auth:error", detail);
+      dispatchEvent(
+        rootElement,
+        "mpr-ui:auth:error",
+        Object.assign({ code: code }, extra || {}),
+      );
     }
 
     function bootstrapSession() {
       if (typeof global.initAuthClient !== "function") {
+        markUnauthenticated({ emit: false, prompt: false });
         return Promise.resolve();
       }
       return Promise.resolve(
@@ -147,7 +184,7 @@
           },
           onUnauthenticated: function () {
             pendingProfile = null;
-            markUnauthenticated();
+            markUnauthenticated({ prompt: true });
           },
         }),
       ).catch(function (error) {
@@ -158,17 +195,25 @@
     }
 
     function exchangeCredential(credential) {
-      var payload = { google_id_token: credential };
+      var payload = JSON.stringify({ google_id_token: credential });
       return global
-        .fetch(joinUrl(options.baseUrl, "/auth/google"), {
+        .fetch(joinUrl(options.baseUrl, options.loginPath), {
           method: "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: payload,
         })
         .then(function (response) {
-          if (!response || !response.ok) {
-            throw new Error("google_exchange_failed");
+          if (!response || typeof response.json !== "function") {
+            throw new Error("invalid response from credential exchange");
+          }
+          if (!response.ok) {
+            var errorObject = new Error("credential exchange failed");
+            errorObject.status = response.status;
+            throw errorObject;
           }
           return response.json();
         });
@@ -176,7 +221,7 @@
 
     function performLogout() {
       return global
-        .fetch(joinUrl(options.baseUrl, "/auth/logout"), {
+        .fetch(joinUrl(options.baseUrl, options.logoutPath), {
           method: "POST",
           credentials: "include",
           headers: { "X-Requested-With": "XMLHttpRequest" },
@@ -186,47 +231,66 @@
         });
     }
 
-    var controller = {
-      state: state,
-      handleCredential: function (credentialResponse) {
-        if (!credentialResponse || !credentialResponse.credential) {
-          emitError("mpr-ui.auth.missing_credential", {});
-          return Promise.resolve();
-        }
-        return exchangeCredential(credentialResponse.credential)
-          .then(function (profile) {
-            if (typeof global.initAuthClient !== "function") {
-              markAuthenticated(profile);
-              return;
-            }
-            pendingProfile = profile || null;
-            return bootstrapSession();
-          })
-          .catch(function (error) {
-            emitError("mpr-ui.auth.exchange_failed", {
-              message: error && error.message ? error.message : String(error),
-            });
-            markUnauthenticated();
-            throw error;
-          });
-      },
-      signOut: function () {
-        return performLogout().then(function () {
+    function handleCredential(credentialResponse) {
+      if (!credentialResponse || !credentialResponse.credential) {
+        emitError("mpr-ui.auth.missing_credential", {});
+        markUnauthenticated({ prompt: true });
+        return Promise.resolve();
+      }
+      return exchangeCredential(credentialResponse.credential)
+        .then(function (profile) {
           if (typeof global.initAuthClient !== "function") {
-            markUnauthenticated();
-            return;
+            markAuthenticated(profile);
+            return profile;
           }
-          pendingProfile = null;
+          pendingProfile = profile || null;
           return bootstrapSession();
+        })
+        .catch(function (error) {
+          emitError("mpr-ui.auth.exchange_failed", {
+            message: error && error.message ? error.message : String(error),
+            status: error && error.status ? error.status : null,
+          });
+          markUnauthenticated({ prompt: true });
+          return Promise.resolve();
         });
-      },
-    };
+    }
 
+    function signOut() {
+      return performLogout().then(function () {
+        pendingProfile = null;
+        if (typeof global.initAuthClient !== "function") {
+          markUnauthenticated({ prompt: true });
+          return null;
+        }
+        return bootstrapSession();
+      });
+    }
+
+    markUnauthenticated({ emit: false, prompt: false });
     bootstrapSession();
 
-    return controller;
+    return {
+      host: rootElement,
+      state: state,
+      handleCredential: handleCredential,
+      signOut: signOut,
+      restartSessionWatcher: bootstrapSession,
+    };
   }
 
-  var root = ensureMprUiRoot(global);
-  root.createAuthHeader = createAuthHeader;
+  function renderAuthHeader(target, options) {
+    var host = target;
+    if (typeof target === "string" && global.document) {
+      host = global.document.querySelector(target);
+    }
+    if (!host) {
+      throw new Error("renderAuthHeader requires a host element");
+    }
+    return createAuthHeader(host, options || {});
+  }
+
+  var namespace = ensureNamespace(global);
+  namespace.createAuthHeader = createAuthHeader;
+  namespace.renderAuthHeader = renderAuthHeader;
 })(typeof window !== "undefined" ? window : globalThis);
