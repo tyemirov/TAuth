@@ -144,11 +144,12 @@ class StubCustomEvent {
 }
 
 async function loadAuthHeader(options = {}) {
+  const resolvedOptions = options || {};
   const defaultScriptPath = LOCAL_ASSET_PATH;
 
   let source = null;
-  if (options.useLocalAsset !== false) {
-    const scriptPath = options.scriptPath || defaultScriptPath;
+  if (resolvedOptions.useLocalAsset !== false) {
+    const scriptPath = resolvedOptions.scriptPath || defaultScriptPath;
     try {
       source = await fs.readFile(scriptPath, "utf8");
     } catch (error) {
@@ -159,7 +160,7 @@ async function loadAuthHeader(options = {}) {
   }
 
   if (source === null) {
-    const cdnFetch = options.cdnFetch || globalThis.fetch;
+    const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
     if (typeof cdnFetch !== "function") {
       throw new Error("fetch API required to load mpr-ui auth header from CDN");
     }
@@ -175,11 +176,11 @@ async function loadAuthHeader(options = {}) {
     source = await response.text();
   }
 
-  const rootElement = options.rootElement || new StubElement("div");
+  const rootElement = resolvedOptions.rootElement || new StubElement("div");
   const events = [];
 
   const fetchImpl =
-    typeof options.fetch === "function" ? options.fetch : undefined;
+    typeof resolvedOptions.fetch === "function" ? resolvedOptions.fetch : undefined;
 
   const context = {
     document: new StubDocument(),
@@ -191,8 +192,8 @@ async function loadAuthHeader(options = {}) {
   };
   context.window = context;
   context.window.MPRUI = {};
-  context.window.google = options.google;
-  context.window.initAuthClient = options.initAuthClient;
+  context.window.google = resolvedOptions.google;
+  context.window.initAuthClient = resolvedOptions.initAuthClient;
   context.window.CustomEvent = StubCustomEvent;
   context.window.HTMLElement = StubElement;
   context.HTMLElement = StubElement;
@@ -203,14 +204,15 @@ async function loadAuthHeader(options = {}) {
   vm.createContext(context);
   vm.runInContext(source, context);
 
+  const eventsCollector = events;
   rootElement.addEventListener("mpr-ui:auth:authenticated", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
   rootElement.addEventListener("mpr-ui:auth:unauthenticated", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
   rootElement.addEventListener("mpr-ui:auth:error", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
 
   return {
