@@ -148,7 +148,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	protected := router.Group("/api")
 	protected.Use(authkit.RequireSession(configuration))
-	protected.GET("/me", web.HandleWhoAmI())
+	protected.GET("/me", web.HandleWhoAmI(logger, userStore))
 
 	server := &http.Server{
 		Addr:              listenAddr,
