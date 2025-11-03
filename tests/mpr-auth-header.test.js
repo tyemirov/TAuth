@@ -147,32 +147,42 @@ class StubCustomEvent {
   }
 }
 
-async function loadAuthHeader(options) {
+async function loadAuthHeader(options = {}) {
   const resolvedOptions = options || {};
-  const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
-  if (typeof cdnFetch !== "function") {
-    throw new Error("fetch API required to load mpr-ui auth header from CDN");
-  }
-  const response = await cdnFetch(MPR_UI_CDN_URL);
-  if (!response || typeof response.text !== "function") {
-    throw new Error("invalid response when loading mpr-ui auth header");
-  }
-  if (response.ok === false) {
-    throw new Error(
-      `failed to load mpr-ui auth header from CDN (status ${response.status})`,
-    );
-  }
-  const source = await response.text();
+  let source;
 
-  const rootElement =
-    resolvedOptions.rootElement || new StubElement("div");
+  if (typeof resolvedOptions.loadModuleSource === "function") {
+    source = await resolvedOptions.loadModuleSource();
+  } else {
+    const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
+    if (typeof cdnFetch !== "function") {
+      throw new Error("fetch API required to load mpr-ui auth header from CDN");
+    }
+    const response = await cdnFetch(MPR_UI_CDN_URL);
+    if (!response || typeof response.text !== "function") {
+      throw new Error("invalid response when loading mpr-ui auth header");
+    }
+    if (response.ok === false) {
+      throw new Error(
+        `failed to load mpr-ui auth header from CDN (status ${response.status})`,
+      );
+    }
+    source = await response.text();
+  }
+
+  const rootElement = resolvedOptions.rootElement || new StubElement("div");
   const events = [];
+
+  const fetchImpl =
+    typeof resolvedOptions.fetch === "function"
+      ? resolvedOptions.fetch
+      : undefined;
 
   const context = {
     document: new StubDocument(),
     CustomEvent: StubCustomEvent,
     console,
-    fetch: resolvedOptions.fetch,
+    fetch: fetchImpl,
     setTimeout,
     clearTimeout,
   };
@@ -183,6 +193,9 @@ async function loadAuthHeader(options) {
   context.window.CustomEvent = StubCustomEvent;
   context.window.HTMLElement = StubElement;
   context.HTMLElement = StubElement;
+  if (fetchImpl) {
+    context.window.fetch = fetchImpl;
+  }
 
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -295,6 +308,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     fetch,
     google: googleStub,
     initAuthClient,
+    loadModuleSource: () => fs.readFile(CDN_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {
@@ -369,6 +383,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
     fetch,
     google: googleStub,
     initAuthClient,
+    loadModuleSource: () => fs.readFile(CDN_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {});
