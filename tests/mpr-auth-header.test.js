@@ -6,7 +6,13 @@ const fs = require("node:fs/promises");
 
 const MPR_UI_CDN_URL =
   "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
-const LOCAL_ASSET_PATH = path.join(__dirname, "..", "web", "mpr-ui.js");
+const LOCAL_ASSET_PATH = path.join(
+  __dirname,
+  "..",
+  "tools",
+  "mpr-ui",
+  "mpr-ui.js",
+);
 
 let cachedLocalAssetPromise = null;
 

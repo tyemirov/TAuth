@@ -4,7 +4,13 @@ const vm = require("node:vm");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 
-const SCRIPT_PATH = path.join(__dirname, "..", "web", "mpr-ui.js");
+const SCRIPT_PATH = path.join(
+  __dirname,
+  "..",
+  "tools",
+  "mpr-ui",
+  "mpr-ui.js",
+);
 
 function createVmContext() {
   const hostElement = { innerHTML: "", className: "", classList: { add() {} } };

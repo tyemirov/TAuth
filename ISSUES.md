@@ -16,9 +16,9 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-204] Expand auth logging and metrics hooks — Injected zap logger and metrics recorder into auth routes, added structured warnings/errors, and incremented counters for login, refresh, and logout flows.
 - [x] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Added TLS-backed `httptest.Server` flows covering login→refresh→logout, tampered sessions, and revoked tokens with metrics assertions.
 - [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
-- [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, added `/static/mpr-ui.js`, and hydrated the demo with support/status links.
+- [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, and hydrated the demo with support/status links (initially served locally, now loaded from the CDN build).
 - [x] [TA-208] Enforce nonce validation in `/auth/google` — Added `/auth/nonce` issuance with in-memory store, required nonce consumption/matching in auth routes, updated mpr-ui/demo clients to attach `nonce_token`, and expanded Go/Node coverage for missing or mismatched nonces.
-- [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, and Node tests assert nonce preparation and failure handling.
+- [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, Node tests assert nonce preparation/failure handling, and the bundled `web/mpr-ui.js` asset was removed in favour of the CDN build.
 
 ## BugFixes (300–399)
 
