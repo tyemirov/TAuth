@@ -73,7 +73,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 - Refresh token stores:
   - Memory implementation for tests/dev.
   - GORM-backed implementation (`DatabaseRefreshTokenStore`) that performs migrations and issues hashed refresh tokens.
-- `RequireSession`: Gin middleware validating `app_session`, confirming issuer, and injecting `JwtCustomClaims` into the request context (`auth_claims`).
+- `RequireSession`: Gin middleware backed by the shared session validator; confirms issuer and injects `JwtCustomClaims` into the request context (`auth_claims`).
 - Shared helpers (`refresh_token_helpers.go`) generate token IDs and opaque values consistently across store implementations.
 
 ### 4.3 `internal/web`
@@ -109,6 +109,13 @@ type RefreshTokenStore interface {
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
+
+### 4.6 `pkg/sessionvalidator`
+
+- Reusable library for downstream Go services to validate the `app_session` cookie.
+- Smart constructor enforces signing key and issuer configuration, with optional cookie name overrides.
+- Provides `ValidateToken`, `ValidateRequest`, and a Gin middleware adapter to populate typed `Claims`.
+- Shares the same claim shape (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`) used by the server.
 
 ## 5. Configuration Surface
 
