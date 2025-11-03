@@ -76,6 +76,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 					"email":          "user@example.com",
 					"email_verified": true,
 					"name":           "HTTP User",
+					"nonce":          "",
 				},
 			},
 			expectedAudience: "client-id",
@@ -99,7 +100,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
@@ -107,11 +108,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	client := server.Client()
 	state := authCookieState{}
 
-	loginBody := []byte(`{"google_id_token":"valid-token"}`)
-	loginResp, err := client.Post(server.URL+"/auth/google", "application/json", bytes.NewReader(loginBody))
-	if err != nil {
-		t.Fatalf("login request failed: %v", err)
-	}
+	loginResp, _ := loginWithNonce(t, client, server.URL, validator, "valid-token")
 	if loginResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from login, got %d", loginResp.StatusCode)
 	}
@@ -177,10 +174,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	// Restore valid session via fresh login.
 	state.session = ""
 	state.refresh = ""
-	loginResp2, err := client.Post(server.URL+"/auth/google", "application/json", bytes.NewReader(loginBody))
-	if err != nil {
-		t.Fatalf("second login failed: %v", err)
-	}
+	loginResp2, _ := loginWithNonce(t, client, server.URL, validator, "valid-token")
 	if loginResp2.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from second login, got %d", loginResp2.StatusCode)
 	}
@@ -262,7 +256,7 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore)
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
 
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
@@ -270,10 +264,7 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	client := server.Client()
 	state := authCookieState{}
 
-	loginResp, err := client.Post(server.URL+"/auth/google", "application/json", bytes.NewReader([]byte(`{"google_id_token":"valid-token"}`)))
-	if err != nil {
-		t.Fatalf("login request failed: %v", err)
-	}
+	loginResp, _ := loginWithNonce(t, client, server.URL, validator, "valid-token")
 	if loginResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from login, got %d", loginResp.StatusCode)
 	}
@@ -317,4 +308,52 @@ func mustParseURL(raw string) *url.URL {
 		panic(err)
 	}
 	return parsed
+}
+
+func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) string {
+	t.Helper()
+	response, err := client.Post(baseURL+"/auth/nonce", "application/json", nil)
+	if err != nil {
+		t.Fatalf("request nonce: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from /auth/nonce, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Nonce string `json:"nonce"`
+	}
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode nonce payload: %v", decodeErr)
+	}
+	if payload.Nonce == "" {
+		t.Fatalf("nonce payload empty")
+	}
+	return payload.Nonce
+}
+
+func loginWithNonce(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string) (*http.Response, string) {
+	t.Helper()
+	nonce := issueNonceViaClient(t, client, baseURL)
+	result, ok := validator.results[token]
+	if !ok {
+		t.Fatalf("token %s not configured in validator", token)
+	}
+	if result.payload == nil {
+		t.Fatalf("validator payload missing for token %s", token)
+	}
+	result.payload.Claims["nonce"] = nonce
+	validator.results[token] = result
+	loginPayload, marshalErr := json.Marshal(map[string]string{
+		"google_id_token": token,
+		"nonce_token":     nonce,
+	})
+	if marshalErr != nil {
+		t.Fatalf("marshal login payload: %v", marshalErr)
+	}
+	response, err := client.Post(baseURL+"/auth/google", "application/json", bytes.NewReader(loginPayload))
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	return response, nonce
 }

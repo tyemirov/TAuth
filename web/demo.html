@@ -12,6 +12,10 @@
         ></script>
         <!-- Your co-hosted auth client -->
         <script src="/static/auth-client.js"></script>
+        <script
+            defer
+            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/mpr-ui.js"
+        ></script>
         <style>
             html,
             body {
@@ -157,6 +161,7 @@
                 </p>
             </section>
         </div>
+        <div id="appFooter"></div>
 
         <script>
             // ----- DOM references
@@ -169,6 +174,118 @@
             const callApiButtonElement =
                 document.getElementById("callApiButton");
             const logoutButtonElement = document.getElementById("logoutButton");
+            const footerElement = document.getElementById("appFooter");
+            let pendingNonceToken = null;
+            let nonceRequestPromise = null;
+
+            if (
+                footerElement &&
+                window.MPRUI &&
+                typeof window.MPRUI.renderFooter === "function"
+            ) {
+                window.MPRUI.renderFooter(footerElement, {
+                    lines: [
+                        "Support: support@mprlab.com",
+                        "Status: https://status.mprlab.com",
+                    ],
+                    links: [
+                        {
+                            label: "Privacy",
+                            href: "https://mprlab.com/privacy",
+                        },
+                        {
+                            label: "Terms of Service",
+                            href: "https://mprlab.com/terms",
+                        },
+                    ],
+                    copyrightName: "Marco Polo Research Lab",
+                });
+            }
+
+            function getGoogleOnloadElement() {
+                return document.getElementById("g_id_onload");
+            }
+
+            function configureGoogleNonce(nonceToken) {
+                pendingNonceToken = nonceToken;
+                const onloadElement = getGoogleOnloadElement();
+                if (
+                    onloadElement &&
+                    typeof onloadElement.setAttribute === "function"
+                ) {
+                    onloadElement.setAttribute("data-nonce", nonceToken);
+                }
+                if (
+                    window.google &&
+                    window.google.accounts &&
+                    window.google.accounts.id &&
+                    typeof window.google.accounts.id.initialize === "function"
+                ) {
+                    try {
+                        const clientId =
+                            onloadElement &&
+                            typeof onloadElement.getAttribute === "function"
+                                ? onloadElement.getAttribute("data-client_id")
+                                : "";
+                        window.google.accounts.id.initialize({
+                            client_id: clientId || undefined,
+                            callback: onGoogleCredential,
+                            nonce: nonceToken,
+                        });
+                    } catch (initializationError) {
+                        setOutput({
+                            error: "auth_google_initialize_failed",
+                            detail: String(initializationError),
+                        });
+                    }
+                }
+            }
+
+            async function requestNonceToken() {
+                const response = await fetch("/auth/nonce", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                });
+                if (!response.ok) {
+                    const nonceError = new Error("nonce request failed");
+                    nonceError.status = response.status;
+                    throw nonceError;
+                }
+                const payload = await response.json().catch(() => ({}));
+                const nonceToken =
+                    payload && payload.nonce ? String(payload.nonce) : "";
+                if (!nonceToken) {
+                    throw new Error("nonce payload missing");
+                }
+                return nonceToken;
+            }
+
+            async function prepareGoogleNonce() {
+                if (pendingNonceToken) {
+                    return pendingNonceToken;
+                }
+                if (nonceRequestPromise) {
+                    return nonceRequestPromise;
+                }
+                nonceRequestPromise = requestNonceToken()
+                    .then(function (nonceToken) {
+                        configureGoogleNonce(nonceToken);
+                        return nonceToken;
+                    })
+                    .finally(function () {
+                        nonceRequestPromise = null;
+                    });
+                return nonceRequestPromise;
+            }
+
+            function consumePreparedNonce() {
+                const nonceToken = pendingNonceToken;
+                pendingNonceToken = null;
+                return nonceToken || "";
+            }
 
             function show(element) {
                 element.classList.remove("hidden");
@@ -197,10 +314,42 @@
                 show(signedInPanelElement);
             }
 
-            function renderSignedOutView() {
+            function renderSignedOutView(config) {
                 hide(signedInPanelElement);
                 show(signedOutPanelElement);
-                outputAreaElement.textContent = "Signed out.";
+                const resetOutput =
+                    !config || config.resetOutput !== false;
+                if (resetOutput) {
+                    outputAreaElement.textContent = "Signed out.";
+                }
+                prepareGoogleNonce()
+                    .then(function () {
+                        if (
+                            window.google &&
+                            window.google.accounts &&
+                            window.google.accounts.id &&
+                            typeof window.google.accounts.id.prompt === "function"
+                        ) {
+                            try {
+                                window.google.accounts.id.prompt();
+                            } catch (promptError) {
+                                setOutput({
+                                    error: "auth_google_prompt_failed",
+                                    detail: String(promptError),
+                                });
+                            }
+                        }
+                    })
+                    .catch(function (error) {
+                        setOutput({
+                            error: "auth_nonce_failed",
+                            detail:
+                                error && error.message
+                                    ? error.message
+                                    : String(error),
+                            status: error && error.status ? error.status : null,
+                        });
+                    });
             }
 
             function setOutput(objectToDump) {
@@ -255,12 +404,23 @@
                         });
                         return;
                     }
+                    const nonceToken = consumePreparedNonce();
+                    if (!nonceToken) {
+                        setOutput({ error: "auth_nonce_missing" });
+                        renderSignedOutView({ resetOutput: false });
+                        return;
+                    }
+
                     const exchangeResponse = await fetch("/auth/google", {
                         method: "POST",
                         credentials: "include",
-                        headers: { "Content-Type": "application/json" },
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-Requested-With": "XMLHttpRequest",
+                        },
                         body: JSON.stringify({
                             google_id_token: googleIdToken,
+                            nonce_token: nonceToken,
                         }),
                     });
                     if (!exchangeResponse.ok) {
@@ -270,6 +430,7 @@
                             status: exchangeResponse.status,
                             body: exchangeError,
                         });
+                        renderSignedOutView({ resetOutput: false });
                         return;
                     }
                     // Hydrate the session/UI now that cookies are set.
@@ -290,6 +451,7 @@
                         error: "onGoogleCredential_exception",
                         detail: String(unexpectedError),
                     });
+                    renderSignedOutView({ resetOutput: false });
                 }
             }
             window.onGoogleCredential = onGoogleCredential;

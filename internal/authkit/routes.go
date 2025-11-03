@@ -125,22 +125,57 @@ func logAuthError(code string, err error, fields ...zap.Field) {
 	configuredLogger.Error("auth", logFields...)
 }
 
-// MountAuthRoutes registers /auth/google, /auth/refresh, /auth/logout, and /me.
-func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore) {
+// MountAuthRoutes registers /auth endpoints and session helpers.
+func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
 	}
+	if nonces == nil {
+		nonces = NewMemoryNonceStore(configuration.NonceTTL)
+	}
+
+	router.POST("/auth/nonce", func(contextGin *gin.Context) {
+		if nonces == nil {
+			contextGin.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		token, issueErr := nonces.Issue(contextGin)
+		if issueErr != nil {
+			logAuthError("auth.nonce.issue_failed", issueErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		contextGin.JSON(http.StatusOK, gin.H{"nonce": token})
+	})
 
 	router.POST("/auth/google", func(contextGin *gin.Context) {
 		var inbound struct {
 			GoogleIDToken string `json:"google_id_token"`
-			Nonce         string `json:"nonce"`
+			NonceToken    string `json:"nonce_token"`
 		}
 		if err := contextGin.BindJSON(&inbound); err != nil || strings.TrimSpace(inbound.GoogleIDToken) == "" {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.invalid_json", err)
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		if nonces == nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.nonce_store_unavailable", nil)
+			contextGin.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		if strings.TrimSpace(inbound.NonceToken) == "" {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.missing_nonce", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
+			return
+		}
+		if consumeErr := nonces.Consume(contextGin, inbound.NonceToken); consumeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
 		}
 
@@ -177,6 +212,13 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		emailVerified, _ := payload.Claims["email_verified"].(bool)
 		userDisplayName, _ := payload.Claims["name"].(string)
 		userAvatarURL, _ := payload.Claims["picture"].(string)
+		nonceClaim, _ := payload.Claims["nonce"].(string)
+		if nonceClaim == "" || nonceClaim != inbound.NonceToken {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.nonce_mismatch", nil, zap.String("google_nonce", nonceClaim))
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
 
 		if googleSub == "" || userEmail == "" || !emailVerified {
 			recordMetric(metricAuthLoginFailure)

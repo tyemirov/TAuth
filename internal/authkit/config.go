@@ -15,6 +15,7 @@ type ServerConfig struct {
 	RefreshCookieName string
 	SessionTTL        time.Duration
 	RefreshTTL        time.Duration
+	NonceTTL          time.Duration
 	SameSiteMode      http.SameSite
 	AllowInsecureHTTP bool
 }
