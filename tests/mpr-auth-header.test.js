@@ -21,20 +21,49 @@ async function loadCdnFixture() {
   return cachedCdnFixturePromise;
 }
 
-async function createCdnFetchStub() {
+async function createFetchStub(responses) {
   const scriptSource = await loadCdnFixture();
-  return async (url) => {
-    if (url !== MPR_UI_CDN_URL) {
-      throw new Error(`unexpected CDN request to ${url}`);
+  const queue = [...responses];
+  const calls = [];
+
+  const fetchStub = async (url, options = {}) => {
+    if (url === MPR_UI_CDN_URL) {
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return scriptSource;
+        },
+      };
+    }
+    const descriptor = queue.shift();
+    if (!descriptor) {
+      throw new Error(`unexpected fetch call to ${url}`);
+    }
+    calls.push({
+      url,
+      method: (options.method || "GET").toUpperCase(),
+      body: options.body ? JSON.parse(options.body) : undefined,
+    });
+    if (descriptor.status >= 200 && descriptor.status < 300) {
+      return {
+        ok: true,
+        status: descriptor.status,
+        async json() {
+          return descriptor.body || {};
+        },
+      };
     }
     return {
-      ok: true,
-      status: 200,
-      async text() {
-        return scriptSource;
+      ok: false,
+      status: descriptor.status,
+      async json() {
+        return descriptor.body || {};
       },
     };
   };
+  fetchStub.calls = calls;
+  return fetchStub;
 }
 
 class ClassList {
@@ -149,34 +178,29 @@ class StubCustomEvent {
 
 async function loadAuthHeader(options = {}) {
   const resolvedOptions = options || {};
-  let source;
-
-  if (typeof resolvedOptions.loadModuleSource === "function") {
-    source = await resolvedOptions.loadModuleSource();
-  } else {
-    const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
-    if (typeof cdnFetch !== "function") {
-      throw new Error("fetch API required to load mpr-ui auth header from CDN");
-    }
-    const response = await cdnFetch(MPR_UI_CDN_URL);
-    if (!response || typeof response.text !== "function") {
-      throw new Error("invalid response when loading mpr-ui auth header");
-    }
-    if (response.ok === false) {
-      throw new Error(
-        `failed to load mpr-ui auth header from CDN (status ${response.status})`,
-      );
-    }
-    source = await response.text();
+  const cdnFetch = resolvedOptions.fetch || globalThis.fetch;
+  if (typeof cdnFetch !== "function") {
+    throw new Error("fetch API required to load mpr-ui auth header from CDN");
   }
+
+  const response = await cdnFetch(MPR_UI_CDN_URL);
+  if (!response || typeof response.text !== "function") {
+    throw new Error("invalid response when loading mpr-ui auth header");
+  }
+  if (response.ok === false) {
+    throw new Error(
+      `failed to load mpr-ui auth header from CDN (status ${response.status})`,
+    );
+  }
+  const source = await response.text();
 
   const rootElement = resolvedOptions.rootElement || new StubElement("div");
   const events = [];
 
   const fetchImpl =
     typeof resolvedOptions.fetch === "function"
-      ? resolvedOptions.fetch
-      : undefined;
+     ? resolvedOptions.fetch
+     : undefined;
 
   const context = {
     document: new StubDocument(),
@@ -217,40 +241,6 @@ async function loadAuthHeader(options = {}) {
   };
 }
 
-function createFetchStub(responses) {
-  const calls = [];
-  const queue = [...responses];
-  const fetchStub = async (url, options = {}) => {
-    const descriptor = queue.shift();
-    if (!descriptor) {
-      throw new Error(`unexpected fetch call to ${url}`);
-    }
-    calls.push({
-      url,
-      method: (options.method || "GET").toUpperCase(),
-      body: options.body ? JSON.parse(options.body) : undefined,
-    });
-    if (descriptor.status >= 200 && descriptor.status < 300) {
-      return {
-        ok: true,
-        status: descriptor.status,
-        async json() {
-          return descriptor.body || {};
-        },
-      };
-    }
-    return {
-      ok: false,
-      status: descriptor.status,
-      async json() {
-        return descriptor.body || {};
-      },
-    };
-  };
-  fetchStub.calls = calls;
-  return fetchStub;
-}
-
 test("mpr-ui header handles credential exchange and logout", async () => {
   const loginProfile = {
     user_id: "google:sub-xyz",
@@ -260,7 +250,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     roles: ["user"],
   };
 
-  const fetch = createFetchStub([
+  const fetch = await createFetchStub([
     { status: 200, body: loginProfile }, // /auth/google
     { status: 204, body: {} }, // /auth/logout
   ]);
@@ -304,11 +294,9 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
-    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
-    loadModuleSource: () => fs.readFile(CDN_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {
@@ -365,7 +353,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
 });
 
 test("mpr-ui header surfaces error when credential missing", async () => {
-  const fetch = createFetchStub([]);
+  const fetch = await createFetchStub([]);
   const initAuthClient = (options) => {
     options.onUnauthenticated();
     return Promise.resolve();
@@ -379,16 +367,14 @@ test("mpr-ui header surfaces error when credential missing", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
-    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
-    loadModuleSource: () => fs.readFile(CDN_FIXTURE_PATH, "utf8"),
   });
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {});
 
-  controller.handleCredential({});
+  await controller.handleCredential({});
   assert.equal(events.length, 2);
   assert.equal(events[0].type, "mpr-ui:auth:unauthenticated");
   assert.equal(events[1].type, "mpr-ui:auth:error");
