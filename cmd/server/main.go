@@ -46,6 +46,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().Bool("dev_insecure_http", false, "Allow insecure HTTP for local dev")
 	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
+	rootCmd.Flags().StringSlice("cors_allowed_origins", nil, "Comma-separated list of allowed origins when CORS is enabled")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
 	_ = viper.BindPFlag("cookie_domain", rootCmd.Flags().Lookup("cookie_domain"))
@@ -56,6 +57,7 @@ func newRootCommand() *cobra.Command {
 	_ = viper.BindPFlag("dev_insecure_http", rootCmd.Flags().Lookup("dev_insecure_http"))
 	_ = viper.BindPFlag("database_url", rootCmd.Flags().Lookup("database_url"))
 	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
+	_ = viper.BindPFlag("cors_allowed_origins", rootCmd.Flags().Lookup("cors_allowed_origins"))
 
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
@@ -79,6 +81,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	devInsecureHTTP := viper.GetBool("dev_insecure_http")
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
+	corsAllowedOrigins := viper.GetStringSlice("cors_allowed_origins")
 
 	missingConfiguration := make([]string, 0, 2)
 	if googleWebClientID == "" {
@@ -97,7 +100,15 @@ func runServer(command *cobra.Command, arguments []string) error {
 	router.Use(zapLoggerMiddleware(logger))
 
 	if enableCORS {
-		router.Use(web.PermissiveCORS())
+		if len(corsAllowedOrigins) == 0 {
+			return fmt.Errorf("enable_cors requires explicit origins via --cors_allowed_origins or APP_CORS_ALLOWED_ORIGINS")
+		}
+		corsMiddleware, corsErr := web.ConfigureCORS(logger, corsAllowedOrigins)
+		if corsErr != nil {
+			return corsErr
+		}
+		router.Use(corsMiddleware)
+		logger.Info("cors enabled", zap.Strings("allowed_origins", corsAllowedOrigins))
 	}
 
 	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {

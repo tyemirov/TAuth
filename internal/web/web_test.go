@@ -48,26 +48,94 @@ func TestServeEmbeddedStaticJS(t *testing.T) {
 	}
 }
 
-func TestPermissiveCORS(t *testing.T) {
+func TestConfigureCORSAllowsExplicitOrigins(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
 
+	core, logs := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	middleware, err := ConfigureCORS(logger, []string{"https://app.example.com"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	router := gin.New()
-	router.Use(PermissiveCORS())
+	router.Use(middleware)
 	router.OPTIONS("/resource", func(contextGin *gin.Context) {
 		contextGin.Status(http.StatusNoContent)
 	})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodOptions, "/resource", nil)
-	request.Header.Set("Origin", "http://localhost")
+	request.Header.Set("Origin", "https://app.example.com")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
 	router.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 from preflight, got %d", recorder.Code)
 	}
-	if recorder.Header().Get("Access-Control-Allow-Origin") == "" {
-		t.Fatalf("CORS headers missing")
+	if origin := recorder.Header().Get("Access-Control-Allow-Origin"); origin != "https://app.example.com" {
+		t.Fatalf("expected allow-origin header, got %q", origin)
+	}
+	if recorder.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("expected credentials allowed")
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("expected no warnings, got %d", logs.Len())
+	}
+}
+
+func TestConfigureCORSRejectsWildcardOrigin(t *testing.T) {
+	t.Parallel()
+	core, _ := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+
+	_, err := ConfigureCORS(logger, []string{"*"})
+	if !errors.Is(err, errWildcardOrigin) {
+		t.Fatalf("expected errWildcardOrigin, got %v", err)
+	}
+}
+
+func TestConfigureCORSLogsUnsafeOrigins(t *testing.T) {
+	t.Parallel()
+	core, logs := observer.New(zap.WarnLevel)
+	logger := zap.New(core)
+
+	middleware, err := ConfigureCORS(logger, []string{
+		"https://app.example.com",
+		"http://example.net",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if logs.Len() != 1 {
+		t.Fatalf("expected warning for unsafe origin, got %d entries", logs.Len())
+	}
+	entry := logs.All()[0]
+	if entry.Level != zapcore.WarnLevel {
+		t.Fatalf("expected warn level log, got %v", entry.Level)
+	}
+	if code := entry.ContextMap()["code"]; code != "cors.origin.unsafe" {
+		t.Fatalf("expected code cors.origin.unsafe, got %v", code)
+	}
+	if origin := entry.ContextMap()["origin"]; origin != "http://example.net" {
+		t.Fatalf("expected origin http://example.net, got %v", origin)
+	}
+
+	router := gin.New()
+	router.Use(middleware)
+	router.OPTIONS("/resource", func(contextGin *gin.Context) {
+		contextGin.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, "/resource", nil)
+	request.Header.Set("Origin", "https://app.example.com")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 from preflight, got %d", recorder.Code)
 	}
 }
 

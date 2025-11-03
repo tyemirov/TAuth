@@ -121,7 +121,8 @@ type RefreshTokenStore interface {
 | `APP_SESSION_TTL`          | Access token lifetime                               | `15m`                                               |
 | `APP_REFRESH_TTL`          | Refresh token lifetime                              | `1440h` (60 days)                                   |
 | `APP_DATABASE_URL`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite://file:./auth.db`                           |
-| `APP_ENABLE_CORS`          | Enable permissive CORS (cross-origin dev only)      | `true`                                              |
+| `APP_ENABLE_CORS`          | Enable CORS for cross-origin development            | `true`                                              |
+| `APP_CORS_ALLOWED_ORIGINS` | Comma-separated list of allowed origins when CORS on | `https://app.example.com,http://localhost:5173`     |
 | `APP_DEV_INSECURE_HTTP`    | Allow non-HTTPS (local development)                 | `true`                                              |
 
 Viper reads environment variables (prefixed `APP_`) and command-line flags.
@@ -168,7 +169,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 ### 8.2 Split Origin (local labs)
 
 - UI: `http://localhost:5173`, API: `http://localhost:8080`.
-- Set `APP_ENABLE_CORS=true` and `APP_DEV_INSECURE_HTTP=true`.
+- Set `APP_ENABLE_CORS=true`, `APP_CORS_ALLOWED_ORIGINS=http://localhost:5173`, and `APP_DEV_INSECURE_HTTP=true`.
 - Browser will require HTTPS + `SameSite=None` in production for cross-origin cookies.
 
 ## 9. CLI and Server Lifecycle

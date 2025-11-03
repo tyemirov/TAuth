@@ -90,6 +90,7 @@ func TestRunServerSuccess(t *testing.T) {
 	viper.Set("dev_insecure_http", true)
 	viper.Set("database_url", "sqlite://file::memory:?cache=shared")
 	viper.Set("enable_cors", true)
+	viper.Set("cors_allowed_origins", []string{"http://localhost:5173"})
 
 	if err := runServer(&cobra.Command{}, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)

@@ -67,7 +67,7 @@ That’s it. The client keeps sessions fresh, dispatches events on auth changes,
 ## Deploy with confidence
 
 - Works out of the box for single-origin deployments.
-- Toggle CORS and insecure HTTP flags to iterate locally across ports.
+- Toggle CORS via `APP_ENABLE_CORS=true` and list explicit origins with `APP_CORS_ALLOWED_ORIGINS` when iterating across ports.
 - Point `APP_DATABASE_URL` at Postgres or SQLite to store refresh tokens durably.
 - Structured zap logging makes it easy to monitor sign-in, refresh, and logout flows.
 
