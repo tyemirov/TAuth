@@ -6,64 +6,31 @@ const fs = require("node:fs/promises");
 
 const MPR_UI_CDN_URL =
   "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
-const CDN_FIXTURE_PATH = path.join(
-  __dirname,
-  "fixtures",
-  "mpr-ui-auth-header.js",
-);
+const LOCAL_ASSET_PATH = path.join(__dirname, "..", "web", "mpr-ui.js");
 
-let cachedCdnFixturePromise = null;
+let cachedLocalAssetPromise = null;
 
-async function loadCdnFixture() {
-  if (!cachedCdnFixturePromise) {
-    cachedCdnFixturePromise = fs.readFile(CDN_FIXTURE_PATH, "utf8");
+async function loadLocalAsset() {
+  if (!cachedLocalAssetPromise) {
+    cachedLocalAssetPromise = fs.readFile(LOCAL_ASSET_PATH, "utf8");
   }
-  return cachedCdnFixturePromise;
+  return cachedLocalAssetPromise;
 }
 
-async function createFetchStub(responses) {
-  const scriptSource = await loadCdnFixture();
-  const queue = [...responses];
-  const calls = [];
-
-  const fetchStub = async (url, options = {}) => {
-    if (url === MPR_UI_CDN_URL) {
-      return {
-        ok: true,
-        status: 200,
-        async text() {
-          return scriptSource;
-        },
-      };
-    }
-    const descriptor = queue.shift();
-    if (!descriptor) {
-      throw new Error(`unexpected fetch call to ${url}`);
-    }
-    calls.push({
-      url,
-      method: (options.method || "GET").toUpperCase(),
-      body: options.body ? JSON.parse(options.body) : undefined,
-    });
-    if (descriptor.status >= 200 && descriptor.status < 300) {
-      return {
-        ok: true,
-        status: descriptor.status,
-        async json() {
-          return descriptor.body || {};
-        },
-      };
+async function createCdnFetchStub() {
+  const scriptSource = await loadLocalAsset();
+  return async (url) => {
+    if (url !== MPR_UI_CDN_URL) {
+      throw new Error(`unexpected CDN request to ${url}`);
     }
     return {
-      ok: false,
-      status: descriptor.status,
-      async json() {
-        return descriptor.body || {};
+      ok: true,
+      status: 200,
+      async text() {
+        return scriptSource;
       },
     };
   };
-  fetchStub.calls = calls;
-  return fetchStub;
 }
 
 class ClassList {
@@ -178,29 +145,42 @@ class StubCustomEvent {
 
 async function loadAuthHeader(options = {}) {
   const resolvedOptions = options || {};
-  const cdnFetch = resolvedOptions.fetch || globalThis.fetch;
-  if (typeof cdnFetch !== "function") {
-    throw new Error("fetch API required to load mpr-ui auth header from CDN");
+  const defaultScriptPath = LOCAL_ASSET_PATH;
+
+  let source = null;
+  if (resolvedOptions.useLocalAsset !== false) {
+    const scriptPath = resolvedOptions.scriptPath || defaultScriptPath;
+    try {
+      source = await fs.readFile(scriptPath, "utf8");
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") {
+        throw error;
+      }
+    }
   }
 
-  const response = await cdnFetch(MPR_UI_CDN_URL);
-  if (!response || typeof response.text !== "function") {
-    throw new Error("invalid response when loading mpr-ui auth header");
+  if (source === null) {
+    const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
+    if (typeof cdnFetch !== "function") {
+      throw new Error("fetch API required to load mpr-ui auth header from CDN");
+    }
+    const response = await cdnFetch(MPR_UI_CDN_URL);
+    if (!response || typeof response.text !== "function") {
+      throw new Error("invalid response when loading mpr-ui auth header");
+    }
+    if (response.ok === false) {
+      throw new Error(
+        `failed to load mpr-ui auth header from CDN (status ${response.status})`,
+      );
+    }
+    source = await response.text();
   }
-  if (response.ok === false) {
-    throw new Error(
-      `failed to load mpr-ui auth header from CDN (status ${response.status})`,
-    );
-  }
-  const source = await response.text();
 
   const rootElement = resolvedOptions.rootElement || new StubElement("div");
   const events = [];
 
   const fetchImpl =
-    typeof resolvedOptions.fetch === "function"
-     ? resolvedOptions.fetch
-     : undefined;
+    typeof resolvedOptions.fetch === "function" ? resolvedOptions.fetch : undefined;
 
   const context = {
     document: new StubDocument(),
@@ -224,14 +204,15 @@ async function loadAuthHeader(options = {}) {
   vm.createContext(context);
   vm.runInContext(source, context);
 
+  const eventsCollector = events;
   rootElement.addEventListener("mpr-ui:auth:authenticated", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
   rootElement.addEventListener("mpr-ui:auth:unauthenticated", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
   rootElement.addEventListener("mpr-ui:auth:error", (event) => {
-    events.push({ type: event.type, detail: event.detail });
+    eventsCollector.push({ type: event.type, detail: event.detail });
   });
 
   return {
@@ -239,6 +220,40 @@ async function loadAuthHeader(options = {}) {
     rootElement,
     events,
   };
+}
+
+function createFetchStub(responses) {
+  const calls = [];
+  const queue = [...responses];
+  const fetchStub = async (url, options = {}) => {
+    const descriptor = queue.shift();
+    if (!descriptor) {
+      throw new Error(`unexpected fetch call to ${url}`);
+    }
+    calls.push({
+      url,
+      method: (options.method || "GET").toUpperCase(),
+      body: options.body ? JSON.parse(options.body) : undefined,
+    });
+    if (descriptor.status >= 200 && descriptor.status < 300) {
+      return {
+        ok: true,
+        status: descriptor.status,
+        async json() {
+          return descriptor.body || {};
+        },
+      };
+    }
+    return {
+      ok: false,
+      status: descriptor.status,
+      async json() {
+        return descriptor.body || {};
+      },
+    };
+  };
+  fetchStub.calls = calls;
+  return fetchStub;
 }
 
 test("mpr-ui header handles credential exchange and logout", async () => {
@@ -250,7 +265,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     roles: ["user"],
   };
 
-  const fetch = await createFetchStub([
+  const fetch = createFetchStub([
     { status: 200, body: loginProfile }, // /auth/google
     { status: 204, body: {} }, // /auth/logout
   ]);
@@ -294,6 +309,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
+    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
@@ -353,7 +369,7 @@ test("mpr-ui header handles credential exchange and logout", async () => {
 });
 
 test("mpr-ui header surfaces error when credential missing", async () => {
-  const fetch = await createFetchStub([]);
+  const fetch = createFetchStub([]);
   const initAuthClient = (options) => {
     options.onUnauthenticated();
     return Promise.resolve();
@@ -367,6 +383,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
   };
 
   const { context, rootElement, events } = await loadAuthHeader({
+    cdnFetch: await createCdnFetchStub(),
     fetch,
     google: googleStub,
     initAuthClient,
@@ -374,7 +391,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {});
 
-  await controller.handleCredential({});
+  controller.handleCredential({});
   assert.equal(events.length, 2);
   assert.equal(events[0].type, "mpr-ui:auth:unauthenticated");
   assert.equal(events[1].type, "mpr-ui:auth:error");
@@ -383,4 +400,21 @@ test("mpr-ui header surfaces error when credential missing", async () => {
     "mpr-ui.auth.missing_credential",
   );
   assert.equal(fetch.calls.length, 0);
+});
+
+test("mpr-ui header loads from CDN when local asset disabled", async () => {
+  let cdnCalls = 0;
+  const cdnFetch = await createCdnFetchStub();
+  const cdnFetchSpy = async (url) => {
+    cdnCalls += 1;
+    return cdnFetch(url);
+  };
+
+  const { context } = await loadAuthHeader({
+    useLocalAsset: false,
+    cdnFetch: cdnFetchSpy,
+  });
+
+  assert.equal(typeof context.MPRUI.createAuthHeader, "function");
+  assert.equal(cdnCalls, 1);
 });
