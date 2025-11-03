@@ -115,7 +115,7 @@ class StubCustomEvent {
 }
 
 async function loadAuthHeader(options) {
-  const scriptPath = path.join(__dirname, "..", "tools", "mpr-ui", "mpr-ui.js");
+  const scriptPath = path.join(__dirname, "..", "web", "mpr-ui.js");
   const source = await fs.readFile(scriptPath, "utf8");
 
   const rootElement = options.rootElement || new StubElement("div");
