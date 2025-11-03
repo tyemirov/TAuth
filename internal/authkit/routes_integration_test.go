@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/api/idtoken"
 )
 
@@ -38,12 +40,18 @@ func (validator *fakeGoogleValidator) Validate(ctx context.Context, token string
 	return result.payload, nil
 }
 
-func withValidatorFactory(t *testing.T, factory func(context.Context) (googleTokenValidator, error)) func() {
+func withValidatorFactory(t *testing.T, factory func(context.Context) (GoogleTokenValidator, error)) func() {
 	t.Helper()
 	previous := newGoogleTokenValidator
 	newGoogleTokenValidator = factory
+	validatorCache.Lock()
+	validatorCache.value = nil
+	validatorCache.Unlock()
 	return func() {
 		newGoogleTokenValidator = previous
+		validatorCache.Lock()
+		validatorCache.value = nil
+		validatorCache.Unlock()
 	}
 }
 
@@ -54,6 +62,7 @@ type testUserStore struct {
 type testUserProfile struct {
 	email   string
 	display string
+	avatar  string
 	roles   []string
 }
 
@@ -61,23 +70,24 @@ func newTestUserStore() *testUserStore {
 	return &testUserStore{profiles: make(map[string]testUserProfile)}
 }
 
-func (store *testUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (string, []string, error) {
+func (store *testUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	applicationUserID := "google:" + googleSub
 	profile := testUserProfile{
 		email:   userEmail,
 		display: userDisplayName,
+		avatar:  userAvatarURL,
 		roles:   []string{"user"},
 	}
 	store.profiles[applicationUserID] = profile
 	return applicationUserID, profile.roles, nil
 }
 
-func (store *testUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error) {
+func (store *testUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
 	profile, ok := store.profiles[applicationUserID]
 	if !ok {
-		return "", "", nil, errors.New("user_not_found")
+		return "", "", "", nil, errors.New("user_not_found")
 	}
-	return profile.email, profile.display, profile.roles, nil
+	return profile.email, profile.display, profile.avatar, profile.roles, nil
 }
 
 type failingUserStore struct {
@@ -85,12 +95,12 @@ type failingUserStore struct {
 	profileErr error
 }
 
-func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (string, []string, error) {
+func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	return "", nil, store.upsertErr
 }
 
-func (store *failingUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error) {
-	return "", "", nil, store.profileErr
+func (store *failingUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
+	return "", "", "", nil, store.profileErr
 }
 
 type stubRefreshStore struct {
@@ -161,10 +171,11 @@ func TestAuthLifecycle(t *testing.T) {
 			"email":          "user@example.com",
 			"email_verified": true,
 			"name":           "Test User",
+			"picture":        "https://example.com/avatar.png",
 		},
 	}
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -217,6 +228,9 @@ func TestAuthLifecycle(t *testing.T) {
 	}
 	if mePayload["user_id"] != "google:sub-123" {
 		t.Fatalf("unexpected user_id: %v", mePayload["user_id"])
+	}
+	if mePayload["avatar_url"] != "https://example.com/avatar.png" {
+		t.Fatalf("unexpected avatar_url: %v", mePayload["avatar_url"])
 	}
 
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
@@ -272,7 +286,7 @@ func TestAuthLifecycle(t *testing.T) {
 func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -283,6 +297,7 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 							"email":          "https@example.com",
 							"email_verified": true,
 							"name":           "Secure",
+							"picture":        "https://example.com/avatar.png",
 						},
 					},
 					expectedAudience: "client-id",
@@ -344,7 +359,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return nil, errors.New("factory_failure")
 	})
 	MountAuthRoutes(router, config, userStore, refreshStore)
@@ -358,7 +373,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	}
 	restoreValidator()
 
-	restoreValidator = withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator = withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"bad-token": {
@@ -382,6 +397,116 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	}
 }
 
+func TestAuthGoogleSuccessMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	metrics := NewCounterMetrics()
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+
+	core, observed := observer.New(zap.InfoLevel)
+	ProvideLogger(zap.New(core))
+	defer ProvideLogger(nil)
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload: &idtoken.Payload{Claims: map[string]interface{}{
+						"iss":            "https://accounts.google.com",
+						"sub":            "sub-success",
+						"email":          "user@example.com",
+						"email_verified": true,
+						"name":           "User",
+						"picture":        "https://example.com/avatar.png",
+					}},
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore)
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected success, got %d", response.Code)
+	}
+	if metrics.Count(metricAuthLoginSuccess) != 1 {
+		t.Fatalf("expected auth.login.success metric to increment")
+	}
+	if observed.Len() != 0 {
+		t.Fatalf("did not expect warnings on successful login")
+	}
+}
+
+func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	metrics := NewCounterMetrics()
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+
+	core, observed := observer.New(zap.WarnLevel)
+	ProvideLogger(zap.New(core))
+	defer ProvideLogger(nil)
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload: &idtoken.Payload{Claims: map[string]interface{}{
+						"iss":            "https://accounts.google.com",
+						"sub":            "sub-fail",
+						"email":          "user@example.com",
+						"email_verified": true,
+						"name":           "User",
+						"picture":        "https://example.com/avatar.png",
+					}},
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := &failingUserStore{upsertErr: errors.New("upsert-fail")}
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore)
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", response.Code)
+	}
+	if metrics.Count(metricAuthLoginFailure) != 1 {
+		t.Fatalf("expected auth.login.failure metric to increment")
+	}
+	warnLogs := observed.FilterMessage("auth")
+	if warnLogs.Len() == 0 {
+		t.Fatalf("expected warning log for user store failure")
+	}
+	if warnLogs.All()[0].Context[0].Key != "code" || warnLogs.All()[0].Context[0].String != "auth.login.user_store" {
+		t.Fatalf("expected auth.login.user_store code, got %v", warnLogs.All()[0].Context)
+	}
+}
+
 func TestAuthGoogleValidationBranches(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -394,6 +519,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email":          "user@example.com",
 					"email_verified": true,
 					"name":           "Example",
+					"picture":        "https://example.com/avatar.png",
 				},
 			},
 			expectedAudience: "client-id",
@@ -406,13 +532,14 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email":          "user@example.com",
 					"email_verified": false,
 					"name":           "Example",
+					"picture":        "https://example.com/avatar.png",
 				},
 			},
 			expectedAudience: "client-id",
 		},
 	}
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{results: results}, nil
 	})
 	defer restoreValidator()
@@ -440,7 +567,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 func TestRefreshAndLogoutGuards(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -451,6 +578,7 @@ func TestRefreshAndLogoutGuards(t *testing.T) {
 							"email":          "user@example.com",
 							"email_verified": true,
 							"name":           "Refresh",
+							"picture":        "https://example.com/avatar.png",
 						},
 					},
 					expectedAudience: "client-id",
@@ -549,7 +677,7 @@ func TestAuthGoogleMissingToken(t *testing.T) {
 func TestAuthGoogleUserStoreError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -559,6 +687,7 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "Example",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -585,7 +714,7 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 func TestAuthGoogleRefreshIssueError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (googleTokenValidator, error) {
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return &fakeGoogleValidator{
 			results: map[string]validatorResult{
 				"valid-token": {
@@ -595,6 +724,7 @@ func TestAuthGoogleRefreshIssueError(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "Example",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -671,7 +801,7 @@ func TestAuthRefreshIssueFailure(t *testing.T) {
 
 	config := newTestServerConfig()
 	userStore := newTestUserStore()
-	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", roles: []string{"user"}}
+	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", avatar: "https://example.com/avatar.png", roles: []string{"user"}}
 	refreshStore := &stubRefreshStore{
 		validateFunc: func(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
 			return "user", "token", time.Now().Add(time.Minute).Unix(), nil
@@ -697,7 +827,7 @@ func TestAuthRefreshRevokeFailure(t *testing.T) {
 
 	config := newTestServerConfig()
 	userStore := newTestUserStore()
-	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", roles: []string{"user"}}
+	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", avatar: "https://example.com/avatar.png", roles: []string{"user"}}
 	refreshStore := &stubRefreshStore{
 		validateFunc: func(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
 			return "user", "token", time.Now().Add(time.Minute).Unix(), nil
@@ -725,7 +855,7 @@ func TestRequireSessionIssuerMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	config := newTestServerConfig()
-	token, _, err := MintAppJWT("user", "user@example.com", "User", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+	token, _, err := MintAppJWT(NewSystemClock(), "user", "user@example.com", "User", "https://example.com/avatar.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 	if err != nil {
 		t.Fatalf("failed to mint token: %v", err)
 	}

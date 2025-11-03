@@ -1,0 +1,24 @@
+{
+  "name": "tauth",
+  "version": "1.0.0",
+  "description": "*Google Sign-In + JWT sessions for single-origin apps*",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tyemirov/TAuth.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tyemirov/TAuth/issues"
+  },
+  "homepage": "https://github.com/tyemirov/TAuth#readme"
+}

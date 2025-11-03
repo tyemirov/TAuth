@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>MPR Lab Auth Demo</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <!-- GIS (Google Identity Services) -->
+        <script
+            src="https://accounts.google.com/gsi/client"
+            async
+            defer
+        ></script>
+        <!-- Your co-hosted auth client -->
+        <script src="/static/auth-client.js"></script>
+        <style>
+            html,
+            body {
+                margin: 0;
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    Segoe UI,
+                    Roboto,
+                    Ubuntu,
+                    Cantarell,
+                    Noto Sans,
+                    Arial,
+                    sans-serif;
+            }
+            .page {
+                max-width: 880px;
+                margin: 48px auto;
+                padding: 0 16px;
+            }
+            .panel {
+                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 16px;
+            }
+            .row {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+            .hidden {
+                display: none !important;
+            }
+            .btn {
+                appearance: none;
+                border: 1px solid #1b6ef3;
+                background: #1b6ef3;
+                color: #fff;
+                padding: 10px 14px;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: 600;
+            }
+            .btn.secondary {
+                background: #fff;
+                color: #1b6ef3;
+            }
+            pre {
+                background: #0f172a;
+                color: #e2e8f0;
+                padding: 12px;
+                border-radius: 12px;
+                overflow: auto;
+            }
+            .muted {
+                color: #6b7280;
+            }
+            .user-summary {
+                display: flex;
+                gap: 16px;
+                align-items: center;
+            }
+            .user-summary-avatar {
+                width: 48px;
+                height: 48px;
+                border-radius: 24px;
+                background: #1b6ef3;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 600;
+                overflow: hidden;
+            }
+            .user-summary-avatar img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+            .user-summary-details {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <h1>MPR Lab — Auth + GIS Demo</h1>
+
+            <!-- Signed OUT panel -->
+            <section id="signedOutPanel" class="panel">
+                <h2>Sign in</h2>
+                <p class="muted">
+                    Use Google Sign-In. The page will set secure HttpOnly
+                    cookies via your Go backend.
+                </p>
+
+                <!-- GIS attribute-based setup -->
+                <div
+                    id="g_id_onload"
+                    data-client_id="991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
+                    data-auto_select="false"
+                    data-callback="onGoogleCredential"
+                    data-ux_mode="popup"
+                ></div>
+                <div class="row">
+                    <div
+                        class="g_id_signin"
+                        data-type="standard"
+                        data-shape="rectangular"
+                        data-theme="outline"
+                        data-text="signin_with"
+                        data-size="large"
+                        data-logo_alignment="left"
+                    ></div>
+                </div>
+            </section>
+
+            <!-- Signed IN panel -->
+            <section id="signedInPanel" class="panel hidden">
+                <h2>Welcome</h2>
+                <div id="userSummary" class="row"></div>
+                <div class="row" style="margin-top: 12px">
+                    <button id="callApiButton" class="btn">
+                        Call Protected API (/api/me)
+                    </button>
+                    <button id="logoutButton" class="btn secondary">
+                        Sign out
+                    </button>
+                </div>
+            </section>
+
+            <!-- Output -->
+            <section class="panel">
+                <h2>Output</h2>
+                <pre id="outputArea">Nothing yet.</pre>
+                <p class="muted">
+                    This panel shows responses from /me and /api/me using your
+                    auth-client’s session handling.
+                </p>
+            </section>
+        </div>
+
+        <script>
+            // ----- DOM references
+            const signedOutPanelElement =
+                document.getElementById("signedOutPanel");
+            const signedInPanelElement =
+                document.getElementById("signedInPanel");
+            const userSummaryElement = document.getElementById("userSummary");
+            const outputAreaElement = document.getElementById("outputArea");
+            const callApiButtonElement =
+                document.getElementById("callApiButton");
+            const logoutButtonElement = document.getElementById("logoutButton");
+
+            function show(element) {
+                element.classList.remove("hidden");
+            }
+            function hide(element) {
+                element.classList.add("hidden");
+            }
+
+            function renderAuthenticatedView(userProfile) {
+                const expirationIsoString =
+                    userProfile && userProfile.expires
+                        ? new Date(userProfile.expires).toISOString()
+                        : "";
+                userSummaryElement.innerHTML = [
+                    '<div class="user-summary">',
+                    buildAvatarMarkup(userProfile),
+                    '<div class="user-summary-details">',
+                    `<div><strong>User:</strong> ${escapeHtml(userProfile.display || "")}</div>`,
+                    `<div><strong>Email:</strong> ${escapeHtml(userProfile.user_email || "")}</div>`,
+                    `<div><strong>Roles:</strong> ${(userProfile.roles || []).map(escapeHtml).join(", ")}</div>`,
+                    `<div><strong>Access Expires:</strong> ${escapeHtml(expirationIsoString)}</div>`,
+                    "</div>",
+                    "</div>",
+                ].join("");
+                hide(signedOutPanelElement);
+                show(signedInPanelElement);
+            }
+
+            function renderSignedOutView() {
+                hide(signedInPanelElement);
+                show(signedOutPanelElement);
+                outputAreaElement.textContent = "Signed out.";
+            }
+
+            function setOutput(objectToDump) {
+                try {
+                    outputAreaElement.textContent = JSON.stringify(
+                        objectToDump,
+                        null,
+                        2,
+                    );
+                } catch (serializationError) {
+                    outputAreaElement.textContent = String(objectToDump);
+                }
+            }
+
+            function escapeHtml(textValue) {
+                return String(textValue)
+                    .replaceAll("&", "&amp;")
+                    .replaceAll("<", "&lt;")
+                    .replaceAll(">", "&gt;")
+                    .replaceAll('"', "&quot;")
+                    .replaceAll("'", "&#39;");
+            }
+
+            function buildAvatarMarkup(userProfile) {
+                const avatarUrl = (userProfile && userProfile.avatar_url) || "";
+                const displayName = (userProfile && userProfile.display) || "";
+                if (avatarUrl) {
+                    return `<div class="user-summary-avatar"><img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName || "User")}'s avatar" /></div>`;
+                }
+                return `<div class="user-summary-avatar">${escapeHtml(buildInitials(displayName))}</div>`;
+            }
+
+            function buildInitials(displayName) {
+                return displayName
+                    .split(/\s+/)
+                    .filter((chunk) => chunk.length > 0)
+                    .slice(0, 2)
+                    .map((chunk) => chunk.charAt(0).toUpperCase())
+                    .join("") || "?";
+            }
+
+            // ----- GIS callback → exchange ID token with your backend
+            // Google will call this with { credential: "<ID_TOKEN>", ... }
+            async function onGoogleCredential(googleResponse) {
+                try {
+                    const googleIdToken =
+                        googleResponse && googleResponse.credential;
+                    if (!googleIdToken) {
+                        setOutput({
+                            error: "missing_google_id_token",
+                            detail: googleResponse,
+                        });
+                        return;
+                    }
+                    const exchangeResponse = await fetch("/auth/google", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            google_id_token: googleIdToken,
+                        }),
+                    });
+                    if (!exchangeResponse.ok) {
+                        const exchangeError = await safeJson(exchangeResponse);
+                        setOutput({
+                            error: "auth_google_failed",
+                            status: exchangeResponse.status,
+                            body: exchangeError,
+                        });
+                        return;
+                    }
+                    // Hydrate the session/UI now that cookies are set.
+                    await initAuthClient({
+                        onAuthenticated: function onAuthenticated(profile) {
+                            renderAuthenticatedView(profile);
+                            setOutput({
+                                message: "Signed in",
+                                profile: profile,
+                            });
+                        },
+                        onUnauthenticated: function onUnauthenticated() {
+                            renderSignedOutView();
+                        },
+                    });
+                } catch (unexpectedError) {
+                    setOutput({
+                        error: "onGoogleCredential_exception",
+                        detail: String(unexpectedError),
+                    });
+                }
+            }
+            window.onGoogleCredential = onGoogleCredential;
+
+            // ----- Initial hydration on page load
+            (async function bootstrap() {
+                await initAuthClient({
+                    onAuthenticated: function onAuthenticated(profile) {
+                        renderAuthenticatedView(profile);
+                        setOutput({
+                            message: "Hydrated from /me",
+                            profile: profile,
+                        });
+                    },
+                    onUnauthenticated: function onUnauthenticated() {
+                        renderSignedOutView();
+                    },
+                });
+            })();
+
+            // ----- Buttons
+            callApiButtonElement.addEventListener(
+                "click",
+                async function onProtectedApiClick() {
+                    try {
+                        const apiResponse = await apiFetch("/api/me", {
+                            method: "GET",
+                        });
+                        const apiJson = await safeJson(apiResponse);
+                        setOutput({
+                            status: apiResponse.status,
+                            body: apiJson,
+                        });
+                        if (apiResponse.status === 401) {
+                            renderSignedOutView();
+                        }
+                    } catch (requestError) {
+                        setOutput({
+                            error: "api_call_failed",
+                            detail: String(requestError),
+                        });
+                    }
+                },
+            );
+
+            logoutButtonElement.addEventListener(
+                "click",
+                async function onLogoutClick() {
+                    await logout();
+                    renderSignedOutView();
+                },
+            );
+
+            // ----- Helpers
+            async function safeJson(fetchResponse) {
+                try {
+                    return await fetchResponse.json();
+                } catch {
+                    return { raw: await fetchResponse.text() };
+                }
+            }
+        </script>
+    </body>
+</html>

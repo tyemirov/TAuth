@@ -48,11 +48,11 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 2. Browser posts `{ "google_id_token": "..." }` (and optional `nonce`) to `/auth/google`.
 3. `MountAuthRoutes` enforces HTTPS unless `AllowInsecureHTTP` is explicitly enabled for local development.
 4. `idtoken.NewValidator` validates issuer and audience against `ServerConfig.GoogleWebClientID`.
-5. `UserStore.UpsertGoogleUser` persists or updates the profile and returns the application user ID plus roles.
-6. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`).
+5. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.
+6. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`) embedding `user_avatar_url` alongside the existing claims.
 7. `RefreshTokenStore.Issue` creates a new opaque refresh token (hashed before storage) with `RefreshTTL`.
 8. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
-9. The JSON response mirrors key profile fields so the browser helper can hydrate UI state.
+9. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
 
 ## 4. Components
 
@@ -73,7 +73,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 - Refresh token stores:
   - Memory implementation for tests/dev.
   - GORM-backed implementation (`DatabaseRefreshTokenStore`) that performs migrations and issues hashed refresh tokens.
-- `RequireSession`: Gin middleware validating `app_session`, confirming issuer, and injecting `JwtCustomClaims` into the request context (`auth_claims`).
+- `RequireSession`: Gin middleware backed by the shared session validator; confirms issuer and injects `JwtCustomClaims` into the request context (`auth_claims`).
 - Shared helpers (`refresh_token_helpers.go`) generate token IDs and opaque values consistently across store implementations.
 
 ### 4.3 `internal/web`
@@ -95,8 +95,8 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 
 ```go
 type UserStore interface {
-    UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (applicationUserID string, userRoles []string, err error)
-    GetUserProfile(ctx context.Context, applicationUserID string) (userEmail string, userDisplayName string, userRoles []string, err error)
+    UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+    GetUserProfile(ctx context.Context, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
 
 type RefreshTokenStore interface {
@@ -109,6 +109,13 @@ type RefreshTokenStore interface {
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
+
+### 4.6 `pkg/sessionvalidator`
+
+- Reusable library for downstream Go services to validate the `app_session` cookie.
+- Smart constructor enforces signing key and issuer configuration, with optional cookie name overrides.
+- Provides `ValidateToken`, `ValidateRequest`, and a Gin middleware adapter to populate typed `Claims`.
+- Shares the same claim shape (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`) used by the server.
 
 ## 5. Configuration Surface
 
