@@ -46,7 +46,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 ### 3.3 Google Sign-In exchange
 
 1. Browser obtains a Google ID token from Google Identity Services.
-2. Browser requests a nonce from `/auth/nonce` and includes it as `nonce_token` when posting `{ "google_id_token": "...", "nonce_token": "..." }` to `/auth/google`.
+2. Browser requests a nonce from `/auth/nonce`, passes it to Google Identity Services via `google.accounts.id.initialize({ nonce })`, and includes the same value as `nonce_token` when posting `{ "google_id_token": "...", "nonce_token": "..." }` to `/auth/google`.
 3. `MountAuthRoutes` enforces HTTPS unless `AllowInsecureHTTP` is explicitly enabled for local development.
 4. `idtoken.NewValidator` validates issuer and audience against `ServerConfig.GoogleWebClientID`.
 5. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.

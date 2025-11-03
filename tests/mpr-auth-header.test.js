@@ -73,6 +73,7 @@ class StubElement {
     this.hidden = false;
     this.eventListeners = new Map();
     this.innerHTMLValue = "";
+    this.id = "";
   }
 
   appendChild(child) {
@@ -83,6 +84,9 @@ class StubElement {
 
   setAttribute(name, value) {
     this.attributes[name] = String(value);
+    if (name === "id") {
+      this.id = String(value);
+    }
     if (name.startsWith("data-")) {
       const key = dataAttributeToKey(name);
       this.dataset[key] = String(value);
@@ -97,6 +101,9 @@ class StubElement {
 
   removeAttribute(name) {
     delete this.attributes[name];
+    if (name === "id") {
+      this.id = "";
+    }
     if (name.startsWith("data-")) {
       const key = dataAttributeToKey(name);
       delete this.dataset[key];
@@ -130,8 +137,21 @@ class StubElement {
 }
 
 class StubDocument {
+  constructor() {
+    this.elementsById = new Map();
+    this.head = new StubElement("head");
+  }
+
   createElement(tagName) {
     return new StubElement(tagName);
+  }
+
+  getElementById(id) {
+    return this.elementsById.get(id) || null;
+  }
+
+  registerElement(id, element) {
+    this.elementsById.set(id, element);
   }
 }
 
@@ -201,6 +221,11 @@ async function loadAuthHeader(options = {}) {
     context.window.fetch = fetchImpl;
   }
 
+  const googleOnloadElement = new StubElement("div");
+  googleOnloadElement.setAttribute("id", "g_id_onload");
+  context.document.registerElement("g_id_onload", googleOnloadElement);
+  context.window.document = context.document;
+
   vm.createContext(context);
   vm.runInContext(source, context);
 
@@ -267,6 +292,12 @@ function createFetchStub(responses) {
   return fetchStub;
 }
 
+async function flushAsyncTasks() {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 test("mpr-ui header handles credential exchange and logout", async () => {
   const loginProfile = {
     user_id: "google:sub-xyz",
@@ -328,8 +359,12 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     accounts: {
       id: {
         promptCalls: 0,
+        initializeCalls: [],
         prompt() {
           googleStub.accounts.id.promptCalls += 1;
+        },
+        initialize(options) {
+          googleStub.accounts.id.initializeCalls.push(options);
         },
       },
     },
@@ -351,9 +386,27 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   assert.equal(controller.state.status, "unauthenticated");
   assert.equal(rootElement.getAttribute("data-user-id"), null);
 
+  const googleOnloadElement = context.document.getElementById("g_id_onload");
+  assert.ok(googleOnloadElement);
+  googleOnloadElement.setAttribute("data-client_id", "test-client-id");
+
+  await flushAsyncTasks();
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
+  assert.equal(googleStub.accounts.id.promptCalls, 1);
+  assert.equal(googleStub.accounts.id.initializeCalls.length, 1);
+  assert.equal(googleStub.accounts.id.initializeCalls[0].nonce, "nonce-123");
+  assert.equal(
+    googleStub.accounts.id.initializeCalls[0].client_id,
+    "test-client-id",
+  );
+  assert.equal(
+    googleOnloadElement.getAttribute("data-nonce"),
+    "nonce-123",
+  );
+
   await controller.handleCredential({ credential: "token-123" });
   assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
   assert.deepEqual(fetch.calls[1].url, "https://auth.example.com/auth/google");
   assert.deepEqual(fetch.calls[1].body, {
     google_id_token: "token-123",
@@ -396,6 +449,65 @@ test("mpr-ui header handles credential exchange and logout", async () => {
       "mpr-ui:auth:authenticated",
       "mpr-ui:auth:unauthenticated",
     ],
+  );
+});
+
+test("mpr-ui header surfaces error when nonce issuance fails", async () => {
+  const fetch = createFetchStub([
+    {
+      url: "https://auth.example.com/auth/nonce",
+      method: "POST",
+      status: 500,
+      body: {},
+    },
+  ]);
+
+  const initAuthClient = (options) => {
+    options.onUnauthenticated();
+    return Promise.resolve();
+  };
+
+  const googleStub = {
+    accounts: {
+      id: {
+        promptCalls: 0,
+        initializeCalls: [],
+        prompt() {
+          googleStub.accounts.id.promptCalls += 1;
+        },
+        initialize(options) {
+          googleStub.accounts.id.initializeCalls.push(options);
+        },
+      },
+    },
+  };
+
+  const { context, rootElement, events } = await loadAuthHeader({
+    cdnFetch: await createCdnFetchStub(),
+    fetch,
+    google: googleStub,
+    initAuthClient,
+  });
+
+  const controller = context.MPRUI.createAuthHeader(rootElement, {
+    baseUrl: "https://auth.example.com",
+  });
+  const googleOnloadElement = context.document.getElementById("g_id_onload");
+  assert.ok(googleOnloadElement);
+  googleOnloadElement.setAttribute("data-client_id", "test-client-id");
+
+  await flushAsyncTasks();
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
+  assert.equal(googleStub.accounts.id.promptCalls, 0);
+  assert.equal(googleStub.accounts.id.initializeCalls.length, 0);
+  const errorEvents = events.filter(
+    (event) => event.type === "mpr-ui:auth:error",
+  );
+  assert.equal(errorEvents.length > 0, true);
+  assert.equal(
+    errorEvents[errorEvents.length - 1].detail.code,
+    "mpr-ui.auth.nonce_failed",
   );
 });
 

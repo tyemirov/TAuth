@@ -18,6 +18,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
 - [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, added `/static/mpr-ui.js`, and hydrated the demo with support/status links.
 - [x] [TA-208] Enforce nonce validation in `/auth/google` — Added `/auth/nonce` issuance with in-memory store, required nonce consumption/matching in auth routes, updated mpr-ui/demo clients to attach `nonce_token`, and expanded Go/Node coverage for missing or mismatched nonces.
+- [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, and Node tests assert nonce preparation and failure handling.
 
 ## BugFixes (300–399)
 

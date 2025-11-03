@@ -49,14 +49,44 @@ go run ./cmd/server
 </script>
 ```
 
-4. **Exchange the Google ID token one time**
+4. **Request a nonce before prompting Google Identity Services**
+
+```js
+let pendingNonce = "";
+
+async function prepareGoogleSignIn() {
+  const response = await fetch("/auth/nonce", {
+    method: "POST",
+    credentials: "include",
+    headers: { "X-Requested-With": "XMLHttpRequest" },
+  });
+  if (!response.ok) {
+    throw new Error("nonce request failed");
+  }
+  const payload = await response.json();
+  pendingNonce = payload.nonce;
+  google.accounts.id.initialize({
+    client_id: "your_web_client_id.apps.googleusercontent.com",
+    callback: handleCredential,
+    nonce: pendingNonce,
+  });
+  google.accounts.id.prompt();
+}
+```
+
+Call `prepareGoogleSignIn()` before every login attempt. The nonce is single-use and must be supplied to Google so the ID token echoes it back.
+
+5. **Exchange the Google ID token using the issued nonce**
 
 ```js
 await fetch("/auth/google", {
   method: "POST",
   credentials: "include",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ google_id_token: idTokenFromGoogle })
+  body: JSON.stringify({
+    google_id_token: idTokenFromGoogle,
+    nonce_token: pendingNonce,
+  }),
 });
 ```
 
@@ -76,6 +106,16 @@ Successful exchanges populate `/me` with a rich profile:
 ```
 
 Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mpr-ui header component).
+
+---
+
+### Google nonce handling
+
+- TAuth issues one-time nonces via `POST /auth/nonce`. Google does **not** provide a nonce for you.
+- Supply the nonce to Google Identity Services via `google.accounts.id.initialize({ nonce })` or the `data-nonce` attribute on the `g_id_onload` element before prompting the user.
+- Echo the same nonce back to TAuth as `nonce_token` when exchanging the ID token. Tokens without a matching nonce are rejected (`auth.login.nonce_mismatch`).
+- Fetch a fresh nonce for every sign-in attempt (including retries). TAuth invalidates a nonce as soon as it is consumed.
+- The default `auth-client.js` and `mpr-ui` helpers take care of this flow automatically; custom clients must follow the same sequence.
 
 ---
 

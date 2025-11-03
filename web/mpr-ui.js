@@ -7,6 +7,7 @@
     loginPath: "/auth/google",
     logoutPath: "/auth/logout",
     noncePath: "/auth/nonce",
+    googleClientId: "",
     siteName: "",
     siteLink: "",
   };
@@ -108,9 +109,14 @@
     var pendingProfile = null;
     var hasEmittedUnauthenticated = false;
     var lastAuthenticatedSignature = null;
+    var pendingNonceToken = null;
+    var nonceRequestPromise = null;
 
     function requestNonceToken() {
-      return global
+      if (nonceRequestPromise) {
+        return nonceRequestPromise;
+      }
+      nonceRequestPromise = global
         .fetch(joinUrl(options.baseUrl, options.noncePath), {
           method: "POST",
           credentials: "include",
@@ -136,7 +142,57 @@
             throw new Error("nonce payload missing");
           }
           return nonceToken;
+        })
+        .finally(function () {
+          nonceRequestPromise = null;
         });
+      return nonceRequestPromise;
+    }
+
+    function configureGoogleNonce(nonceToken) {
+      pendingNonceToken = nonceToken;
+      var clientIdValue = options.googleClientId || "";
+      if (global.document) {
+        var onloadElement = global.document.getElementById("g_id_onload");
+        if (onloadElement && typeof onloadElement.setAttribute === "function") {
+          onloadElement.setAttribute("data-nonce", nonceToken);
+        }
+        if (!clientIdValue && typeof onloadElement.getAttribute === "function") {
+          var attributeClientId = onloadElement.getAttribute("data-client_id");
+          if (attributeClientId) {
+            clientIdValue = attributeClientId;
+          }
+        }
+      }
+      if (
+        global.google &&
+        global.google.accounts &&
+        global.google.accounts.id &&
+        typeof global.google.accounts.id.initialize === "function"
+      ) {
+        try {
+          global.google.accounts.id.initialize({
+            client_id: clientIdValue || undefined,
+            callback: function (payload) {
+              handleCredential(payload);
+            },
+            nonce: nonceToken,
+          });
+        } catch (_error) {}
+      }
+    }
+
+    function prepareGooglePromptNonce() {
+      var sourcePromise;
+      if (pendingNonceToken) {
+        sourcePromise = Promise.resolve(pendingNonceToken);
+      } else {
+        sourcePromise = requestNonceToken();
+      }
+      return sourcePromise.then(function (nonceToken) {
+        configureGoogleNonce(nonceToken);
+        return nonceToken;
+      });
     }
 
     function updateDatasetFromProfile(profile) {
@@ -188,7 +244,17 @@
         hasEmittedUnauthenticated = true;
       }
       if (prompt) {
-        promptGoogleIfAvailable(global);
+        prepareGooglePromptNonce()
+          .then(function () {
+            promptGoogleIfAvailable(global);
+          })
+          .catch(function (error) {
+            emitError("mpr-ui.auth.nonce_failed", {
+              message:
+                error && error.message ? error.message : String(error),
+              status: error && error.status ? error.status : null,
+            });
+          });
       }
     }
 
@@ -226,7 +292,14 @@
     }
 
     function exchangeCredential(credential) {
-      return requestNonceToken()
+      var noncePromise;
+      if (pendingNonceToken) {
+        noncePromise = Promise.resolve(pendingNonceToken);
+        pendingNonceToken = null;
+      } else {
+        noncePromise = requestNonceToken();
+      }
+      return noncePromise
         .then(function (nonceToken) {
           var payload = JSON.stringify({
             google_id_token: credential,
