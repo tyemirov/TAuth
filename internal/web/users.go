@@ -13,7 +13,7 @@ import (
 
 // ProfileStore exposes the ability to retrieve user profiles.
 type ProfileStore interface {
-	GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error)
+	GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error)
 }
 
 // ClaimsProvider exposes identity fields extracted from a JWT.
@@ -34,9 +34,10 @@ type InMemoryUsers struct {
 
 // UserProfile represents an application user.
 type UserProfile struct {
-	Email   string
-	Display string
-	Roles   []string
+	Email     string
+	Display   string
+	AvatarURL string
+	Roles     []string
 }
 
 // NewInMemoryUsers constructs a store with an empty map.
@@ -45,24 +46,25 @@ func NewInMemoryUsers() *InMemoryUsers {
 }
 
 // UpsertGoogleUser inserts or updates a user based on Google sub.
-func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (string, []string, error) {
+func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	applicationUserID := "google:" + googleSub
 	record := UserProfile{
-		Email:   userEmail,
-		Display: userDisplayName,
-		Roles:   []string{"user"},
+		Email:     userEmail,
+		Display:   userDisplayName,
+		AvatarURL: userAvatarURL,
+		Roles:     []string{"user"},
 	}
 	store.Users[applicationUserID] = record
 	return applicationUserID, record.Roles, nil
 }
 
 // GetUserProfile returns a profile by application user id.
-func (store *InMemoryUsers) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error) {
+func (store *InMemoryUsers) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
 	record, ok := store.Users[applicationUserID]
 	if !ok {
-		return "", "", nil, ErrUserNotFound
+		return "", "", "", nil, ErrUserNotFound
 	}
-	return record.Email, record.Display, record.Roles, nil
+	return record.Email, record.Display, record.AvatarURL, record.Roles, nil
 }
 
 // HandleWhoAmI returns the authenticated user's profile.
@@ -84,7 +86,7 @@ func HandleWhoAmI(store ProfileStore, logger *zap.Logger) gin.HandlerFunc {
 			return
 		}
 
-		userEmail, display, roles, err := store.GetUserProfile(contextGin, provider.GetUserID())
+		userEmail, display, avatarURL, roles, err := store.GetUserProfile(contextGin, provider.GetUserID())
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
 				logger.Warn("whoami.user_not_found", zap.String("user_id", provider.GetUserID()))
@@ -100,6 +102,7 @@ func HandleWhoAmI(store ProfileStore, logger *zap.Logger) gin.HandlerFunc {
 			"user_id":    provider.GetUserID(),
 			"user_email": userEmail,
 			"display":    display,
+			"avatar_url": avatarURL,
 			"roles":      roles,
 			"expires":    provider.GetExpiresAt(),
 		})

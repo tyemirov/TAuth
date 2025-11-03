@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "node --test tests/auth-client.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -20,8 +20,5 @@
   "bugs": {
     "url": "https://github.com/tyemirov/TAuth/issues"
   },
-  "homepage": "https://github.com/tyemirov/TAuth#readme",
-  "devDependencies": {
-    "puppeteer-core": "^24.27.0"
-  }
+  "homepage": "https://github.com/tyemirov/TAuth#readme"
 }

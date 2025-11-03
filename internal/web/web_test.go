@@ -113,9 +113,10 @@ func TestHandleWhoAmI(t *testing.T) {
 
 	store := NewInMemoryUsers()
 	store.Users["google:sub-1"] = UserProfile{
-		Email:   "user@example.com",
-		Display: "Demo User",
-		Roles:   []string{"user"},
+		Email:     "user@example.com",
+		Display:   "Demo User",
+		AvatarURL: "https://example.com/avatar.png",
+		Roles:     []string{"user"},
 	}
 
 	router := gin.New()
@@ -150,6 +151,9 @@ func TestHandleWhoAmI(t *testing.T) {
 	}
 	if payload["display"] != "Demo User" {
 		t.Fatalf("unexpected display: %v", payload["display"])
+	}
+	if payload["avatar_url"] != "https://example.com/avatar.png" {
+		t.Fatalf("unexpected avatar_url: %v", payload["avatar_url"])
 	}
 	if _, ok := payload["roles"]; !ok {
 		t.Fatalf("expected roles in response")
@@ -206,7 +210,7 @@ func TestHandleWhoAmIMissingUser(t *testing.T) {
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()
-	userID, roles, err := store.UpsertGoogleUser(nil, "sub-1", "user@example.com", "User")
+	userID, roles, err := store.UpsertGoogleUser(nil, "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,15 +221,15 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("expected default role")
 	}
 
-	email, display, storedRoles, err := store.GetUserProfile(nil, userID)
+	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, userID)
 	if err != nil {
 		t.Fatalf("unexpected error retrieving profile: %v", err)
 	}
-	if email == "" || display == "" || len(storedRoles) == 0 {
+	if email == "" || display == "" || avatarURL == "" || len(storedRoles) == 0 {
 		t.Fatalf("incomplete profile returned")
 	}
 
-	if _, _, _, err := store.GetUserProfile(nil, "missing"); err == nil {
+	if _, _, _, _, err := store.GetUserProfile(nil, "missing"); err == nil {
 		t.Fatalf("expected error for missing user")
 	}
 }

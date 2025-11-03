@@ -62,6 +62,7 @@ type testUserStore struct {
 type testUserProfile struct {
 	email   string
 	display string
+	avatar  string
 	roles   []string
 }
 
@@ -69,23 +70,24 @@ func newTestUserStore() *testUserStore {
 	return &testUserStore{profiles: make(map[string]testUserProfile)}
 }
 
-func (store *testUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (string, []string, error) {
+func (store *testUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	applicationUserID := "google:" + googleSub
 	profile := testUserProfile{
 		email:   userEmail,
 		display: userDisplayName,
+		avatar:  userAvatarURL,
 		roles:   []string{"user"},
 	}
 	store.profiles[applicationUserID] = profile
 	return applicationUserID, profile.roles, nil
 }
 
-func (store *testUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error) {
+func (store *testUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
 	profile, ok := store.profiles[applicationUserID]
 	if !ok {
-		return "", "", nil, errors.New("user_not_found")
+		return "", "", "", nil, errors.New("user_not_found")
 	}
-	return profile.email, profile.display, profile.roles, nil
+	return profile.email, profile.display, profile.avatar, profile.roles, nil
 }
 
 type failingUserStore struct {
@@ -93,12 +95,12 @@ type failingUserStore struct {
 	profileErr error
 }
 
-func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string) (string, []string, error) {
+func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	return "", nil, store.upsertErr
 }
 
-func (store *failingUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, []string, error) {
-	return "", "", nil, store.profileErr
+func (store *failingUserStore) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
+	return "", "", "", nil, store.profileErr
 }
 
 type stubRefreshStore struct {
@@ -169,6 +171,7 @@ func TestAuthLifecycle(t *testing.T) {
 			"email":          "user@example.com",
 			"email_verified": true,
 			"name":           "Test User",
+			"picture":        "https://example.com/avatar.png",
 		},
 	}
 
@@ -225,6 +228,9 @@ func TestAuthLifecycle(t *testing.T) {
 	}
 	if mePayload["user_id"] != "google:sub-123" {
 		t.Fatalf("unexpected user_id: %v", mePayload["user_id"])
+	}
+	if mePayload["avatar_url"] != "https://example.com/avatar.png" {
+		t.Fatalf("unexpected avatar_url: %v", mePayload["avatar_url"])
 	}
 
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
@@ -291,6 +297,7 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 							"email":          "https@example.com",
 							"email_verified": true,
 							"name":           "Secure",
+							"picture":        "https://example.com/avatar.png",
 						},
 					},
 					expectedAudience: "client-id",
@@ -411,6 +418,7 @@ func TestAuthGoogleSuccessMetrics(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "User",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -463,6 +471,7 @@ func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "User",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -510,6 +519,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email":          "user@example.com",
 					"email_verified": true,
 					"name":           "Example",
+					"picture":        "https://example.com/avatar.png",
 				},
 			},
 			expectedAudience: "client-id",
@@ -522,6 +532,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 					"email":          "user@example.com",
 					"email_verified": false,
 					"name":           "Example",
+					"picture":        "https://example.com/avatar.png",
 				},
 			},
 			expectedAudience: "client-id",
@@ -567,6 +578,7 @@ func TestRefreshAndLogoutGuards(t *testing.T) {
 							"email":          "user@example.com",
 							"email_verified": true,
 							"name":           "Refresh",
+							"picture":        "https://example.com/avatar.png",
 						},
 					},
 					expectedAudience: "client-id",
@@ -675,6 +687,7 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "Example",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -711,6 +724,7 @@ func TestAuthGoogleRefreshIssueError(t *testing.T) {
 						"email":          "user@example.com",
 						"email_verified": true,
 						"name":           "Example",
+						"picture":        "https://example.com/avatar.png",
 					}},
 					expectedAudience: "client-id",
 				},
@@ -787,7 +801,7 @@ func TestAuthRefreshIssueFailure(t *testing.T) {
 
 	config := newTestServerConfig()
 	userStore := newTestUserStore()
-	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", roles: []string{"user"}}
+	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", avatar: "https://example.com/avatar.png", roles: []string{"user"}}
 	refreshStore := &stubRefreshStore{
 		validateFunc: func(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
 			return "user", "token", time.Now().Add(time.Minute).Unix(), nil
@@ -813,7 +827,7 @@ func TestAuthRefreshRevokeFailure(t *testing.T) {
 
 	config := newTestServerConfig()
 	userStore := newTestUserStore()
-	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", roles: []string{"user"}}
+	userStore.profiles["user"] = testUserProfile{email: "user@example.com", display: "User", avatar: "https://example.com/avatar.png", roles: []string{"user"}}
 	refreshStore := &stubRefreshStore{
 		validateFunc: func(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
 			return "user", "token", time.Now().Add(time.Minute).Unix(), nil
@@ -841,7 +855,7 @@ func TestRequireSessionIssuerMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	config := newTestServerConfig()
-	token, _, err := MintAppJWT(NewSystemClock(), "user", "user@example.com", "User", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+	token, _, err := MintAppJWT(NewSystemClock(), "user", "user@example.com", "User", "https://example.com/avatar.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 	if err != nil {
 		t.Fatalf("failed to mint token: %v", err)
 	}

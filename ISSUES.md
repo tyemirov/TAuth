@@ -4,7 +4,8 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 ## Features (100–199)
 
-- [ ] [TA-100] Develop a new HTML header using mpr-ui that incorporates TAuth. The header shall be in mpr-ui repo. The header shall allow to login a user, display its avatar and the name, expose user id, email etc for the consumption by the rest of the app.
+- [x] [TA-100] Develop a new HTML header using mpr-ui that incorporates TAuth. The header shall be in mpr-ui repo. The header shall allow to login a user, display its avatar and the name, expose user id, email etc for the consumption by the rest of the app. — Added the reusable `mpr-ui` auth header component with avatar/name rendering, emitted dataset attributes for downstream consumers, surfaced `avatar_url` through `/auth/google` and `/me`, refreshed demo + docs, and staged Puppeteer coverage (skipped in CI until Chromium is available).
+- [x] [TA-101] Add a reusable Go client validator package under /pkg for validating TAuth session cookies (app_session) in other apps — Added `pkg/sessionvalidator` with smart constructor, token/request helpers, and Gin middleware, refactored `RequireSession` to reuse it, documented usage, and delivered unit tests enforcing signature/issuer/expiry behaviour.
 
 ## Improvements (200–299)
 
@@ -16,6 +17,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Added TLS-backed `httptest.Server` flows covering login→refresh→logout, tampered sessions, and revoked tokens with metrics assertions.
 - [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
 - [ ] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example
+- [ ] [TA-208] Enforce nonce validation in `/auth/google` — Prevent ID token replay by requiring a client-provided `nonce`, verifying it matches the `nonce` claim in the Google ID token, and binding it to a one-time server-issued nonce (e.g., signed cookie or short-lived cache) with TTL; update docs and add tests.
 
 ## BugFixes (300–399)
 

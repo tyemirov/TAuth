@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	sessionvalidator "github.com/tyemirov/tauth/pkg/sessionvalidator"
 )
 
 // Clock provides the current time, enabling deterministic tests.
@@ -28,57 +29,11 @@ func NewSystemClock() Clock {
 
 var errJWTMintFailure = errors.New("jwt.mint.failure")
 
-// JwtCustomClaims are embedded in the session token.
-type JwtCustomClaims struct {
-	UserID          string   `json:"user_id"`
-	UserEmail       string   `json:"user_email"`
-	UserDisplayName string   `json:"user_display_name"`
-	UserRoles       []string `json:"user_roles"`
-	jwt.RegisteredClaims
-}
-
-// GetUserID returns the application user identifier.
-func (claims *JwtCustomClaims) GetUserID() string {
-	if claims == nil {
-		return ""
-	}
-	return claims.UserID
-}
-
-// GetUserEmail returns the email stored in the claims.
-func (claims *JwtCustomClaims) GetUserEmail() string {
-	if claims == nil {
-		return ""
-	}
-	return claims.UserEmail
-}
-
-// GetUserDisplayName returns the display name from the claims.
-func (claims *JwtCustomClaims) GetUserDisplayName() string {
-	if claims == nil {
-		return ""
-	}
-	return claims.UserDisplayName
-}
-
-// GetUserRoles returns the role slice associated with the claims.
-func (claims *JwtCustomClaims) GetUserRoles() []string {
-	if claims == nil {
-		return nil
-	}
-	return claims.UserRoles
-}
-
-// GetExpiresAt exposes the expiry timestamp for downstream consumers.
-func (claims *JwtCustomClaims) GetExpiresAt() time.Time {
-	if claims == nil || claims.ExpiresAt == nil {
-		return time.Time{}
-	}
-	return claims.ExpiresAt.Time
-}
+// JwtCustomClaims aliases the shared sessionvalidator claims for backward compatibility.
+type JwtCustomClaims = sessionvalidator.Claims
 
 // MintAppJWT creates a signed HS256 access token using the provided clock.
-func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDisplayName string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
+func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(applicationUserID) == "" {
 		return "", time.Time{}, fmt.Errorf("%w: subject must be non-empty", errJWTMintFailure)
 	}
@@ -89,6 +44,7 @@ func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDis
 		UserID:          applicationUserID,
 		UserEmail:       userEmail,
 		UserDisplayName: userDisplayName,
+		UserAvatarURL:   userAvatarURL,
 		UserRoles:       userRoles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issuer,
