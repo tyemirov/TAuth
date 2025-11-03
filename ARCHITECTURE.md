@@ -28,6 +28,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 
 | Method | Path            | Responsibility                                          | Response                                    |
 | ------ | --------------- | ------------------------------------------------------- | ------------------------------------------- |
+| POST   | `/auth/nonce`   | Issue short-lived single-use nonce for Google exchange | `200` JSON `{ nonce }`                       |
 | POST   | `/auth/google`  | Verify Google ID token, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
@@ -45,7 +46,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 ### 3.3 Google Sign-In exchange
 
 1. Browser obtains a Google ID token from Google Identity Services.
-2. Browser posts `{ "google_id_token": "..." }` (and optional `nonce`) to `/auth/google`.
+2. Browser requests a nonce from `/auth/nonce` and includes it as `nonce_token` when posting `{ "google_id_token": "...", "nonce_token": "..." }` to `/auth/google`.
 3. `MountAuthRoutes` enforces HTTPS unless `AllowInsecureHTTP` is explicitly enabled for local development.
 4. `idtoken.NewValidator` validates issuer and audience against `ServerConfig.GoogleWebClientID`.
 5. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.
@@ -161,6 +162,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.
 - Validate Google tokens strictly: issuer, audience, expiry, issued-at.
 - Rate limit `/auth/google` and `/auth/refresh` and monitor failures via zap logs.
+- Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
 - Rotate `APP_JWT_SIGNING_KEY` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
 - Serve browser code through `/static/auth-client.js` and avoid inline scripts to keep CSP-friendly deployments.
@@ -206,7 +208,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 The following surface area is considered stable across releases:
 
-- Endpoints: `/auth/google`, `/auth/refresh`, `/auth/logout`, `/me`.
+- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/refresh`, `/auth/logout`, `/me`.
 - Cookie names: `app_session`, `app_refresh`.
 - JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `roles`, `expires`).
 
