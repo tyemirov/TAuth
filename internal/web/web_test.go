@@ -43,6 +43,37 @@ func TestServeEmbeddedStaticJS(t *testing.T) {
 	}
 }
 
+func TestServeStaticJSBytes(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/mpr-ui.js", func(contextGin *gin.Context) {
+		ServeStaticJSBytes(contextGin, webassets.MPRUIFooterJS)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/mpr-ui.js", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/javascript; charset=utf-8" {
+		t.Fatalf("unexpected content type: %s", contentType)
+	}
+
+	missRouter := gin.New()
+	missRouter.GET("/mpr-ui.js", func(contextGin *gin.Context) {
+		ServeStaticJSBytes(contextGin, nil)
+	})
+	missRecorder := httptest.NewRecorder()
+	missRouter.ServeHTTP(missRecorder, httptest.NewRequest(http.MethodGet, "/mpr-ui.js", nil))
+	if missRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when data is empty, got %d", missRecorder.Code)
+	}
+}
+
 func TestPermissiveCORS(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
