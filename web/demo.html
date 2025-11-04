@@ -14,7 +14,7 @@
         <script src="/static/auth-client.js"></script>
         <script
             defer
-            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/mpr-ui.js"
+            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@1.0.0/mpr-ui.js"
         ></script>
         <script type="module">
             import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
@@ -168,7 +168,7 @@
         </div>
         <footer
             id="appFooter"
-            x-data="MPRUI.mprFooter({
+            x-data="(window.MPRUI && MPRUI.mprFooter({
                 lines: [
                     'Support: support@mprlab.com',
                     'Status: https://status.mprlab.com'
@@ -178,7 +178,11 @@
                     { label: 'Terms of Service', href: 'https://mprlab.com/terms' }
                 ],
                 copyrightName: 'Marco Polo Research Lab'
-            })"
+            })) || {
+                init() {},
+                update() {},
+                destroy() {}
+            }"
             x-init="init()"
         ></footer>
 
