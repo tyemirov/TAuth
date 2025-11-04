@@ -19,6 +19,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, and hydrated the demo with support/status links (initially served locally, now loaded from the CDN build).
 - [x] [TA-208] Enforce nonce validation in `/auth/google` — Added `/auth/nonce` issuance with in-memory store, required nonce consumption/matching in auth routes, updated mpr-ui/demo clients to attach `nonce_token`, and expanded Go/Node coverage for missing or mismatched nonces.
 - [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, Node tests assert nonce preparation/failure handling, and the bundled `web/mpr-ui.js` asset was removed in favour of the CDN build.
+- [ ] [TA-209] Add a footer from mpr-ui to the demo.html
 
 ## BugFixes (300–399)
 
@@ -159,5 +160,7 @@ jobs:
 ```
 
 - [x] [TA-406] Align changelog and issue log entries with merged work — Added TA-200–TA-405 summaries to `CHANGELOG.md`, confirmed matching merge commits, and documented that TA-302 currently enforces explicit origin lists (wildcard tightening remains unchanged).
+
+- [x] [TA-303] Accept hashed GIS nonce claim during `/auth/google` — Updated nonce verification to allow `base64url(sha256(nonce_token))`, added integration coverage for the hashed claim, refreshed README guidance, and confirmed other nonce mismatches still return `invalid_nonce`.
 
 ## Planning
