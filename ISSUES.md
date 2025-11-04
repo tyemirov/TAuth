@@ -19,7 +19,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, and hydrated the demo with support/status links (initially served locally, now loaded from the CDN build).
 - [x] [TA-208] Enforce nonce validation in `/auth/google` — Added `/auth/nonce` issuance with in-memory store, required nonce consumption/matching in auth routes, updated mpr-ui/demo clients to attach `nonce_token`, and expanded Go/Node coverage for missing or mismatched nonces.
 - [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, Node tests assert nonce preparation/failure handling, and the bundled `web/mpr-ui.js` asset was removed in favour of the CDN build.
-- [ ] [TA-209] Add a footer from mpr-ui to the demo.html
+- [x] [TA-209] Add a footer from mpr-ui to the demo.html — Demo now mounts the shared `MPRUI.mprFooter` Alpine factory with CDN Alpine bootstrap, aligns footer content with support/status links, and ships regression coverage ensuring the declarative integration remains in place.
 
 ## BugFixes (300–399)
 

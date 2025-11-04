@@ -16,6 +16,11 @@
             defer
             src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/mpr-ui.js"
         ></script>
+        <script type="module">
+            import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
+            window.Alpine = Alpine;
+            window.Alpine.start();
+        </script>
         <style>
             html,
             body {
@@ -161,7 +166,21 @@
                 </p>
             </section>
         </div>
-        <div id="appFooter"></div>
+        <footer
+            id="appFooter"
+            x-data="MPRUI.mprFooter({
+                lines: [
+                    'Support: support@mprlab.com',
+                    'Status: https://status.mprlab.com'
+                ],
+                links: [
+                    { label: 'Privacy', href: 'https://mprlab.com/privacy' },
+                    { label: 'Terms of Service', href: 'https://mprlab.com/terms' }
+                ],
+                copyrightName: 'Marco Polo Research Lab'
+            })"
+            x-init="init()"
+        ></footer>
 
         <script>
             // ----- DOM references
@@ -174,33 +193,8 @@
             const callApiButtonElement =
                 document.getElementById("callApiButton");
             const logoutButtonElement = document.getElementById("logoutButton");
-            const footerElement = document.getElementById("appFooter");
             let pendingNonceToken = null;
             let nonceRequestPromise = null;
-
-            if (
-                footerElement &&
-                window.MPRUI &&
-                typeof window.MPRUI.renderFooter === "function"
-            ) {
-                window.MPRUI.renderFooter(footerElement, {
-                    lines: [
-                        "Support: support@mprlab.com",
-                        "Status: https://status.mprlab.com",
-                    ],
-                    links: [
-                        {
-                            label: "Privacy",
-                            href: "https://mprlab.com/privacy",
-                        },
-                        {
-                            label: "Terms of Service",
-                            href: "https://mprlab.com/terms",
-                        },
-                    ],
-                    copyrightName: "Marco Polo Research Lab",
-                });
-            }
 
             function getGoogleOnloadElement() {
                 return document.getElementById("g_id_onload");
