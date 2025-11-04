@@ -114,6 +114,7 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 - TAuth issues one-time nonces via `POST /auth/nonce`. Google does **not** provide a nonce for you.
 - Supply the nonce to Google Identity Services via `google.accounts.id.initialize({ nonce })` or the `data-nonce` attribute on the `g_id_onload` element before prompting the user.
 - Echo the same nonce back to TAuth as `nonce_token` when exchanging the ID token. Tokens without a matching nonce are rejected (`auth.login.nonce_mismatch`).
+- Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`); TAuth accepts that form automatically, so clients should continue sending the raw nonce they received.
 - Fetch a fresh nonce for every sign-in attempt (including retries). TAuth invalidates a nonce as soon as it is consumed.
 - The default `auth-client.js` and `mpr-ui` helpers take care of this flow automatically; custom clients must follow the same sequence.
 

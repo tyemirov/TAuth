@@ -790,6 +790,60 @@ func TestAuthGoogleNonceMismatch(t *testing.T) {
 	}
 }
 
+func TestAuthGoogleAcceptsHashedNonceClaim(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-hash",
+		"email":          "hash@example.com",
+		"email_verified": true,
+		"name":           "Hashed Nonce",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload:          payload,
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+
+	nonce := issueNonceForTest(t, router)
+	payload.Claims["nonce"] = hashOpaque(nonce)
+
+	requestBody, err := json.Marshal(map[string]string{
+		"google_id_token": "valid-token",
+		"nonce_token":     nonce,
+	})
+	if err != nil {
+		t.Fatalf("marshal login payload: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 when nonce claim is hashed, got %d", response.Code)
+	}
+	if _, ok := userStore.profiles["google:sub-hash"]; !ok {
+		t.Fatalf("expected hashed nonce login to persist user profile")
+	}
+}
+
 func TestAuthGoogleUserStoreError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

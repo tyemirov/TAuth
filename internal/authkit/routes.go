@@ -213,11 +213,25 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 		userDisplayName, _ := payload.Claims["name"].(string)
 		userAvatarURL, _ := payload.Claims["picture"].(string)
 		nonceClaim, _ := payload.Claims["nonce"].(string)
-		if nonceClaim == "" || nonceClaim != inbound.NonceToken {
+		if nonceClaim == "" {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.nonce_mismatch", nil, zap.String("google_nonce", nonceClaim))
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
+		}
+		if nonceClaim != inbound.NonceToken {
+			expectedHashedNonce := hashOpaque(inbound.NonceToken)
+			if nonceClaim != expectedHashedNonce {
+				recordMetric(metricAuthLoginFailure)
+				logAuthWarning(
+					"auth.login.nonce_mismatch",
+					nil,
+					zap.String("google_nonce", nonceClaim),
+					zap.String("expected_nonce_hashed", expectedHashedNonce),
+				)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+				return
+			}
 		}
 
 		if googleSub == "" || userEmail == "" || !emailVerified {
