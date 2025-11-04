@@ -6,6 +6,3 @@ import "embed"
 
 //go:embed auth-client.js
 var FS embed.FS
-
-//go:embed mpr-ui.js
-var MPRUIFooterJS []byte

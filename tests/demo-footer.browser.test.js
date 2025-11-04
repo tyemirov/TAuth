@@ -22,8 +22,8 @@ async function startDemoServer() {
     path.join(__dirname, "..", "web", "auth-client.js"),
     "utf8",
   );
-  const mprUISource = await fs.readFile(
-    path.join(__dirname, "..", "tools", "mpr-ui", "mpr-ui.js"),
+  const footerSource = await fs.readFile(
+    path.join(__dirname, "..", "tools", "mpr-ui", "footer.js"),
     "utf8",
   );
 
@@ -39,12 +39,6 @@ async function startDemoServer() {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(authClientSource);
-      return;
-    }
-    if (method === "GET" && url === "/static/mpr-ui.js") {
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      response.end(mprUISource);
       return;
     }
     if (method === "GET" && url === "/me") {
@@ -78,6 +72,7 @@ async function startDemoServer() {
 
   return {
     baseUrl,
+    footerSource,
     close() {
       return new Promise((resolve, reject) => {
         server.close((error) => {
@@ -107,6 +102,17 @@ if (!puppeteer || !chromiumExecutable) {
     t.after(() => browser.close());
 
     const page = await browser.newPage();
+    await page.route(
+      "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js*",
+      (route) => {
+        route.fulfill({
+          status: 200,
+          contentType: "application/javascript; charset=utf-8",
+          body: server.footerSource,
+        });
+      },
+    );
+
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
     await page.waitForSelector("#appFooter footer[role='contentinfo']", {

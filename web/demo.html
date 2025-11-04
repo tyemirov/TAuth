@@ -12,14 +12,41 @@
         ></script>
         <!-- Your co-hosted auth client -->
         <script src="/static/auth-client.js"></script>
-        <script
-            defer
-            src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"
-        ></script>
-        <script
-            defer
-            src="/static/mpr-ui.js"
-        ></script>
+        <script type="module">
+            import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
+            import "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";
+
+            const footerFactory =
+                window.MPRUI && typeof window.MPRUI.mprFooter === "function"
+                    ? window.MPRUI.mprFooter
+                    : null;
+            if (!footerFactory) {
+                window.mprFooter = function () {
+                    return { init() {} };
+                };
+                console.error(
+                    "mprFooter unavailable from mpr-ui; footer will not render",
+                );
+            } else {
+                window.mprFooter = footerFactory;
+            }
+            window.Alpine = Alpine;
+            document.documentElement.dataset.theme =
+                document.documentElement.dataset.theme || "light";
+            document.addEventListener(
+                "mpr-footer:theme-change",
+                (eventObject) => {
+                    const nextTheme =
+                        eventObject && eventObject.detail
+                            ? eventObject.detail.theme
+                            : null;
+                    if (nextTheme) {
+                        document.documentElement.dataset.theme = nextTheme;
+                    }
+                },
+            );
+            Alpine.start();
+        </script>
         <style>
             html,
             body {
@@ -106,6 +133,74 @@
                 flex-direction: column;
                 gap: 4px;
             }
+            .app-footer {
+                margin-top: 48px;
+                padding: 24px 16px;
+                border-top: 1px solid #e5e7eb;
+                background: #f8fafc;
+                color: #1f2937;
+                font-size: 14px;
+            }
+            .app-footer__layout {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .app-footer__brand {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                align-items: center;
+            }
+            .app-footer__prefix {
+                font-weight: 600;
+                color: inherit;
+            }
+            .app-footer__menu {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                gap: 8px;
+            }
+            .app-footer__menu-toggle {
+                border: none;
+                background: transparent;
+                font-weight: 600;
+                cursor: pointer;
+                color: inherit;
+                padding: 0;
+            }
+            .app-footer__menu-item {
+                text-decoration: none;
+                color: inherit;
+                font-weight: 500;
+            }
+            .app-footer__privacy {
+                text-decoration: none;
+                color: inherit;
+            }
+            .app-footer__theme {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .app-footer__theme-input {
+                width: 42px;
+                height: 22px;
+                cursor: pointer;
+            }
+            [data-theme="dark"] .app-footer {
+                background: #111827;
+                color: #e5e7eb;
+                border-top-color: #1f2937;
+            }
+            [data-theme="dark"] .app-footer__menu-item,
+            [data-theme="dark"] .app-footer__privacy {
+                color: #60a5fa;
+            }
         </style>
     </head>
     <body>
@@ -167,14 +262,35 @@
         </div>
         <footer
             id="appFooter"
-            x-data="MPRUI.mprFooter({
+            x-data="mprFooter({
+                baseClass: 'app-footer',
+                wrapperClass: 'app-footer__layout',
+                brandWrapperClass: 'app-footer__brand',
+                prefixClass: 'app-footer__prefix',
+                prefixText: 'Built by Marco Polo Research Lab',
+                toggleButtonClass: 'app-footer__menu-toggle',
+                toggleLabel: 'Products',
+                menuClass: 'app-footer__menu',
+                menuItemClass: 'app-footer__menu-item',
+                privacyLinkClass: 'app-footer__privacy',
+                privacyLinkHref: 'https://mprlab.com/privacy',
+                privacyLinkLabel: 'Privacy • Terms',
+                themeToggle: {
+                    enabled: true,
+                    wrapperClass: 'app-footer__theme',
+                    inputClass: 'app-footer__theme-input',
+                    inputId: 'app-footer-theme-toggle',
+                    ariaLabel: 'Toggle dark mode',
+                    dataTheme: 'light'
+                },
+                links: [
+                    { label: 'Marco Polo Research Lab', url: 'https://mprlab.com' },
+                    { label: 'Gravity Notes', url: 'https://gravity.mprlab.com' },
+                    { label: 'LoopAware', url: 'https://loopaware.mprlab.com' }
+                ],
                 lines: [
                     'Support: support@mprlab.com',
                     'Status: https://status.mprlab.com'
-                ],
-                links: [
-                    { label: 'Privacy', href: 'https://mprlab.com/privacy' },
-                    { label: 'Terms of Service', href: 'https://mprlab.com/terms' }
                 ],
                 copyrightName: 'Marco Polo Research Lab'
             })"

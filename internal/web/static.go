@@ -19,16 +19,6 @@ func ServeEmbeddedStaticJS(contextGin *gin.Context, filesystem embed.FS, path st
 		return
 	}
 	contextGin.Header("Content-Type", "application/javascript; charset=utf-8")
-	contextGin.Header("Cache-Control", "public, max-age=31536000, immutable")
-	contextGin.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
-}
-
-// ServeStaticJSBytes writes an in-memory JS asset with cache headers.
-func ServeStaticJSBytes(contextGin *gin.Context, data []byte) {
-	if len(data) == 0 {
-		contextGin.AbortWithStatus(http.StatusNotFound)
-		return
-	}
 	contextGin.Header("Content-Type", "application/javascript; charset=utf-8")
 	contextGin.Header("Cache-Control", "public, max-age=31536000, immutable")
 	contextGin.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
