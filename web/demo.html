@@ -2,626 +2,669 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <title>MPR Lab Auth Demo</title>
+        <title>TAuth Demo</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <!-- GIS (Google Identity Services) -->
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+            integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+            crossorigin="anonymous"
+        />
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+            integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
+            crossorigin="anonymous"
+        />
         <script
             src="https://accounts.google.com/gsi/client"
             async
             defer
         ></script>
-        <!-- Your co-hosted auth client -->
         <script src="/static/auth-client.js"></script>
-        <script type="module">
-            import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
-            import "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";
-
-            const footerFactory =
-                window.MPRUI && typeof window.MPRUI.mprFooter === "function"
-                    ? window.MPRUI.mprFooter
-                    : null;
-            if (!footerFactory) {
-                window.mprFooter = function () {
-                    return { init() {} };
-                };
-                console.error(
-                    "mprFooter unavailable from mpr-ui; footer will not render",
-                );
-            } else {
-                window.mprFooter = footerFactory;
-            }
-            window.Alpine = Alpine;
-            document.documentElement.dataset.theme =
-                document.documentElement.dataset.theme || "light";
-            document.addEventListener(
-                "mpr-footer:theme-change",
-                (eventObject) => {
-                    const nextTheme =
-                        eventObject && eventObject.detail
-                            ? eventObject.detail.theme
-                            : null;
-                    if (nextTheme) {
-                        document.documentElement.dataset.theme = nextTheme;
-                    }
-                },
-            );
-            Alpine.start();
-        </script>
+        <script
+            defer
+            src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+            crossorigin="anonymous"
+        ></script>
         <style>
-            html,
+            :root {
+                --demo-gradient-light: radial-gradient(
+                    120% 120% at 50% 0%,
+                    #f5fbff 0%,
+                    #e6f0ff 48%,
+                    #dce7ff 100%
+                );
+                --demo-gradient-dark: radial-gradient(
+                    120% 120% at 50% 10%,
+                    #132336 0%,
+                    #0f172a 60%,
+                    #030712 100%
+                );
+                --demo-card-shadow-light: 0 24px 48px rgba(12, 52, 111, 0.16);
+                --demo-card-shadow-dark: 0 32px 54px rgba(3, 11, 29, 0.72);
+                --demo-muted-light: #53627b;
+                --demo-muted-dark: #c4d0e6;
+                --demo-code-border-light: rgba(126, 143, 170, 0.28);
+                --demo-code-border-dark: rgba(94, 139, 211, 0.3);
+            }
+
             body {
-                margin: 0;
-                font-family:
-                    system-ui,
-                    -apple-system,
-                    Segoe UI,
-                    Roboto,
-                    Ubuntu,
-                    Cantarell,
-                    Noto Sans,
-                    Arial,
-                    sans-serif;
+                background: var(--demo-gradient-light);
+                transition: background 220ms ease;
             }
-            .page {
-                max-width: 880px;
-                margin: 48px auto;
-                padding: 0 16px;
+
+            body[data-bs-theme="dark"] {
+                background: var(--demo-gradient-dark);
             }
-            .panel {
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                padding: 20px;
-                margin-bottom: 16px;
+
+            .demo-card {
+                border-radius: 1.25rem;
+                background: rgba(255, 255, 255, 0.94);
+                border: 1px solid rgba(18, 68, 128, 0.1);
+                box-shadow: var(--demo-card-shadow-light);
             }
-            .row {
-                display: flex;
-                gap: 12px;
-                align-items: center;
-                flex-wrap: wrap;
+
+            body[data-bs-theme="dark"] .demo-card {
+                background: rgba(17, 27, 48, 0.9);
+                border-color: rgba(90, 130, 210, 0.22);
+                box-shadow: var(--demo-card-shadow-dark);
             }
-            .hidden {
-                display: none !important;
+
+            .demo-muted {
+                color: var(--demo-muted-light);
             }
-            .btn {
-                appearance: none;
-                border: 1px solid #1b6ef3;
-                background: #1b6ef3;
-                color: #fff;
-                padding: 10px 14px;
-                border-radius: 10px;
-                cursor: pointer;
-                font-weight: 600;
+
+            body[data-bs-theme="dark"] .demo-muted {
+                color: var(--demo-muted-dark);
             }
-            .btn.secondary {
-                background: #fff;
-                color: #1b6ef3;
-            }
-            pre {
-                background: #0f172a;
-                color: #e2e8f0;
-                padding: 12px;
-                border-radius: 12px;
+
+            .demo-output {
+                border-radius: 1rem;
+                background: rgba(5, 13, 30, 0.94);
+                border: 1px solid var(--demo-code-border-light);
+                padding: 1.25rem;
+                color: #e7eefc;
+                max-height: 22rem;
                 overflow: auto;
+                font-size: 0.9rem;
+                font-family:
+                    "JetBrains Mono",
+                    "Fira Code",
+                    "SFMono-Regular",
+                    Menlo,
+                    Consolas,
+                    monospace;
             }
-            .muted {
-                color: #6b7280;
+
+            body[data-bs-theme="dark"] .demo-output {
+                border-color: var(--demo-code-border-dark);
             }
-            .user-summary {
-                display: flex;
-                gap: 16px;
-                align-items: center;
+
+            #landing-footer {
+                backdrop-filter: blur(16px);
+                box-shadow: 0 -24px 64px rgba(9, 22, 48, 0.18);
             }
-            .user-summary-avatar {
-                width: 48px;
-                height: 48px;
-                border-radius: 24px;
-                background: #1b6ef3;
-                color: #fff;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-weight: 600;
-                overflow: hidden;
+
+            body[data-bs-theme="dark"] #landing-footer {
+                box-shadow: 0 -28px 64px rgba(2, 8, 23, 0.8);
             }
-            .user-summary-avatar img {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-            }
-            .user-summary-details {
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            .app-footer {
-                margin-top: 48px;
-                padding: 24px 16px;
-                border-top: 1px solid #e5e7eb;
-                background: #f8fafc;
-                color: #1f2937;
-                font-size: 14px;
-            }
-            .app-footer__layout {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 12px;
-                align-items: center;
-                justify-content: space-between;
-            }
-            .app-footer__brand {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                align-items: center;
-            }
-            .app-footer__prefix {
-                font-weight: 600;
-                color: inherit;
-            }
-            .app-footer__menu {
-                list-style: none;
-                margin: 0;
-                padding: 0;
-                display: flex;
-                gap: 8px;
-            }
-            .app-footer__menu-toggle {
-                border: none;
-                background: transparent;
-                font-weight: 600;
-                cursor: pointer;
-                color: inherit;
-                padding: 0;
-            }
-            .app-footer__menu-item {
-                text-decoration: none;
-                color: inherit;
-                font-weight: 500;
-            }
-            .app-footer__privacy {
-                text-decoration: none;
-                color: inherit;
-            }
-            .app-footer__theme {
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            .app-footer__theme-input {
-                width: 42px;
-                height: 22px;
-                cursor: pointer;
-            }
-            [data-theme="dark"] .app-footer {
-                background: #111827;
-                color: #e5e7eb;
-                border-top-color: #1f2937;
-            }
-            [data-theme="dark"] .app-footer__menu-item,
-            [data-theme="dark"] .app-footer__privacy {
-                color: #60a5fa;
+
+            .dropdown-menu {
+                min-width: 220px;
             }
         </style>
     </head>
-    <body>
-        <div class="page">
-            <h1>MPR Lab — Auth + GIS Demo</h1>
-
-            <!-- Signed OUT panel -->
-            <section id="signedOutPanel" class="panel">
-                <h2>Sign in</h2>
-                <p class="muted">
-                    Use Google Sign-In. The page will set secure HttpOnly
-                    cookies via your Go backend.
-                </p>
-
-                <!-- GIS attribute-based setup -->
-                <div
-                    id="g_id_onload"
-                    data-client_id="991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
-                    data-auto_select="false"
-                    data-callback="onGoogleCredential"
-                    data-ux_mode="popup"
-                ></div>
-                <div class="row">
-                    <div
-                        class="g_id_signin"
-                        data-type="standard"
-                        data-shape="rectangular"
-                        data-theme="outline"
-                        data-text="signin_with"
-                        data-size="large"
-                        data-logo_alignment="left"
-                    ></div>
+    <body class="landing-body d-flex flex-column min-vh-100 bg-body text-body" data-bs-theme="light">
+        <main class="flex-grow-1 py-5">
+            <div class="container-lg">
+                <section class="text-center mb-5">
+                    <span class="badge bg-primary-subtle text-primary-emphasis mb-3 px-3 py-2">
+                        Google Identity + JWT cookies
+                    </span>
+                    <h1 class="display-5 fw-semibold mb-3">Sign in with Google via TAuth</h1>
+                    <p class="lead demo-muted mx-auto" style="max-width: 640px">
+                        Request nonce-protected Google credentials, swap them for first-party cookies,
+                        and inspect the session contract this service documents in the README.
+                    </p>
+                </section>
+                <div class="row g-4 align-items-start">
+                    <section class="col-12 col-lg-6" data-panel="signed-out">
+                        <div class="demo-card border-0 p-4 h-100">
+                            <div class="d-flex flex-column gap-3">
+                                <div>
+                                    <h2 class="h4 fw-semibold mb-2">Ready to sign in</h2>
+                                    <p class="mb-0 demo-muted">
+                                        We fetch a nonce before launching Google Identity Services.
+                                    </p>
+                                </div>
+                                <div
+                                    id="g_id_onload"
+                                    data-client_id="991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
+                                    data-context="signin"
+                                    data-ux_mode="popup"
+                                    data-callback="onGoogleCredential"
+                                    data-auto_select="false"
+                                ></div>
+                                <div
+                                    class="g_id_signin"
+                                    data-type="standard"
+                                    data-shape="rectangular"
+                                    data-theme="outline"
+                                    data-text="signin_with"
+                                    data-size="large"
+                                    data-logo_alignment="left"
+                                ></div>
+                                <div class="border-top"></div>
+                                <p class="mb-0 demo-muted">
+                                    After each attempt we rotate the nonce so replayed credentials are rejected.
+                                </p>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="col-12 col-lg-6 d-none" data-panel="signed-in">
+                        <div class="demo-card border-0 p-4 h-100">
+                            <div class="d-flex flex-column gap-3">
+                                <div>
+                                    <h2 class="h4 fw-semibold mb-2">You’re signed in</h2>
+                                    <p class="mb-0 demo-muted">
+                                        The profile below reflects session cookies set by the backend. Call the
+                                        protected API to inspect the authenticated contract.
+                                    </p>
+                                </div>
+                                <div id="profileSummary"></div>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button id="callApiButton" class="btn btn-primary px-4">
+                                        Call /api/me
+                                    </button>
+                                    <button id="logoutButton" class="btn btn-outline-primary px-4">
+                                        Sign out
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="col-12">
+                        <div class="demo-card border-0 p-4">
+                            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                                <div>
+                                    <h2 class="h5 fw-semibold mb-1">Activity log</h2>
+                                    <p class="mb-0 demo-muted">
+                                        Outputs nonce issuance, credential exchange, and protected API calls.
+                                    </p>
+                                </div>
+                                <i class="bi bi-journal-code fs-4 text-primary-emphasis"></i>
+                            </div>
+                            <pre id="demoOutput" class="demo-output">{"state":"idle"}</pre>
+                        </div>
+                    </section>
                 </div>
-            </section>
-
-            <!-- Signed IN panel -->
-            <section id="signedInPanel" class="panel hidden">
-                <h2>Welcome</h2>
-                <div id="userSummary" class="row"></div>
-                <div class="row" style="margin-top: 12px">
-                    <button id="callApiButton" class="btn">
-                        Call Protected API (/api/me)
-                    </button>
-                    <button id="logoutButton" class="btn secondary">
-                        Sign out
-                    </button>
-                </div>
-            </section>
-
-            <!-- Output -->
-            <section class="panel">
-                <h2>Output</h2>
-                <pre id="outputArea">Nothing yet.</pre>
-                <p class="muted">
-                    This panel shows responses from /me and /api/me using your
-                    auth-client’s session handling.
-                </p>
-            </section>
-        </div>
+            </div>
+        </main>
         <footer
-            id="appFooter"
-            x-data="mprFooter({
-                baseClass: 'app-footer',
-                wrapperClass: 'app-footer__layout',
-                brandWrapperClass: 'app-footer__brand',
-                prefixClass: 'app-footer__prefix',
-                prefixText: 'Built by Marco Polo Research Lab',
-                toggleButtonClass: 'app-footer__menu-toggle',
-                toggleLabel: 'Products',
-                menuClass: 'app-footer__menu',
-                menuItemClass: 'app-footer__menu-item',
-                privacyLinkClass: 'app-footer__privacy',
-                privacyLinkHref: 'https://mprlab.com/privacy',
-                privacyLinkLabel: 'Privacy • Terms',
-                themeToggle: {
-                    enabled: true,
-                    wrapperClass: 'app-footer__theme',
-                    inputClass: 'app-footer__theme-input',
-                    inputId: 'app-footer-theme-toggle',
-                    ariaLabel: 'Toggle dark mode',
-                    dataTheme: 'light'
-                },
-                links: [
-                    { label: 'Marco Polo Research Lab', url: 'https://mprlab.com' },
-                    { label: 'Gravity Notes', url: 'https://gravity.mprlab.com' },
-                    { label: 'LoopAware', url: 'https://loopaware.mprlab.com' }
-                ],
-                lines: [
-                    'Support: support@mprlab.com',
-                    'Status: https://status.mprlab.com'
-                ],
-                copyrightName: 'Marco Polo Research Lab'
-            })"
-            x-init="init()"
-        ></footer>
-
+            id="landing-footer"
+            class="landing-footer border-top mt-auto py-2 fixed-bottom"
+            data-mpr-footer="root"
+            data-mpr-footer-config='{"elementId":"landing-footer","innerElementId":"landing-footer-inner","baseClass":"landing-footer border-top mt-auto py-2 fixed-bottom","innerClass":"container py-2","wrapperClass":"footer-layout w-100 d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3","brandWrapperClass":"footer-brand d-inline-flex align-items-center gap-2 text-body-secondary small","menuWrapperClass":"footer-menu dropup","prefixClass":"text-body-secondary fw-semibold","prefixText":"Built by","toggleButtonId":"landing-footer-toggle","toggleButtonClass":"btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary","toggleLabel":"Marco Polo Research Lab","menuClass":"dropdown-menu dropdown-menu-end shadow","menuItemClass":"dropdown-item","privacyLinkClass":"footer-privacy-link text-body-secondary text-decoration-none small","privacyLinkHref":"https://mprlab.com/privacy","privacyLinkLabel":"Privacy • Terms","themeToggle":{"enabled":true,"wrapperClass":"footer-theme-toggle form-check form-switch m-0","inputClass":"form-check-input","dataTheme":"light","inputId":"public-theme-toggle","ariaLabel":"Toggle theme"},"links":[{"label":"Marco Polo Research Lab","url":"https://mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Gravity Notes","url":"https://gravity.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"LoopAware","url":"https://loopaware.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Allergy Wheel","url":"https://allergy.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Social Threader","url":"https://threader.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"RSVP","url":"https://rsvp.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Countdown Calendar","url":"https://countdown.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"LLM Crossword","url":"https://llm-crossword.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Prompt Bubbles","url":"https://prompts.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Wallpapers","url":"https://wallpapers.mprlab.com","rel":"noopener noreferrer","target":"_blank"}]}'
+            x-data="mprFooter()"
+            x-init="init(JSON.parse($el.getAttribute('data-mpr-footer-config')))"
+        >
+            <div id="landing-footer-inner" class="container py-2" data-mpr-footer="inner">
+                <div
+                    class="footer-layout w-100 d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3"
+                    data-mpr-footer="layout"
+                >
+                    <a
+                        class="footer-privacy-link text-body-secondary text-decoration-none small"
+                        data-mpr-footer="privacy-link"
+                        href="https://mprlab.com/privacy"
+                    >
+                        Privacy • Terms
+                    </a>
+                    <div
+                        class="footer-brand d-inline-flex align-items-center gap-2 text-body-secondary small"
+                        data-mpr-footer="brand"
+                    >
+                        <div
+                            class="footer-theme-toggle form-check form-switch m-0"
+                            data-mpr-footer="theme-toggle"
+                            data-bs-theme="light"
+                        >
+                            <input
+                                class="form-check-input"
+                                type="checkbox"
+                                id="public-theme-toggle"
+                                aria-label="Toggle theme"
+                                data-mpr-footer="theme-toggle-input"
+                            />
+                        </div>
+                        <span class="text-body-secondary fw-semibold" data-mpr-footer="prefix">
+                            Built by
+                        </span>
+                        <div class="footer-menu dropup" data-mpr-footer="menu-wrapper">
+                            <button
+                                id="landing-footer-toggle"
+                                class="btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary"
+                                data-mpr-footer="toggle-button"
+                                type="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                            >
+                                Marco Polo Research Lab
+                            </button>
+                            <ul
+                                class="dropdown-menu dropdown-menu-end shadow"
+                                data-mpr-footer="menu"
+                                aria-labelledby="landing-footer-toggle"
+                            >
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Marco Polo Research Lab
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://gravity.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Gravity Notes
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://loopaware.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        LoopAware
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://allergy.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Allergy Wheel
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://threader.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Social Threader
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://rsvp.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        RSVP
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://countdown.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Countdown Calendar
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://llm-crossword.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        LLM Crossword
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://prompts.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Prompt Bubbles
+                                    </a>
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        data-mpr-footer="menu-link"
+                                        href="https://wallpapers.mprlab.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Wallpapers
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
         <script>
-            // ----- DOM references
-            const signedOutPanelElement =
-                document.getElementById("signedOutPanel");
-            const signedInPanelElement =
-                document.getElementById("signedInPanel");
-            const userSummaryElement = document.getElementById("userSummary");
-            const outputAreaElement = document.getElementById("outputArea");
-            const callApiButtonElement =
-                document.getElementById("callApiButton");
-            const logoutButtonElement = document.getElementById("logoutButton");
-            let pendingNonceToken = null;
-            let nonceRequestPromise = null;
-
-            function getGoogleOnloadElement() {
-                return document.getElementById("g_id_onload");
-            }
-
-            function configureGoogleNonce(nonceToken) {
-                pendingNonceToken = nonceToken;
-                const onloadElement = getGoogleOnloadElement();
-                if (
-                    onloadElement &&
-                    typeof onloadElement.setAttribute === "function"
-                ) {
-                    onloadElement.setAttribute("data-nonce", nonceToken);
-                }
-                if (
-                    window.google &&
-                    window.google.accounts &&
-                    window.google.accounts.id &&
-                    typeof window.google.accounts.id.initialize === "function"
-                ) {
-                    try {
-                        const clientId =
-                            onloadElement &&
-                            typeof onloadElement.getAttribute === "function"
-                                ? onloadElement.getAttribute("data-client_id")
-                                : "";
-                        window.google.accounts.id.initialize({
-                            client_id: clientId || undefined,
-                            callback: onGoogleCredential,
-                            nonce: nonceToken,
-                        });
-                    } catch (initializationError) {
-                        setOutput({
-                            error: "auth_google_initialize_failed",
-                            detail: String(initializationError),
-                        });
+            (function () {
+                var publicThemeStorageKey = "loopaware_public_theme";
+                var landingThemeStorageKey = "loopaware_landing_theme";
+                var legacyThemeStorageKey = "landing_theme";
+                var themeToggleElement = null;
+                function applyPublicTheme(theme) {
+                    var normalizedTheme = theme === "light" ? "light" : "dark";
+                    document.body.setAttribute("data-bs-theme", normalizedTheme);
+                    document.documentElement.setAttribute("data-bs-theme", normalizedTheme);
+                    document.documentElement.dataset.theme = normalizedTheme;
+                    if (themeToggleElement) {
+                        themeToggleElement.checked = normalizedTheme === "dark";
                     }
                 }
-            }
-
-            async function requestNonceToken() {
-                const response = await fetch("/auth/nonce", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "X-Requested-With": "XMLHttpRequest",
-                    },
-                });
-                if (!response.ok) {
-                    const nonceError = new Error("nonce request failed");
-                    nonceError.status = response.status;
-                    throw nonceError;
-                }
-                const payload = await response.json().catch(() => ({}));
-                const nonceToken =
-                    payload && payload.nonce ? String(payload.nonce) : "";
-                if (!nonceToken) {
-                    throw new Error("nonce payload missing");
-                }
-                return nonceToken;
-            }
-
-            async function prepareGoogleNonce() {
-                if (pendingNonceToken) {
-                    return pendingNonceToken;
-                }
-                if (nonceRequestPromise) {
-                    return nonceRequestPromise;
-                }
-                nonceRequestPromise = requestNonceToken()
-                    .then(function (nonceToken) {
-                        configureGoogleNonce(nonceToken);
-                        return nonceToken;
-                    })
-                    .finally(function () {
-                        nonceRequestPromise = null;
-                    });
-                return nonceRequestPromise;
-            }
-
-            function consumePreparedNonce() {
-                const nonceToken = pendingNonceToken;
-                pendingNonceToken = null;
-                return nonceToken || "";
-            }
-
-            function show(element) {
-                element.classList.remove("hidden");
-            }
-            function hide(element) {
-                element.classList.add("hidden");
-            }
-
-            function renderAuthenticatedView(userProfile) {
-                const expirationIsoString =
-                    userProfile && userProfile.expires
-                        ? new Date(userProfile.expires).toISOString()
-                        : "";
-                userSummaryElement.innerHTML = [
-                    '<div class="user-summary">',
-                    buildAvatarMarkup(userProfile),
-                    '<div class="user-summary-details">',
-                    `<div><strong>User:</strong> ${escapeHtml(userProfile.display || "")}</div>`,
-                    `<div><strong>Email:</strong> ${escapeHtml(userProfile.user_email || "")}</div>`,
-                    `<div><strong>Roles:</strong> ${(userProfile.roles || []).map(escapeHtml).join(", ")}</div>`,
-                    `<div><strong>Access Expires:</strong> ${escapeHtml(expirationIsoString)}</div>`,
-                    "</div>",
-                    "</div>",
-                ].join("");
-                hide(signedOutPanelElement);
-                show(signedInPanelElement);
-            }
-
-            function renderSignedOutView(config) {
-                hide(signedInPanelElement);
-                show(signedOutPanelElement);
-                const resetOutput =
-                    !config || config.resetOutput !== false;
-                if (resetOutput) {
-                    outputAreaElement.textContent = "Signed out.";
-                }
-                prepareGoogleNonce()
-                    .then(function () {
-                        if (
-                            window.google &&
-                            window.google.accounts &&
-                            window.google.accounts.id &&
-                            typeof window.google.accounts.id.prompt === "function"
-                        ) {
-                            try {
-                                window.google.accounts.id.prompt();
-                            } catch (promptError) {
-                                setOutput({
-                                    error: "auth_google_prompt_failed",
-                                    detail: String(promptError),
-                                });
+                function loadPublicTheme() {
+                    var storedTheme = localStorage.getItem(publicThemeStorageKey);
+                    if (storedTheme === null) {
+                        var landingStoredTheme = localStorage.getItem(landingThemeStorageKey);
+                        if (landingStoredTheme === null) {
+                            var legacyStoredTheme = localStorage.getItem(legacyThemeStorageKey);
+                            if (legacyStoredTheme === "light" || legacyStoredTheme === "dark") {
+                                landingStoredTheme = legacyStoredTheme;
+                                localStorage.setItem(landingThemeStorageKey, landingStoredTheme);
                             }
                         }
-                    })
-                    .catch(function (error) {
-                        setOutput({
-                            error: "auth_nonce_failed",
-                            detail:
-                                error && error.message
-                                    ? error.message
-                                    : String(error),
-                            status: error && error.status ? error.status : null,
-                        });
-                    });
-            }
-
-            function setOutput(objectToDump) {
-                try {
-                    outputAreaElement.textContent = JSON.stringify(
-                        objectToDump,
-                        null,
-                        2,
-                    );
-                } catch (serializationError) {
-                    outputAreaElement.textContent = String(objectToDump);
-                }
-            }
-
-            function escapeHtml(textValue) {
-                return String(textValue)
-                    .replaceAll("&", "&amp;")
-                    .replaceAll("<", "&lt;")
-                    .replaceAll(">", "&gt;")
-                    .replaceAll('"', "&quot;")
-                    .replaceAll("'", "&#39;");
-            }
-
-            function buildAvatarMarkup(userProfile) {
-                const avatarUrl = (userProfile && userProfile.avatar_url) || "";
-                const displayName = (userProfile && userProfile.display) || "";
-                if (avatarUrl) {
-                    return `<div class="user-summary-avatar"><img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName || "User")}'s avatar" /></div>`;
-                }
-                return `<div class="user-summary-avatar">${escapeHtml(buildInitials(displayName))}</div>`;
-            }
-
-            function buildInitials(displayName) {
-                return displayName
-                    .split(/\s+/)
-                    .filter((chunk) => chunk.length > 0)
-                    .slice(0, 2)
-                    .map((chunk) => chunk.charAt(0).toUpperCase())
-                    .join("") || "?";
-            }
-
-            // ----- GIS callback → exchange ID token with your backend
-            // Google will call this with { credential: "<ID_TOKEN>", ... }
-            async function onGoogleCredential(googleResponse) {
-                try {
-                    const googleIdToken =
-                        googleResponse && googleResponse.credential;
-                    if (!googleIdToken) {
-                        setOutput({
-                            error: "missing_google_id_token",
-                            detail: googleResponse,
-                        });
-                        return;
-                    }
-                    const nonceToken = consumePreparedNonce();
-                    if (!nonceToken) {
-                        setOutput({ error: "auth_nonce_missing" });
-                        renderSignedOutView({ resetOutput: false });
-                        return;
-                    }
-
-                    const exchangeResponse = await fetch("/auth/google", {
-                        method: "POST",
-                        credentials: "include",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "X-Requested-With": "XMLHttpRequest",
-                        },
-                        body: JSON.stringify({
-                            google_id_token: googleIdToken,
-                            nonce_token: nonceToken,
-                        }),
-                    });
-                    if (!exchangeResponse.ok) {
-                        const exchangeError = await safeJson(exchangeResponse);
-                        setOutput({
-                            error: "auth_google_failed",
-                            status: exchangeResponse.status,
-                            body: exchangeError,
-                        });
-                        renderSignedOutView({ resetOutput: false });
-                        return;
-                    }
-                    // Hydrate the session/UI now that cookies are set.
-                    await initAuthClient({
-                        onAuthenticated: function onAuthenticated(profile) {
-                            renderAuthenticatedView(profile);
-                            setOutput({
-                                message: "Signed in",
-                                profile: profile,
-                            });
-                        },
-                        onUnauthenticated: function onUnauthenticated() {
-                            renderSignedOutView();
-                        },
-                    });
-                } catch (unexpectedError) {
-                    setOutput({
-                        error: "onGoogleCredential_exception",
-                        detail: String(unexpectedError),
-                    });
-                    renderSignedOutView({ resetOutput: false });
-                }
-            }
-            window.onGoogleCredential = onGoogleCredential;
-
-            // ----- Initial hydration on page load
-            (async function bootstrap() {
-                await initAuthClient({
-                    onAuthenticated: function onAuthenticated(profile) {
-                        renderAuthenticatedView(profile);
-                        setOutput({
-                            message: "Hydrated from /me",
-                            profile: profile,
-                        });
-                    },
-                    onUnauthenticated: function onUnauthenticated() {
-                        renderSignedOutView();
-                    },
-                });
-            })();
-
-            // ----- Buttons
-            callApiButtonElement.addEventListener(
-                "click",
-                async function onProtectedApiClick() {
-                    try {
-                        const apiResponse = await apiFetch("/api/me", {
-                            method: "GET",
-                        });
-                        const apiJson = await safeJson(apiResponse);
-                        setOutput({
-                            status: apiResponse.status,
-                            body: apiJson,
-                        });
-                        if (apiResponse.status === 401) {
-                            renderSignedOutView();
+                        if (landingStoredTheme === "light" || landingStoredTheme === "dark") {
+                            storedTheme = landingStoredTheme;
+                            localStorage.setItem(publicThemeStorageKey, storedTheme);
                         }
-                    } catch (requestError) {
-                        setOutput({
-                            error: "api_call_failed",
-                            detail: String(requestError),
+                    }
+                    return storedTheme;
+                }
+                function persistPublicTheme(theme) {
+                    localStorage.setItem(publicThemeStorageKey, theme);
+                    localStorage.setItem(landingThemeStorageKey, theme);
+                }
+                function initializePublicTheme() {
+                    themeToggleElement = document.getElementById("public-theme-toggle");
+                    var storedTheme = loadPublicTheme();
+                    applyPublicTheme(storedTheme);
+                    if (themeToggleElement) {
+                        themeToggleElement.addEventListener("change", function (eventObject) {
+                            var nextTheme = eventObject.target.checked ? "dark" : "light";
+                            applyPublicTheme(nextTheme);
+                            persistPublicTheme(nextTheme);
                         });
                     }
-                },
-            );
-
-            logoutButtonElement.addEventListener(
-                "click",
-                async function onLogoutClick() {
-                    await logout();
-                    renderSignedOutView();
-                },
-            );
-
-            // ----- Helpers
-            async function safeJson(fetchResponse) {
-                try {
-                    return await fetchResponse.json();
-                } catch {
-                    return { raw: await fetchResponse.text() };
                 }
+                initializePublicTheme();
+            })();
+        </script>
+        <script type="module">
+            import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
+            import { mprFooter } from "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";
+            window.Alpine = Alpine;
+            window.mprFooter = mprFooter;
+            Alpine.start();
+        </script>
+        <script>
+            (function () {
+                const requestState = {
+                    noncePromise: null,
+                    preparedNonce: null,
+                };
+
+                function fetchJSON(url, options) {
+                    return fetch(url, {
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json", ...(options && options.headers) },
+                        ...options,
+                    })
+                        .then(async (response) => {
+                            const text = await response.text();
+                            let json;
+                            try {
+                                json = JSON.parse(text);
+                            } catch {
+                                json = { raw: text };
+                            }
+                            return { ok: response.ok, status: response.status, json };
+                        });
+                }
+
+                async function ensureNonce() {
+                    if (requestState.preparedNonce) {
+                        return requestState.preparedNonce;
+                    }
+                    if (!requestState.noncePromise) {
+                        requestState.noncePromise = fetchJSON("/auth/nonce", {
+                            method: "POST",
+                            body: "{}",
+                        })
+                            .then(({ ok, json }) => {
+                                if (!ok || !json || !json.nonce) {
+                                    throw new Error("auth_nonce_missing");
+                                }
+                                return String(json.nonce);
+                            })
+                            .then((nonceValue) => {
+                                requestState.preparedNonce = nonceValue;
+                                const gisRoot = document.getElementById("g_id_onload");
+                                if (gisRoot) {
+                                    gisRoot.setAttribute("data-nonce", nonceValue);
+                                }
+                                return nonceValue;
+                            })
+                            .finally(() => {
+                                requestState.noncePromise = null;
+                            });
+                    }
+                    return requestState.noncePromise;
+                }
+
+                function consumeNonce() {
+                    const nonce = requestState.preparedNonce;
+                    requestState.preparedNonce = null;
+                    return nonce;
+                }
+
+                function setOutput(payload) {
+                    const output = document.getElementById("demoOutput");
+                    if (output) {
+                        output.textContent = JSON.stringify(payload, null, 2);
+                    }
+                }
+
+            function renderProfileSummary(profile) {
+                const target = document.getElementById("profileSummary");
+                if (!target) {
+                    return;
+                }
+                if (!profile) {
+                    target.innerHTML = "";
+                    return;
+                }
+                const displayName =
+                    profile.display ||
+                    profile.display_name ||
+                    profile.user_email ||
+                    profile.user_id ||
+                    "Authenticated user";
+                const userEmail = profile.user_email || "Email unavailable";
+                const userId = profile.user_id || profile.id || "unknown";
+                const initials = displayName
+                    .split(" ")
+                    .map((word) => word.charAt(0))
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase() || "?";
+                const avatarMarkup = profile.avatar_url
+                    ? `<img src="${profile.avatar_url}" alt="User avatar" class="rounded-circle img-fluid" />`
+                    : `<span class="fs-4 fw-semibold">${initials}</span>`;
+                target.innerHTML = `
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="rounded-circle bg-primary-subtle text-primary-emphasis d-inline-flex justify-content-center align-items-center" style="width:64px;height:64px;">
+                            ${avatarMarkup}
+                        </span>
+                        <div class="d-flex flex-column small text-start">
+                            <strong class="fs-6">${displayName}</strong>
+                            <span>${userEmail}</span>
+                            <span class="text-body-secondary">ID: ${userId}</span>
+                        </div>
+                    </div>
+                `;
             }
+
+                function showSignedOut() {
+                    const signedOut = document.querySelector('[data-panel="signed-out"]');
+                    const signedIn = document.querySelector('[data-panel="signed-in"]');
+                    if (signedOut) {
+                        signedOut.classList.remove("d-none");
+                    }
+                    if (signedIn) {
+                        signedIn.classList.add("d-none");
+                    }
+                    renderProfileSummary(null);
+                    setOutput({ state: "signed_out" });
+                    ensureNonce().catch(() => {});
+                }
+
+                function showSignedIn(profile) {
+                    const signedOut = document.querySelector('[data-panel="signed-out"]');
+                    const signedIn = document.querySelector('[data-panel="signed-in"]');
+                    if (signedOut) {
+                        signedOut.classList.add("d-none");
+                    }
+                    if (signedIn) {
+                        signedIn.classList.remove("d-none");
+                    }
+                    renderProfileSummary(profile);
+                    setOutput({ state: "signed_in", profile });
+                }
+
+                async function handleGoogleCredential(responseObject) {
+                    try {
+                        const credential = responseObject && responseObject.credential;
+                        if (!credential) {
+                            setOutput({
+                                error: "missing_google_id_token",
+                                payload: responseObject,
+                            });
+                            return;
+                        }
+                        const nonceToken = consumeNonce();
+                        if (!nonceToken) {
+                            setOutput({ error: "auth_nonce_missing" });
+                            showSignedOut();
+                            return;
+                        }
+                        const { ok, status, json } = await fetchJSON("/auth/google", {
+                            method: "POST",
+                            body: JSON.stringify({
+                                google_id_token: credential,
+                                nonce_token: nonceToken,
+                            }),
+                        });
+                        if (!ok) {
+                            setOutput({
+                                error: "auth_google_failed",
+                                status,
+                                body: json,
+                            });
+                            showSignedOut();
+                            return;
+                        }
+                        await window.initAuthClient({
+                            onAuthenticated: (profile) => {
+                                showSignedIn(profile);
+                                setOutput({ event: "signed_in", profile });
+                            },
+                            onUnauthenticated: showSignedOut,
+                        });
+                    } catch (error) {
+                        setOutput({
+                            error: "google_credential_exception",
+                            detail: String(error),
+                        });
+                        showSignedOut();
+                    } finally {
+                        ensureNonce().catch(() => {});
+                    }
+                }
+
+                async function hydrateSession() {
+                    await window.initAuthClient({
+                        onAuthenticated: (profile) => {
+                            showSignedIn(profile);
+                            setOutput({ event: "hydrated", profile });
+                        },
+                        onUnauthenticated: showSignedOut,
+                    });
+                }
+
+                function bindUiHandlers() {
+                    const callApiButton = document.getElementById("callApiButton");
+                    const logoutButton = document.getElementById("logoutButton");
+                    if (callApiButton) {
+                        callApiButton.addEventListener("click", async () => {
+                            try {
+                                const response = await window.apiFetch("/api/me", { method: "GET" });
+                                const body = await response.json();
+                                setOutput({ event: "/api/me", status: response.status, body });
+                                if (response.status === 401) {
+                                    showSignedOut();
+                                }
+                            } catch (error) {
+                                setOutput({ error: "api_me_failed", detail: String(error) });
+                            }
+                        });
+                    }
+                    if (logoutButton) {
+                        logoutButton.addEventListener("click", async () => {
+                            await window.logout();
+                            showSignedOut();
+                        });
+                    }
+                }
+
+                function initialiseDemo() {
+                    ensureNonce().catch(() => {});
+                    bindUiHandlers();
+                    hydrateSession().catch((error) => {
+                        console.error("Session hydrate failed:", error);
+                        showSignedOut();
+                    });
+                }
+
+                window.addEventListener("DOMContentLoaded", initialiseDemo);
+                window.onGoogleCredential = handleGoogleCredential;
+            })();
         </script>
     </body>
 </html>
