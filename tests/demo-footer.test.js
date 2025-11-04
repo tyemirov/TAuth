@@ -9,16 +9,32 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
     html.includes(
-      'import "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";',
+      'import { mprFooter } from "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";',
     ),
-    "Expected demo to load the footer module from the CDN",
+    "Expected demo to import the mprFooter factory from the CDN module",
   );
   assert.ok(
-    html.includes('x-data="mprFooter({'),
-    "Expected demo to expose the footer via the mprFooter Alpine factory",
+    html.includes('data-mpr-footer-config='),
+    "Expected footer markup to embed mpr-footer configuration JSON",
   );
   assert.ok(
-    html.includes('"themeToggle": {') || html.includes("themeToggle: {"),
-    "Expected footer configuration to provide theme toggle options",
+    html.includes('Built by') && html.includes('Marco Polo Research Lab'),
+    "Expected footer to include the Built by Marco Polo Research Lab copy",
+  );
+  assert.ok(
+    html.includes('footer-menu dropup'),
+    "Expected footer menu wrapper to declare the dropup styling",
+  );
+  assert.ok(
+    html.includes('footer-theme-toggle form-check form-switch m-0'),
+    "Expected footer theme toggle to reuse the LoopAware form-switch styling",
+  );
+  assert.ok(
+    html.includes('id="public-theme-toggle"'),
+    "Expected footer theme toggle input id to match public theme storage wiring",
+  );
+  assert.ok(
+    html.includes('href="https://mprlab.com"'),
+    "Expected footer link catalogue to include the LoopAware product list",
   );
 });

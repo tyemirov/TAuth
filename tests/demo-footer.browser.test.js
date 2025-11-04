@@ -115,19 +115,64 @@ if (!puppeteer || !chromiumExecutable) {
 
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
-    await page.waitForSelector("#appFooter footer[role='contentinfo']", {
+    await page.waitForSelector("#landing-footer", {
       visible: true,
       timeout: 5000,
     });
 
-    const footerText = await page.$eval("#appFooter", (node) => node.textContent || "");
-    assert.match(footerText, /Support: support@mprlab.com/);
-    assert.match(footerText, /Terms of Service/);
+    const footerText = await page.$eval(
+      "#landing-footer",
+      (node) => node.textContent || "",
+    );
+    assert.match(footerText, /Built by/i);
+    assert.match(footerText, /Marco Polo Research Lab/);
+    assert.match(footerText, /Privacy • Terms/);
 
-    const displayValue = await page.$eval("#appFooter", (node) => {
+    const displayValue = await page.$eval("#landing-footer", (node) => {
       const style = window.getComputedStyle(node);
       return style ? style.display : "";
     });
     assert.notEqual(displayValue, "none");
+
+    const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
+    await page.click(toggleSelector);
+    await page.waitForSelector("#landing-footer .dropdown-menu.show", {
+      visible: true,
+      timeout: 2000,
+    });
+    const ariaExpanded = await page.$eval(
+      toggleSelector,
+      (node) => node.getAttribute("aria-expanded"),
+    );
+    assert.equal(ariaExpanded, "true");
+    await page.click(toggleSelector);
+    await page.waitForTimeout(100);
+    const ariaCollapsed = await page.$eval(
+      toggleSelector,
+      (node) => node.getAttribute("aria-expanded"),
+    );
+    assert.equal(ariaCollapsed, "false");
+    const menuVisible = await page.$eval(
+      "#landing-footer .dropdown-menu",
+      (node) => node.classList.contains("show"),
+    );
+    assert.equal(menuVisible, false, "Expected dropdown menu to close");
+
+    const themeToggleSelector = "#public-theme-toggle";
+    const initialTheme = await page.evaluate(
+      () => document.body.getAttribute("data-bs-theme"),
+    );
+    await page.click(themeToggleSelector);
+    await page.waitForTimeout(50);
+    const darkTheme = await page.evaluate(
+      () => document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(darkTheme, "dark", "Expected theme toggle to enable dark theme");
+    await page.click(themeToggleSelector);
+    await page.waitForTimeout(50);
+    const finalTheme = await page.evaluate(
+      () => document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(finalTheme, initialTheme, "Expected second toggle to restore initial theme");
   });
 }

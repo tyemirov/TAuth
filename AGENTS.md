@@ -239,7 +239,7 @@ All rules for validation, error handling, invariants, and “confident programmi
 
 - Use Gin for routing.
 - Middleware for CORS, auth, logging.
-- Vanilla CSS; no Bootstrap.
+- No vanilla CSS; use either Bootstrap with Materia or Tailwind.
 - Header fixed top; footer fixed bottom using CSS utilities.
 
 ---
