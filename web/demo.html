@@ -115,6 +115,10 @@
             .dropdown-menu {
                 min-width: 220px;
             }
+
+            #demoNotice {
+                border-radius: 0.75rem;
+            }
         </style>
     </head>
     <body class="landing-body d-flex flex-column min-vh-100 bg-body text-body" data-bs-theme="light">
@@ -130,6 +134,7 @@
                         and inspect the session contract this service documents in the README.
                     </p>
                 </section>
+                <div id="demoNotice" class="alert alert-danger d-none" role="status"></div>
                 <div class="row g-4 align-items-start">
                     <section class="col-12 col-lg-6" data-panel="signed-out">
                         <div class="demo-card border-0 p-4 h-100">
@@ -435,13 +440,48 @@
         </script>
         <script>
             (function () {
+                const demoConfig = window.__TAUTH_DEMO_CONFIG || {};
+                const demoBaseUrl = typeof demoConfig.baseUrl === "string" ? demoConfig.baseUrl.replace(/\/+$/, "") : "";
+                const demoGoogleClientId = typeof demoConfig.googleClientId === "string" ? demoConfig.googleClientId : "";
+                const noticeElement = document.getElementById("demoNotice");
+
                 const requestState = {
                     noncePromise: null,
                     preparedNonce: null,
+                    latestNonce: null,
                 };
 
+                function withBase(path) {
+                    if (!demoBaseUrl) {
+                        return path;
+                    }
+                    if (!path || /^https?:\/\//i.test(path)) {
+                        return path || demoBaseUrl;
+                    }
+                    if (path.startsWith("/")) {
+                        return demoBaseUrl + path;
+                    }
+                    return `${demoBaseUrl}/${path}`;
+                }
+
+                function clearNotice() {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.textContent = "";
+                    noticeElement.classList.add("d-none");
+                }
+
+                function showErrorNotice(message) {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.textContent = message;
+                    noticeElement.classList.remove("d-none");
+                }
+
                 function fetchJSON(url, options) {
-                    return fetch(url, {
+                    return fetch(withBase(url), {
                         credentials: "include",
                         headers: { "Content-Type": "application/json", ...(options && options.headers) },
                         ...options,
@@ -456,6 +496,19 @@
                             }
                             return { ok: response.ok, status: response.status, json };
                         });
+                }
+
+                function configureGoogleClient(nonceToken) {
+                    const googleAccounts = window.google && window.google.accounts && window.google.accounts.id;
+                    if (!googleAccounts || typeof googleAccounts.initialize !== "function") {
+                        return;
+                    }
+                    googleAccounts.initialize({
+                        client_id: demoGoogleClientId || undefined,
+                        callback: handleGoogleCredential,
+                        nonce: nonceToken,
+                        ux_mode: "popup",
+                    });
                 }
 
                 async function ensureNonce() {
@@ -475,10 +528,12 @@
                             })
                             .then((nonceValue) => {
                                 requestState.preparedNonce = nonceValue;
+                                requestState.latestNonce = nonceValue;
                                 const gisRoot = document.getElementById("g_id_onload");
                                 if (gisRoot) {
                                     gisRoot.setAttribute("data-nonce", nonceValue);
                                 }
+                                configureGoogleClient(nonceValue);
                                 return nonceValue;
                             })
                             .finally(() => {
@@ -486,6 +541,14 @@
                             });
                     }
                     return requestState.noncePromise;
+                }
+
+                function warmNonce() {
+                    return ensureNonce().catch((error) => {
+                        showErrorNotice("Unable to prepare Google Sign-In. Please retry.");
+                        setOutput({ error: "auth_nonce_failed", detail: String(error) });
+                        return null;
+                    });
                 }
 
                 function consumeNonce() {
@@ -500,8 +563,7 @@
                         output.textContent = JSON.stringify(payload, null, 2);
                     }
                 }
-
-            function renderProfileSummary(profile) {
+                function renderProfileSummary(profile) {
                 const target = document.getElementById("profileSummary");
                 if (!target) {
                     return;
@@ -552,10 +614,11 @@
                     }
                     renderProfileSummary(null);
                     setOutput({ state: "signed_out" });
-                    ensureNonce().catch(() => {});
+                    warmNonce();
                 }
 
                 function showSignedIn(profile) {
+                    clearNotice();
                     const signedOut = document.querySelector('[data-panel="signed-out"]');
                     const signedIn = document.querySelector('[data-panel="signed-in"]');
                     if (signedOut) {
@@ -575,11 +638,15 @@
                     setOutput(payload);
                 }
 
-                async function runAuthClient(eventLabel) {
+                async function runAuthClient(eventLabel, options = {}) {
+                    const suppressLog = Boolean(options.suppressLog);
                     await window.initAuthClient({
+                        baseUrl: demoBaseUrl || undefined,
                         onAuthenticated: (profile) => {
                             showSignedIn(profile);
-                            logSignedIn(profile, eventLabel);
+                            if (!suppressLog) {
+                                logSignedIn(profile, eventLabel);
+                            }
                         },
                         onUnauthenticated: showSignedOut,
                     });
@@ -593,11 +660,14 @@
                                 error: "missing_google_id_token",
                                 payload: responseObject,
                             });
+                            showErrorNotice("Google did not return a credential. Please retry.");
+                            showSignedOut();
                             return;
                         }
                         const nonceToken = consumeNonce();
                         if (!nonceToken) {
                             setOutput({ error: "auth_nonce_missing" });
+                            showErrorNotice("Sign-in nonce expired. Please try again.");
                             showSignedOut();
                             return;
                         }
@@ -614,22 +684,32 @@
                                 status,
                                 body: json,
                             });
+                            showErrorNotice("Google exchange failed. See log for details.");
                             showSignedOut();
                             return;
                         }
-                        await runAuthClient("signed_in");
+                        clearNotice();
+                        if (json && typeof json === "object") {
+                            showSignedIn(json);
+                            logSignedIn(json, "signed_in");
+                            await runAuthClient(undefined, { suppressLog: true });
+                        } else {
+                            await runAuthClient("signed_in");
+                        }
                     } catch (error) {
                         setOutput({
                             error: "google_credential_exception",
                             detail: String(error),
                         });
+                        showErrorNotice("Unexpected error while handling Google credentials.");
                         showSignedOut();
                     } finally {
-                        ensureNonce().catch(() => {});
+                        warmNonce();
                     }
                 }
 
                 async function hydrateSession() {
+                    clearNotice();
                     await runAuthClient("hydrated");
                 }
 
@@ -643,15 +723,18 @@
                                 const body = await response.json();
                                 setOutput({ event: "/api/me", status: response.status, body });
                                 if (response.status === 401) {
+                                    showErrorNotice("Session expired. Please sign in again.");
                                     showSignedOut();
                                 }
                             } catch (error) {
                                 setOutput({ error: "api_me_failed", detail: String(error) });
+                                showErrorNotice("Unable to reach /api/me. Check the network log.");
                             }
                         });
                     }
                     if (logoutButton) {
                         logoutButton.addEventListener("click", async () => {
+                            clearNotice();
                             await window.logout();
                             showSignedOut();
                         });
@@ -659,13 +742,20 @@
                 }
 
                 function initialiseDemo() {
-                    ensureNonce().catch(() => {});
+                    warmNonce();
                     bindUiHandlers();
                     hydrateSession().catch((error) => {
                         console.error("Session hydrate failed:", error);
+                        showErrorNotice("Automatic session hydration failed. Sign in with Google to continue.");
                         showSignedOut();
                     });
                 }
+
+                window.addEventListener("load", () => {
+                    if (requestState.latestNonce) {
+                        configureGoogleClient(requestState.latestNonce);
+                    }
+                });
 
                 window.addEventListener("DOMContentLoaded", initialiseDemo);
                 window.onGoogleCredential = handleGoogleCredential;

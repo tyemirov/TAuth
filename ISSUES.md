@@ -22,6 +22,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-209] Add a footer from mpr-ui to the demo.html — Demo now imports Alpine + `mprFooter` via the CDN module (`footer.js?module`), feeds theme toggle/options into the Alpine factory, removes the bespoke embedded asset plumbing, and keeps coverage (string + optional Puppeteer) ensuring the footer renders and stays visible.
 - [x] [TA-210] Add proper styling for the footer, including theme switching to the demo. Use styling from @tools/loopaware for inspiration — Reauthored `web/demo.html` from scratch with LoopAware’s footer contract, reused the exact Bootstrap 5.3 + Bootstrap Icons stack, embedded the public theme script, and strengthened Node coverage for theme persistence and dropup behaviour.
 - [x] [TA-211] Update README to document remote TAuth deployment — Documented hosted deployment steps, cookie scoping, CORS settings, and cross-origin front-end samples for `https://tauth.mprlab.com` serving `https://gravity.mprlab.com`.
+- [x] [TA-307] Harden Google Sign-In flow — Demo now reads base URLs from `/demo/config.js`, reinitialises Google Identity with freshly issued nonces, surfaces auth errors inline, avoids redundant `/me` fetches, and documents the CORS/SameSite requirement for cross-origin cookies.
 
 ## BugFixes (300–399)
 

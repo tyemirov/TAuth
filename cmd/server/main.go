@@ -49,7 +49,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().Duration("refresh_ttl", 60*24*time.Hour, "Refresh token TTL")
 	rootCmd.Flags().Bool("dev_insecure_http", false, "Allow insecure HTTP for local dev")
 	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
-	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
+	rootCmd.Flags().Bool("enable_cors", false, "Enable CORS for cross-origin clients (required to set SameSite=None cookies)")
 	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
 	rootCmd.Flags().Duration("nonce_ttl", 5*time.Minute, "Nonce lifetime for Google Sign-In exchanges")
 

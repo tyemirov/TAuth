@@ -41,6 +41,8 @@ tauth --listen_addr=":8443" --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. With the cookie domain set to `.mprlab.com`, the session cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com`.
 
+> When your product runs on a different origin, you **must** enable CORS (either `--enable_cors` or `APP_ENABLE_CORS=true`) and supply `APP_CORS_ALLOWED_ORIGINS`; TAuth switches cookies to `SameSite=None` only when this flag is set, so skipping it leads to browsers rejecting `app_session`.
+
 ### 3. Integrate the browser helper from the product site
 
 ```html

@@ -17,4 +17,12 @@ test("demo loads dynamic config instead of hard-coding Google client ID", async 
     !html.includes(HARDCODED_CLIENT_ID),
     "Expected demo to rely on runtime configuration for the Google client ID",
   );
+  assert.ok(
+    html.includes("window.__TAUTH_DEMO_CONFIG || {}"),
+    "Expected demo to read runtime configuration from the injected script",
+  );
+  assert.ok(
+    html.includes("const demoBaseUrl") && html.includes("fetch(withBase") && html.includes("baseUrl: demoBaseUrl"),
+    "Expected demo JavaScript to route API calls through the configured base URL",
+  );
 });
