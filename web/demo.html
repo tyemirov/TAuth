@@ -211,7 +211,7 @@
             })();
         </script>
         <script>
-            (function () {
+            window.addEventListener("load", function () {
                 const config = window.__TAUTH_DEMO_CONFIG || {};
                 const configuredBase = typeof config.baseUrl === "string" ? config.baseUrl.trim() : "";
                 const tauthBaseUrl = configuredBase ? configuredBase.replace(/\/+$/, "") : window.location.origin;
@@ -454,7 +454,7 @@
 
                 bindUiHandlers();
                 refreshSession("hydrated");
-            })();
+            });
         </script>
     </body>
 </html>
