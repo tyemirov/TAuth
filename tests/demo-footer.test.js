@@ -9,9 +9,13 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
     html.includes(
-      'import { mprFooter } from "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module";',
+      '<script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js"></script>',
     ),
-    "Expected demo to import the mprFooter factory from the CDN module",
+    "Expected demo to load the mpr-ui footer bundle via CDN",
+  );
+  assert.ok(
+    html.includes("window.mprFooter = window.MPRUI && window.MPRUI.mprFooter;"),
+    "Expected demo to expose the mprFooter Alpine factory from the global namespace",
   );
   assert.ok(
     html.includes('data-mpr-footer-config='),

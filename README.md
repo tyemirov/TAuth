@@ -15,30 +15,39 @@ TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep
 
 ---
 
-## Get started
+## Deploy TAuth for a hosted product
 
-1. **Create a Google OAuth Web client**  
-   Add your origin (e.g. `https://app.example.com`) and copy the Client ID.
-2. **Launch the server**
+### 1. Create a Google OAuth Web client
+
+Register the product origin you want to protect (e.g. `https://gravity.mprlab.com`) inside Google Cloud Console and copy the Web Client ID. Add `https://tauth.mprlab.com` as an authorized JavaScript origin so the nonce exchange can run from the hosted service.
+
+### 2. Launch the service (e.g. on `https://tauth.mprlab.com`)
 
 ```bash
-export APP_LISTEN_ADDR=":8080"
+export APP_LISTEN_ADDR=":8443"                            # or the port your ingress forwards to
 export APP_GOOGLE_WEB_CLIENT_ID="your_web_client_id.apps.googleusercontent.com"
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_COOKIE_DOMAIN="localhost"
-# Optional persistence:
-# export APP_DATABASE_URL="postgres://user:pass@localhost:5432/authdb?sslmode=disable"
+export APP_COOKIE_DOMAIN=".mprlab.com"                    # share cookies across tauth + gravity subdomains
+export APP_ENABLE_CORS="true"                            # allow the product origin to call TAuth
+export APP_CORS_ALLOWED_ORIGINS='["https://gravity.mprlab.com"]'
+# Optional persistence (choose one):
+# export APP_DATABASE_URL="postgres://user:pass@db.internal:5432/authdb?sslmode=disable"
 # export APP_DATABASE_URL="sqlite://file:./auth.db"
 
-go run ./cmd/server
+tauth --listen_addr=":8443" --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
+  --jwt_signing_key="$APP_JWT_SIGNING_KEY" --cookie_domain="$APP_COOKIE_DOMAIN" \
+  --enable_cors --cors_allowed_origins="https://gravity.mprlab.com"
 ```
 
-3. **Mount the browser helper**
+Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. With the cookie domain set to `.mprlab.com`, the session cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com`.
+
+### 3. Integrate the browser helper from the product site
 
 ```html
-<script src="/static/auth-client.js"></script>
+<script src="https://tauth.mprlab.com/static/auth-client.js"></script>
 <script>
   initAuthClient({
+    baseUrl: "https://tauth.mprlab.com",
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -49,13 +58,13 @@ go run ./cmd/server
 </script>
 ```
 
-4. **Request a nonce before prompting Google Identity Services**
+### 4. Prepare and exchange Google credentials across origins
 
 ```js
 let pendingNonce = "";
 
 async function prepareGoogleSignIn() {
-  const response = await fetch("/auth/nonce", {
+  const response = await fetch("https://tauth.mprlab.com/auth/nonce", {
     method: "POST",
     credentials: "include",
     headers: { "X-Requested-With": "XMLHttpRequest" },
@@ -72,23 +81,21 @@ async function prepareGoogleSignIn() {
   });
   google.accounts.id.prompt();
 }
+
+async function exchangeGoogleCredential(idTokenFromGoogle) {
+  await fetch("https://tauth.mprlab.com/auth/google", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      google_id_token: idTokenFromGoogle,
+      nonce_token: pendingNonce,
+    }),
+  });
+}
 ```
 
-Call `prepareGoogleSignIn()` before every login attempt. The nonce is single-use and must be supplied to Google so the ID token echoes it back.
-
-5. **Exchange the Google ID token using the issued nonce**
-
-```js
-await fetch("/auth/google", {
-  method: "POST",
-  credentials: "include",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    google_id_token: idTokenFromGoogle,
-    nonce_token: pendingNonce,
-  }),
-});
-```
+The login flow is identical to a local setup—the only difference is that every call points at the hosted TAuth origin. Because cookies are scoped to `.mprlab.com`, the `app_session` cookie is now available to product routes on `https://gravity.mprlab.com` while remaining `HttpOnly`.
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
@@ -122,10 +129,10 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ## Deploy with confidence
 
-- Works out of the box for single-origin deployments.
-- Toggle CORS and insecure HTTP flags to iterate locally across ports.
+- Works out of the box for any single registrable domain—host TAuth once and share cookies across subdomains.
+- Toggle CORS (and `SameSite=None` automatically) when your UI is served from a different origin during development.
 - Point `APP_DATABASE_URL` at Postgres or SQLite to store refresh tokens durably.
-- Structured zap logging makes it easy to monitor sign-in, refresh, and logout flows.
+- Structured zap logging makes it easy to monitor sign-in, refresh, and logout flows wherever you deploy.
 
 ---
 
