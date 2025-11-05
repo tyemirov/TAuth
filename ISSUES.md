@@ -26,10 +26,10 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-309] Clean up GIS button initialization — Replaced the inline Google button markup with programmatic `renderButton` usage, ensured nonce-driven `initialize` calls, and refreshed tests verifying the popup flow.
 - [x] [TA-309] Clean up GIS popup integration — Simplified the demo to programmatically initialize Google Identity Services with fresh nonces, render the button container, update tests, and document the popup setup steps in README.
 - [x] [TA-310] Integrate the mpr-ui front-end library into the demo: have a distinct header with a functional Google login button and a footer, all loaded from the CDN and using mpr-ui@v0.0.5. — Replaced the bespoke GIS wiring with `mpr-ui@0.0.5` site header/footer, configured the demo to consume the CDN bundle, and updated scripts/tests to drive auth via the shared components.
-- [ ] [TA-311] The header is not sticky and not full width. Make the header to be sticky (touching the top of the screen and staying there) and occupying the full width of the viewport.
-- [ ] [TA-312] Link to REAMDE or architecture shall open in a new window.
-- [ ] [TA-313] Clicking on Maro Polo Research Lab produces an empty drop up. Populate it with all of the marco polo websites
-- [ ] [TA-314] Theme switches do not switch theme on the page. Use the provided theme bundles from mpr-ui.
+- [ ] [TA-311] The header of in the @web/demo.html is not sticky and not full width. Make the header to be sticky (touching the top of the screen and staying there) and occupying the full width of the viewport.
+- [ ] [TA-312] Links in the @web/demo.html to REAMDE or architecture shall open in a new window.
+- [ ] [TA-313] Clicking on Maro Polo Research Lab produces an empty drop up. Populate it with all of the Marco Polo websites. Check @tools/loopaware for the list
+- [ ] [TA-314] Theme switches do not switch theme on the page. Use the provided theme bundleded from mpr-ui.
 - [ ] [TA-315] Push demo styling into mpr-ui — Move the bespoke header/footer CSS and avatar chip markup currently embedded in `web/demo.html` into reusable styling hooks inside `tools/mpr-ui` so consumers only supply configuration; expose classes/tokens so the demo can drop its custom `<style>` block. Open a PR to mpr-ui
 - [ ] [TA-316] Centralize retry + API helpers in auth-client.js — Extract the `fetchWithRetry`, nonce polling, and notice/error plumbing from `web/demo.html` into `web/auth-client.js` so demos/apps call exported helpers instead of duplicating network robustness logic.
 - [ ] [TA-317] Extend mpr-ui auth header to own GIS button rendering — Teach `MPRUI.renderSiteHeader`/`createAuthHeader` to render and toggle the Google Identity button, swap it for the avatar on authentication, and surface callbacks for demos; the demo should just pass `googleClientId` and listen to events without wiring GIS directly.
