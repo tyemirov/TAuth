@@ -21,7 +21,7 @@ test("demo renders mpr-ui header/footer with GIS popup wiring", async () => {
     "Expected demo to define the canonical Google client ID",
   );
   assert.ok(
-    html.includes('id="googleButtonHost"'),
-    "Expected demo to expose a host element for the Google-rendered button",
+    html.includes("googleHeaderButton"),
+    "Expected demo to allocate a header container for the Google-rendered button",
   );
 });

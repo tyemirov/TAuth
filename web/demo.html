@@ -140,6 +140,17 @@
                 box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3);
             }
 
+            .google-signin-host {
+                display: inline-flex;
+                align-items: center;
+                pointer-events: auto;
+            }
+
+            .google-signin-host.is-disabled {
+                opacity: 0.6;
+                pointer-events: none;
+            }
+
             .mpr-header__button.is-disabled {
                 opacity: 0.6;
                 pointer-events: none;
@@ -173,7 +184,6 @@
                                         Use the header’s <strong>Sign in</strong> button to launch Google Identity Services.
                                     </p>
                                 </div>
-                                <div id="googleButtonHost" class="d-flex justify-content-center"></div>
                                 <p class="mb-0 demo-muted">
                                     TAuth issues a one-time nonce for every attempt so replayed credentials are rejected automatically.
                                 </p>
@@ -234,7 +244,8 @@
                 const signedOutPanel = document.querySelector('[data-panel="signed-out"]');
                 const signedInPanel = document.querySelector('[data-panel="signed-in"]');
                 const activityOutput = document.getElementById("demoOutput");
-                const googleButtonHost = document.getElementById("googleButtonHost");
+                let headerSignInButton = null;
+                let headerGoogleHost = null;
 
                 const footerLinks = [
                     { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
@@ -290,6 +301,14 @@
                             googleClientId: GOOGLE_CLIENT_ID,
                         },
                     });
+                    headerSignInButton = headerHost.querySelector('[data-mpr-header="sign-in-button"]');
+                    if (headerSignInButton) {
+                        headerGoogleHost = document.createElement("div");
+                        headerGoogleHost.id = "googleHeaderButton";
+                        headerGoogleHost.className = "google-signin-host is-disabled";
+                        headerSignInButton.style.display = "none";
+                        headerSignInButton.insertAdjacentElement("afterend", headerGoogleHost);
+                    }
                 }
 
                 if (footerHost) {
@@ -332,16 +351,19 @@
                 }
 
                 function enableSignInButton(isEnabled) {
-                    const signInButton = headerHost && headerHost.querySelector('[data-mpr-header="sign-in-button"]');
-                    if (!signInButton) {
-                        return;
+                    if (headerSignInButton) {
+                        if (isEnabled) {
+                            headerSignInButton.removeAttribute("disabled");
+                        } else {
+                            headerSignInButton.setAttribute("disabled", "disabled");
+                        }
                     }
-                    if (isEnabled) {
-                        signInButton.removeAttribute("disabled");
-                        signInButton.classList.remove("is-disabled");
-                    } else {
-                        signInButton.setAttribute("disabled", "disabled");
-                        signInButton.classList.add("is-disabled");
+                    if (headerGoogleHost) {
+                        if (isEnabled) {
+                            headerGoogleHost.classList.remove("is-disabled");
+                        } else {
+                            headerGoogleHost.classList.add("is-disabled");
+                        }
                     }
                 }
 
@@ -455,11 +477,9 @@
                 }
 
                 let activeNonceToken = "";
-                let signInReady = false;
 
                 async function prepareGoogleSignIn() {
                     enableSignInButton(false);
-                    signInReady = false;
                     try {
                         const accounts = await googleReadyPromise;
                         const nonceResponse = await fetchWithRetry("/auth/nonce", {
@@ -476,9 +496,10 @@
                             nonce: activeNonceToken,
                             ux_mode: "popup",
                         });
-                        if (googleButtonHost) {
-                            googleButtonHost.innerHTML = "";
-                            accounts.renderButton(googleButtonHost, {
+                        const renderHost = headerGoogleHost || headerSignInButton;
+                        if (renderHost) {
+                            renderHost.innerHTML = "";
+                            accounts.renderButton(renderHost, {
                                 theme: "outline",
                                 size: "large",
                                 text: "signin_with",
@@ -486,7 +507,6 @@
                                 logo_alignment: "left",
                             });
                         }
-                        signInReady = true;
                         enableSignInButton(true);
                     } catch (error) {
                         showNotice("Unable to prepare Google Sign-In. Please retry.");
@@ -586,19 +606,6 @@
                 }
 
                 if (headerHost) {
-                    headerHost.addEventListener("mpr-ui:header:signin-click", (eventObject) => {
-                        eventObject.preventDefault();
-                        if (!signInReady) {
-                            showNotice("Preparing Google Sign-In… please wait.");
-                            prepareGoogleSignIn().catch(() => {});
-                            return;
-                        }
-                        googleReadyPromise
-                            .then((accounts) => {
-                                accounts.prompt();
-                            })
-                            .catch(() => {});
-                    });
                     headerHost.addEventListener("mpr-ui:header:signout-click", () => {
                         clearNotice();
                         window.logout()
