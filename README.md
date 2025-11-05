@@ -56,6 +56,8 @@ Host the binary behind TLS (or terminate TLS at your load balancer) so responses
     }
   });
 </script>
+
+<div id="googleSignIn"></div>
 ```
 
 ### 4. Prepare and exchange Google credentials across origins
@@ -78,6 +80,12 @@ async function prepareGoogleSignIn() {
     client_id: "your_web_client_id.apps.googleusercontent.com",
     callback: handleCredential,
     nonce: pendingNonce,
+    ux_mode: "popup",
+  });
+  google.accounts.id.renderButton(document.getElementById("googleSignIn"), {
+    theme: "outline",
+    size: "large",
+    text: "signin_with",
   });
   google.accounts.id.prompt();
 }
@@ -96,6 +104,27 @@ async function exchangeGoogleCredential(idTokenFromGoogle) {
 ```
 
 The login flow is identical to a local setup—the only difference is that every call points at the hosted TAuth origin. Because cookies are scoped to `.mprlab.com`, the `app_session` cookie is now available to product routes on `https://gravity.mprlab.com` while remaining `HttpOnly`.
+
+### Configure Google Identity Services (popup flow)
+
+1. **Create or reuse a Google OAuth Web client.** Add every product origin (e.g. `https://gravity.mprlab.com`) and the hosted TAuth origin (e.g. `https://tauth.mprlab.com`) to the *Authorized JavaScript origins* list. Redirect URIs are not required for this popup flow.
+2. **Load the GIS SDK before you render a button.**
+
+   ```html
+   <script src="https://accounts.google.com/gsi/client" async defer></script>
+   <div id="googleSignIn"></div>
+   ```
+
+3. **Fetch and attach a nonce before prompting Google.** Use `POST /auth/nonce`, call `google.accounts.id.initialize({ nonce, client_id, ux_mode: "popup" })`, and render the button programmatically (see `prepareGoogleSignIn` above or `web/demo.html`).
+4. **Exchange the credential without redirecting.** When GIS invokes your callback, post `{ google_id_token, nonce_token }` to `https://tauth.mprlab.com/auth/google` (or your hosted base URL) with `credentials: "include"` so TAuth can mint cookies.
+
+### Quick verification checklist
+
+- Open the browser console and confirm a nonce request (`POST /auth/nonce`) fires before the GIS popup.
+- Click the button; the popup should open and return a credential to `handleCredential`.
+- Check the network tab for `POST https://tauth.mprlab.com/auth/google` and ensure it succeeds (`200`).
+- Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
+- Call `/api/me` and verify it returns the signed-in profile.
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
