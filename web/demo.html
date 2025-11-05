@@ -115,6 +115,32 @@
             .dropdown-menu {
                 min-width: 220px;
             }
+
+            .mpr-header__button--primary[data-mpr-header="sign-in-button"] {
+                background-color: #ffffff;
+                color: #3c4043;
+                border: 1px solid #dadce0;
+                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                font-weight: 600;
+            }
+
+            .mpr-header__button--primary[data-mpr-header="sign-in-button"]::before {
+                content: "";
+                width: 18px;
+                height: 18px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="%234285F4" d="M24 9.5c3.54 0 6.7 1.22 9.2 3.6l6.86-6.86C35.6 2.42 30.3 0 24 0 14.64 0 6.4 5.46 2.5 13.36l7.98 6.19C12.61 13.63 17.77 9.5 24 9.5z"/><path fill="%2334A853" d="M46.5 24c0-1.56-.14-3.06-.4-4.5H24v8.52h12.7c-.55 2.9-2.22 5.36-4.73 7.02l7.64 5.93C43.47 37.64 46.5 31.36 46.5 24z"/><path fill="%23FBBC05" d="M10.48 28.45a14.5 14.5 0 010-8.9l-7.98-6.19C.9 17.32 0 20.57 0 24s.9 6.68 2.5 10.64l7.98-6.19z"/><path fill="%23EA4335" d="M24 48c6.3 0 11.58-2.07 15.44-5.62l-7.64-5.93c-2.11 1.42-4.82 2.26-7.8 2.26-6.23 0-11.39-4.13-13.52-9.87l-7.98 6.19C6.4 42.54 14.64 48 24 48z"/></svg>');
+                background-size: contain;
+                background-repeat: no-repeat;
+            }
+
+            .mpr-header__button--primary[data-mpr-header="sign-in-button"]:hover {
+                background-color: #f7f8f8;
+                box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3);
+            }
+
         </style>
     </head>
     <body class="landing-body bg-body text-body" data-bs-theme="light">
@@ -215,7 +241,14 @@
                 const config = window.__TAUTH_DEMO_CONFIG || {};
                 const configuredBase = typeof config.baseUrl === "string" ? config.baseUrl.trim() : "";
                 const tauthBaseUrl = configuredBase ? configuredBase.replace(/\/+$/, "") : window.location.origin;
-                const googleClientId = typeof config.googleClientId === "string" ? config.googleClientId : "";
+                const DEFAULT_GOOGLE_CLIENT_ID = "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com";
+                const googleClientIdValue = typeof config.googleClientId === "string" && config.googleClientId.trim()
+                    ? config.googleClientId.trim()
+                    : DEFAULT_GOOGLE_CLIENT_ID;
+                const googleClientId = googleClientIdValue;
+                if (!config.googleClientId || !config.googleClientId.trim()) {
+                    console.warn("demo: using fallback Google Client ID; set APP_GOOGLE_WEB_CLIENT_ID to override.");
+                }
 
                 const headerHost = document.getElementById("siteHeader");
                 const footerHost = document.getElementById("landing-footer");
@@ -247,6 +280,7 @@
                             { label: "README", href: "https://github.com/tyemirov/TAuth#readme" },
                             { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
                         ],
+                        signInLabel: "Sign in with Google",
                         auth: {
                             baseUrl: tauthBaseUrl,
                             loginPath: "/auth/google",
