@@ -16,7 +16,7 @@
             integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
             crossorigin="anonymous"
         />
-        <script defer src="/demo/config.js"></script>
+        <script src="/demo/config.js"></script>
         <script
             src="https://accounts.google.com/gsi/client"
             defer
@@ -419,9 +419,9 @@
         </script>
         <script>
             (function () {
-                const demoConfig = window.__TAUTH_DEMO_CONFIG || {};
-                const demoGoogleClientId =
-                    typeof demoConfig.googleClientId === "string" ? demoConfig.googleClientId : "";
+                const config = window.__TAUTH_DEMO_CONFIG || {};
+                const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl.replace(/\/+$/, "") : "";
+                const googleClientId = typeof config.googleClientId === "string" ? config.googleClientId : "";
 
                 const requestState = {
                     noncePromise: null,
@@ -429,53 +429,21 @@
                     buttonRendered: false,
                 };
 
-                function getGoogleAccounts() {
-                    return window.google && window.google.accounts && window.google.accounts.id
-                        ? window.google.accounts.id
-                        : null;
-                }
-
-                function renderGoogleButton() {
-                    if (requestState.buttonRendered) {
-                        return;
+                function withBase(path) {
+                    if (!baseUrl) {
+                        return path;
                     }
-                    const googleAccounts = getGoogleAccounts();
-                    const host = document.getElementById("googleButtonHost");
-                    if (!googleAccounts || !host) {
-                        return;
+                    if (!path || /^https?:\/\//i.test(path)) {
+                        return path || baseUrl;
                     }
-                    host.innerHTML = "";
-                    googleAccounts.renderButton(host, {
-                        type: "standard",
-                        theme: "outline",
-                        size: "large",
-                        text: "signin_with",
-                        shape: "rectangular",
-                        logo_alignment: "left",
-                    });
-                    requestState.buttonRendered = true;
-                }
-
-                function configureGoogleClient(nonceToken) {
-                    if (!demoGoogleClientId) {
-                        return;
+                    if (path.startsWith("/")) {
+                        return `${baseUrl}${path}`;
                     }
-                    const googleAccounts = getGoogleAccounts();
-                    if (!googleAccounts) {
-                        window.setTimeout(() => configureGoogleClient(nonceToken), 50);
-                        return;
-                    }
-                    googleAccounts.initialize({
-                        client_id: demoGoogleClientId,
-                        callback: handleGoogleCredential,
-                        nonce: nonceToken,
-                        ux_mode: "popup",
-                    });
-                    renderGoogleButton();
+                    return `${baseUrl}/${path}`;
                 }
 
                 function fetchJSON(url, options) {
-                    return fetch(url, {
+                    return fetch(withBase(url), {
                         credentials: "include",
                         headers: { "Content-Type": "application/json", ...(options && options.headers) },
                         ...options,
@@ -489,46 +457,6 @@
                         }
                         return { ok: response.ok, status: response.status, json };
                     });
-                }
-
-                async function ensureNonce() {
-                    if (requestState.preparedNonce) {
-                        return requestState.preparedNonce;
-                    }
-                    if (!requestState.noncePromise) {
-                        requestState.noncePromise = fetchJSON("/auth/nonce", {
-                            method: "POST",
-                            body: "{}",
-                        })
-                            .then(({ ok, json }) => {
-                                if (!ok || !json || !json.nonce) {
-                                    throw new Error("auth_nonce_missing");
-                                }
-                                return String(json.nonce);
-                            })
-                            .then((nonceValue) => {
-                                requestState.preparedNonce = nonceValue;
-                                configureGoogleClient(nonceValue);
-                                return nonceValue;
-                            })
-                            .finally(() => {
-                                requestState.noncePromise = null;
-                            });
-                    }
-                    return requestState.noncePromise;
-                }
-
-                function warmNonce() {
-                    return ensureNonce().catch((error) => {
-                        setOutput({ error: "auth_nonce_failed", detail: String(error) });
-                        return null;
-                    });
-                }
-
-                function consumeNonce() {
-                    const nonce = requestState.preparedNonce;
-                    requestState.preparedNonce = null;
-                    return nonce;
                 }
 
                 function setOutput(payload) {
@@ -590,7 +518,7 @@
                     }
                     renderProfileSummary(null);
                     setOutput({ state: "signed_out" });
-                    warmNonce();
+                    warmNonce().catch(() => {});
                 }
 
                 function showSignedIn(profile) {
@@ -603,6 +531,94 @@
                         signedIn.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
+                }
+
+                function getGoogleAccounts() {
+                    const google = window.google;
+                    return google && google.accounts && google.accounts.id ? google.accounts.id : null;
+                }
+
+                const googleReadyPromise = new Promise((resolve) => {
+                    function checkReady() {
+                        const accounts = getGoogleAccounts();
+                        if (accounts) {
+                            resolve(accounts);
+                        } else {
+                            window.requestAnimationFrame(checkReady);
+                        }
+                    }
+                    checkReady();
+                });
+
+                async function configureGoogleIdentity(nonceToken) {
+                    if (!googleClientId) {
+                        setOutput({ error: "missing_google_client_id" });
+                        return;
+                    }
+                    const accounts = await googleReadyPromise;
+                    accounts.initialize({
+                        client_id: googleClientId,
+                        callback: handleGoogleCredential,
+                        nonce: nonceToken,
+                        ux_mode: "popup",
+                    });
+                    if (!requestState.buttonRendered) {
+                        const host = document.getElementById("googleButtonHost");
+                        if (host) {
+                            host.innerHTML = "";
+                            accounts.renderButton(host, {
+                                type: "standard",
+                                theme: "outline",
+                                size: "large",
+                                text: "signin_with",
+                                shape: "rectangular",
+                                logo_alignment: "left",
+                            });
+                            requestState.buttonRendered = true;
+                        }
+                    }
+                }
+
+                async function ensureNonce() {
+                    if (requestState.preparedNonce) {
+                        return requestState.preparedNonce;
+                    }
+                    if (!requestState.noncePromise) {
+                        requestState.noncePromise = fetchJSON("/auth/nonce", {
+                            method: "POST",
+                            body: "{}",
+                        })
+                            .then(({ ok, json }) => {
+                                if (!ok || !json || !json.nonce) {
+                                    throw new Error("auth_nonce_missing");
+                                }
+                                return String(json.nonce);
+                            })
+                            .then(async (nonceValue) => {
+                                requestState.preparedNonce = nonceValue;
+                                await configureGoogleIdentity(nonceValue);
+                                return nonceValue;
+                            })
+                            .finally(() => {
+                                requestState.noncePromise = null;
+                            });
+                    }
+                    return requestState.noncePromise;
+                }
+
+                async function warmNonce() {
+                    try {
+                        await ensureNonce();
+                    } catch (error) {
+                        setOutput({ error: "auth_nonce_failed", detail: String(error) });
+                        throw error;
+                    }
+                }
+
+                function consumeNonce() {
+                    const value = requestState.preparedNonce;
+                    requestState.preparedNonce = null;
+                    return value;
                 }
 
                 async function handleGoogleCredential(responseObject) {
@@ -639,6 +655,7 @@
                             return;
                         }
                         await window.initAuthClient({
+                            baseUrl: baseUrl || undefined,
                             onAuthenticated: (profile) => {
                                 showSignedIn(profile);
                                 setOutput({ event: "signed_in", profile });
@@ -652,12 +669,13 @@
                         });
                         showSignedOut();
                     } finally {
-                        warmNonce();
+                        warmNonce().catch(() => {});
                     }
                 }
 
                 async function hydrateSession() {
                     await window.initAuthClient({
+                        baseUrl: baseUrl || undefined,
                         onAuthenticated: (profile) => {
                             showSignedIn(profile);
                             setOutput({ event: "hydrated", profile });
@@ -672,7 +690,7 @@
                     if (callApiButton) {
                         callApiButton.addEventListener("click", async () => {
                             try {
-                                const response = await window.apiFetch("/api/me", { method: "GET" });
+                                const response = await window.apiFetch(withBase("/api/me"), { method: "GET" });
                                 const body = await response.json();
                                 setOutput({ event: "/api/me", status: response.status, body });
                                 if (response.status === 401) {
@@ -692,7 +710,7 @@
                 }
 
                 function initialiseDemo() {
-                    warmNonce();
+                    warmNonce().catch(() => {});
                     bindUiHandlers();
                     hydrateSession().catch((error) => {
                         console.error("Session hydrate failed:", error);

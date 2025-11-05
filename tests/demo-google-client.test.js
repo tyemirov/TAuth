@@ -10,7 +10,7 @@ const HARDCODED_CLIENT_ID =
 test("demo loads dynamic config instead of hard-coding Google client ID", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes('src="/demo/config.js"'),
+    html.includes('<script src="/demo/config.js"></script>'),
     "Expected demo to pull runtime configuration from the server",
   );
   assert.ok(
@@ -19,10 +19,10 @@ test("demo loads dynamic config instead of hard-coding Google client ID", async 
   );
   assert.ok(
     html.includes('id="googleButtonHost"'),
-    "Expected demo to render the Google button programmatically",
+    "Expected demo to expose a container for the GIS button",
   );
   assert.ok(
-    html.includes("renderGoogleButton") && html.includes("renderButton(host"),
-    "Expected demo JavaScript to initialize the Google button via GIS APIs",
+    html.includes("accounts.renderButton(host"),
+    "Expected demo JavaScript to initialize the GIS button programmatically",
   );
 });
