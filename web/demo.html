@@ -115,35 +115,14 @@
                 min-width: 220px;
             }
 
-            .mpr-header__button--primary[data-mpr-header="sign-in-button"] {
-                background-color: #ffffff;
-                color: #3c4043;
-                border: 1px solid #dadce0;
-                box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
-                display: inline-flex;
-                align-items: center;
-                gap: 0.5rem;
-                font-weight: 600;
-            }
-
-            .mpr-header__button--primary[data-mpr-header="sign-in-button"]::before {
-                content: "";
-                width: 18px;
-                height: 18px;
-                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="%234285F4" d="M24 9.5c3.54 0 6.7 1.22 9.2 3.6l6.86-6.86C35.6 2.42 30.3 0 24 0 14.64 0 6.4 5.46 2.5 13.36l7.98 6.19C12.61 13.63 17.77 9.5 24 9.5z"/><path fill="%2334A853" d="M46.5 24c0-1.56-.14-3.06-.4-4.5H24v8.52h12.7c-.55 2.9-2.22 5.36-4.73 7.02l7.64 5.93C43.47 37.64 46.5 31.36 46.5 24z"/><path fill="%23FBBC05" d="M10.48 28.45a14.5 14.5 0 010-8.9l-7.98-6.19C.9 17.32 0 20.57 0 24s.9 6.68 2.5 10.64l7.98-6.19z"/><path fill="%23EA4335" d="M24 48c6.3 0 11.58-2.07 15.44-5.62l-7.64-5.93c-2.11 1.42-4.82 2.26-7.8 2.26-6.23 0-11.39-4.13-13.52-9.87l-7.98 6.19C6.4 42.54 14.64 48 24 48z"/></svg>');
-                background-size: contain;
-                background-repeat: no-repeat;
-            }
-
-            .mpr-header__button--primary[data-mpr-header="sign-in-button"]:hover {
-                background-color: #f7f8f8;
-                box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3);
+            .mpr-header__button.is-disabled {
+                opacity: 0.6;
+                pointer-events: none;
             }
 
             .google-signin-host {
                 display: inline-flex;
                 align-items: center;
-                pointer-events: auto;
             }
 
             .google-signin-host.is-disabled {
@@ -151,9 +130,24 @@
                 pointer-events: none;
             }
 
-            .mpr-header__button.is-disabled {
-                opacity: 0.6;
-                pointer-events: none;
+            .mpr-header__avatar {
+                width: 32px;
+                height: 32px;
+                border-radius: 999px;
+                background: rgba(59, 130, 246, 0.12);
+                color: #1d4ed8;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 600;
+                font-size: 0.8rem;
+                overflow: hidden;
+            }
+
+            .mpr-header__avatar img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
             }
 
         </style>
@@ -244,8 +238,6 @@
                 const signedOutPanel = document.querySelector('[data-panel="signed-out"]');
                 const signedInPanel = document.querySelector('[data-panel="signed-in"]');
                 const activityOutput = document.getElementById("demoOutput");
-                let headerSignInButton = null;
-                let headerGoogleHost = null;
 
                 const footerLinks = [
                     { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
@@ -260,27 +252,15 @@
                     { label: "Wallpapers", href: "https://wallpapers.mprlab.com" },
                 ];
 
-                function setOutput(payload) {
-                    if (activityOutput) {
-                        activityOutput.textContent = JSON.stringify(payload, null, 2);
-                    }
-                }
-
-                function clearNotice() {
-                    if (!noticeElement) {
-                        return;
-                    }
-                    noticeElement.classList.add("d-none");
-                    noticeElement.textContent = "";
-                }
-
-                function showNotice(message) {
-                    if (!noticeElement) {
-                        return;
-                    }
-                    noticeElement.textContent = message;
-                    noticeElement.classList.remove("d-none");
-                }
+                let headerRoot = null;
+                let headerSignInButton = null;
+                let headerGoogleHost = null;
+                let headerProfileContainer = null;
+                let headerProfileLabel = null;
+                let headerProfileName = null;
+                let headerProfileAvatar = null;
+                let headerSignOutButton = null;
+                let isAuthenticated = false;
 
                 if (headerHost) {
                     MPRUI.renderSiteHeader(headerHost, {
@@ -301,13 +281,24 @@
                             googleClientId: GOOGLE_CLIENT_ID,
                         },
                     });
+                    headerRoot = headerHost.querySelector("header.mpr-header");
                     headerSignInButton = headerHost.querySelector('[data-mpr-header="sign-in-button"]');
+                    headerProfileContainer = headerHost.querySelector('[data-mpr-header="profile"]');
+                    headerProfileLabel = headerHost.querySelector('[data-mpr-header="profile-label"]');
+                    headerProfileName = headerHost.querySelector('[data-mpr-header="profile-name"]');
+                    headerSignOutButton = headerHost.querySelector('[data-mpr-header="sign-out-button"]');
                     if (headerSignInButton) {
                         headerGoogleHost = document.createElement("div");
                         headerGoogleHost.id = "googleHeaderButton";
-                        headerGoogleHost.className = "google-signin-host is-disabled";
-                        headerSignInButton.style.display = "none";
+                        headerGoogleHost.className = "google-signin-host";
                         headerSignInButton.insertAdjacentElement("afterend", headerGoogleHost);
+                        headerSignInButton.classList.add("d-none");
+                        headerSignInButton.setAttribute("aria-hidden", "true");
+                    }
+                    if (headerProfileContainer && headerSignOutButton) {
+                        headerProfileAvatar = document.createElement("span");
+                        headerProfileAvatar.className = "mpr-header__avatar me-2";
+                        headerProfileContainer.insertBefore(headerProfileAvatar, headerSignOutButton);
                     }
                 }
 
@@ -350,19 +341,82 @@
                     return `${TAUTH_BASE_URL}/${path}`;
                 }
 
-                function enableSignInButton(isEnabled) {
-                    if (headerSignInButton) {
-                        if (isEnabled) {
-                            headerSignInButton.removeAttribute("disabled");
-                        } else {
-                            headerSignInButton.setAttribute("disabled", "disabled");
-                        }
+                function setOutput(payload) {
+                    if (activityOutput) {
+                        activityOutput.textContent = JSON.stringify(payload, null, 2);
                     }
+                }
+
+                function clearNotice() {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.classList.add("d-none");
+                    noticeElement.textContent = "";
+                }
+
+                function showNotice(message) {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.textContent = message;
+                    noticeElement.classList.remove("d-none");
+                }
+
+                function enableSignInButton(isEnabled) {
                     if (headerGoogleHost) {
-                        if (isEnabled) {
-                            headerGoogleHost.classList.remove("is-disabled");
+                        headerGoogleHost.classList.toggle("is-disabled", !isEnabled);
+                    }
+                }
+
+                function toggleGoogleButton(isVisible) {
+                    if (headerGoogleHost) {
+                        headerGoogleHost.classList.toggle("d-none", !isVisible);
+                    }
+                }
+
+                function updateHeaderProfile(profile) {
+                    if (!headerRoot) {
+                        return;
+                    }
+                    if (!profile) {
+                        headerRoot.classList.remove("mpr-header--authenticated");
+                        if (headerProfileName) {
+                            headerProfileName.textContent = "";
+                        }
+                        if (headerProfileAvatar) {
+                            headerProfileAvatar.innerHTML = "";
+                        }
+                        return;
+                    }
+                    headerRoot.classList.add("mpr-header--authenticated");
+                    if (headerProfileLabel) {
+                        headerProfileLabel.textContent = "Signed in as";
+                    }
+                    const displayName =
+                        profile.display ||
+                        profile.display_name ||
+                        profile.user_email ||
+                        profile.user_id ||
+                        "Authenticated user";
+                    if (headerProfileName) {
+                        headerProfileName.textContent = displayName;
+                    }
+                    if (headerProfileAvatar) {
+                        headerProfileAvatar.innerHTML = "";
+                        if (profile.avatar_url) {
+                            const image = document.createElement("img");
+                            image.src = profile.avatar_url;
+                            image.alt = `${displayName} avatar`;
+                            headerProfileAvatar.appendChild(image);
                         } else {
-                            headerGoogleHost.classList.add("is-disabled");
+                            const initials = displayName
+                                .split(" ")
+                                .map((word) => word.charAt(0))
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase() || "?";
+                            headerProfileAvatar.textContent = initials;
                         }
                     }
                 }
@@ -464,6 +518,10 @@
                         signedInPanel.classList.add("d-none");
                     }
                     renderProfileSummary(null);
+                    updateHeaderProfile(null);
+                    isAuthenticated = false;
+                    enableSignInButton(false);
+                    toggleGoogleButton(true);
                 }
 
                 function showSignedIn(profile) {
@@ -474,6 +532,10 @@
                         signedInPanel.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
+                    updateHeaderProfile(profile);
+                    isAuthenticated = true;
+                    enableSignInButton(false);
+                    toggleGoogleButton(false);
                 }
 
                 let activeNonceToken = "";
@@ -496,10 +558,9 @@
                             nonce: activeNonceToken,
                             ux_mode: "popup",
                         });
-                        const renderHost = headerGoogleHost || headerSignInButton;
-                        if (renderHost) {
-                            renderHost.innerHTML = "";
-                            accounts.renderButton(renderHost, {
+                        if (headerGoogleHost) {
+                            headerGoogleHost.innerHTML = "";
+                            accounts.renderButton(headerGoogleHost, {
                                 theme: "outline",
                                 size: "large",
                                 text: "signin_with",
@@ -507,11 +568,18 @@
                                 logo_alignment: "left",
                             });
                         }
-                        enableSignInButton(true);
+                        if (isAuthenticated) {
+                            toggleGoogleButton(false);
+                            enableSignInButton(false);
+                        } else {
+                            toggleGoogleButton(true);
+                            enableSignInButton(true);
+                        }
                     } catch (error) {
                         showNotice("Unable to prepare Google Sign-In. Please retry.");
                         setOutput({ error: "prepare_google_failed", detail: String(error) });
                         activeNonceToken = "";
+                        toggleGoogleButton(true);
                         enableSignInButton(false);
                     }
                 }
@@ -528,12 +596,14 @@
                             onUnauthenticated() {
                                 showSignedOut();
                                 setOutput({ state: "signed_out" });
+                                prepareGoogleSignIn().catch(() => {});
                             },
                         });
                     } catch (error) {
                         showSignedOut();
                         showNotice("Unable to hydrate the session. Please sign in again.");
                         setOutput({ error: "auth_client_init_failed", detail: String(error) });
+                        prepareGoogleSignIn().catch(() => {});
                     }
                 }
 
@@ -542,11 +612,13 @@
                         if (!responseObject || !responseObject.credential) {
                             showNotice("Google did not return a credential. Please try again.");
                             setOutput({ error: "missing_google_credential", payload: responseObject });
+                            activeNonceToken = "";
                             await prepareGoogleSignIn();
                             return;
                         }
                         if (!activeNonceToken) {
                             showNotice("Sign-in nonce expired. Preparing a new attempt.");
+                            activeNonceToken = "";
                             await prepareGoogleSignIn();
                             return;
                         }
@@ -564,14 +636,15 @@
                                 status: exchange.status,
                                 body: exchange.json,
                             });
+                            activeNonceToken = "";
                             await prepareGoogleSignIn();
                             return;
                         }
+                        activeNonceToken = "";
                         await refreshSession("signed_in");
                     } catch (error) {
                         showNotice("Unexpected error during Google Sign-In.");
                         setOutput({ error: "google_credential_exception", detail: String(error) });
-                    } finally {
                         activeNonceToken = "";
                         prepareGoogleSignIn().catch(() => {});
                     }
@@ -598,9 +671,13 @@
                     if (logoutButton) {
                         logoutButton.addEventListener("click", async () => {
                             clearNotice();
-                            await window.logout();
-                            showSignedOut();
-                            setOutput({ event: "signed_out" });
+                            try {
+                                await window.logout();
+                            } catch (error) {
+                                showNotice("Unable to sign out. Please retry.");
+                                setOutput({ error: "logout_failed", detail: String(error) });
+                                prepareGoogleSignIn().catch(() => {});
+                            }
                         });
                     }
                 }
@@ -608,30 +685,34 @@
                 if (headerHost) {
                     headerHost.addEventListener("mpr-ui:header:signout-click", () => {
                         clearNotice();
-                        window.logout()
-                            .then(() => {
-                                showSignedOut();
-                                setOutput({ event: "signed_out" });
-                                prepareGoogleSignIn().catch(() => {});
-                            })
-                            .catch(() => {});
+                        window.logout().catch((error) => {
+                            showNotice("Unable to sign out. Please retry.");
+                            setOutput({ error: "logout_failed", detail: String(error) });
+                        });
                     });
-                    headerHost.addEventListener("mpr-ui:auth:authenticated", () => {
-                        refreshSession("signed_in");
+                    headerHost.addEventListener("mpr-ui:auth:authenticated", (eventObject) => {
+                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
+                        if (detail.profile) {
+                            showSignedIn(detail.profile);
+                        } else {
+                            refreshSession("signed_in");
+                        }
                     });
                     headerHost.addEventListener("mpr-ui:auth:unauthenticated", () => {
                         showSignedOut();
-                        setOutput({ event: "signed_out" });
+                        prepareGoogleSignIn().catch(() => {});
                     });
                     headerHost.addEventListener("mpr-ui:auth:error", (eventObject) => {
                         const detail = eventObject && eventObject.detail ? eventObject.detail : {};
                         showNotice("Authentication error. Please try again.");
                         setOutput({ error: detail.code || "mpr-ui.auth.error", detail });
+                        prepareGoogleSignIn().catch(() => {});
                     });
                     headerHost.addEventListener("mpr-ui:header:error", (eventObject) => {
                         const detail = eventObject && eventObject.detail ? eventObject.detail : {};
                         showNotice("Google prompt failed. Please retry.");
                         setOutput({ error: detail.code || "mpr-ui.header.error", detail });
+                        prepareGoogleSignIn().catch(() => {});
                     });
                 }
 
@@ -639,6 +720,7 @@
                 prepareGoogleSignIn().catch(() => {});
                 refreshSession("hydrated");
             });
-        </script></script>
+        </script>
+
     </body>
 </html>
