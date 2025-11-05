@@ -420,7 +420,7 @@
         <script>
             (function () {
                 const config = window.__TAUTH_DEMO_CONFIG || {};
-                const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl.replace(/\\/+$/, "") : "";
+                const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl.replace(/\/+$/, "") : "";
                 const googleClientId = typeof config.googleClientId === "string" ? config.googleClientId : "";
 
                 const requestState = {
