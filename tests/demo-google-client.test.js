@@ -10,7 +10,7 @@ const HARDCODED_CLIENT_ID =
 test("demo loads dynamic config instead of hard-coding Google client ID", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes('<script defer src="/demo/config.js"></script>'),
+    html.includes('<script src="/demo/config.js"></script>'),
     "Expected demo to pull runtime configuration from the server",
   );
   assert.ok(
