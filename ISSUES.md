@@ -31,7 +31,19 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 00:45:49 tyemirov@computercat:~/Development/Research/TAuth [master] $ go run ./... --google_web_client_id "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
 Error: missing required configuration: google_web_client_id or jwt_signing_key
 ```
-- [x] [TA-301] Align `/api/me` with the documented profile contract — Merge-conflict resolution against `master` retained `/me` session middleware, restored validator caching, and updated tests to flush cached validators before assertions.
+- [x] [TA-303] Align `/api/me` with the documented profile contract — Merge-conflict resolution against `master` retained `/me` session middleware, restored validator caching, and updated tests to flush cached validators before assertions.
+
+- [x] [TA-304] Google sign in doesnt work, even though http://localhost:3000 and http://localhost:3000/auth/google/callback are allowed — Resolved by serving the demo Google client ID via `/demo/config.js` and loading `mpr-ui` through its global namespace so the CDN bundle no longer fails.
+```js
+Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:281:37
+Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:282:336
+Content-Security-Policy warnings 5
+[GSI_LOGGER]: The given origin is not allowed for the given client ID. m=credential_button_library:73:360
+Uncaught SyntaxError: The requested module 'https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module' doesn't provide an export named: 'mprFooter' demo:431:22
+[GSI_LOGGER]: The given origin is not allowed for the given client ID. client:73:360
+Opening multiple popups was blocked due to lack of user activation. client:242:240
+Storage access automatically granted for origin “https://accounts.google.com” on “http://localhost:3000”.
+```
 
 ## Maintenance (400–499)
 
@@ -163,5 +175,7 @@ jobs:
 - [x] [TA-406] Align changelog and issue log entries with merged work — Added TA-200–TA-405 summaries to `CHANGELOG.md`, confirmed matching merge commits, and documented that TA-302 currently enforces explicit origin lists (wildcard tightening remains unchanged).
 
 - [x] [TA-303] Accept hashed GIS nonce claim during `/auth/google` — Updated nonce verification to allow `base64url(sha256(nonce_token))`, added integration coverage for the hashed claim, refreshed README guidance, and confirmed other nonce mismatches still return `invalid_nonce`.
+
+
 
 ## Planning
