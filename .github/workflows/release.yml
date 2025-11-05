@@ -35,6 +35,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Ensure Buildx uses the docker-container driver (required for GHA cache)
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true           # makes `docker buildx` the default builder
+          driver: docker-container
+
       # Generates normalized (lowercased) image name and semver tags from v* refs
       - name: Docker metadata
         id: meta
