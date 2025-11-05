@@ -555,7 +555,7 @@
                     ensureNonce().catch(() => {});
                 }
 
-                function showSignedIn(profile, eventLabel) {
+                function showSignedIn(profile) {
                     const signedOut = document.querySelector('[data-panel="signed-out"]');
                     const signedIn = document.querySelector('[data-panel="signed-in"]');
                     if (signedOut) {
@@ -565,20 +565,7 @@
                         signedIn.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
-                    if (eventLabel) {
-                        setOutput({ event: eventLabel, profile });
-                    } else {
-                        setOutput({ state: "signed_in", profile });
-                    }
-                }
-
-                async function syncSession(eventLabel) {
-                    await window.initAuthClient({
-                        onAuthenticated: (profile) => {
-                            showSignedIn(profile, eventLabel);
-                        },
-                        onUnauthenticated: showSignedOut,
-                    });
+                    setOutput({ state: "signed_in", profile });
                 }
 
                 async function handleGoogleCredential(responseObject) {
@@ -613,7 +600,15 @@
                             showSignedOut();
                             return;
                         }
-                        await syncSession("signed_in");
+                        // Intentionally re-run initAuthClient so the shared client helpers hydrate
+                        // the newly minted session and emit the signed_in event for the demo log.
+                        await window.initAuthClient({
+                            onAuthenticated: (profile) => {
+                                showSignedIn(profile);
+                                setOutput({ event: "signed_in", profile });
+                            },
+                            onUnauthenticated: showSignedOut,
+                        });
                     } catch (error) {
                         setOutput({
                             error: "google_credential_exception",
@@ -626,7 +621,15 @@
                 }
 
                 async function hydrateSession() {
-                    await syncSession("hydrated");
+                    // Same wiring as the post-login flow; duplication keeps the demo's
+                    // event logging explicit for each state transition.
+                    await window.initAuthClient({
+                        onAuthenticated: (profile) => {
+                            showSignedIn(profile);
+                            setOutput({ event: "hydrated", profile });
+                        },
+                        onUnauthenticated: showSignedOut,
+                    });
                 }
 
                 function bindUiHandlers() {
