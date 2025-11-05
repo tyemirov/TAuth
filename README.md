@@ -78,6 +78,7 @@ async function prepareGoogleSignIn() {
     client_id: "your_web_client_id.apps.googleusercontent.com",
     callback: handleCredential,
     nonce: pendingNonce,
+    ux_mode: "popup",
   });
   google.accounts.id.prompt();
 }
@@ -96,6 +97,20 @@ async function exchangeGoogleCredential(idTokenFromGoogle) {
 ```
 
 The login flow is identical to a local setup—the only difference is that every call points at the hosted TAuth origin. Because cookies are scoped to `.mprlab.com`, the `app_session` cookie is now available to product routes on `https://gravity.mprlab.com` while remaining `HttpOnly`.
+
+### How to configure Google Identity Services for the popup flow
+
+1. **Load the GIS SDK** on any page that renders a sign-in button:
+
+   ```html
+   <script src="https://accounts.google.com/gsi/client" async defer></script>
+   ```
+
+2. **Authorise JavaScript origins** (not redirect URIs) in Google Cloud Console. Add both your product origin (e.g. `https://gravity.mprlab.com`) and the TAuth origin (e.g. `https://tauth.mprlab.com`). The popup flow never navigates the browser away from your page, so `/auth/google/callback` does not need to be registered.
+
+3. **Initialize GIS only after you have a nonce** (see `prepareGoogleSignIn` above). The nonce is echoed in the ID credential and TAuth rejects mismatches.
+
+4. **Post the credential to TAuth** while sending cookies: `fetch("https://tauth.mprlab.com/auth/google", { method: "POST", credentials: "include", … })`. The frontend keeps control of the UX; you should never redirect the browser to the TAuth domain.
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
