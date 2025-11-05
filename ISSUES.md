@@ -30,6 +30,9 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [ ] [TA-312] Link to REAMDE or architecture shall open in a new window.
 - [ ] [TA-313] Clicking on Maro Polo Research Lab produces an empty drop up. Populate it with all of the marco polo websites
 - [ ] [TA-314] Theme switches do not switch theme on the page. Use the provided theme bundles from mpr-ui.
+- [ ] [TA-315] Push demo styling into mpr-ui — Move the bespoke header/footer CSS and avatar chip markup currently embedded in `web/demo.html` into reusable styling hooks inside `tools/mpr-ui` so consumers only supply configuration; expose classes/tokens so the demo can drop its custom `<style>` block. Open a PR to mpr-ui
+- [ ] [TA-316] Centralize retry + API helpers in auth-client.js — Extract the `fetchWithRetry`, nonce polling, and notice/error plumbing from `web/demo.html` into `web/auth-client.js` so demos/apps call exported helpers instead of duplicating network robustness logic.
+- [ ] [TA-317] Extend mpr-ui auth header to own GIS button rendering — Teach `MPRUI.renderSiteHeader`/`createAuthHeader` to render and toggle the Google Identity button, swap it for the avatar on authentication, and surface callbacks for demos; the demo should just pass `googleClientId` and listen to events without wiring GIS directly.
 
 ## BugFixes (300–399)
 
