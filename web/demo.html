@@ -16,13 +16,12 @@
             integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
             crossorigin="anonymous"
         />
-        <script src="/demo/config.js"></script>
-        <script
-            src="https://accounts.google.com/gsi/client"
-            defer
-        ></script>
+                <script src="https://accounts.google.com/gsi/client" async defer></script>
         <script src="/static/auth-client.js"></script>
-        <script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js"></script>
+        <script
+            defer
+            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js"
+        ></script>
         <script
             defer
             src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
@@ -115,10 +114,48 @@
             .dropdown-menu {
                 min-width: 220px;
             }
+
+            .mpr-header__button.is-disabled {
+                opacity: 0.6;
+                pointer-events: none;
+            }
+
+            .google-signin-host {
+                display: inline-flex;
+                align-items: center;
+            }
+
+            .google-signin-host.is-disabled {
+                opacity: 0.6;
+                pointer-events: none;
+            }
+
+            .mpr-header__avatar {
+                width: 32px;
+                height: 32px;
+                border-radius: 999px;
+                background: rgba(59, 130, 246, 0.12);
+                color: #1d4ed8;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 600;
+                font-size: 0.8rem;
+                overflow: hidden;
+            }
+
+            .mpr-header__avatar img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+
         </style>
     </head>
-    <body class="landing-body d-flex flex-column min-vh-100 bg-body text-body" data-bs-theme="light">
-        <main class="flex-grow-1 py-5">
+    <body class="landing-body bg-body text-body" data-bs-theme="light">
+        <div class="d-flex flex-column min-vh-100">
+            <header id="siteHeader" class="container-lg py-3"></header>
+            <main class="flex-grow-1 py-5">
             <div class="container-lg">
                 <section class="text-center mb-5">
                     <span class="badge bg-primary-subtle text-primary-emphasis mb-3 px-3 py-2">
@@ -130,6 +167,7 @@
                         and inspect the session contract this service documents in the README.
                     </p>
                 </section>
+                <div id="demoNotice" class="alert alert-danger d-none" role="status"></div>
                 <div class="row g-4 align-items-start">
                     <section class="col-12 col-lg-6" data-panel="signed-out">
                         <div class="demo-card border-0 p-4 h-100">
@@ -137,13 +175,11 @@
                                 <div>
                                     <h2 class="h4 fw-semibold mb-2">Ready to sign in</h2>
                                     <p class="mb-0 demo-muted">
-                                        We fetch a nonce before launching Google Identity Services.
+                                        Use the header’s <strong>Sign in</strong> button to launch Google Identity Services.
                                     </p>
                                 </div>
-                                <div id="googleButtonHost" class="d-flex justify-content-center"></div>
-                                <div class="border-top"></div>
                                 <p class="mb-0 demo-muted">
-                                    After each attempt we rotate the nonce so replayed credentials are rejected.
+                                    TAuth issues a one-time nonce for every attempt so replayed credentials are rejected automatically.
                                 </p>
                             </div>
                         </div>
@@ -186,285 +222,252 @@
                     </section>
                 </div>
             </div>
-        </main>
-        <footer
-            id="landing-footer"
-            class="landing-footer border-top mt-auto py-2 fixed-bottom"
-            data-mpr-footer="root"
-            data-mpr-footer-config='{"elementId":"landing-footer","innerElementId":"landing-footer-inner","baseClass":"landing-footer border-top mt-auto py-2 fixed-bottom","innerClass":"container py-2","wrapperClass":"footer-layout w-100 d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3","brandWrapperClass":"footer-brand d-inline-flex align-items-center gap-2 text-body-secondary small","menuWrapperClass":"footer-menu dropup","prefixClass":"text-body-secondary fw-semibold","prefixText":"Built by","toggleButtonId":"landing-footer-toggle","toggleButtonClass":"btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary","toggleLabel":"Marco Polo Research Lab","menuClass":"dropdown-menu dropdown-menu-end shadow","menuItemClass":"dropdown-item","privacyLinkClass":"footer-privacy-link text-body-secondary text-decoration-none small","privacyLinkHref":"https://mprlab.com/privacy","privacyLinkLabel":"Privacy • Terms","themeToggle":{"enabled":true,"wrapperClass":"footer-theme-toggle form-check form-switch m-0","inputClass":"form-check-input","dataTheme":"light","inputId":"public-theme-toggle","ariaLabel":"Toggle theme"},"links":[{"label":"Marco Polo Research Lab","url":"https://mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Gravity Notes","url":"https://gravity.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"LoopAware","url":"https://loopaware.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Allergy Wheel","url":"https://allergy.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Social Threader","url":"https://threader.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"RSVP","url":"https://rsvp.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Countdown Calendar","url":"https://countdown.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"LLM Crossword","url":"https://llm-crossword.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Prompt Bubbles","url":"https://prompts.mprlab.com","rel":"noopener noreferrer","target":"_blank"},{"label":"Wallpapers","url":"https://wallpapers.mprlab.com","rel":"noopener noreferrer","target":"_blank"}]}'
-            x-data="mprFooter()"
-            x-init="init(JSON.parse($el.getAttribute('data-mpr-footer-config')))"
-        >
-            <div id="landing-footer-inner" class="container py-2" data-mpr-footer="inner">
-                <div
-                    class="footer-layout w-100 d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3"
-                    data-mpr-footer="layout"
-                >
-                    <a
-                        class="footer-privacy-link text-body-secondary text-decoration-none small"
-                        data-mpr-footer="privacy-link"
-                        href="https://mprlab.com/privacy"
-                    >
-                        Privacy • Terms
-                    </a>
-                    <div
-                        class="footer-brand d-inline-flex align-items-center gap-2 text-body-secondary small"
-                        data-mpr-footer="brand"
-                    >
-                        <div
-                            class="footer-theme-toggle form-check form-switch m-0"
-                            data-mpr-footer="theme-toggle"
-                            data-bs-theme="light"
-                        >
-                            <input
-                                class="form-check-input"
-                                type="checkbox"
-                                id="public-theme-toggle"
-                                aria-label="Toggle theme"
-                                data-mpr-footer="theme-toggle-input"
-                            />
-                        </div>
-                        <span class="text-body-secondary fw-semibold" data-mpr-footer="prefix">
-                            Built by
-                        </span>
-                        <div class="footer-menu dropup" data-mpr-footer="menu-wrapper">
-                            <button
-                                id="landing-footer-toggle"
-                                class="btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary"
-                                data-mpr-footer="toggle-button"
-                                type="button"
-                                data-bs-toggle="dropdown"
-                                aria-expanded="false"
-                            >
-                                Marco Polo Research Lab
-                            </button>
-                            <ul
-                                class="dropdown-menu dropdown-menu-end shadow"
-                                data-mpr-footer="menu"
-                                aria-labelledby="landing-footer-toggle"
-                            >
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Marco Polo Research Lab
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://gravity.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Gravity Notes
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://loopaware.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        LoopAware
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://allergy.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Allergy Wheel
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://threader.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Social Threader
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://rsvp.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        RSVP
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://countdown.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Countdown Calendar
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://llm-crossword.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        LLM Crossword
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://prompts.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Prompt Bubbles
-                                    </a>
-                                </li>
-                                <li>
-                                    <a
-                                        class="dropdown-item"
-                                        data-mpr-footer="menu-link"
-                                        href="https://wallpapers.mprlab.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Wallpapers
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </footer>
+            </main>
+            <footer id="landing-footer" class="mt-auto"></footer>
+        </div>
         <script>
-            (function () {
-                var publicThemeStorageKey = "loopaware_public_theme";
-                var landingThemeStorageKey = "loopaware_landing_theme";
-                var legacyThemeStorageKey = "landing_theme";
-                var themeToggleElement = null;
-                function applyPublicTheme(theme) {
-                    var normalizedTheme = theme === "light" ? "light" : "dark";
-                    document.body.setAttribute("data-bs-theme", normalizedTheme);
-                    document.documentElement.setAttribute("data-bs-theme", normalizedTheme);
-                    document.documentElement.dataset.theme = normalizedTheme;
-                    if (themeToggleElement) {
-                        themeToggleElement.checked = normalizedTheme === "dark";
-                    }
-                }
-                function loadPublicTheme() {
-                    var storedTheme = localStorage.getItem(publicThemeStorageKey);
-                    if (storedTheme === null) {
-                        var landingStoredTheme = localStorage.getItem(landingThemeStorageKey);
-                        if (landingStoredTheme === null) {
-                            var legacyStoredTheme = localStorage.getItem(legacyThemeStorageKey);
-                            if (legacyStoredTheme === "light" || legacyStoredTheme === "dark") {
-                                landingStoredTheme = legacyStoredTheme;
-                                localStorage.setItem(landingThemeStorageKey, landingStoredTheme);
-                            }
-                        }
-                        if (landingStoredTheme === "light" || landingStoredTheme === "dark") {
-                            storedTheme = landingStoredTheme;
-                            localStorage.setItem(publicThemeStorageKey, storedTheme);
-                        }
-                    }
-                    return storedTheme;
-                }
-                function persistPublicTheme(theme) {
-                    localStorage.setItem(publicThemeStorageKey, theme);
-                    localStorage.setItem(landingThemeStorageKey, theme);
-                }
-                function initializePublicTheme() {
-                    themeToggleElement = document.getElementById("public-theme-toggle");
-                    var storedTheme = loadPublicTheme();
-                    applyPublicTheme(storedTheme);
-                    if (themeToggleElement) {
-                        themeToggleElement.addEventListener("change", function (eventObject) {
-                            var nextTheme = eventObject.target.checked ? "dark" : "light";
-                            applyPublicTheme(nextTheme);
-                            persistPublicTheme(nextTheme);
-                        });
-                    }
-                }
-                initializePublicTheme();
-            })();
-        </script>
-        <script type="module">
-            import Alpine from "https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/module.esm.js";
-            window.Alpine = Alpine;
-            window.mprFooter = window.MPRUI && window.MPRUI.mprFooter;
-            Alpine.start();
-        </script>
-        <script>
-            (function () {
-                const config = window.__TAUTH_DEMO_CONFIG || {};
-                const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl.replace(/\/+$/, "") : "";
-                const googleClientId = typeof config.googleClientId === "string" ? config.googleClientId : "";
+            window.addEventListener("load", function () {
+                const TAUTH_BASE_URL = window.location.origin;
+                const GOOGLE_CLIENT_ID = "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com";
+                const MAX_GIS_WAIT_MS = 5000;
+                const RETRY_ATTEMPTS = 2;
 
-                const requestState = {
-                    noncePromise: null,
-                    preparedNonce: null,
-                    buttonRendered: false,
-                };
+                const headerHost = document.getElementById("siteHeader");
+                const footerHost = document.getElementById("landing-footer");
+                const noticeElement = document.getElementById("demoNotice");
+                const signedOutPanel = document.querySelector('[data-panel="signed-out"]');
+                const signedInPanel = document.querySelector('[data-panel="signed-in"]');
+                const activityOutput = document.getElementById("demoOutput");
 
-                function withBase(path) {
-                    if (!baseUrl) {
-                        return path;
+                const footerLinks = [
+                    { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
+                    { label: "Gravity Notes", href: "https://gravity.mprlab.com" },
+                    { label: "LoopAware", href: "https://loopaware.mprlab.com" },
+                    { label: "Allergy Wheel", href: "https://allergy.mprlab.com" },
+                    { label: "Social Threader", href: "https://threader.mprlab.com" },
+                    { label: "RSVP", href: "https://rsvp.mprlab.com" },
+                    { label: "Countdown Calendar", href: "https://countdown.mprlab.com" },
+                    { label: "LLM Crossword", href: "https://llm-crossword.mprlab.com" },
+                    { label: "Prompt Bubbles", href: "https://prompts.mprlab.com" },
+                    { label: "Wallpapers", href: "https://wallpapers.mprlab.com" },
+                ];
+
+                let headerRoot = null;
+                let headerSignInButton = null;
+                let headerGoogleHost = null;
+                let headerProfileContainer = null;
+                let headerProfileLabel = null;
+                let headerProfileName = null;
+                let headerProfileAvatar = null;
+                let headerSignOutButton = null;
+                let isAuthenticated = false;
+
+                if (headerHost) {
+                    MPRUI.renderSiteHeader(headerHost, {
+                        brand: {
+                            label: "TAuth Demo",
+                            href: "/demo",
+                        },
+                        navLinks: [
+                            { label: "README", href: "https://github.com/tyemirov/TAuth#readme" },
+                            { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
+                        ],
+                        signInLabel: "Sign in with Google",
+                        auth: {
+                            baseUrl: TAUTH_BASE_URL,
+                            loginPath: "/auth/google",
+                            logoutPath: "/auth/logout",
+                            noncePath: "/auth/nonce",
+                            googleClientId: GOOGLE_CLIENT_ID,
+                        },
+                    });
+                    headerRoot = headerHost.querySelector("header.mpr-header");
+                    headerSignInButton = headerHost.querySelector('[data-mpr-header="sign-in-button"]');
+                    headerProfileContainer = headerHost.querySelector('[data-mpr-header="profile"]');
+                    headerProfileLabel = headerHost.querySelector('[data-mpr-header="profile-label"]');
+                    headerProfileName = headerHost.querySelector('[data-mpr-header="profile-name"]');
+                    headerSignOutButton = headerHost.querySelector('[data-mpr-header="sign-out-button"]');
+                    if (headerSignInButton) {
+                        headerGoogleHost = document.createElement("div");
+                        headerGoogleHost.id = "googleHeaderButton";
+                        headerGoogleHost.className = "google-signin-host";
+                        headerSignInButton.insertAdjacentElement("afterend", headerGoogleHost);
+                        headerSignInButton.classList.add("d-none");
+                        headerSignInButton.setAttribute("aria-hidden", "true");
                     }
-                    if (!path || /^https?:\/\//i.test(path)) {
-                        return path || baseUrl;
+                    if (headerProfileContainer && headerSignOutButton) {
+                        headerProfileAvatar = document.createElement("span");
+                        headerProfileAvatar.className = "mpr-header__avatar me-2";
+                        headerProfileContainer.insertBefore(headerProfileAvatar, headerSignOutButton);
                     }
-                    if (path.startsWith("/")) {
-                        return `${baseUrl}${path}`;
-                    }
-                    return `${baseUrl}/${path}`;
                 }
 
-                function fetchJSON(url, options) {
-                    return fetch(withBase(url), {
-                        credentials: "include",
-                        headers: { "Content-Type": "application/json", ...(options && options.headers) },
-                        ...options,
-                    }).then(async (response) => {
-                        const text = await response.text();
-                        let json;
-                        try {
-                            json = JSON.parse(text);
-                        } catch {
-                            json = { raw: text };
-                        }
-                        return { ok: response.ok, status: response.status, json };
+                if (footerHost) {
+                    MPRUI.renderFooter(footerHost, {
+                        baseClass: "landing-footer border-top py-3",
+                        innerClass: "container d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3",
+                        brandWrapperClass: "d-inline-flex align-items-center gap-2 text-body-secondary small",
+                        menuWrapperClass: "dropup",
+                        prefixClass: "text-body-secondary fw-semibold",
+                        prefixText: "Built by",
+                        toggleButtonClass: "btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
+                        toggleLabel: "Marco Polo Research Lab",
+                        menuClass: "dropdown-menu dropdown-menu-end shadow",
+                        menuItemClass: "dropdown-item",
+                        privacyLinkClass: "text-body-secondary text-decoration-none small",
+                        privacyLinkHref: "https://mprlab.com/privacy",
+                        privacyLinkLabel: "Privacy • Terms",
+                        themeToggle: {
+                            enabled: true,
+                            wrapperClass: "form-check form-switch m-0",
+                            inputClass: "form-check-input",
+                            inputId: "public-theme-toggle",
+                            ariaLabel: "Toggle theme",
+                        },
+                        links: footerLinks,
                     });
                 }
 
+                function withBase(path) {
+                    if (!path) {
+                        return TAUTH_BASE_URL;
+                    }
+                    if (/^https?:\/\//i.test(path)) {
+                        return path;
+                    }
+                    if (path.startsWith("/")) {
+                        return `${TAUTH_BASE_URL}${path}`;
+                    }
+                    return `${TAUTH_BASE_URL}/${path}`;
+                }
+
                 function setOutput(payload) {
-                    const output = document.getElementById("demoOutput");
-                    if (output) {
-                        output.textContent = JSON.stringify(payload, null, 2);
+                    if (activityOutput) {
+                        activityOutput.textContent = JSON.stringify(payload, null, 2);
                     }
                 }
+
+                function clearNotice() {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.classList.add("d-none");
+                    noticeElement.textContent = "";
+                }
+
+                function showNotice(message) {
+                    if (!noticeElement) {
+                        return;
+                    }
+                    noticeElement.textContent = message;
+                    noticeElement.classList.remove("d-none");
+                }
+
+                function enableSignInButton(isEnabled) {
+                    if (headerGoogleHost) {
+                        headerGoogleHost.classList.toggle("is-disabled", !isEnabled);
+                    }
+                }
+
+                function toggleGoogleButton(isVisible) {
+                    if (headerGoogleHost) {
+                        headerGoogleHost.classList.toggle("d-none", !isVisible);
+                    }
+                }
+
+                function updateHeaderProfile(profile) {
+                    if (!headerRoot) {
+                        return;
+                    }
+                    if (!profile) {
+                        headerRoot.classList.remove("mpr-header--authenticated");
+                        if (headerProfileName) {
+                            headerProfileName.textContent = "";
+                        }
+                        if (headerProfileAvatar) {
+                            headerProfileAvatar.innerHTML = "";
+                        }
+                        return;
+                    }
+                    headerRoot.classList.add("mpr-header--authenticated");
+                    if (headerProfileLabel) {
+                        headerProfileLabel.textContent = "Signed in as";
+                    }
+                    const displayName =
+                        profile.display ||
+                        profile.display_name ||
+                        profile.user_email ||
+                        profile.user_id ||
+                        "Authenticated user";
+                    if (headerProfileName) {
+                        headerProfileName.textContent = displayName;
+                    }
+                    if (headerProfileAvatar) {
+                        headerProfileAvatar.innerHTML = "";
+                        if (profile.avatar_url) {
+                            const image = document.createElement("img");
+                            image.src = profile.avatar_url;
+                            image.alt = `${displayName} avatar`;
+                            headerProfileAvatar.appendChild(image);
+                        } else {
+                            const initials = displayName
+                                .split(" ")
+                                .map((word) => word.charAt(0))
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase() || "?";
+                            headerProfileAvatar.textContent = initials;
+                        }
+                    }
+                }
+
+                async function fetchWithRetry(url, options) {
+                    let attempt = 0;
+                    let lastError;
+                    while (attempt <= RETRY_ATTEMPTS) {
+                        try {
+                            const response = await fetch(withBase(url), {
+                                credentials: "include",
+                                headers: { "Content-Type": "application/json", ...(options && options.headers) },
+                                ...options,
+                            });
+                            return {
+                                ok: response.ok,
+                                status: response.status,
+                                json: await response.json().catch(() => ({})),
+                            };
+                        } catch (error) {
+                            lastError = error;
+                            attempt += 1;
+                        }
+                    }
+                    throw lastError || new Error("network_error");
+                }
+
+                let googleReadyResolve;
+                let googleReadyReject;
+                const googleReadyPromise = new Promise((resolve, reject) => {
+                    googleReadyResolve = resolve;
+                    googleReadyReject = reject;
+                });
+
+                const googleReadyTimeout = setTimeout(() => {
+                    googleReadyReject(new Error("google_identity_services_timeout"));
+                }, MAX_GIS_WAIT_MS);
+
+                (function waitForGIS() {
+                    const accounts = window.google && window.google.accounts && window.google.accounts.id;
+                    if (accounts) {
+                        clearTimeout(googleReadyTimeout);
+                        googleReadyResolve(accounts);
+                        return;
+                    }
+                    window.requestAnimationFrame(waitForGIS);
+                })();
+
+                googleReadyPromise.catch(() => {
+                    showNotice("Google Identity Services failed to load. Check content blockers or network settings.");
+                });
 
                 function renderProfileSummary(profile) {
                     const target = document.getElementById("profileSummary");
@@ -508,180 +511,143 @@
                 }
 
                 function showSignedOut() {
-                    const signedOut = document.querySelector('[data-panel="signed-out"]');
-                    const signedIn = document.querySelector('[data-panel="signed-in"]');
-                    if (signedOut) {
-                        signedOut.classList.remove("d-none");
+                    if (signedOutPanel) {
+                        signedOutPanel.classList.remove("d-none");
                     }
-                    if (signedIn) {
-                        signedIn.classList.add("d-none");
+                    if (signedInPanel) {
+                        signedInPanel.classList.add("d-none");
                     }
                     renderProfileSummary(null);
-                    setOutput({ state: "signed_out" });
-                    warmNonce().catch(() => {});
+                    updateHeaderProfile(null);
+                    isAuthenticated = false;
+                    enableSignInButton(false);
+                    toggleGoogleButton(true);
                 }
 
                 function showSignedIn(profile) {
-                    const signedOut = document.querySelector('[data-panel="signed-out"]');
-                    const signedIn = document.querySelector('[data-panel="signed-in"]');
-                    if (signedOut) {
-                        signedOut.classList.add("d-none");
+                    if (signedOutPanel) {
+                        signedOutPanel.classList.add("d-none");
                     }
-                    if (signedIn) {
-                        signedIn.classList.remove("d-none");
+                    if (signedInPanel) {
+                        signedInPanel.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
+                    updateHeaderProfile(profile);
+                    isAuthenticated = true;
+                    enableSignInButton(false);
+                    toggleGoogleButton(false);
                 }
 
-                function getGoogleAccounts() {
-                    const google = window.google;
-                    return google && google.accounts && google.accounts.id ? google.accounts.id : null;
-                }
+                let activeNonceToken = "";
 
-                const googleReadyPromise = new Promise((resolve) => {
-                    function checkReady() {
-                        const accounts = getGoogleAccounts();
-                        if (accounts) {
-                            resolve(accounts);
-                        } else {
-                            window.requestAnimationFrame(checkReady);
+                async function prepareGoogleSignIn() {
+                    enableSignInButton(false);
+                    try {
+                        const accounts = await googleReadyPromise;
+                        const nonceResponse = await fetchWithRetry("/auth/nonce", {
+                            method: "POST",
+                            body: "{}",
+                        });
+                        if (!nonceResponse.ok || !nonceResponse.json || !nonceResponse.json.nonce) {
+                            throw new Error("nonce request failed");
                         }
-                    }
-                    checkReady();
-                });
-
-                async function configureGoogleIdentity(nonceToken) {
-                    if (!googleClientId) {
-                        setOutput({ error: "missing_google_client_id" });
-                        return;
-                    }
-                    const accounts = await googleReadyPromise;
-                    accounts.initialize({
-                        client_id: googleClientId,
-                        callback: handleGoogleCredential,
-                        nonce: nonceToken,
-                        ux_mode: "popup",
-                    });
-                    if (!requestState.buttonRendered) {
-                        const host = document.getElementById("googleButtonHost");
-                        if (host) {
-                            host.innerHTML = "";
-                            accounts.renderButton(host, {
-                                type: "standard",
+                        activeNonceToken = String(nonceResponse.json.nonce);
+                        accounts.initialize({
+                            client_id: GOOGLE_CLIENT_ID,
+                            callback: handleGoogleCredential,
+                            nonce: activeNonceToken,
+                            ux_mode: "popup",
+                        });
+                        if (headerGoogleHost) {
+                            headerGoogleHost.innerHTML = "";
+                            accounts.renderButton(headerGoogleHost, {
                                 theme: "outline",
                                 size: "large",
                                 text: "signin_with",
                                 shape: "rectangular",
                                 logo_alignment: "left",
                             });
-                            requestState.buttonRendered = true;
                         }
-                    }
-                }
-
-                async function ensureNonce() {
-                    if (requestState.preparedNonce) {
-                        return requestState.preparedNonce;
-                    }
-                    if (!requestState.noncePromise) {
-                        requestState.noncePromise = fetchJSON("/auth/nonce", {
-                            method: "POST",
-                            body: "{}",
-                        })
-                            .then(({ ok, json }) => {
-                                if (!ok || !json || !json.nonce) {
-                                    throw new Error("auth_nonce_missing");
-                                }
-                                return String(json.nonce);
-                            })
-                            .then(async (nonceValue) => {
-                                requestState.preparedNonce = nonceValue;
-                                await configureGoogleIdentity(nonceValue);
-                                return nonceValue;
-                            })
-                            .finally(() => {
-                                requestState.noncePromise = null;
-                            });
-                    }
-                    return requestState.noncePromise;
-                }
-
-                async function warmNonce() {
-                    try {
-                        await ensureNonce();
+                        if (isAuthenticated) {
+                            toggleGoogleButton(false);
+                            enableSignInButton(false);
+                        } else {
+                            toggleGoogleButton(true);
+                            enableSignInButton(true);
+                        }
                     } catch (error) {
-                        setOutput({ error: "auth_nonce_failed", detail: String(error) });
-                        throw error;
+                        showNotice("Unable to prepare Google Sign-In. Please retry.");
+                        setOutput({ error: "prepare_google_failed", detail: String(error) });
+                        activeNonceToken = "";
+                        toggleGoogleButton(true);
+                        enableSignInButton(false);
                     }
                 }
 
-                function consumeNonce() {
-                    const value = requestState.preparedNonce;
-                    requestState.preparedNonce = null;
-                    return value;
+                async function refreshSession(eventLabel) {
+                    try {
+                        await window.initAuthClient({
+                            baseUrl: TAUTH_BASE_URL,
+                            onAuthenticated(profile) {
+                                clearNotice();
+                                showSignedIn(profile);
+                                setOutput(eventLabel ? { event: eventLabel, profile } : { state: "signed_in", profile });
+                            },
+                            onUnauthenticated() {
+                                showSignedOut();
+                                setOutput({ state: "signed_out" });
+                                prepareGoogleSignIn().catch(() => {});
+                            },
+                        });
+                    } catch (error) {
+                        showSignedOut();
+                        showNotice("Unable to hydrate the session. Please sign in again.");
+                        setOutput({ error: "auth_client_init_failed", detail: String(error) });
+                        prepareGoogleSignIn().catch(() => {});
+                    }
                 }
 
                 async function handleGoogleCredential(responseObject) {
                     try {
-                        const credential = responseObject && responseObject.credential;
-                        if (!credential) {
-                            setOutput({
-                                error: "missing_google_id_token",
-                                payload: responseObject,
-                            });
-                            showSignedOut();
+                        if (!responseObject || !responseObject.credential) {
+                            showNotice("Google did not return a credential. Please try again.");
+                            setOutput({ error: "missing_google_credential", payload: responseObject });
+                            activeNonceToken = "";
+                            await prepareGoogleSignIn();
                             return;
                         }
-                        const nonceToken = consumeNonce();
-                        if (!nonceToken) {
-                            setOutput({ error: "auth_nonce_missing" });
-                            showSignedOut();
+                        if (!activeNonceToken) {
+                            showNotice("Sign-in nonce expired. Preparing a new attempt.");
+                            activeNonceToken = "";
+                            await prepareGoogleSignIn();
                             return;
                         }
-                        const { ok, status, json } = await fetchJSON("/auth/google", {
+                        const exchange = await fetchWithRetry("/auth/google", {
                             method: "POST",
                             body: JSON.stringify({
-                                google_id_token: credential,
-                                nonce_token: nonceToken,
+                                google_id_token: responseObject.credential,
+                                nonce_token: activeNonceToken,
                             }),
                         });
-                        if (!ok) {
+                        if (!exchange.ok) {
+                            showNotice("Authentication failed. Check the log for details.");
                             setOutput({
                                 error: "auth_google_failed",
-                                status,
-                                body: json,
+                                status: exchange.status,
+                                body: exchange.json,
                             });
-                            showSignedOut();
+                            activeNonceToken = "";
+                            await prepareGoogleSignIn();
                             return;
                         }
-                        await window.initAuthClient({
-                            baseUrl: baseUrl || undefined,
-                            onAuthenticated: (profile) => {
-                                showSignedIn(profile);
-                                setOutput({ event: "signed_in", profile });
-                            },
-                            onUnauthenticated: showSignedOut,
-                        });
+                        activeNonceToken = "";
+                        await refreshSession("signed_in");
                     } catch (error) {
-                        setOutput({
-                            error: "google_credential_exception",
-                            detail: String(error),
-                        });
-                        showSignedOut();
-                    } finally {
-                        warmNonce().catch(() => {});
+                        showNotice("Unexpected error during Google Sign-In.");
+                        setOutput({ error: "google_credential_exception", detail: String(error) });
+                        activeNonceToken = "";
+                        prepareGoogleSignIn().catch(() => {});
                     }
-                }
-
-                async function hydrateSession() {
-                    await window.initAuthClient({
-                        baseUrl: baseUrl || undefined,
-                        onAuthenticated: (profile) => {
-                            showSignedIn(profile);
-                            setOutput({ event: "hydrated", profile });
-                        },
-                        onUnauthenticated: showSignedOut,
-                    });
                 }
 
                 function bindUiHandlers() {
@@ -697,30 +663,64 @@
                                     showSignedOut();
                                 }
                             } catch (error) {
+                                showNotice("Unable to reach /api/me. Check the console for details.");
                                 setOutput({ error: "api_me_failed", detail: String(error) });
                             }
                         });
                     }
                     if (logoutButton) {
                         logoutButton.addEventListener("click", async () => {
-                            await window.logout();
-                            showSignedOut();
+                            clearNotice();
+                            try {
+                                await window.logout();
+                            } catch (error) {
+                                showNotice("Unable to sign out. Please retry.");
+                                setOutput({ error: "logout_failed", detail: String(error) });
+                                prepareGoogleSignIn().catch(() => {});
+                            }
                         });
                     }
                 }
 
-                function initialiseDemo() {
-                    warmNonce().catch(() => {});
-                    bindUiHandlers();
-                    hydrateSession().catch((error) => {
-                        console.error("Session hydrate failed:", error);
+                if (headerHost) {
+                    headerHost.addEventListener("mpr-ui:header:signout-click", () => {
+                        clearNotice();
+                        window.logout().catch((error) => {
+                            showNotice("Unable to sign out. Please retry.");
+                            setOutput({ error: "logout_failed", detail: String(error) });
+                        });
+                    });
+                    headerHost.addEventListener("mpr-ui:auth:authenticated", (eventObject) => {
+                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
+                        if (detail.profile) {
+                            showSignedIn(detail.profile);
+                        } else {
+                            refreshSession("signed_in");
+                        }
+                    });
+                    headerHost.addEventListener("mpr-ui:auth:unauthenticated", () => {
                         showSignedOut();
+                        prepareGoogleSignIn().catch(() => {});
+                    });
+                    headerHost.addEventListener("mpr-ui:auth:error", (eventObject) => {
+                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
+                        showNotice("Authentication error. Please try again.");
+                        setOutput({ error: detail.code || "mpr-ui.auth.error", detail });
+                        prepareGoogleSignIn().catch(() => {});
+                    });
+                    headerHost.addEventListener("mpr-ui:header:error", (eventObject) => {
+                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
+                        showNotice("Google prompt failed. Please retry.");
+                        setOutput({ error: detail.code || "mpr-ui.header.error", detail });
+                        prepareGoogleSignIn().catch(() => {});
                     });
                 }
 
-                window.addEventListener("DOMContentLoaded", initialiseDemo);
-                window.onGoogleCredential = handleGoogleCredential;
-            })();
+                bindUiHandlers();
+                prepareGoogleSignIn().catch(() => {});
+                refreshSession("hydrated");
+            });
         </script>
+
     </body>
 </html>

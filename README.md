@@ -126,6 +126,8 @@ The login flow is identical to a local setup—the only difference is that every
 - Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
 - Call `/api/me` and verify it returns the signed-in profile.
 
+> **Tip:** The demo falls back to a public sample client ID when `APP_GOOGLE_WEB_CLIENT_ID` is not set. Replace it with your own Google OAuth Web client in production.
+
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
 Successful exchanges populate `/me` with a rich profile:

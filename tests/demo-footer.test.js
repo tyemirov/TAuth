@@ -9,36 +9,24 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
     html.includes(
-      '<script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js"></script>',
+      'src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js"',
     ),
-    "Expected demo to load the mpr-ui footer bundle via CDN",
+    "Expected demo to load the mpr-ui bundle via CDN",
   );
   assert.ok(
-    html.includes("window.mprFooter = window.MPRUI && window.MPRUI.mprFooter;"),
-    "Expected demo to expose the mprFooter Alpine factory from the global namespace",
+    html.includes("MPRUI.renderFooter") && html.includes("MPRUI.renderSiteHeader"),
+    "Expected demo to configure both the mpr-ui footer and site header",
   );
   assert.ok(
-    html.includes('data-mpr-footer-config='),
-    "Expected footer markup to embed mpr-footer configuration JSON",
+    html.includes('prefixText: "Built by"') && html.includes('"Marco Polo Research Lab"'),
+    "Expected footer configuration to include Built by Marco Polo Research Lab copy",
   );
   assert.ok(
-    html.includes('Built by') && html.includes('Marco Polo Research Lab'),
-    "Expected footer to include the Built by Marco Polo Research Lab copy",
+    html.includes('inputId: "public-theme-toggle"'),
+    "Expected footer theme toggle to expose the public theme toggle input",
   );
   assert.ok(
-    html.includes('footer-menu dropup'),
-    "Expected footer menu wrapper to declare the dropup styling",
-  );
-  assert.ok(
-    html.includes('footer-theme-toggle form-check form-switch m-0'),
-    "Expected footer theme toggle to reuse the LoopAware form-switch styling",
-  );
-  assert.ok(
-    html.includes('id="public-theme-toggle"'),
-    "Expected footer theme toggle input id to match public theme storage wiring",
-  );
-  assert.ok(
-    html.includes('href="https://mprlab.com"'),
+    html.includes('href: "https://mprlab.com"'),
     "Expected footer link catalogue to include the LoopAware product list",
   );
 });

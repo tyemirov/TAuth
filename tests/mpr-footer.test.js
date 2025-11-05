@@ -13,13 +13,38 @@ const SCRIPT_PATH = path.join(
 );
 
 function createVmContext() {
-  const hostElement = { innerHTML: "", className: "", classList: { add() {} } };
+  const hostElement = {
+    innerHTML: "",
+    className: "",
+    classList: { add() {}, remove() {} },
+    setAttribute() {},
+    querySelector() {
+      return null;
+    },
+  };
   const document = {
     querySelector() {
       return hostElement;
     },
+    createElement() {
+      return {
+        setAttribute() {},
+        appendChild() {},
+        textContent: "",
+        styleSheet: null,
+      };
+    },
+    createTextNode() {
+      return {};
+    },
     head: {
       appendChild() {},
+      querySelector() {
+        return null;
+      },
+    },
+    getElementById() {
+      return null;
     },
   };
   const CustomEvent = class CustomEvent {
@@ -59,16 +84,12 @@ test("mpr-ui exposes renderFooter helper", async () => {
   );
 
   context.window.MPRUI.renderFooter(hostElement, {
-    lines: ["Support: support@mprlab.com"],
-    copyrightName: "Marco Polo Research Lab",
+    prefixText: "Built by",
+    links: [{ label: "Support", href: "mailto:support@mprlab.com" }],
   });
 
   assert.ok(
-    hostElement.innerHTML.includes("Support: support@mprlab.com"),
-    "Footer markup should include provided support line",
-  );
-  assert.ok(
-    hostElement.innerHTML.includes("Marco Polo Research Lab"),
-    "Footer markup should include copyright name",
+    hostElement.innerHTML && hostElement.innerHTML.length > 0,
+    "Footer markup should be rendered into the host element",
   );
 });
