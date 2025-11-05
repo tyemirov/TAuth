@@ -140,23 +140,7 @@
                                         We fetch a nonce before launching Google Identity Services.
                                     </p>
                                 </div>
-                                <div
-                                    id="g_id_onload"
-                                    data-client_id=""
-                                    data-context="signin"
-                                    data-ux_mode="popup"
-                                    data-callback="onGoogleCredential"
-                                    data-auto_select="false"
-                                ></div>
-                                <div
-                                    class="g_id_signin"
-                                    data-type="standard"
-                                    data-shape="rectangular"
-                                    data-theme="outline"
-                                    data-text="signin_with"
-                                    data-size="large"
-                                    data-logo_alignment="left"
-                                ></div>
+                                <div id="googleButtonHost" class="d-flex justify-content-center"></div>
                                 <div class="border-top"></div>
                                 <p class="mb-0 demo-muted">
                                     After each attempt we rotate the nonce so replayed credentials are rejected.
@@ -435,27 +419,76 @@
         </script>
         <script>
             (function () {
+                const demoConfig = window.__TAUTH_DEMO_CONFIG || {};
+                const demoGoogleClientId =
+                    typeof demoConfig.googleClientId === "string" ? demoConfig.googleClientId : "";
+
                 const requestState = {
                     noncePromise: null,
                     preparedNonce: null,
+                    buttonRendered: false,
                 };
+
+                function getGoogleAccounts() {
+                    return window.google && window.google.accounts && window.google.accounts.id
+                        ? window.google.accounts.id
+                        : null;
+                }
+
+                function renderGoogleButton() {
+                    if (requestState.buttonRendered) {
+                        return;
+                    }
+                    const googleAccounts = getGoogleAccounts();
+                    const host = document.getElementById("googleButtonHost");
+                    if (!googleAccounts || !host) {
+                        return;
+                    }
+                    host.innerHTML = "";
+                    googleAccounts.renderButton(host, {
+                        type: "standard",
+                        theme: "outline",
+                        size: "large",
+                        text: "signin_with",
+                        shape: "rectangular",
+                        logo_alignment: "left",
+                    });
+                    requestState.buttonRendered = true;
+                }
+
+                function configureGoogleClient(nonceToken) {
+                    if (!demoGoogleClientId) {
+                        return;
+                    }
+                    const googleAccounts = getGoogleAccounts();
+                    if (!googleAccounts) {
+                        window.setTimeout(() => configureGoogleClient(nonceToken), 50);
+                        return;
+                    }
+                    googleAccounts.initialize({
+                        client_id: demoGoogleClientId,
+                        callback: handleGoogleCredential,
+                        nonce: nonceToken,
+                        ux_mode: "popup",
+                    });
+                    renderGoogleButton();
+                }
 
                 function fetchJSON(url, options) {
                     return fetch(url, {
                         credentials: "include",
                         headers: { "Content-Type": "application/json", ...(options && options.headers) },
                         ...options,
-                    })
-                        .then(async (response) => {
-                            const text = await response.text();
-                            let json;
-                            try {
-                                json = JSON.parse(text);
-                            } catch {
-                                json = { raw: text };
-                            }
-                            return { ok: response.ok, status: response.status, json };
-                        });
+                    }).then(async (response) => {
+                        const text = await response.text();
+                        let json;
+                        try {
+                            json = JSON.parse(text);
+                        } catch {
+                            json = { raw: text };
+                        }
+                        return { ok: response.ok, status: response.status, json };
+                    });
                 }
 
                 async function ensureNonce() {
@@ -475,10 +508,7 @@
                             })
                             .then((nonceValue) => {
                                 requestState.preparedNonce = nonceValue;
-                                const gisRoot = document.getElementById("g_id_onload");
-                                if (gisRoot) {
-                                    gisRoot.setAttribute("data-nonce", nonceValue);
-                                }
+                                configureGoogleClient(nonceValue);
                                 return nonceValue;
                             })
                             .finally(() => {
@@ -486,6 +516,13 @@
                             });
                     }
                     return requestState.noncePromise;
+                }
+
+                function warmNonce() {
+                    return ensureNonce().catch((error) => {
+                        setOutput({ error: "auth_nonce_failed", detail: String(error) });
+                        return null;
+                    });
                 }
 
                 function consumeNonce() {
@@ -501,33 +538,34 @@
                     }
                 }
 
-            function renderProfileSummary(profile) {
-                const target = document.getElementById("profileSummary");
-                if (!target) {
-                    return;
-                }
-                if (!profile) {
-                    target.innerHTML = "";
-                    return;
-                }
-                const displayName =
-                    profile.display ||
-                    profile.display_name ||
-                    profile.user_email ||
-                    profile.user_id ||
-                    "Authenticated user";
-                const userEmail = profile.user_email || "Email unavailable";
-                const userId = profile.user_id || profile.id || "unknown";
-                const initials = displayName
-                    .split(" ")
-                    .map((word) => word.charAt(0))
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase() || "?";
-                const avatarMarkup = profile.avatar_url
-                    ? `<img src="${profile.avatar_url}" alt="User avatar" class="rounded-circle img-fluid" />`
-                    : `<span class="fs-4 fw-semibold">${initials}</span>`;
-                target.innerHTML = `
+                function renderProfileSummary(profile) {
+                    const target = document.getElementById("profileSummary");
+                    if (!target) {
+                        return;
+                    }
+                    if (!profile) {
+                        target.innerHTML = "";
+                        return;
+                    }
+                    const displayName =
+                        profile.display ||
+                        profile.display_name ||
+                        profile.user_email ||
+                        profile.user_id ||
+                        "Authenticated user";
+                    const userEmail = profile.user_email || "Email unavailable";
+                    const userId = profile.user_id || profile.id || "unknown";
+                    const initials =
+                        displayName
+                            .split(" ")
+                            .map((word) => word.charAt(0))
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase() || "?";
+                    const avatarMarkup = profile.avatar_url
+                        ? `<img src="${profile.avatar_url}" alt="User avatar" class="rounded-circle img-fluid" />`
+                        : `<span class="fs-4 fw-semibold">${initials}</span>`;
+                    target.innerHTML = `
                     <div class="d-flex align-items-center gap-3">
                         <span class="rounded-circle bg-primary-subtle text-primary-emphasis d-inline-flex justify-content-center align-items-center" style="width:64px;height:64px;">
                             ${avatarMarkup}
@@ -539,7 +577,7 @@
                         </div>
                     </div>
                 `;
-            }
+                }
 
                 function showSignedOut() {
                     const signedOut = document.querySelector('[data-panel="signed-out"]');
@@ -552,7 +590,7 @@
                     }
                     renderProfileSummary(null);
                     setOutput({ state: "signed_out" });
-                    ensureNonce().catch(() => {});
+                    warmNonce();
                 }
 
                 function showSignedIn(profile) {
@@ -565,7 +603,6 @@
                         signedIn.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
-                    setOutput({ state: "signed_in", profile });
                 }
 
                 async function handleGoogleCredential(responseObject) {
@@ -576,6 +613,7 @@
                                 error: "missing_google_id_token",
                                 payload: responseObject,
                             });
+                            showSignedOut();
                             return;
                         }
                         const nonceToken = consumeNonce();
@@ -614,7 +652,7 @@
                         });
                         showSignedOut();
                     } finally {
-                        ensureNonce().catch(() => {});
+                        warmNonce();
                     }
                 }
 
@@ -654,7 +692,7 @@
                 }
 
                 function initialiseDemo() {
-                    ensureNonce().catch(() => {});
+                    warmNonce();
                     bindUiHandlers();
                     hydrateSession().catch((error) => {
                         console.error("Session hydrate failed:", error);

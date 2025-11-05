@@ -56,6 +56,8 @@ Host the binary behind TLS (or terminate TLS at your load balancer) so responses
     }
   });
 </script>
+
+<div id="googleSignIn"></div>
 ```
 
 ### 4. Prepare and exchange Google credentials across origins
@@ -79,6 +81,11 @@ async function prepareGoogleSignIn() {
     callback: handleCredential,
     nonce: pendingNonce,
     ux_mode: "popup",
+  });
+  google.accounts.id.renderButton(document.getElementById("googleSignIn"), {
+    theme: "outline",
+    size: "large",
+    text: "signin_with",
   });
   google.accounts.id.prompt();
 }
@@ -111,6 +118,8 @@ The login flow is identical to a local setup—the only difference is that every
 3. **Initialize GIS only after you have a nonce** (see `prepareGoogleSignIn` above). The nonce is echoed in the ID credential and TAuth rejects mismatches.
 
 4. **Post the credential to TAuth** while sending cookies: `fetch("https://tauth.mprlab.com/auth/google", { method: "POST", credentials: "include", … })`. The frontend keeps control of the UX; you should never redirect the browser to the TAuth domain.
+
+The example above renders the Google button into `#googleSignIn`; the demo app mirrors the same approach (`web/demo.html`).
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 

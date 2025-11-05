@@ -23,6 +23,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-210] Add proper styling for the footer, including theme switching to the demo. Use styling from @tools/loopaware for inspiration — Reauthored `web/demo.html` from scratch with LoopAware’s footer contract, reused the exact Bootstrap 5.3 + Bootstrap Icons stack, embedded the public theme script, and strengthened Node coverage for theme persistence and dropup behaviour.
 - [x] [TA-211] Update README to document remote TAuth deployment — Documented hosted deployment steps, cookie scoping, CORS settings, and cross-origin front-end samples for `https://tauth.mprlab.com` serving `https://gravity.mprlab.com`.
 - [x] [TA-308] Document GIS popup integration — Clarified GIS SDK loading, origin authorization, nonce initialization, and credential exchange steps for remote TAuth deployments.
+- [x] [TA-309] Clean up GIS button initialization — Replaced the inline Google button markup with programmatic `renderButton` usage, ensured nonce-driven `initialize` calls, and refreshed tests verifying the popup flow.
 
 ## BugFixes (300–399)
 
