@@ -565,7 +565,24 @@
                         signedIn.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
-                    setOutput({ state: "signed_in", profile });
+                }
+
+                function logSignedIn(profile, eventLabel) {
+                    const payload = { state: "signed_in", profile };
+                    if (eventLabel) {
+                        payload.event = eventLabel;
+                    }
+                    setOutput(payload);
+                }
+
+                async function runAuthClient(eventLabel) {
+                    await window.initAuthClient({
+                        onAuthenticated: (profile) => {
+                            showSignedIn(profile);
+                            logSignedIn(profile, eventLabel);
+                        },
+                        onUnauthenticated: showSignedOut,
+                    });
                 }
 
                 async function handleGoogleCredential(responseObject) {
@@ -600,15 +617,7 @@
                             showSignedOut();
                             return;
                         }
-                        // Intentionally re-run initAuthClient so the shared client helpers hydrate
-                        // the newly minted session and emit the signed_in event for the demo log.
-                        await window.initAuthClient({
-                            onAuthenticated: (profile) => {
-                                showSignedIn(profile);
-                                setOutput({ event: "signed_in", profile });
-                            },
-                            onUnauthenticated: showSignedOut,
-                        });
+                        await runAuthClient("signed_in");
                     } catch (error) {
                         setOutput({
                             error: "google_credential_exception",
@@ -621,15 +630,7 @@
                 }
 
                 async function hydrateSession() {
-                    // Same wiring as the post-login flow; duplication keeps the demo's
-                    // event logging explicit for each state transition.
-                    await window.initAuthClient({
-                        onAuthenticated: (profile) => {
-                            showSignedIn(profile);
-                            setOutput({ event: "hydrated", profile });
-                        },
-                        onUnauthenticated: showSignedOut,
-                    });
+                    await runAuthClient("hydrated");
                 }
 
                 function bindUiHandlers() {
