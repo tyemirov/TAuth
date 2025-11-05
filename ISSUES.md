@@ -35,6 +35,7 @@ Error: missing required configuration: google_web_client_id or jwt_signing_key
 - [x] [TA-303] Align `/api/me` with the documented profile contract — Merge-conflict resolution against `master` retained `/me` session middleware, restored validator caching, and updated tests to flush cached validators before assertions.
 
 - [x] [TA-304] Google sign in doesnt work, even though http://localhost:3000 and http://localhost:3000/auth/google/callback are allowed — Resolved by serving the demo Google client ID via `/demo/config.js` and loading `mpr-ui` through its global namespace so the CDN bundle no longer fails.
+- [x] [TA-305] Remove duplicate `initAuthClient` usage in demo script — Extracted `syncSession` helper and optional event logging so both login and hydration reuse the same wiring; refreshed Node tests.
 ```js
 Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:281:37
 Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:282:336
