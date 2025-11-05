@@ -35,6 +35,20 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [ ] [TA-315] Push demo styling into mpr-ui — Move the bespoke header/footer CSS and avatar chip markup currently embedded in `web/demo.html` into reusable styling hooks inside `tools/mpr-ui` so consumers only supply configuration; expose classes/tokens so the demo can drop its custom `<style>` block. Open a PR to mpr-ui
 - [ ] [TA-316] Centralize retry + API helpers in auth-client.js — Extract the `fetchWithRetry`, nonce polling, and notice/error plumbing from `web/demo.html` into `web/auth-client.js` so demos/apps call exported helpers instead of duplicating network robustness logic.
 - [ ] [TA-317] Extend mpr-ui auth header to own GIS button rendering — Teach `MPRUI.renderSiteHeader`/`createAuthHeader` to render and toggle the Google Identity button, swap it for the avatar on authentication, and surface callbacks for demos; the demo should just pass `googleClientId` and listen to events without wiring GIS directly.
+- [x] [TA-311] Superseded by [TA-320] and [TA-324]; sticky/full-width layout now tracked via targeted issues for mpr-ui header and shared styling.
+- [x] [TA-312] Superseded by [TA-321]; external documentation links require a navigation contract update captured below.
+- [x] [TA-313] Superseded by [TA-322]; the drop-up content work is decomposed with Loopaware data requirements.
+- [x] [TA-314] Superseded by [TA-323]; theme switching is scoped to reuse the mpr-ui theme bundle.
+- [x] [TA-315] Superseded by [TA-324]; styling consolidation broken out per component.
+- [x] [TA-316] Superseded by [TA-325]; API helper extraction now tracked with contract + test requirements.
+- [x] [TA-317] Superseded by [TA-326]; GIS ownership resides with the mpr-ui header issue below.
+- [ ] [TA-320] Harden mpr-ui header layout for sticky full-width usage — Extend `MPRUI.renderSiteHeader` with a `layout: "sticky"` (or equivalent) option that renders a fluid container, applies `position: sticky`, `top: 0`, and `width: 100%`, preserves dark-mode tokens, and exposes CSS hooks so downstream consumers do not reimplement spacing; update `web/demo.html` to adopt the new mode and cover scroll behaviour with a Puppeteer smoke test.
+- [ ] [TA-321] Normalize external navigation behaviour — Audit all documentation/support links emitted by the demo header/footer, ensure they open in a new tab (`target="_blank"` + `rel="noopener"`), and add an integration check so regressions are caught.
+- [ ] [TA-322] Populate Marco Polo drop-up via Loopaware catalog — Source the canonical list of Marco Polo properties from `tools/loopaware`, render them inside the header drop-up with icons/labels, and provide fixture-driven coverage within the demo to guarantee the menu stays in sync with the upstream catalog.
+- [ ] [TA-323] Wire theme toggles to the mpr-ui theme system — Replace the bespoke gradient + `data-bs-theme` management in `web/demo.html` with the theme switcher API shipped in `mpr-ui`, confirm the toggle persists state across reloads, and back the change with browser automation assertions.
+- [ ] [TA-324] Move demo-specific header/footer styling into mpr-ui — Extract the avatar chip, spacing, and gradient tokens into `mpr-ui` so apps only import classes; update the demo to drop its inline `<style>` block, and validate the published package exposes documented classes/tokens.
+- [ ] [TA-325] Publish network + retry helpers from auth-client.js — Promote the demo’s fetch/retry/nonce logic into exported helpers inside `web/auth-client.js`, refactor the demo to consume them, and add unit/integration coverage that exercises exponential backoff and error surfacing.
+- [ ] [TA-326] Let mpr-ui own the GIS button lifecycle — Update `mpr-ui`’s auth header to initialize Google Identity Services, render the sign-in button, swap to the avatar view after authentication, and emit events (`tauth:login`, `tauth:logout`, etc.) so demos/applications register callbacks without wiring GIS themselves; ensure the demo drops direct GIS calls and that puppeteer coverage confirms the full flow.
 
 ## BugFixes (300–399)
 
