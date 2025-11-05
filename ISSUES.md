@@ -29,6 +29,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [ ] [TA-311] The header is not sticky and not full width. Make the header to be sticky (touching the top of the screen and staying there) and occupying the full width of the viewport.
 - [ ] [TA-312] Link to REAMDE or architecture shall open in a new window.
 - [ ] [TA-313] Clicking on Maro Polo Research Lab produces an empty drop up. Populate it with all of the marco polo websites
+- [ ] [TA-314] Theme switches do not switch theme on the page. Use the provided theme bundles from mpr-ui.
 
 ## BugFixes (300–399)
 
