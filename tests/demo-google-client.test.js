@@ -18,11 +18,7 @@ test("demo loads dynamic config instead of hard-coding Google client ID", async 
     "Expected demo to rely on runtime configuration for the Google client ID",
   );
   assert.ok(
-    html.includes('id="googleButtonHost"'),
-    "Expected demo to expose a container for the GIS button",
-  );
-  assert.ok(
-    html.includes("accounts.renderButton(host"),
-    "Expected demo JavaScript to initialize the GIS button programmatically",
+    html.includes("MPRUI.renderSiteHeader") && html.includes("auth: {"),
+    "Expected demo to configure the mpr-ui site header with auth options",
   );
 });

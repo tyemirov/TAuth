@@ -22,8 +22,8 @@ async function startDemoServer() {
     path.join(__dirname, "..", "web", "auth-client.js"),
     "utf8",
   );
-  const footerSource = await fs.readFile(
-    path.join(__dirname, "..", "tools", "mpr-ui", "footer.js"),
+  const mprUiSource = await fs.readFile(
+    path.join(__dirname, "..", "tools", "mpr-ui", "mpr-ui.js"),
     "utf8",
   );
 
@@ -72,7 +72,7 @@ async function startDemoServer() {
 
   return {
     baseUrl,
-    footerSource,
+    mprUiSource,
     close() {
       return new Promise((resolve, reject) => {
         server.close((error) => {
@@ -103,12 +103,12 @@ if (!puppeteer || !chromiumExecutable) {
 
     const page = await browser.newPage();
     await page.route(
-      "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js*",
+      "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js*",
       (route) => {
         route.fulfill({
           status: 200,
           contentType: "application/javascript; charset=utf-8",
-          body: server.footerSource,
+          body: server.mprUiSource,
         });
       },
     );
