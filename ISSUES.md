@@ -26,6 +26,7 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 - [x] [TA-309] Clean up GIS button initialization — Replaced the inline Google button markup with programmatic `renderButton` usage, ensured nonce-driven `initialize` calls, and refreshed tests verifying the popup flow.
 - [x] [TA-309] Clean up GIS popup integration — Simplified the demo to programmatically initialize Google Identity Services with fresh nonces, render the button container, update tests, and document the popup setup steps in README.
 - [x] [TA-310] Integrate the mpr-ui front-end library into the demo: have a distinct header with a functional Google login button and a footer, all loaded from the CDN and using mpr-ui@v0.0.5. — Replaced the bespoke GIS wiring with `mpr-ui@0.0.5` site header/footer, configured the demo to consume the CDN bundle, and updated scripts/tests to drive auth via the shared components.
+- [ ] [TA-311] The header is not sticky and not full width. Make the header to be sticky (touching the top of the screen and staying there) and occupying the full width of the viewport.
 
 ## BugFixes (300–399)
 
