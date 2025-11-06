@@ -154,7 +154,7 @@
     </head>
     <body class="landing-body bg-body text-body" data-bs-theme="light">
         <div class="d-flex flex-column min-vh-100">
-            <header id="siteHeader" class="container-lg py-3"></header>
+            <header id="siteHeader"></header>
             <main class="flex-grow-1 py-5">
             <div class="container-lg">
                 <section class="text-center mb-5">
@@ -264,6 +264,7 @@
 
                 if (headerHost) {
                     MPRUI.renderSiteHeader(headerHost, {
+                        layout: "sticky",
                         brand: {
                             label: "TAuth Demo",
                             href: "/demo",
