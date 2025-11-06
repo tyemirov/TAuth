@@ -183,6 +183,10 @@ func runServer(command *cobra.Command, arguments []string) error {
 		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
 	})
 
+	router.GET("/static/mpr-sites.js", func(contextGin *gin.Context) {
+		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "mpr-sites.js")
+	})
+
 	router.GET("/demo/config.js", func(contextGin *gin.Context) {
 		web.ServeDemoConfig(contextGin, web.DemoConfig{
 			GoogleClientID: serverConfig.GoogleWebClientID,

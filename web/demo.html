@@ -16,8 +16,9 @@
             integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
             crossorigin="anonymous"
         />
-                <script src="https://accounts.google.com/gsi/client" async defer></script>
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
         <script src="/static/auth-client.js"></script>
+        <script src="/static/mpr-sites.js"></script>
         <script
             defer
             src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js"
@@ -293,18 +294,20 @@
                     });
                 }
 
-                const footerLinks = [
-                    { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
-                    { label: "Gravity Notes", href: "https://gravity.mprlab.com" },
-                    { label: "LoopAware", href: "https://loopaware.mprlab.com" },
-                    { label: "Allergy Wheel", href: "https://allergy.mprlab.com" },
-                    { label: "Social Threader", href: "https://threader.mprlab.com" },
-                    { label: "RSVP", href: "https://rsvp.mprlab.com" },
-                    { label: "Countdown Calendar", href: "https://countdown.mprlab.com" },
-                    { label: "LLM Crossword", href: "https://llm-crossword.mprlab.com" },
-                    { label: "Prompt Bubbles", href: "https://prompts.mprlab.com" },
-                    { label: "Wallpapers", href: "https://wallpapers.mprlab.com" },
+                const themePersistenceKey = "tauth-demo-theme";
+                const themeTargets = ["document", "body"];
+                const themeModes = [
+                    { value: "light", dataset: { "bs-theme": "light" } },
+                    { value: "dark", dataset: { "bs-theme": "dark" } },
                 ];
+                const footerLinks = Array.isArray(window.MPR_SITES)
+                    ? window.MPR_SITES
+                    : [];
+
+                function syncBodyTheme(nextMode) {
+                    const resolvedMode = typeof nextMode === "string" && nextMode ? nextMode : "light";
+                    document.body.setAttribute("data-bs-theme", resolvedMode);
+                }
 
                 let headerRoot = null;
                 let headerSignInButton = null;
@@ -317,6 +320,34 @@
                 let isAuthenticated = false;
 
                 if (headerHost) {
+                    if (window.MPRUI && typeof window.MPRUI.configureTheme === "function") {
+                        window.MPRUI.configureTheme({
+                            targets: themeTargets,
+                            modes: themeModes,
+                        });
+                    }
+                    if (window.MPRUI && typeof window.MPRUI.configureThemePersistence === "function") {
+                        window.MPRUI.configureThemePersistence({
+                            enabled: true,
+                            storageKey: themePersistenceKey,
+                        });
+                    }
+                    if (window.MPRUI && typeof window.MPRUI.getThemeMode === "function") {
+                        syncBodyTheme(window.MPRUI.getThemeMode());
+                    } else {
+                        syncBodyTheme(document.documentElement.getAttribute("data-bs-theme") || "light");
+                    }
+                    document.addEventListener("mpr-ui:theme-change", (eventObject) => {
+                        const modeValue =
+                            eventObject && eventObject.detail && typeof eventObject.detail.mode === "string"
+                                ? eventObject.detail.mode
+                                : window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+                                  ? window.MPRUI.getThemeMode()
+                                  : null;
+                        if (modeValue) {
+                            syncBodyTheme(modeValue);
+                        }
+                    });
                     MPRUI.renderSiteHeader(headerHost, {
                         layout: "sticky",
                         brand: {
@@ -328,6 +359,14 @@
                             { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
                         ],
                         signInLabel: "Sign in with Google",
+                        themeToggle: {
+                            targets: themeTargets,
+                            modes: themeModes,
+                            persistence: {
+                                enabled: true,
+                                storageKey: themePersistenceKey,
+                            },
+                        },
                         auth: {
                             baseUrl: TAUTH_BASE_URL,
                             loginPath: "/auth/google",
@@ -385,6 +424,12 @@
                             inputClass: "mpr-footer__theme-checkbox form-check-input",
                             inputId: "public-theme-toggle",
                             ariaLabel: "Toggle theme",
+                            targets: themeTargets,
+                            modes: themeModes,
+                            persistence: {
+                                enabled: true,
+                                storageKey: themePersistenceKey,
+                            },
                         },
                         links: footerLinks,
                     });

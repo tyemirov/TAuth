@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
 const { interceptMprUiRequest } = require("./support/interceptMprUi");
 const { delay } = require("./support/delay");
+const { MPR_SITES } = require("../web/mpr-sites.js");
 
 let puppeteer = null;
 try {
@@ -89,23 +90,6 @@ if (!puppeteer) {
       "Expected footer to align with the viewport edge",
     );
 
-    const linkStates = await page.$$eval(
-      "#landing-footer a[href^=\"http\"]",
-      (nodes) =>
-        nodes.map((node) => ({
-          target: node.getAttribute("target"),
-          rel: node.getAttribute("rel") || "",
-        })),
-    );
-    assert.ok(linkStates.length > 0, "Expected footer to expose external navigation links");
-    linkStates.forEach((state) => {
-      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
-      assert.ok(
-        /\bnoopener\b/.test(state.rel),
-        "Expected footer external link to include noopener",
-      );
-    });
-
     const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
     await page.click(toggleSelector);
     await page.waitForSelector("#landing-footer .dropdown-menu.show", {
@@ -117,6 +101,33 @@ if (!puppeteer) {
       (node) => node.getAttribute("aria-expanded"),
     );
     assert.equal(ariaExpanded, "true");
+
+    const linkStates = await page.$$eval(
+      "#landing-footer [data-mpr-footer='menu-link']",
+      (nodes) =>
+        nodes.map((node) => ({
+          href: node.getAttribute("href"),
+          target: node.getAttribute("target"),
+          rel: node.getAttribute("rel") || "",
+        })),
+    );
+    assert.equal(
+      linkStates.length,
+      MPR_SITES.length,
+      "Expected footer menu to render all site catalog entries",
+    );
+    const renderedHrefs = linkStates.map((state) => state.href);
+    const expectedHrefs = MPR_SITES.map((link) => link.href);
+    assert.deepEqual(
+      renderedHrefs,
+      expectedHrefs,
+      "Expected footer menu to render canonical site URLs in order",
+    );
+    linkStates.forEach((state) => {
+      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
+      assert.ok(/\bnoopener\b/.test(state.rel), "Expected footer external link to include noopener");
+    });
+
     await page.click(toggleSelector);
     await delay(100);
     const ariaCollapsed = await page.$eval(
@@ -132,12 +143,16 @@ if (!puppeteer) {
 
     const themeToggleSelector = "#public-theme-toggle";
     const initialTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     await page.click(themeToggleSelector);
     await delay(150);
     const toggledTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     assert.notEqual(
       toggledTheme,
@@ -152,10 +167,58 @@ if (!puppeteer) {
       toggledTheme,
       "Expected document theme attribute to match active mode",
     );
+    const bodyThemeAttribute = await page.evaluate(() =>
+      document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(
+      bodyThemeAttribute,
+      toggledTheme,
+      "Expected body Bootstrap theme attribute to mirror the active mode",
+    );
+
+    await page.reload({ waitUntil: "networkidle0" });
+    await page.waitForSelector(themeToggleSelector, { visible: true, timeout: 5000 });
+    await page.waitForFunction(
+      (expected) =>
+        window.MPRUI &&
+        typeof window.MPRUI.getThemeMode === "function" &&
+        window.MPRUI.getThemeMode() === expected,
+      { timeout: 5000 },
+      toggledTheme,
+    );
+    const reloadedTheme = await page.evaluate(() =>
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
+    );
+    assert.equal(
+      reloadedTheme,
+      toggledTheme,
+      "Expected theme mode to persist after reloading the page",
+    );
+    const reloadedDocTheme = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-mpr-theme"),
+    );
+    assert.equal(
+      reloadedDocTheme,
+      toggledTheme,
+      "Expected document attribute to persist the restored theme mode",
+    );
+    const reloadedBodyTheme = await page.evaluate(() =>
+      document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(
+      reloadedBodyTheme,
+      toggledTheme,
+      "Expected body Bootstrap theme attribute to persist after reload",
+    );
+
     await page.click(themeToggleSelector);
     await delay(150);
     const finalTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     assert.equal(
       finalTheme,

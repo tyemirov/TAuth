@@ -200,6 +200,22 @@ jobs:
 
 ```
 
+- [x] [TA-327] Mirror Marco Polo footer links into shared data module — Added `web/mpr-sites.js` exporting the curated URL list (embedded for `/static/mpr-sites.js`), exposed Node/CommonJS support, and introduced a guard test validating the frozen catalog.
+- [x] [TA-328] Integrate site catalog module into demo drop-up — Wired the demo + Puppeteer harness to serve the embedded script, fed `MPRUI.renderFooter` from the shared data, and expanded browser assertions to confirm every property link renders with `target="_blank"`/`rel="noopener"`.
+- [x] [TA-322] Superseded by [TA-327] and [TA-328]; remaining work tracked by the decomposed issues.
+- [x] [TA-329] Expose persistent theme toggle API in mpr-ui — Added storage-aware theme manager support with `configureThemePersistence`/`clearThemePersistence`/`wasThemeRestoredFromPersistence`, plumbed `themeToggle.persistence` through the header/footer helpers, documented the contract, and shipped node tests covering storage restore and footer integration (`improvement/TA-329-theme-persistence` in `tools/mpr-ui`).
+- [x] [TA-330] Adopt mpr-ui theme API within TAuth demo — Wired header/footer theme toggles to the shared persistence helpers, synced `data-bs-theme`/`data-mpr-theme` targets, and extended browser/unit coverage to assert reload persistence (`improvement/TA-330-theme-persistence`).
+- [x] [TA-323] Superseded by [TA-329] and [TA-330]; original umbrella closed.
+- [ ] [TA-331] Publish header/footer layout tokens from mpr-ui — Move the avatar chip, spacing, and sticky positioning CSS into reusable classes, document usage, and ship a tagged release. Priority: Medium.
+- [ ] [TA-332] Consume mpr-ui layout tokens in TAuth demo — Drop inline styles, adopt the published classes, and update browser tests to ensure sticky/full-width layout remains. Priority: Medium.
+- [x] [TA-324] Superseded by [TA-331] and [TA-332]; remaining work captured in the decomposed issues.
+- [ ] [TA-333] Export fetch/retry helpers from auth-client.js — Promote the demo’s network helpers into `web/auth-client.js`, add unit tests covering retry/backoff, and update type definitions. Priority: Medium.
+- [ ] [TA-334] Refactor demo to consume auth-client helpers — Switch demo flows to the exported helpers, ensure notice/error handling remains, and extend integration tests for failure scenarios. Priority: Medium.
+- [x] [TA-325] Superseded by [TA-333] and [TA-334]; umbrella issue closed after decomposition.
+- [ ] [TA-335] Let mpr-ui auth header own GIS lifecycle — Initialize Google Identity Services inside the component, emit login/logout events, and provide regression tests plus documentation updates. Priority: High.
+- [ ] [TA-336] Align TAuth demo with mpr-ui GIS events — Remove direct GIS plumbing, consume the new events, refresh Puppeteer coverage, and update README guidance. Priority: High.
+- [x] [TA-326] Superseded by [TA-335] and [TA-336]; remaining work tracked by the decomposed issues.
+
 - [x] [TA-406] Align changelog and issue log entries with merged work — Added TA-200–TA-405 summaries to `CHANGELOG.md`, confirmed matching merge commits, and documented that TA-302 currently enforces explicit origin lists (wildcard tightening remains unchanged).
 
 - [x] [TA-303] Accept hashed GIS nonce claim during `/auth/google` — Updated nonce verification to allow `base64url(sha256(nonce_token))`, added integration coverage for the hashed claim, refreshed README guidance, and confirmed other nonce mismatches still return `invalid_nonce`.

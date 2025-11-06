@@ -2,6 +2,7 @@ PLAN.md
 .env
 node_modules/
 tools/
+.local-browsers/
 
 *.json
 !package.json
