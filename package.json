@@ -20,5 +20,8 @@
   "bugs": {
     "url": "https://github.com/tyemirov/TAuth/issues"
   },
-  "homepage": "https://github.com/tyemirov/TAuth#readme"
+  "homepage": "https://github.com/tyemirov/TAuth#readme",
+  "devDependencies": {
+    "puppeteer": "^24.29.0"
+  }
 }

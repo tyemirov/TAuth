@@ -107,6 +107,30 @@
                 box-shadow: 0 -24px 64px rgba(9, 22, 48, 0.18);
             }
 
+            #landing-footer,
+            #landing-footer .mpr-footer {
+                width: 100%;
+            }
+
+            #landing-footer .mpr-footer__inner {
+                max-width: 100%;
+                width: 100%;
+                margin: 0 auto;
+                padding-left: 1.5rem;
+                padding-right: 1.5rem;
+            }
+
+            #siteHeader {
+                position: sticky;
+                top: 0;
+                z-index: 1200;
+                width: 100%;
+            }
+
+            #siteHeader header.mpr-header {
+                width: 100%;
+            }
+
             body[data-bs-theme="dark"] #landing-footer {
                 box-shadow: 0 -28px 64px rgba(2, 8, 23, 0.8);
             }
@@ -154,7 +178,7 @@
     </head>
     <body class="landing-body bg-body text-body" data-bs-theme="light">
         <div class="d-flex flex-column min-vh-100">
-            <header id="siteHeader" class="container-lg py-3"></header>
+            <header id="siteHeader"></header>
             <main class="flex-grow-1 py-5">
             <div class="container-lg">
                 <section class="text-center mb-5">
@@ -239,6 +263,36 @@
                 const signedInPanel = document.querySelector('[data-panel="signed-in"]');
                 const activityOutput = document.getElementById("demoOutput");
 
+                function applyExternalLinkAttributes(rootElement) {
+                    if (!rootElement) {
+                        return;
+                    }
+                    const anchors = rootElement.querySelectorAll("a[href]");
+                    const currentOrigin = window.location.origin;
+                    anchors.forEach((anchor) => {
+                        const hrefValue = anchor.getAttribute("href");
+                        if (!hrefValue || hrefValue.startsWith("#") || hrefValue.startsWith("mailto:") || hrefValue.startsWith("tel:")) {
+                            return;
+                        }
+                        let resolvedUrl;
+                        try {
+                            resolvedUrl = new URL(anchor.href, window.location.href);
+                        } catch (_error) {
+                            return;
+                        }
+                        if (resolvedUrl.origin === currentOrigin) {
+                            return;
+                        }
+                        anchor.setAttribute("target", "_blank");
+                        const existingRel = anchor.getAttribute("rel") || "";
+                        const tokens = existingRel.split(/\s+/).filter(Boolean);
+                        const uniqueTokens = new Set(tokens);
+                        uniqueTokens.add("noopener");
+                        uniqueTokens.add("noreferrer");
+                        anchor.setAttribute("rel", Array.from(uniqueTokens).join(" "));
+                    });
+                }
+
                 const footerLinks = [
                     { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
                     { label: "Gravity Notes", href: "https://gravity.mprlab.com" },
@@ -264,6 +318,7 @@
 
                 if (headerHost) {
                     MPRUI.renderSiteHeader(headerHost, {
+                        layout: "sticky",
                         brand: {
                             label: "TAuth Demo",
                             href: "/demo",
@@ -300,32 +355,40 @@
                         headerProfileAvatar.className = "mpr-header__avatar me-2";
                         headerProfileContainer.insertBefore(headerProfileAvatar, headerSignOutButton);
                     }
+                    applyExternalLinkAttributes(headerHost);
+                    headerHost.addEventListener("mpr-ui:auth:authenticated", function () {
+                        applyExternalLinkAttributes(headerHost);
+                    });
+                    headerHost.addEventListener("mpr-ui:auth:unauthenticated", function () {
+                        applyExternalLinkAttributes(headerHost);
+                    });
                 }
 
                 if (footerHost) {
                     MPRUI.renderFooter(footerHost, {
-                        baseClass: "landing-footer border-top py-3",
-                        innerClass: "container d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3",
-                        brandWrapperClass: "d-inline-flex align-items-center gap-2 text-body-secondary small",
-                        menuWrapperClass: "dropup",
-                        prefixClass: "text-body-secondary fw-semibold",
+                        baseClass: "mpr-footer landing-footer border-top py-3",
+                        innerClass: "mpr-footer__inner d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
+                        brandWrapperClass: "mpr-footer__brand d-inline-flex align-items-center gap-2 text-body-secondary small",
+                        menuWrapperClass: "mpr-footer__menu-wrapper dropup",
+                        prefixClass: "mpr-footer__prefix text-body-secondary fw-semibold",
                         prefixText: "Built by",
-                        toggleButtonClass: "btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
+                        toggleButtonClass: "mpr-footer__menu-button btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
                         toggleLabel: "Marco Polo Research Lab",
-                        menuClass: "dropdown-menu dropdown-menu-end shadow",
-                        menuItemClass: "dropdown-item",
-                        privacyLinkClass: "text-body-secondary text-decoration-none small",
+                        menuClass: "mpr-footer__menu dropdown-menu dropdown-menu-end shadow",
+                        menuItemClass: "mpr-footer__menu-item dropdown-item",
+                        privacyLinkClass: "mpr-footer__privacy text-body-secondary text-decoration-none small",
                         privacyLinkHref: "https://mprlab.com/privacy",
                         privacyLinkLabel: "Privacy • Terms",
                         themeToggle: {
                             enabled: true,
-                            wrapperClass: "form-check form-switch m-0",
-                            inputClass: "form-check-input",
+                            wrapperClass: "mpr-footer__theme-toggle form-check form-switch m-0",
+                            inputClass: "mpr-footer__theme-checkbox form-check-input",
                             inputId: "public-theme-toggle",
                             ariaLabel: "Toggle theme",
                         },
                         links: footerLinks,
                     });
+                    applyExternalLinkAttributes(footerHost);
                 }
 
                 function withBase(path) {
