@@ -120,6 +120,17 @@
                 padding-right: 1.5rem;
             }
 
+            #siteHeader {
+                position: sticky;
+                top: 0;
+                z-index: 1200;
+                width: 100%;
+            }
+
+            #siteHeader header.mpr-header {
+                width: 100%;
+            }
+
             body[data-bs-theme="dark"] #landing-footer {
                 box-shadow: 0 -28px 64px rgba(2, 8, 23, 0.8);
             }
@@ -252,6 +263,36 @@
                 const signedInPanel = document.querySelector('[data-panel="signed-in"]');
                 const activityOutput = document.getElementById("demoOutput");
 
+                function applyExternalLinkAttributes(rootElement) {
+                    if (!rootElement) {
+                        return;
+                    }
+                    const anchors = rootElement.querySelectorAll("a[href]");
+                    const currentOrigin = window.location.origin;
+                    anchors.forEach((anchor) => {
+                        const hrefValue = anchor.getAttribute("href");
+                        if (!hrefValue || hrefValue.startsWith("#") || hrefValue.startsWith("mailto:") || hrefValue.startsWith("tel:")) {
+                            return;
+                        }
+                        let resolvedUrl;
+                        try {
+                            resolvedUrl = new URL(anchor.href, window.location.href);
+                        } catch (_error) {
+                            return;
+                        }
+                        if (resolvedUrl.origin === currentOrigin) {
+                            return;
+                        }
+                        anchor.setAttribute("target", "_blank");
+                        const existingRel = anchor.getAttribute("rel") || "";
+                        const tokens = existingRel.split(/\s+/).filter(Boolean);
+                        const uniqueTokens = new Set(tokens);
+                        uniqueTokens.add("noopener");
+                        uniqueTokens.add("noreferrer");
+                        anchor.setAttribute("rel", Array.from(uniqueTokens).join(" "));
+                    });
+                }
+
                 const footerLinks = [
                     { label: "Marco Polo Research Lab", href: "https://mprlab.com" },
                     { label: "Gravity Notes", href: "https://gravity.mprlab.com" },
@@ -314,6 +355,13 @@
                         headerProfileAvatar.className = "mpr-header__avatar me-2";
                         headerProfileContainer.insertBefore(headerProfileAvatar, headerSignOutButton);
                     }
+                    applyExternalLinkAttributes(headerHost);
+                    headerHost.addEventListener("mpr-ui:auth:authenticated", function () {
+                        applyExternalLinkAttributes(headerHost);
+                    });
+                    headerHost.addEventListener("mpr-ui:auth:unauthenticated", function () {
+                        applyExternalLinkAttributes(headerHost);
+                    });
                 }
 
                 if (footerHost) {
@@ -340,6 +388,7 @@
                         },
                         links: footerLinks,
                     });
+                    applyExternalLinkAttributes(footerHost);
                 }
 
                 function withBase(path) {

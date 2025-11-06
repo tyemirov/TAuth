@@ -89,6 +89,23 @@ if (!puppeteer) {
       "Expected footer to align with the viewport edge",
     );
 
+    const linkStates = await page.$$eval(
+      "#landing-footer a[href^=\"http\"]",
+      (nodes) =>
+        nodes.map((node) => ({
+          target: node.getAttribute("target"),
+          rel: node.getAttribute("rel") || "",
+        })),
+    );
+    assert.ok(linkStates.length > 0, "Expected footer to expose external navigation links");
+    linkStates.forEach((state) => {
+      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
+      assert.ok(
+        /\bnoopener\b/.test(state.rel),
+        "Expected footer external link to include noopener",
+      );
+    });
+
     const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
     await page.click(toggleSelector);
     await page.waitForSelector("#landing-footer .dropdown-menu.show", {
