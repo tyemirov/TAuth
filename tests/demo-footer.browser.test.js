@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
 const { interceptMprUiRequest } = require("./support/interceptMprUi");
 const { delay } = require("./support/delay");
+const { MPR_SITES } = require("../web/mpr-sites.js");
 
 let puppeteer = null;
 try {
@@ -89,23 +90,6 @@ if (!puppeteer) {
       "Expected footer to align with the viewport edge",
     );
 
-    const linkStates = await page.$$eval(
-      "#landing-footer a[href^=\"http\"]",
-      (nodes) =>
-        nodes.map((node) => ({
-          target: node.getAttribute("target"),
-          rel: node.getAttribute("rel") || "",
-        })),
-    );
-    assert.ok(linkStates.length > 0, "Expected footer to expose external navigation links");
-    linkStates.forEach((state) => {
-      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
-      assert.ok(
-        /\bnoopener\b/.test(state.rel),
-        "Expected footer external link to include noopener",
-      );
-    });
-
     const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
     await page.click(toggleSelector);
     await page.waitForSelector("#landing-footer .dropdown-menu.show", {
@@ -117,6 +101,33 @@ if (!puppeteer) {
       (node) => node.getAttribute("aria-expanded"),
     );
     assert.equal(ariaExpanded, "true");
+
+    const linkStates = await page.$$eval(
+      "#landing-footer [data-mpr-footer='menu-link']",
+      (nodes) =>
+        nodes.map((node) => ({
+          href: node.getAttribute("href"),
+          target: node.getAttribute("target"),
+          rel: node.getAttribute("rel") || "",
+        })),
+    );
+    assert.equal(
+      linkStates.length,
+      MPR_SITES.length,
+      "Expected footer menu to render all site catalog entries",
+    );
+    const renderedHrefs = linkStates.map((state) => state.href);
+    const expectedHrefs = MPR_SITES.map((link) => link.url);
+    assert.deepEqual(
+      renderedHrefs,
+      expectedHrefs,
+      "Expected footer menu to render canonical site URLs in order",
+    );
+    linkStates.forEach((state) => {
+      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
+      assert.ok(/\bnoopener\b/.test(state.rel), "Expected footer external link to include noopener");
+    });
+
     await page.click(toggleSelector);
     await delay(100);
     const ariaCollapsed = await page.$eval(

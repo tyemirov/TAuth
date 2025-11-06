@@ -25,8 +25,5 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
     html.includes('inputId: "public-theme-toggle"'),
     "Expected footer theme toggle to expose the public theme toggle input",
   );
-  assert.ok(
-    html.includes('href: "https://mprlab.com"'),
-    "Expected footer link catalogue to include the LoopAware product list",
-  );
+  assert.ok(html.includes('src="/static/mpr-sites.js"'), "Expected demo to load the shared sites script");
 });
