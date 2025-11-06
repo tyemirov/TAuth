@@ -25,5 +25,12 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
     html.includes('inputId: "public-theme-toggle"'),
     "Expected footer theme toggle to expose the public theme toggle input",
   );
-  assert.ok(html.includes('src="/static/mpr-sites.js"'), "Expected demo to load the shared sites script");
+  assert.ok(
+    html.includes('src="/static/mpr-sites.js"'),
+    "Expected demo to load the shared sites script",
+  );
+  assert.ok(
+    html.includes("tauth-demo-theme"),
+    "Expected demo script to configure persistent theme storage",
+  );
 });

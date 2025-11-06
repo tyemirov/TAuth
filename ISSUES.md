@@ -204,7 +204,7 @@ jobs:
 - [x] [TA-328] Integrate site catalog module into demo drop-up — Wired the demo + Puppeteer harness to serve the embedded script, fed `MPRUI.renderFooter` from the shared data, and expanded browser assertions to confirm every property link renders with `target="_blank"`/`rel="noopener"`.
 - [x] [TA-322] Superseded by [TA-327] and [TA-328]; remaining work tracked by the decomposed issues.
 - [x] [TA-329] Expose persistent theme toggle API in mpr-ui — Added storage-aware theme manager support with `configureThemePersistence`/`clearThemePersistence`/`wasThemeRestoredFromPersistence`, plumbed `themeToggle.persistence` through the header/footer helpers, documented the contract, and shipped node tests covering storage restore and footer integration (`improvement/TA-329-theme-persistence` in `tools/mpr-ui`).
-- [ ] [TA-330] Adopt mpr-ui theme API within TAuth demo — Replace the demo’s gradient toggle with the new API, persist selection across reloads, and add Puppeteer assertions. Priority: High.
+- [x] [TA-330] Adopt mpr-ui theme API within TAuth demo — Wired header/footer theme toggles to the shared persistence helpers, synced `data-bs-theme`/`data-mpr-theme` targets, and extended browser/unit coverage to assert reload persistence (`improvement/TA-330-theme-persistence`).
 - [x] [TA-323] Superseded by [TA-329] and [TA-330]; original umbrella closed.
 - [ ] [TA-331] Publish header/footer layout tokens from mpr-ui — Move the avatar chip, spacing, and sticky positioning CSS into reusable classes, document usage, and ship a tagged release. Priority: Medium.
 - [ ] [TA-332] Consume mpr-ui layout tokens in TAuth demo — Drop inline styles, adopt the published classes, and update browser tests to ensure sticky/full-width layout remains. Priority: Medium.

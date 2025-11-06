@@ -143,12 +143,16 @@ if (!puppeteer) {
 
     const themeToggleSelector = "#public-theme-toggle";
     const initialTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     await page.click(themeToggleSelector);
     await delay(150);
     const toggledTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     assert.notEqual(
       toggledTheme,
@@ -163,10 +167,58 @@ if (!puppeteer) {
       toggledTheme,
       "Expected document theme attribute to match active mode",
     );
+    const bodyThemeAttribute = await page.evaluate(() =>
+      document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(
+      bodyThemeAttribute,
+      toggledTheme,
+      "Expected body Bootstrap theme attribute to mirror the active mode",
+    );
+
+    await page.reload({ waitUntil: "networkidle0" });
+    await page.waitForSelector(themeToggleSelector, { visible: true, timeout: 5000 });
+    await page.waitForFunction(
+      (expected) =>
+        window.MPRUI &&
+        typeof window.MPRUI.getThemeMode === "function" &&
+        window.MPRUI.getThemeMode() === expected,
+      { timeout: 5000 },
+      toggledTheme,
+    );
+    const reloadedTheme = await page.evaluate(() =>
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
+    );
+    assert.equal(
+      reloadedTheme,
+      toggledTheme,
+      "Expected theme mode to persist after reloading the page",
+    );
+    const reloadedDocTheme = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-mpr-theme"),
+    );
+    assert.equal(
+      reloadedDocTheme,
+      toggledTheme,
+      "Expected document attribute to persist the restored theme mode",
+    );
+    const reloadedBodyTheme = await page.evaluate(() =>
+      document.body.getAttribute("data-bs-theme"),
+    );
+    assert.equal(
+      reloadedBodyTheme,
+      toggledTheme,
+      "Expected body Bootstrap theme attribute to persist after reload",
+    );
+
     await page.click(themeToggleSelector);
     await delay(150);
     const finalTheme = await page.evaluate(() =>
-      window.MPRUI ? window.MPRUI.getThemeMode() : null,
+      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
+        ? window.MPRUI.getThemeMode()
+        : null,
     );
     assert.equal(
       finalTheme,
