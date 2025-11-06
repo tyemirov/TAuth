@@ -42,7 +42,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-315] Superseded by [TA-324]; styling consolidation broken out per component.
 - [x] [TA-316] Superseded by [TA-325]; API helper extraction now tracked with contract + test requirements.
 - [x] [TA-317] Superseded by [TA-326]; GIS ownership resides with the mpr-ui header issue below.
-- [x] [TA-320] Harden mpr-ui header layout for sticky full-width usage — Added a `layout: "sticky"` mode with root/inner modifiers plus CSS tokens, refactored the demo to rely on it, and shipped Puppeteer coverage that scroll-tests the header positioning.
+- [x] [TA-320] Harden mpr-ui header layout for sticky full-width usage — Demo now relies on the default sticky header/footer from `mpr-ui`, removed container constraints so both span the viewport, and expanded Puppeteer checks to assert sticky positioning across scroll.
 - [ ] [TA-321] Normalize external navigation behaviour — Audit all documentation/support links emitted by the demo header/footer, ensure they open in a new tab (`target="_blank"` + `rel="noopener"`), and add an integration check so regressions are caught.
 - [ ] [TA-322] Populate Marco Polo drop-up via Loopaware catalog — Source the canonical list of Marco Polo properties from `tools/loopaware`, render them inside the header drop-up with icons/labels, and provide fixture-driven coverage within the demo to guarantee the menu stays in sync with the upstream catalog.
 - [ ] [TA-323] Wire theme toggles to the mpr-ui theme system — Replace the bespoke gradient + `data-bs-theme` management in `web/demo.html` with the theme switcher API shipped in `mpr-ui`, confirm the toggle persists state across reloads, and back the change with browser automation assertions.

@@ -107,6 +107,19 @@
                 box-shadow: 0 -24px 64px rgba(9, 22, 48, 0.18);
             }
 
+            #landing-footer,
+            #landing-footer .mpr-footer {
+                width: 100%;
+            }
+
+            #landing-footer .mpr-footer__inner {
+                max-width: 100%;
+                width: 100%;
+                margin: 0 auto;
+                padding-left: 1.5rem;
+                padding-right: 1.5rem;
+            }
+
             body[data-bs-theme="dark"] #landing-footer {
                 box-shadow: 0 -28px 64px rgba(2, 8, 23, 0.8);
             }
@@ -305,23 +318,23 @@
 
                 if (footerHost) {
                     MPRUI.renderFooter(footerHost, {
-                        baseClass: "landing-footer border-top py-3",
-                        innerClass: "container d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3",
-                        brandWrapperClass: "d-inline-flex align-items-center gap-2 text-body-secondary small",
-                        menuWrapperClass: "dropup",
-                        prefixClass: "text-body-secondary fw-semibold",
+                        baseClass: "mpr-footer landing-footer border-top py-3",
+                        innerClass: "mpr-footer__inner d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
+                        brandWrapperClass: "mpr-footer__brand d-inline-flex align-items-center gap-2 text-body-secondary small",
+                        menuWrapperClass: "mpr-footer__menu-wrapper dropup",
+                        prefixClass: "mpr-footer__prefix text-body-secondary fw-semibold",
                         prefixText: "Built by",
-                        toggleButtonClass: "btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
+                        toggleButtonClass: "mpr-footer__menu-button btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
                         toggleLabel: "Marco Polo Research Lab",
-                        menuClass: "dropdown-menu dropdown-menu-end shadow",
-                        menuItemClass: "dropdown-item",
-                        privacyLinkClass: "text-body-secondary text-decoration-none small",
+                        menuClass: "mpr-footer__menu dropdown-menu dropdown-menu-end shadow",
+                        menuItemClass: "mpr-footer__menu-item dropdown-item",
+                        privacyLinkClass: "mpr-footer__privacy text-body-secondary text-decoration-none small",
                         privacyLinkHref: "https://mprlab.com/privacy",
                         privacyLinkLabel: "Privacy • Terms",
                         themeToggle: {
                             enabled: true,
-                            wrapperClass: "form-check form-switch m-0",
-                            inputClass: "form-check-input",
+                            wrapperClass: "mpr-footer__theme-toggle form-check form-switch m-0",
+                            inputClass: "mpr-footer__theme-checkbox form-check-input",
                             inputId: "public-theme-toggle",
                             ariaLabel: "Toggle theme",
                         },

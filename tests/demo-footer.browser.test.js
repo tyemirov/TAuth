@@ -62,6 +62,33 @@ if (!puppeteer) {
     });
     assert.notEqual(displayValue, "none");
 
+    const footerState = await page.evaluate(() => {
+      const footerRoot = document.querySelector(
+        "#landing-footer footer[role='contentinfo']",
+      );
+      if (!footerRoot) {
+        return null;
+      }
+      const rect = footerRoot.getBoundingClientRect();
+      const style = window.getComputedStyle(footerRoot);
+      return {
+        position: style.position,
+        width: rect.width,
+        viewportWidth: window.innerWidth,
+        left: rect.left,
+      };
+    });
+    assert.ok(footerState, "Expected footer root element to exist");
+    assert.equal(footerState.position, "sticky");
+    assert.ok(
+      Math.abs(footerState.width - footerState.viewportWidth) <= 2,
+      "Expected footer to span the viewport width",
+    );
+    assert.ok(
+      footerState.left >= -1 && footerState.left <= 1,
+      "Expected footer to align with the viewport edge",
+    );
+
     const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
     await page.click(toggleSelector);
     await page.waitForSelector("#landing-footer .dropdown-menu.show", {
