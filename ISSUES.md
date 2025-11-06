@@ -220,7 +220,5 @@ jobs:
 
 - [x] [TA-303] Accept hashed GIS nonce claim during `/auth/google` — Updated nonce verification to allow `base64url(sha256(nonce_token))`, added integration coverage for the hashed claim, refreshed README guidance, and confirmed other nonce mismatches still return `invalid_nonce`.
 
-
-
 ## Planning
 So not work on these, not ready
