@@ -203,7 +203,7 @@ jobs:
 - [x] [TA-327] Mirror Marco Polo footer links into shared data module — Added `web/mpr-sites.js` exporting the curated URL list (embedded for `/static/mpr-sites.js`), exposed Node/CommonJS support, and introduced a guard test validating the frozen catalog.
 - [x] [TA-328] Integrate site catalog module into demo drop-up — Wired the demo + Puppeteer harness to serve the embedded script, fed `MPRUI.renderFooter` from the shared data, and expanded browser assertions to confirm every property link renders with `target="_blank"`/`rel="noopener"`.
 - [x] [TA-322] Superseded by [TA-327] and [TA-328]; remaining work tracked by the decomposed issues.
-- [ ] [TA-329] Expose persistent theme toggle API in mpr-ui — Extend the shared header/footer package to surface theme presets and persistence helpers, document the contract, and add unit coverage. Priority: High.
+- [x] [TA-329] Expose persistent theme toggle API in mpr-ui — Added storage-aware theme manager support with `configureThemePersistence`/`clearThemePersistence`/`wasThemeRestoredFromPersistence`, plumbed `themeToggle.persistence` through the header/footer helpers, documented the contract, and shipped node tests covering storage restore and footer integration (`improvement/TA-329-theme-persistence` in `tools/mpr-ui`).
 - [ ] [TA-330] Adopt mpr-ui theme API within TAuth demo — Replace the demo’s gradient toggle with the new API, persist selection across reloads, and add Puppeteer assertions. Priority: High.
 - [x] [TA-323] Superseded by [TA-329] and [TA-330]; original umbrella closed.
 - [ ] [TA-331] Publish header/footer layout tokens from mpr-ui — Move the avatar chip, spacing, and sticky positioning CSS into reusable classes, document usage, and ship a tagged release. Priority: Medium.
