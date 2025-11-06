@@ -117,7 +117,7 @@ if (!puppeteer) {
       "Expected footer menu to render all site catalog entries",
     );
     const renderedHrefs = linkStates.map((state) => state.href);
-    const expectedHrefs = MPR_SITES.map((link) => link.url);
+    const expectedHrefs = MPR_SITES.map((link) => link.href);
     assert.deepEqual(
       renderedHrefs,
       expectedHrefs,
