@@ -1,9 +1,4 @@
-PLAN.md
+# Managed by gix gitignore workflow
 .env
-node_modules/
 tools/
-.local-browsers/
-
-*.json
-!package.json
-!package-lock.json
+bin/
