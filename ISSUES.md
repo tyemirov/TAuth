@@ -9,216 +9,55 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-100] Develop a new HTML header using mpr-ui that incorporates TAuth. The header shall be in mpr-ui repo. The header shall allow to login a user, display its avatar and the name, expose user id, email etc for the consumption by the rest of the app. — Added the reusable `mpr-ui` auth header component with avatar/name rendering, emitted dataset attributes for downstream consumers, surfaced `avatar_url` through `/auth/google` and `/me`, refreshed demo + docs, and staged Puppeteer coverage (skipped in CI until Chromium is available).
 - [x] [TA-101] Add a reusable Go client validator package under /pkg for validating TAuth session cookies (app_session) in other apps — Added `pkg/sessionvalidator` with smart constructor, token/request helpers, and Gin middleware, refactored `RequireSession` to reuse it, documented usage, and delivered unit tests enforcing signature/issuer/expiry behaviour.
 
-## Improvements (200–299)
+## Improvements (212–299)
 
-- [x] [TA-200] Use GORM and abstract away the flavor of the DB through GORM. If the DB url sent through an envionment variable specifies postgres protocol, then use postgres, if sqlite, then use sqlite, etc — Resolved with `NewDatabaseRefreshTokenStore` (GORM, Postgres/SQLite), mandatory `--database_url` / `APP_DATABASE_URL`, legacy Postgres-only store removed, docs + tests added
-- [x] [TA-201] Harden configuration lifecycle and smart constructors — Added `LoadServerConfig` smart constructor invoked from `PreRunE`, validated TTLs and required identifiers, and surfaced structured `config.*` error codes before server start.
-- [x] [TA-202] Inject Google token validator dependencies and wrap JWT errors — Introduced injectable Google validator/clock with CLI wiring, tightened route time handling, and wrapped JWT mint failures with `jwt.mint.failure` codes.
-- [x] [TA-203] Harmonize refresh token store error semantics — Unified sentinel errors across memory/sqlite stores, wrapped errors with context codes, and surfaced an idempotent revoke contract for logging.
-- [x] [TA-204] Expand auth logging and metrics hooks — Injected zap logger and metrics recorder into auth routes, added structured warnings/errors, and incremented counters for login, refresh, and logout flows.
-- [x] [TA-205] Deliver end-to-end Go HTTP tests for the auth lifecycle — Added TLS-backed `httptest.Server` flows covering login→refresh→logout, tampered sessions, and revoked tokens with metrics assertions.
-- [x] [TA-206] Add Puppeteer coverage for `auth-client.js` events — Added Puppeteer Core harness verifying login, refresh, and logout event callbacks with a mocked HTTP server; tests require system Chromium (`CHROMIUM_PATH`) to run.
-- [x] [TA-207] Use mpr-ui library for the footer of the demo app. See @tools/mpr-ui for an example — Rendered the shared footer via `MPRUI.renderFooter`, exposed `mprFooter` for Alpine integration, and hydrated the demo with support/status links (initially served locally, now loaded from the CDN build).
-- [x] [TA-208] Enforce nonce validation in `/auth/google` — Added `/auth/nonce` issuance with in-memory store, required nonce consumption/matching in auth routes, updated mpr-ui/demo clients to attach `nonce_token`, and expanded Go/Node coverage for missing or mismatched nonces.
-- [x] [TA-208] Finalized GIS nonce propagation — browser/demo helpers now inject the issued nonce into Google Identity Services before prompting, docs/examples call out the required flow, Node tests assert nonce preparation/failure handling, and the bundled `web/mpr-ui.js` asset was removed in favour of the CDN build.
-- [x] [TA-209] Add a footer from mpr-ui to the demo.html — Demo now imports Alpine + `mprFooter` via the CDN module (`footer.js?module`), feeds theme toggle/options into the Alpine factory, removes the bespoke embedded asset plumbing, and keeps coverage (string + optional Puppeteer) ensuring the footer renders and stays visible.
-- [x] [TA-210] Add proper styling for the footer, including theme switching to the demo. Use styling from @tools/loopaware for inspiration — Reauthored `web/demo.html` from scratch with LoopAware’s footer contract, reused the exact Bootstrap 5.3 + Bootstrap Icons stack, embedded the public theme script, and strengthened Node coverage for theme persistence and dropup behaviour.
-- [x] [TA-211] Update README to document remote TAuth deployment — Documented hosted deployment steps, cookie scoping, CORS settings, and cross-origin front-end samples for `https://tauth.mprlab.com` serving `https://gravity.mprlab.com`.
-- [x] [TA-308] Document GIS popup integration — Clarified GIS SDK loading, origin authorization, nonce initialization, and credential exchange steps for remote TAuth deployments.
-- [x] [TA-309] Clean up GIS button initialization — Replaced the inline Google button markup with programmatic `renderButton` usage, ensured nonce-driven `initialize` calls, and refreshed tests verifying the popup flow.
-- [x] [TA-309] Clean up GIS popup integration — Simplified the demo to programmatically initialize Google Identity Services with fresh nonces, render the button container, update tests, and document the popup setup steps in README.
-- [x] [TA-310] Integrate the mpr-ui front-end library into the demo: have a distinct header with a functional Google login button and a footer, all loaded from the CDN and using mpr-ui@v0.0.5. — Replaced the bespoke GIS wiring with `mpr-ui@0.0.5` site header/footer, configured the demo to consume the CDN bundle, and updated scripts/tests to drive auth via the shared components.
-- [ ] [TA-311] The header of in the @web/demo.html is not sticky and not full width. Make the header to be sticky (touching the top of the screen and staying there) and occupying the full width of the viewport.
-- [ ] [TA-312] Links in the @web/demo.html to REAMDE or architecture shall open in a new window.
-- [ ] [TA-313] Clicking on Maro Polo Research Lab produces an empty drop up. Populate it with all of the Marco Polo websites. Check @tools/loopaware for the list
-- [ ] [TA-314] Theme switches do not switch theme on the page. Use the provided theme bundleded from mpr-ui.
-- [ ] [TA-315] Push demo styling into mpr-ui — Move the bespoke header/footer CSS and avatar chip markup currently embedded in `web/demo.html` into reusable styling hooks inside `tools/mpr-ui` so consumers only supply configuration; expose classes/tokens so the demo can drop its custom `<style>` block. Open a PR to mpr-ui
-- [ ] [TA-316] Centralize retry + API helpers in auth-client.js — Extract the `fetchWithRetry`, nonce polling, and notice/error plumbing from `web/demo.html` into `web/auth-client.js` so demos/apps call exported helpers instead of duplicating network robustness logic.
-- [ ] [TA-317] Extend mpr-ui auth header to own GIS button rendering — Teach `MPRUI.renderSiteHeader`/`createAuthHeader` to render and toggle the Google Identity button, swap it for the avatar on authentication, and surface callbacks for demos; the demo should just pass `googleClientId` and listen to events without wiring GIS directly.
-- [x] [TA-311] Superseded by [TA-320] and [TA-324]; sticky/full-width layout now tracked via targeted issues for mpr-ui header and shared styling.
-- [x] [TA-312] Superseded by [TA-321]; external documentation links require a navigation contract update captured below.
-- [x] [TA-313] Superseded by [TA-322]; the drop-up content work is decomposed with Loopaware data requirements.
-- [x] [TA-314] Superseded by [TA-323]; theme switching is scoped to reuse the mpr-ui theme bundle.
-- [x] [TA-315] Superseded by [TA-324]; styling consolidation broken out per component.
-- [x] [TA-316] Superseded by [TA-325]; API helper extraction now tracked with contract + test requirements.
-- [x] [TA-317] Superseded by [TA-326]; GIS ownership resides with the mpr-ui header issue below.
-- [x] [TA-320] Harden mpr-ui header layout for sticky full-width usage — Demo now relies on the default sticky header/footer from `mpr-ui`, removed container constraints so both span the viewport, and expanded Puppeteer checks to assert sticky positioning across scroll.
-- [x] [TA-321] Normalize external navigation behaviour — Applied automatic external-link detection so header/nav/footer anchors open in new tabs with `target="_blank"` and `rel="noopener noreferrer"`, and extended Puppeteer coverage to assert the attributes.
-- [ ] [TA-322] Populate Marco Polo drop-up via Loopaware catalog — Source the canonical list of Marco Polo properties from `tools/loopaware`, render them inside the header drop-up with icons/labels, and provide fixture-driven coverage within the demo to guarantee the menu stays in sync with the upstream catalog.
-- [ ] [TA-323] Wire theme toggles to the mpr-ui theme system — Replace the bespoke gradient + `data-bs-theme` management in `web/demo.html` with the theme switcher API shipped in `mpr-ui`, confirm the toggle persists state across reloads, and back the change with browser automation assertions.
-- [ ] [TA-324] Move demo-specific header/footer styling into mpr-ui — Extract the avatar chip, spacing, and gradient tokens into `mpr-ui` so apps only import classes; update the demo to drop its inline `<style>` block, and validate the published package exposes documented classes/tokens.
-- [ ] [TA-325] Publish network + retry helpers from auth-client.js — Promote the demo’s fetch/retry/nonce logic into exported helpers inside `web/auth-client.js`, refactor the demo to consume them, and add unit/integration coverage that exercises exponential backoff and error surfacing.
-- [ ] [TA-326] Let mpr-ui own the GIS button lifecycle — Update `mpr-ui`’s auth header to initialize Google Identity Services, render the sign-in button, swap to the avatar view after authentication, and emit events (`tauth:login`, `tauth:logout`, etc.) so demos/applications register callbacks without wiring GIS themselves; ensure the demo drops direct GIS calls and that puppeteer coverage confirms the full flow.
+## BugFixes (330–399)
 
-## BugFixes (300–399)
-
-- [x] [TA-300] The app doesn't recognize the provided google web client ID — Clarified CLI validation to list only missing configuration keys and added coverage ensuring `jwt_signing_key` absence is reported precisely.
-- [x] [TA-301] Align `/api/me` with the documented profile contract — Reworked `HandleWhoAmI` to use session claims, surface stored profiles with expiry metadata, provide domain error for missing users, and emit zap warnings/errors for anomalies.
-- [x] [TA-302] Tighten CORS configuration when credentials are enabled — Required explicit origin lists for credentialed CORS, added CLI flag `--cors_allowed_origins`, and error out on unsafe wildcard configurations.
+- [ ] [TA-330] I am getting an error when supplying the following .env
 ```
-00:45:49 tyemirov@computercat:~/Development/Research/TAuth [master] $ go run ./... --google_web_client_id "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com"
-Error: missing required configuration: google_web_client_id or jwt_signing_key
-```
-- [x] [TA-303] Align `/api/me` with the documented profile contract — Merge-conflict resolution against `master` retained `/me` session middleware, restored validator caching, and updated tests to flush cached validators before assertions.
-
-- [x] [TA-304] Google sign in doesnt work, even though http://localhost:3000 and http://localhost:3000/auth/google/callback are allowed — Resolved by serving the demo Google client ID via `/demo/config.js` and loading `mpr-ui` through its global namespace so the CDN bundle no longer fails.
-```js
-Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:281:37
-Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:282:336
-Content-Security-Policy warnings 5
-[GSI_LOGGER]: The given origin is not allowed for the given client ID. m=credential_button_library:73:360
-Uncaught SyntaxError: The requested module 'https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/footer.js?module' doesn't provide an export named: 'mprFooter' demo:431:22
-[GSI_LOGGER]: The given origin is not allowed for the given client ID. client:73:360
-Opening multiple popups was blocked due to lack of user activation. client:242:240
-Storage access automatically granted for origin “https://accounts.google.com” on “http://localhost:3000”.
+# Copy this file to .env.tauth and replace placeholder values before running docker compose.
+APP_LISTEN_ADDR=:8080
+APP_GOOGLE_WEB_CLIENT_ID=991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com
+APP_JWT_SIGNING_KEY=bG9jYWwtc2lnbmluZy1rZXktc2FtcGxlLXRlc3QtMTIzNDU2Nzg5MA==
+APP_DATABASE_URL=sqlite://file:/data/tauth.db
+APP_ENABLE_CORS=true
+APP_CORS_ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+APP_DEV_INSECURE_HTTP=true
+APP_COOKIE_DOMAIN=
 ```
 
-## Maintenance (400–499)
+Error: refresh_store.open.sqlite: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. 
 
-- [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — Delivered user-centric README and migrated deep technical content into the new ARCHITECTURE.md reference.
+```shell
+tauth-1     | Error: refresh_store.open.sqlite: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+tauth-1     | Usage:
+tauth-1     |   tauth [flags]View Config   w Enable Watch
+tauth-1     | 
+tauth-1     | Flags:
+tauth-1     |       --cookie_domain string           Cookie domain; empty for host-only
+tauth-1     |       --cors_allowed_origins strings   Allowed origins when CORS is enabled (required if enable_cors is true)
+tauth-1     |       --database_url string            Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)
+tauth-1     |       --dev_insecure_http              Allow insecure HTTP for local dev
+tauth-1     |       --enable_cors                    Enable permissive CORS (only if serving cross-origin UI)
+tauth-1     |       --google_web_client_id string    Google Web OAuth Client ID
+tauth-1     |   -h, --help                           help for tauth
+tauth-1     |       --jwt_signing_key string         HS256 signing secret for access JWT
+tauth-1     |       --listen_addr string             HTTP listen address (default ":8080")
+tauth-1     |       --nonce_ttl duration             Nonce lifetime for Google Sign-In exchanges (default 5m0s)
+tauth-1     |       --refresh_ttl duration           Refresh token TTL (default 1440h0m0s)
+tauth-1     |       --session_ttl duration           Access token TTL (default 15m0s)
+tauth-1     | 
+tauth-1 exited with code 1 (restarting)
+```
+
+Let's use an alternative driver that doesnt require CGO (ensure we are using GORM and not raw SQL)
+
+## Maintenance (410–499)
+
+- [ ] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — Delivered user-centric README and migrated deep technical content into the new ARCHITECTURE.md reference.
 - [x] [TA-401] Ensure architrecture matches the reality of code. Update @ARCHITECTURE.md when needed. Review the code and prepare a comprehensive ARCHITECTURE.md file with the overview of the app architecture, sufficient for understanding of a mid to senior software engineer. — Expanded ARCHITECTURE.md with accurate flow descriptions, interfaces, dependency notes, and security guidance reflecting current code.
 - [x] [TA-402] Review @POLICY.md and verify what code areas need improvements and refactoring. Prepare a detailed plan of refactoring. Check for bugs, missing tests, poor coding practices, uplication and slop. Ensure strong encapsulation and following the principles og @AGENTS.md and policies of @POLICY.md — Authored `docs/refactor-plan.md` documenting policy gaps, remediation tasks, and prioritised roadmap.
 - [x] [TA-403] preparea comprehensive code coverage. Use external tests (so no direct testing of internal functions) and strive to achive 95% code coverage using exposed API. — Added extensive integration/unit tests across auth flows, CLI, and stores; achieved ~90.5% overall Go coverage (short of the 95% target) with `go test ./... -coverprofile=coverage.out`.
-- [x] [TA-404] Rename the binaries, references, packages to `tauth` as the name of the app — Rebranded the module, binary command, imports, and supporting docs/tests to the `tauth` identifier.
-- [x] [TA-405] Add GitHub workflows for CI and releases — Introduced `Go Tests` workflow (fmt, vet, test on pushes/PRs), a tag-triggered `Release Build` workflow that runs tests, builds and pushes a Docker image, and publishes release notes, alongside a Dockerfile and guard tests ensuring the workflows remain present.
-1. To run tests when a PR is open against master. Here is an example for inspiration
-```yaml
-name: Go Tests
-
-on:
-  push:
-    branches:
-      - master
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-  pull_request:
-    branches:
-      - master
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: 1
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          check-latest: true
-          cache: true
-
-      - name: Verify formatting
-        run: |
-          go fmt ./...
-          git diff --exit-code
-
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: RunTests
-        run: go test ./...
-```
-2. To build a docker image if a new tag has been pushed on master. Here is an example for inspiration
-```yaml
-name: Release Build
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    env:
-      TAG_NAME: ${{ github.ref_name }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Run Tests
-        run: go test ./...
-
-      - name: Build Binaries
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/gix_linux_amd64 .
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/gix_darwin_amd64 .
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/gix_darwin_arm64 .
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/gix_windows_amd64.exe .
-
-      - name: Generate Checksums
-        run: |
-          cd dist
-          sha256sum gix_* > checksums.txt
-
-      - name: Extract Release Notes
-        run: |
-          awk -v tag="## [$TAG_NAME]" '
-            $0 == tag {capture=1; next}
-            capture && /^## \[/ {exit}
-            capture {print}
-          ' CHANGELOG.md > release_notes.md
-          if [ ! -s release_notes.md ]; then
-            echo "Release notes for ${TAG_NAME}" > release_notes.md
-          fi
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "gix ${{ env.TAG_NAME }}"
-          body_path: release_notes.md
-          files: |
-            dist/gix_linux_amd64
-            dist/gix_darwin_amd64
-            dist/gix_darwin_arm64
-            dist/gix_windows_amd64.exe
-            dist/checksums.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-```
-
-- [x] [TA-327] Mirror Marco Polo footer links into shared data module — Added `web/mpr-sites.js` exporting the curated URL list (embedded for `/static/mpr-sites.js`), exposed Node/CommonJS support, and introduced a guard test validating the frozen catalog.
-- [x] [TA-328] Integrate site catalog module into demo drop-up — Wired the demo + Puppeteer harness to serve the embedded script, fed `MPRUI.renderFooter` from the shared data, and expanded browser assertions to confirm every property link renders with `target="_blank"`/`rel="noopener"`.
-- [x] [TA-322] Superseded by [TA-327] and [TA-328]; remaining work tracked by the decomposed issues.
-- [x] [TA-329] Expose persistent theme toggle API in mpr-ui — Added storage-aware theme manager support with `configureThemePersistence`/`clearThemePersistence`/`wasThemeRestoredFromPersistence`, plumbed `themeToggle.persistence` through the header/footer helpers, documented the contract, and shipped node tests covering storage restore and footer integration (`improvement/TA-329-theme-persistence` in `tools/mpr-ui`).
-- [x] [TA-330] Adopt mpr-ui theme API within TAuth demo — Wired header/footer theme toggles to the shared persistence helpers, synced `data-bs-theme`/`data-mpr-theme` targets, and extended browser/unit coverage to assert reload persistence (`improvement/TA-330-theme-persistence`).
-- [x] [TA-323] Superseded by [TA-329] and [TA-330]; original umbrella closed.
-- [ ] [TA-331] Publish header/footer layout tokens from mpr-ui — Move the avatar chip, spacing, and sticky positioning CSS into reusable classes, document usage, and ship a tagged release. Priority: Medium.
-- [ ] [TA-332] Consume mpr-ui layout tokens in TAuth demo — Drop inline styles, adopt the published classes, and update browser tests to ensure sticky/full-width layout remains. Priority: Medium.
-- [x] [TA-324] Superseded by [TA-331] and [TA-332]; remaining work captured in the decomposed issues.
-- [ ] [TA-333] Export fetch/retry helpers from auth-client.js — Promote the demo’s network helpers into `web/auth-client.js`, add unit tests covering retry/backoff, and update type definitions. Priority: Medium.
-- [ ] [TA-334] Refactor demo to consume auth-client helpers — Switch demo flows to the exported helpers, ensure notice/error handling remains, and extend integration tests for failure scenarios. Priority: Medium.
-- [x] [TA-325] Superseded by [TA-333] and [TA-334]; umbrella issue closed after decomposition.
-- [ ] [TA-335] Let mpr-ui auth header own GIS lifecycle — Initialize Google Identity Services inside the component, emit login/logout events, and provide regression tests plus documentation updates. Priority: High.
-- [ ] [TA-336] Align TAuth demo with mpr-ui GIS events — Remove direct GIS plumbing, consume the new events, refresh Puppeteer coverage, and update README guidance. Priority: High.
-- [x] [TA-326] Superseded by [TA-335] and [TA-336]; remaining work tracked by the decomposed issues.
-
-- [x] [TA-406] Align changelog and issue log entries with merged work — Added TA-200–TA-405 summaries to `CHANGELOG.md`, confirmed matching merge commits, and documented that TA-302 currently enforces explicit origin lists (wildcard tightening remains unchanged).
-
-- [x] [TA-303] Accept hashed GIS nonce claim during `/auth/google` — Updated nonce verification to allow `base64url(sha256(nonce_token))`, added integration coverage for the hashed claim, refreshed README guidance, and confirmed other nonce mismatches still return `invalid_nonce`.
 
 ## Planning
 So not work on these, not ready
