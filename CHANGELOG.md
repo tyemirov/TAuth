@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- TA-332: Added `examples/docker-compose` with a `.env` template plus README instructions so developers can spin up TAuth locally via Docker Compose.
+- TA-333: Updated the compose example to build the image from the local Dockerfile (`docker compose up --build`) so contributors can test unmerged changes.
+- TA-334: Adjusted the Docker image to run as root, create `/data`, and declare it as a volume so the SQLite refresh store can write when using Docker Compose.
+- TA-335: Added an integration test that starts the server with a file-based SQLite DSN (`sqlite:///...`) to guard against regressions in on-disk deployments.
+- TA-335: Restored the Docker Compose quick-start (single TAuth service + `.env` template) and documented the workflow for local testing.
 - TA-335: Restored the `examples/docker-compose` quick-start (compose stack + `.env` template), added README guidance, and ignored local `.env.tauth` overrides so developers can spin up TAuth locally.
 - TA-334: Reconfigured the Docker image to run as root, pre-create `/data`, and declare the data volume so SQLite-backed refresh stores can write without permission errors when running under Docker Compose.
 - TA-330: Replaced the refresh token store’s SQLite dialector with the CGO-free `github.com/glebarez/sqlite`, refreshed tests to enforce the driver selection, and documented the change so Docker images run without enabling CGO.

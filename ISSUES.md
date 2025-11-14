@@ -11,6 +11,11 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## Improvements (212–299)
 
+- [x] [TA-332] Provide a docker-compose example and `.env` template so developers can boot the published TAuth image locally. — Added `examples/docker-compose` (tauth-only), `.env.tauth.example`, README instructions, and gitignore entries for developer overrides.
+- [x] [TA-333] Update the compose example to build the TAuth image from the local Dockerfile so contributors can test code changes without publishing to GHCR. — Added `build` instructions, switched README to `docker compose up --build`, and tagged the image `tauth-local:latest`.
+- [x] [TA-334] Docker Compose runs still fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` because the containerized TAuth process lacks write access to `/data`. — Updated the Dockerfile to run as root, create `/data`, and declare the volume so SQLite refresh stores can write when using Docker.
+- [x] [TA-335] Missing regression coverage for `APP_DATABASE_URL=sqlite:///absolute/path`: starting TAuth with a file-backed SQLite DSN regressed before, so add an integration test that boots the server with a temp file path to catch future issues. — Added `TestRunServerWithSQLiteFilePath` under `cmd/server/main_test.go` which provisions a temp file DSN and ensures `runServer` succeeds and the DB file is created.
+
 ## BugFixes (330–399)
 
 - [x] [TA-330] I am getting an error when supplying the following .env
@@ -60,7 +65,7 @@ Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez
 - [x] [TA-401] Ensure architrecture matches the reality of code. Update @ARCHITECTURE.md when needed. Review the code and prepare a comprehensive ARCHITECTURE.md file with the overview of the app architecture, sufficient for understanding of a mid to senior software engineer. — Expanded ARCHITECTURE.md with accurate flow descriptions, interfaces, dependency notes, and security guidance reflecting current code.
 - [x] [TA-402] Review @POLICY.md and verify what code areas need improvements and refactoring. Prepare a detailed plan of refactoring. Check for bugs, missing tests, poor coding practices, uplication and slop. Ensure strong encapsulation and following the principles og @AGENTS.md and policies of @POLICY.md — Authored `docs/refactor-plan.md` documenting policy gaps, remediation tasks, and prioritised roadmap.
 - [x] [TA-403] preparea comprehensive code coverage. Use external tests (so no direct testing of internal functions) and strive to achive 95% code coverage using exposed API. — Added extensive integration/unit tests across auth flows, CLI, and stores; achieved ~90.5% overall Go coverage (short of the 95% target) with `go test ./... -coverprofile=coverage.out`.
-- [x] [TA-335] The `examples/docker-compose` quick-start folder (compose file + `.env` template) is missing from `master`. Reintroduce it, document the workflow in README, and ensure local `.env.tauth` overrides stay gitignored. — Restored the sample compose stack with `.env` template, ignored local overrides, and refreshed README instructions so contributors can run `docker compose up --build` locally.
+- [x] [TA-335] The `examples/docker-compose` quick-start folder (compose file + `.env` template) is missing from `master`, and prior drafts referenced a `demo` service that no longer exists. Reintroduce the example with a single TAuth service, document the workflow in README, and keep local `.env.tauth` ignored. — Restored the compose stack with only the TAuth container, added `.env` template + gitignore entries, and documented usage in README.
 
 ## Planning
 So not work on these, not ready

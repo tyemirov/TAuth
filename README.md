@@ -132,15 +132,14 @@ The login flow is identical to a local setup—the only difference is that every
 
 ### Local quick-start via Docker Compose
 
-Need to try TAuth without wiring infrastructure? Use the sample stack under `examples/docker-compose`:
+For a quick local run without installing Go, use `examples/docker-compose`:
 
 1. `cd examples/docker-compose`
-2. Copy the template: `cp .env.tauth.example .env.tauth`
-3. Edit `.env.tauth` with your Google Web Client ID and a random Base64 JWT secret. Keep `APP_DATABASE_URL=sqlite:///data/tauth.db` (note the triple slash for absolute paths).
-4. Build and boot the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` for the static demo UI; it talks to TAuth at `http://localhost:8080` via credentialed CORS.
+2. `cp .env.tauth.example .env.tauth`
+3. Edit `.env.tauth` (set your Google Web Client ID and JWT signing key).
+4. `docker compose up --build`
 
-Stop everything with `docker compose down`. The compose file keeps refresh tokens in the named `tauth_data` volume mounted at `/data`; delete the volume if you need a clean slate. Update `.env.tauth` before rerunning to adjust domains or ports.
+The compose file builds the TAuth image locally (tagged `tauth-local:latest`) and exposes it on `http://localhost:8080`. Re-run `docker compose up --build` whenever you change Go code. Tear it down with `docker compose down`. Refresh tokens persist inside the `tauth_data` volume—remove it if you want a fresh SQLite file.
 
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
