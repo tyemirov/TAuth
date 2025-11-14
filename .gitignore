@@ -1,5 +1,7 @@
 PLAN.md
 .env
+.env.tauth
+*.env.tauth
 node_modules/
 tools/
 .local-browsers/

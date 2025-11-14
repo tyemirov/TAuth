@@ -1,0 +1,27 @@
+services:
+  tauth:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    image: tauth-local:latest
+    env_file:
+      - ./.env.tauth
+    ports:
+      - "8080:8080"
+    volumes:
+      - tauth_data:/data
+    restart: unless-stopped
+
+  demo:
+    image: ghcr.io/tyemirov/ghttp:latest
+    depends_on:
+      - tauth
+    command: ["--directory", "/srv/web", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../web:/srv/web:ro
+    restart: unless-stopped
+
+volumes:
+  tauth_data:
