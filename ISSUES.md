@@ -11,6 +11,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## Improvements (212–299)
 
+- [x] [TA-332] Provide a docker-compose example and `.env` template so developers can boot the published TAuth image locally. — Added `examples/docker-compose` (tauth-only), `.env.tauth.example`, README instructions, and gitignore entries for developer overrides.
+
 ## BugFixes (330–399)
 
 - [x] [TA-330] I am getting an error when supplying the following .env
