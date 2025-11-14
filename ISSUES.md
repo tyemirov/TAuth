@@ -56,7 +56,7 @@ Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez
 
 - [x] [TA-331] After switching to the CGO-free sqlite driver, Docker compose runs fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` when `APP_DATABASE_URL=sqlite://file:/data/tauth.db`, preventing the containerized service from booting. Needs DSN handling fix so absolute file paths resolve correctly inside the container.
 
-Resolution: Corrected the SQLite DSN builder to preserve the `file:/absolute/path` prefix when a host of `file` is provided, added regression tests, and verified Docker-style absolute paths open successfully.
+Resolution: SQLite DSNs now reject host-based `sqlite://file:/...` forms with a descriptive `refresh_store.sqlite.unsupported_host` error, documentation clarifies the triple-slash requirement (`sqlite:///data/tauth.db`), and tests cover both valid and invalid inputs.
 
 ## Maintenance (410–499)
 

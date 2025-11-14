@@ -32,12 +32,14 @@ export APP_ENABLE_CORS="true"                            # allow the product ori
 export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com"
 # Optional persistence (choose one):
 # export APP_DATABASE_URL="postgres://user:pass@db.internal:5432/authdb?sslmode=disable"
-# export APP_DATABASE_URL="sqlite://file:./auth.db"
+# export APP_DATABASE_URL="sqlite:///auth.db"
 
 tauth --listen_addr=":8443" --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
   --jwt_signing_key="$APP_JWT_SIGNING_KEY" --cookie_domain="$APP_COOKIE_DOMAIN" \
   --enable_cors --cors_allowed_origins="https://gravity.mprlab.com"
 ```
+
+> SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 
 When multiple product origins need access, provide a comma-separated list via the environment variable (e.g. `export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com,https://gravity-admin.mprlab.com"`) or repeat the CLI flag for each origin.
 

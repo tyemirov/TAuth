@@ -18,11 +18,12 @@ var (
 	// ErrUnsupportedDialect indicates that no GORM dialector is available for the scheme.
 	ErrUnsupportedDialect = errors.New("refresh_store.unsupported_dialect")
 
-	errEmptyOpaqueToken    = errors.New("refresh_store.empty_token")
-	errEmptyDatabaseURL    = errors.New("refresh_store.empty_database_url")
-	errSQLiteEmptyPath     = errors.New("refresh_store.sqlite.empty_path")
-	errSQLiteInvalidURL    = errors.New("refresh_store.sqlite.invalid_url")
-	errUnsupportedNoScheme = errors.New("refresh_store.unsupported_no_scheme")
+	errEmptyOpaqueToken      = errors.New("refresh_store.empty_token")
+	errEmptyDatabaseURL      = errors.New("refresh_store.empty_database_url")
+	errSQLiteEmptyPath       = errors.New("refresh_store.sqlite.empty_path")
+	errSQLiteInvalidURL      = errors.New("refresh_store.sqlite.invalid_url")
+	errSQLiteUnsupportedHost = errors.New("refresh_store.sqlite.unsupported_host")
+	errUnsupportedNoScheme   = errors.New("refresh_store.unsupported_no_scheme")
 )
 
 // DatabaseRefreshTokenStore persists rotating refresh tokens using GORM.
@@ -178,11 +179,14 @@ func buildSQLiteDSN(parsed *url.URL) (string, error) {
 	case parsed.Opaque != "":
 		builder.WriteString(parsed.Opaque)
 	case parsed.Host != "":
-		builder.WriteString(parsed.Host)
+		host := parsed.Host
+		normalizedHost := strings.TrimSuffix(host, ":")
+		if strings.EqualFold(normalizedHost, "file") {
+			return "", errSQLiteUnsupportedHost
+		}
+		builder.WriteString(host)
 		if parsed.Path != "" {
-			if strings.EqualFold(parsed.Host, "file") {
-				builder.WriteString(":")
-			} else if !strings.HasPrefix(parsed.Path, "/") {
+			if !strings.HasPrefix(parsed.Path, "/") {
 				builder.WriteString("/")
 			}
 			builder.WriteString(parsed.Path)

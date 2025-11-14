@@ -109,29 +109,39 @@ func TestBuildSQLiteDSNVariants(t *testing.T) {
 	}
 }
 
-func TestBuildSQLiteDSNFileHostAbsolutePath(t *testing.T) {
+func TestBuildSQLiteDSNRejectsFileHost(t *testing.T) {
 	parsed, err := url.Parse("sqlite://file:/data/tauth.db")
 	if err != nil {
 		t.Fatalf("failed to parse url: %v", err)
 	}
-	dsn, buildErr := buildSQLiteDSN(parsed)
-	if buildErr != nil {
-		t.Fatalf("buildSQLiteDSN returned error: %v", buildErr)
+	_, buildErr := buildSQLiteDSN(parsed)
+	if buildErr == nil {
+		t.Fatalf("expected error for file host")
 	}
-	if dsn != "file:/data/tauth.db" {
-		t.Fatalf("expected file:/data/tauth.db, got %s", dsn)
+	if !errors.Is(buildErr, errSQLiteUnsupportedHost) {
+		t.Fatalf("expected errSQLiteUnsupportedHost, got %v", buildErr)
 	}
 
 	parsed, err = url.Parse("sqlite:///data/alt.db")
 	if err != nil {
 		t.Fatalf("failed to parse triple slash url: %v", err)
 	}
-	dsn, buildErr = buildSQLiteDSN(parsed)
+	dsn, buildErr := buildSQLiteDSN(parsed)
 	if buildErr != nil {
 		t.Fatalf("unexpected error for triple slash absolute path: %v", buildErr)
 	}
 	if dsn != "/data/alt.db" {
 		t.Fatalf("expected /data/alt.db, got %s", dsn)
+	}
+}
+
+func TestResolveDialectorRejectsFileHost(t *testing.T) {
+	_, _, err := resolveDialector("sqlite://file:/data/tauth.db")
+	if err == nil {
+		t.Fatalf("expected error for file host DSN")
+	}
+	if !errors.Is(err, errSQLiteUnsupportedHost) {
+		t.Fatalf("expected errSQLiteUnsupportedHost, got %v", err)
 	}
 }
 
