@@ -180,7 +180,9 @@ func buildSQLiteDSN(parsed *url.URL) (string, error) {
 	case parsed.Host != "":
 		builder.WriteString(parsed.Host)
 		if parsed.Path != "" {
-			if !strings.HasPrefix(parsed.Path, "/") {
+			if strings.EqualFold(parsed.Host, "file") {
+				builder.WriteString(":")
+			} else if !strings.HasPrefix(parsed.Path, "/") {
 				builder.WriteString("/")
 			}
 			builder.WriteString(parsed.Path)

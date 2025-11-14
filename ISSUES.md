@@ -54,6 +54,10 @@ Let's use an alternative driver that doesnt require CGO (ensure we are using GOR
 
 Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez/sqlite` driver, updated the dialector tests to enforce the new dependency, and refreshed docs so Docker builds no longer require CGO.
 
+- [x] [TA-331] After switching to the CGO-free sqlite driver, Docker compose runs fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` when `APP_DATABASE_URL=sqlite://file:/data/tauth.db`, preventing the containerized service from booting. Needs DSN handling fix so absolute file paths resolve correctly inside the container.
+
+Resolution: Corrected the SQLite DSN builder to preserve the `file:/absolute/path` prefix when a host of `file` is provided, added regression tests, and verified Docker-style absolute paths open successfully.
+
 ## Maintenance (410–499)
 
 - [ ] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — Delivered user-centric README and migrated deep technical content into the new ARCHITECTURE.md reference.
