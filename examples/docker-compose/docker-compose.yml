@@ -1,6 +1,9 @@
 services:
   tauth:
-    image: ghcr.io/tyemirov/tauth:latest
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    image: tauth-local:latest
     env_file:
       - ./.env.tauth
     ports:

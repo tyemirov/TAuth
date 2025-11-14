@@ -4,6 +4,7 @@
 
 - TA-331: Tightened SQLite DSN validation to reject host-based forms such as `sqlite://file:/absolute/path`, documented the triple-slash requirement, and ensured errors report invalid DSNs up front.
 - TA-332: Added `examples/docker-compose` with a ready-to-run compose stack + `.env` template, documented the workflow in README, and ignored local `.env.tauth` overrides.
+- TA-333: Switched the compose example to build the TAuth image from the local Dockerfile (tagged `tauth-local:latest`) and updated docs to use `docker compose up --build` so contributors can test unmerged changes.
 - TA-330: Replaced the refresh token store’s SQLite dialector with the CGO-free `github.com/glebarez/sqlite`, refreshed tests to enforce the driver selection, and documented the change so Docker images run without enabling CGO.
 - TA-200: Introduced GORM-backed refresh token store supporting Postgres and SQLite, added mandatory `--database_url` / `APP_DATABASE_URL`, removed pgx-specific store and legacy compatibility, updated docs, and added SQLite lifecycle tests.
 - TA-100: Delivered the reusable mpr-ui auth header, surfaced `avatar_url` across login and `/me` payloads, refreshed demo rendering, and documented dataset/event contracts for downstream consumers.
