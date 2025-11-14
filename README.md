@@ -45,6 +45,23 @@ When multiple product origins need access, provide a comma-separated list via th
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. With the cookie domain set to `.mprlab.com`, the session cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com`.
 
+### Run the demo with Docker Compose (local quick-start)
+
+We ship a compose example under `examples/docker-compose` that boots the published `ghcr.io/tyemirov/tauth:latest` image plus a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) that serves the repository’s `web/` directory on port `8000`.
+
+1. `cd examples/docker-compose`
+2. Copy and edit the environment template:
+
+   ```bash
+   cp .env.tauth.example .env.tauth
+   # edit APP_GOOGLE_WEB_CLIENT_ID + APP_JWT_SIGNING_KEY, keep APP_DATABASE_URL=sqlite:///data/tauth.db
+   ```
+
+3. Start the stack: `docker compose up`
+4. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8080` via CORS).
+
+Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` to change ports, cookie domains, or Google credentials before re-running.
+
 ### 3. Integrate the browser helper from the product site
 
 ```html
