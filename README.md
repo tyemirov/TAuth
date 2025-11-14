@@ -130,6 +130,18 @@ The login flow is identical to a local setup—the only difference is that every
 
 > **Tip:** The demo falls back to a public sample client ID when `APP_GOOGLE_WEB_CLIENT_ID` is not set. Replace it with your own Google OAuth Web client in production.
 
+### Local quick-start via Docker Compose
+
+The repository ships `examples/docker-compose` for spinning up TAuth locally without installing Go. This stack only runs the TAuth service—you can point any local front-end (or `curl`) at `http://localhost:8080`.
+
+1. `cd examples/docker-compose`
+2. Copy the template: `cp .env.tauth.example .env.tauth`
+3. Edit `.env.tauth` with your Google Web Client ID and a random Base64 JWT key. Keep `APP_DATABASE_URL=sqlite:///data/tauth.db` (triple slash required for absolute paths).
+4. Run `docker compose up --build`
+5. Hit `http://localhost:8080/auth/nonce` or wire your local UI against the exposed origin.
+
+Destroy the stack with `docker compose down`. Refresh tokens live in the named `tauth_data` volume—remove it if you need a clean database.
+
 That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
 
 Successful exchanges populate `/me` with a rich profile:
