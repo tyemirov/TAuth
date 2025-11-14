@@ -12,6 +12,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 ## Improvements (212–299)
 
 - [x] [TA-332] Provide a docker-compose example and `.env` template so developers can boot the published TAuth image locally. — Added `examples/docker-compose` (tauth-only), `.env.tauth.example`, README instructions, and gitignore entries for developer overrides.
+- [x] [TA-333] Update the compose example to build the TAuth image from the local Dockerfile so contributors can test code changes without publishing to GHCR. — Added `build` instructions, switched README to `docker compose up --build`, and tagged the image `tauth-local:latest`.
 
 ## BugFixes (330–399)
 
