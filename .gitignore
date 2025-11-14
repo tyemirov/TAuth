@@ -7,3 +7,5 @@ tools/
 *.json
 !package.json
 !package-lock.json
+# Managed by gix gitignore workflow
+bin/
