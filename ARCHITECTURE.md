@@ -154,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id);
 
 Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each refresh rotation inserts the new token, links it to the previous ID, and marks older tokens revoked.
 
-`DatabaseRefreshTokenStore` parses the database URL to select a GORM dialector (`postgres` or `sqlite`), silences default logging, auto-migrates the schema, and tags errors with context (`refresh_store.*`) for observability. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
+`DatabaseRefreshTokenStore` parses the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silences default logging, auto-migrates the schema, and tags errors with context (`refresh_store.*`) for observability. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
 ## 7. Security Considerations
 
@@ -193,7 +193,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 - **Configuration**: `spf13/viper` + `spf13/cobra` for flags and environment merging.
 - **Google verification**: `google.golang.org/api/idtoken`.
 - **JWT**: `github.com/golang-jwt/jwt/v5` with HS256 signatures.
-- **Persistence**: `gorm.io/gorm` with `gorm.io/driver/postgres` and `gorm.io/driver/sqlite`.
+- **Persistence**: `gorm.io/gorm` with `gorm.io/driver/postgres` and the CGO-free `github.com/glebarez/sqlite`.
 - **Logging**: `go.uber.org/zap` (production configuration).
 - **Testing**: standard library `httptest` plus the memory refresh store for fast integration coverage.
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	sqliteDialector "gorm.io/driver/sqlite"
+	sqliteDialector "github.com/glebarez/sqlite"
 )
 
 func TestResolveDialectorUnsupportedScheme(t *testing.T) {

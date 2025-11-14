@@ -13,7 +13,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## BugFixes (330–399)
 
-- [ ] [TA-330] I am getting an error when supplying the following .env
+- [x] [TA-330] I am getting an error when supplying the following .env
 ```
 # Copy this file to .env.tauth and replace placeholder values before running docker compose.
 APP_LISTEN_ADDR=:8080
@@ -51,6 +51,8 @@ tauth-1 exited with code 1 (restarting)
 ```
 
 Let's use an alternative driver that doesnt require CGO (ensure we are using GORM and not raw SQL)
+
+Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez/sqlite` driver, updated the dialector tests to enforce the new dependency, and refreshed docs so Docker builds no longer require CGO.
 
 ## Maintenance (410–499)
 
