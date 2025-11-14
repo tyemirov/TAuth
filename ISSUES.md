@@ -14,6 +14,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-332] Provide a docker-compose example and `.env` template so developers can boot the published TAuth image locally. — Added `examples/docker-compose` (tauth-only), `.env.tauth.example`, README instructions, and gitignore entries for developer overrides.
 - [x] [TA-333] Update the compose example to build the TAuth image from the local Dockerfile so contributors can test code changes without publishing to GHCR. — Added `build` instructions, switched README to `docker compose up --build`, and tagged the image `tauth-local:latest`.
 - [x] [TA-334] Docker Compose runs still fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` because the containerized TAuth process lacks write access to `/data`. — Updated the Dockerfile to run as root, create `/data`, and declare the volume so SQLite refresh stores can write when using Docker.
+- [x] [TA-335] Missing regression coverage for `APP_DATABASE_URL=sqlite:///absolute/path`: starting TAuth with a file-backed SQLite DSN regressed before, so add an integration test that boots the server with a temp file path to catch future issues. — Added `TestRunServerWithSQLiteFilePath` under `cmd/server/main_test.go` which provisions a temp file DSN and ensures `runServer` succeeds and the DB file is created.
 
 ## BugFixes (330–399)
 
