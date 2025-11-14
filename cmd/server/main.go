@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -143,6 +144,23 @@ func LoadServerConfig() (authkit.ServerConfig, error) {
 	}, nil
 }
 
+func configStringSlice(key string) []string {
+	return expandCommaSeparatedEntries(viper.GetStringSlice(key))
+}
+
+func expandCommaSeparatedEntries(entries []string) []string {
+	expanded := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		for _, chunk := range strings.Split(entry, ",") {
+			value := strings.TrimSpace(chunk)
+			if value != "" {
+				expanded = append(expanded, value)
+			}
+		}
+	}
+	return expanded
+}
+
 func runServer(command *cobra.Command, arguments []string) error {
 	logger, loggerErr := zap.NewProduction()
 	if loggerErr != nil {
@@ -164,7 +182,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	devInsecureHTTP := viper.GetBool("dev_insecure_http")
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
-	corsAllowedOrigins := viper.GetStringSlice("cors_allowed_origins")
+	corsAllowedOrigins := configStringSlice("cors_allowed_origins")
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

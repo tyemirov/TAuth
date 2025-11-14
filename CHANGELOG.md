@@ -17,6 +17,7 @@
 - TA-300: Improved CLI configuration errors to enumerate missing keys, ensuring absent `jwt_signing_key` is reported precisely.
 - TA-301: Reworked `/api/me` to source claims from the session context, return persisted profiles with expiry metadata, surface `ErrUserProfileNotFound`, and emit zap warnings for anomalies.
 - TA-302: Required explicit origin lists when enabling credentialed CORS via `--cors_allowed_origins` / `APP_CORS_ALLOWED_ORIGINS`, surfacing configuration errors for empty or whitespace-only inputs.
+- TA-406: Accepted comma-separated `APP_CORS_ALLOWED_ORIGINS` values so environment variables mirror CLI flag behavior and keep whitespace-free origins when enabling credentialed CORS.
 - TA-400: Refocused README on user-facing outcomes and moved deep technical notes into `ARCHITECTURE.md`.
 - TA-401: Expanded `ARCHITECTURE.md` with up-to-date flow diagrams, dependency notes, and security guidance that match the current implementation.
 - TA-402: Captured the refactor roadmap in `docs/refactor-plan.md`, outlining policy gaps and prioritised remediation tasks.

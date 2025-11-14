@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -238,6 +239,56 @@ func TestNewRootCommandHelp(t *testing.T) {
 	cmd.SetArgs([]string{"--help"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected help execution to succeed: %v", err)
+	}
+}
+
+func TestConfigStringSlice(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+
+	viper.Set("sample_slice", []string{"https://one.example , https://two.example", "https://three.example"})
+	result := configStringSlice("sample_slice")
+	expected := []string{"https://one.example", "https://two.example", "https://three.example"}
+
+	if !reflect.DeepEqual(result, expected) {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestExpandCommaSeparatedEntries(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "CommaSeparatedEntries",
+			input:    []string{"https://one.example,https://two.example"},
+			expected: []string{"https://one.example", "https://two.example"},
+		},
+		{
+			name:     "TrimsWhitespace",
+			input:    []string{" https://one.example , https://two.example ", "https://three.example"},
+			expected: []string{"https://one.example", "https://two.example", "https://three.example"},
+		},
+		{
+			name:     "IgnoresEmptyValues",
+			input:    []string{"", "   ", "https://one.example,,https://two.example"},
+			expected: []string{"https://one.example", "https://two.example"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		tc := testCase
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := expandCommaSeparatedEntries(tc.input)
+			if !reflect.DeepEqual(result, tc.expected) {
+				t.Fatalf("expected %v, got %v", tc.expected, result)
+			}
+		})
 	}
 }
 
