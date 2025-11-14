@@ -29,7 +29,7 @@ export APP_GOOGLE_WEB_CLIENT_ID="your_web_client_id.apps.googleusercontent.com"
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
 export APP_COOKIE_DOMAIN=".mprlab.com"                    # share cookies across tauth + gravity subdomains
 export APP_ENABLE_CORS="true"                            # allow the product origin to call TAuth
-export APP_CORS_ALLOWED_ORIGINS='["https://gravity.mprlab.com"]'
+export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com"
 # Optional persistence (choose one):
 # export APP_DATABASE_URL="postgres://user:pass@db.internal:5432/authdb?sslmode=disable"
 # export APP_DATABASE_URL="sqlite://file:./auth.db"
@@ -38,6 +38,8 @@ tauth --listen_addr=":8443" --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
   --jwt_signing_key="$APP_JWT_SIGNING_KEY" --cookie_domain="$APP_COOKIE_DOMAIN" \
   --enable_cors --cors_allowed_origins="https://gravity.mprlab.com"
 ```
+
+When multiple product origins need access, provide a comma-separated list via the environment variable (e.g. `export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com,https://gravity-admin.mprlab.com"`) or repeat the CLI flag for each origin.
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. With the cookie domain set to `.mprlab.com`, the session cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com`.
 
