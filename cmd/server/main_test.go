@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -194,6 +197,55 @@ func TestRunServerSuccess(t *testing.T) {
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
+	}
+}
+
+func TestRunServerWithSQLiteFilePath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		if server.Handler == nil {
+			t.Fatalf("expected handler to be configured")
+		}
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "tauth.db")
+	dsn := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(filePath))
+
+	viper.Set("listen_addr", ":0")
+	viper.Set("google_web_client_id", "client")
+	viper.Set("jwt_signing_key", "signing-secret")
+	viper.Set("cookie_domain", "localhost")
+	viper.Set("session_ttl", time.Minute)
+	viper.Set("refresh_ttl", time.Hour)
+	viper.Set("dev_insecure_http", true)
+	viper.Set("database_url", dsn)
+
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	if err := runServer(command, nil); err != nil {
+		t.Fatalf("expected runServer to succeed with file-backed sqlite, got %v", err)
+	}
+
+	if _, err := os.Stat(filePath); err != nil {
+		t.Fatalf("expected sqlite database file to exist, got %v", err)
 	}
 }
 
