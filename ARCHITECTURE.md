@@ -128,7 +128,7 @@ type RefreshTokenStore interface {
 | `APP_JWT_SIGNING_KEY`      | HS256 signing secret                                | `openssl rand -base64 48`                           |
 | `APP_SESSION_TTL`          | Access token lifetime                               | `15m`                                               |
 | `APP_REFRESH_TTL`          | Refresh token lifetime                              | `1440h` (60 days)                                   |
-| `APP_DATABASE_URL`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite://file:./auth.db`                           |
+| `APP_DATABASE_URL`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite:///auth.db`                                 |
 | `APP_ENABLE_CORS`          | Enable permissive CORS (cross-origin dev only)      | `true`                                              |
 | `APP_DEV_INSECURE_HTTP`    | Allow non-HTTPS (local development)                 | `true`                                              |
 
@@ -154,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id);
 
 Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each refresh rotation inserts the new token, links it to the previous ID, and marks older tokens revoked.
 
-`DatabaseRefreshTokenStore` parses the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silences default logging, auto-migrates the schema, and tags errors with context (`refresh_store.*`) for observability. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
+`DatabaseRefreshTokenStore` parses the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silences default logging, auto-migrates the schema, and tags errors with context (`refresh_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
 ## 7. Security Considerations
 

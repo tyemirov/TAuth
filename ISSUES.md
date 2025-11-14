@@ -59,6 +59,20 @@ Let's use an alternative driver that doesnt require CGO (ensure we are using GOR
 
 Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez/sqlite` driver, updated the dialector tests to enforce the new dependency, and refreshed docs so Docker builds no longer require CGO.
 
+- [x] [TA-331] After switching to the CGO-free sqlite driver, Docker compose runs fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` when `APP_DATABASE_URL=sqlite://file:/data/tauth.db`, preventing the containerized service from booting. Needs DSN handling fix so absolute file paths resolve correctly inside the container.
+
+Resolution: SQLite DSNs now reject host-based `sqlite://file:/...` forms with a descriptive `refresh_store.sqlite.unsupported_host` error, documentation clarifies the triple-slash requirement (`sqlite:///data/tauth.db`), and tests cover both valid and invalid inputs.
+
+- [ ] [TA-332] Ensure the cancellat context is propagated. Currently Ctrl-C in the docker container leaves the app in non-exited state and requires a second ctrl-C
+```
+tauth-1 exited with code 1 (restarting)
+Gracefully Stopping... press Ctrl+C again to force
+ Container docker-compose-tauth-1  Stopping
+ Container docker-compose-tauth-1  Stopped
+^C
+12:37:23 tyemirov@Vadyms-MacBook-Pro:~/Development/tyemirov/TAuth/examples/docker-compose - [improvement/TA-333-compose-build] $ 
+```
+
 ## Maintenance (410–499)
 
 - [ ] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — Delivered user-centric README and migrated deep technical content into the new ARCHITECTURE.md reference.
