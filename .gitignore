@@ -1,7 +1,7 @@
 PLAN.md
 .env
 .env.tauth
-!.env.tauth.example
+!examples/docker-compose/.env.tauth.example
 node_modules/
 tools/
 .local-browsers/

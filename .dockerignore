@@ -1,0 +1,12 @@
+# Prevent secret environment files from being sent to the Docker build context
+.env
+.env.*
+*.env
+*.env.*
+# Allow checked-in example templates
+!.env.example
+!.env.*.example
+!*.example
+
+# Explicitly ignore developer overrides created from examples
+examples/docker-compose/.env.tauth
