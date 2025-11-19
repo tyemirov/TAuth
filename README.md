@@ -201,6 +201,7 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ## Learn more
 
+- Read the authoritative usage guide in [`docs/usage.md`](docs/usage.md) for end-to-end setup and integration details.
 - Dive into [ARCHITECTURE.md](ARCHITECTURE.md) for endpoints, request flows, and deployment guidance.
 - Read [POLICY.md](POLICY.md) for the confident-programming rules enforced across the codebase.
 - Inspect `web/auth-client.js` to extend UI hooks or wire additional analytics.
