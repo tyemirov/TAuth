@@ -126,6 +126,8 @@ The simplest way to use TAuth from the browser is through the helper served at `
 - `getCurrentUser()` – returns the current profile object or `null`.
 - `logout()` – revokes the refresh token and clears client state.
 
+For backend services written in Go, use the `pkg/sessionvalidator` package described in section 6.8 to validate `app_session` cookies.
+
 ### 4.1 Loading the helper
 
 On your product site, include the script from your TAuth origin:
@@ -330,6 +332,110 @@ Optional demo page shipped with the repository. Intended for local development o
 
 ---
 
+## 6.8 Validating sessions from other Go services
+
+Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
+
+### 6.8.1 Basic validator setup
+
+Add the module to your Go service and construct a validator at startup:
+
+```go
+import (
+    "os"
+
+    "github.com/tyemirov/tauth/pkg/sessionvalidator"
+)
+
+func newSessionValidator() (*sessionvalidator.Validator, error) {
+    signingKey := []byte(os.Getenv("APP_JWT_SIGNING_KEY"))
+    return sessionvalidator.New(sessionvalidator.Config{
+        SigningKey: signingKey,
+        Issuer:     "tauth",
+        // CookieName: optional; defaults to "app_session".
+    })
+}
+```
+
+The configuration mirrors your TAuth deployment:
+
+- `SigningKey` must match `APP_JWT_SIGNING_KEY` used by TAuth.
+- `Issuer` must match the issuer configured by the server (typically `"tauth"`; see `ARCHITECTURE.md`).
+- `CookieName` defaults to `app_session` and should only be overridden if you have customised the cookie name on the TAuth side.
+
+The constructor validates configuration up front and returns a typed error if required fields are missing.
+
+### 6.8.2 Gin middleware integration
+
+For Gin-based services, use the built-in middleware to protect routes and attach claims to the context:
+
+```go
+import (
+    "log"
+
+    "github.com/gin-gonic/gin"
+    "github.com/tyemirov/tauth/pkg/sessionvalidator"
+)
+
+func main() {
+    validator, err := newSessionValidator()
+    if err != nil {
+        log.Fatalf("invalid validator configuration: %v", err)
+    }
+
+    router := gin.Default()
+    router.Use(validator.GinMiddleware(sessionvalidator.DefaultContextKey))
+
+    router.GET("/me", func(context *gin.Context) {
+        claimsValue, exists := context.Get(sessionvalidator.DefaultContextKey)
+        if !exists {
+            context.AbortWithStatus(http.StatusUnauthorized)
+            return
+        }
+        claims := claimsValue.(*sessionvalidator.Claims)
+        context.JSON(http.StatusOK, map[string]interface{}{
+            "user_id":    claims.GetUserID(),
+            "user_email": claims.GetUserEmail(),
+            "display":    claims.GetUserDisplayName(),
+            "avatar_url": claims.GetUserAvatarURL(),
+            "roles":      claims.GetUserRoles(),
+        })
+    })
+
+    _ = router.Run()
+}
+```
+
+Key points:
+
+- The middleware reads the `app_session` cookie from each request, validates it, and aborts with `401` when invalid.
+- On success, it stores a `*sessionvalidator.Claims` value in the Gin context under the provided key (default `auth_claims`).
+- Handler code can safely cast this value and use the helper methods (`GetUserID`, `GetUserEmail`, `GetUserDisplayName`, `GetUserAvatarURL`, `GetUserRoles`, `GetExpiresAt`) to drive authorization and UI decisions.
+
+### 6.8.3 Manual validation flows
+
+If you are not using Gin, or you need finer-grained control, use the lower-level helpers:
+
+- `ValidateRequest(*http.Request)` – validates the session cookie on an incoming request and returns `*Claims`.
+- `ValidateToken(string)` – validates a raw JWT string, for example when the token is forwarded between services.
+
+Example with `net/http`:
+
+```go
+func handleProtectedRoute(response http.ResponseWriter, request *http.Request, validator *sessionvalidator.Validator) {
+    claims, err := validator.ValidateRequest(request)
+    if err != nil {
+        http.Error(response, "unauthorized", http.StatusUnauthorized)
+        return
+    }
+    // Use claims.* accessors here.
+}
+```
+
+Using the shared validator keeps your services aligned with TAuth’s JWT format and validation rules, and avoids duplicating cryptographic or time-based logic across codebases.
+
+---
+
 ## 7. Typical flows
 
 ### 7.1 First sign‑in
@@ -372,4 +478,3 @@ Use this checklist when integrating:
   - The `aud` claim in the ID token matches `APP_GOOGLE_WEB_CLIENT_ID`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
-
