@@ -1,6 +1,29 @@
 # Changelog
 
-## Unreleased
+## [v0.0.6]
+
+### Features ✨
+- Support dev cookies over HTTP in server configuration for development ease.
+
+### Improvements ⚙️
+- Added comprehensive usage documentation with an authoritative guide in `docs/usage.md`.
+- Introduced `.gitignore` enhancements to manage environment files and IDE artifacts.
+- Refined server CORS and cookie SameSite handling with a new `devInsecureHTTP` flag.
+- Enhanced integration tests in `internal/authkit/routes_integration_test.go`.
+- Updated README to link to the new usage guide for easier onboarding.
+
+### Bug Fixes 🐛
+- Fixed handling of development cookies to support HTTP environments.
+
+### Testing 🧪
+- Expanded integration test coverage for auth routes to improve reliability.
+
+### Docs 📚
+- Created a detailed usage guide covering setup, session management, and client integration.
+- Removed obsolete docs (`loopaware-footer.md` and `refactor-plan.md`) to streamline documentation.
+- Improved README with updated references to new documentation resources.
+
+## [v0.0.5]
 
 - TA-332: Added `examples/docker-compose` with a `.env` template plus README instructions so developers can spin up TAuth locally via Docker Compose.
 - TA-333: Updated the compose example to build the image from the local Dockerfile (`docker compose up --build`) so contributors can test unmerged changes.
