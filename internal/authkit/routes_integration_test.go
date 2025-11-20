@@ -244,8 +244,14 @@ func TestAuthLifecycle(t *testing.T) {
 	if _, ok := cookies[config.SessionCookieName]; !ok {
 		t.Fatalf("missing session cookie")
 	}
+	if session := cookies[config.SessionCookieName]; session.Secure {
+		t.Fatalf("expected insecure session cookie when AllowInsecureHTTP=true")
+	}
 	if _, ok := cookies[config.RefreshCookieName]; !ok {
 		t.Fatalf("missing refresh cookie")
+	}
+	if refresh := cookies[config.RefreshCookieName]; refresh.Secure {
+		t.Fatalf("expected insecure refresh cookie when AllowInsecureHTTP=true")
 	}
 
 	if _, ok := userStore.profiles["google:sub-123"]; !ok {
@@ -389,6 +395,66 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	router.ServeHTTP(localhostResponse, localhostRequest)
 	if localhostResponse.Code != http.StatusOK {
 		t.Fatalf("expected 200 for localhost override, got %d", localhostResponse.Code)
+	}
+}
+
+func TestAuthCookiesSecureWhenHTTPSOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-secure-cookies",
+		"email":          "secure@example.com",
+		"email_verified": true,
+		"name":           "Secure Cookies",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token-secure": {
+					payload:          payload,
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = false
+	config.SameSiteMode = http.SameSiteNoneMode
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+
+	body := prepareLoginBody(t, router, payload, "valid-token-secure")
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 from secure login, got %d", response.Code)
+	}
+
+	cookies := collectCookies(response.Result().Cookies())
+	session, ok := cookies[config.SessionCookieName]
+	if !ok {
+		t.Fatalf("missing session cookie")
+	}
+	if !session.Secure {
+		t.Fatalf("expected secure session cookie when AllowInsecureHTTP=false")
+	}
+	refresh, ok := cookies[config.RefreshCookieName]
+	if !ok {
+		t.Fatalf("missing refresh cookie")
+	}
+	if !refresh.Secure {
+		t.Fatalf("expected secure refresh cookie when AllowInsecureHTTP=false")
 	}
 }
 
