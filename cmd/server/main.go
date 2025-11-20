@@ -235,6 +235,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if enableCORS {
 		serverConfig.SameSiteMode = http.SameSiteNoneMode
 	}
+	if devInsecureHTTP {
+		serverConfig.SameSiteMode = http.SameSiteLaxMode
+	}
 
 	nonceStore := authkit.NewMemoryNonceStore(serverConfig.NonceTTL)
 

@@ -350,8 +350,8 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 				}
 			}
 		}
-		clearCookie(contextGin, configuration.SessionCookieName, configuration.CookieDomain, configuration.SameSiteMode)
-		clearCookie(contextGin, configuration.RefreshCookieName, configuration.CookieDomain, configuration.SameSiteMode)
+		clearCookie(contextGin, configuration, configuration.SessionCookieName)
+		clearCookie(contextGin, configuration, configuration.RefreshCookieName)
 		contextGin.Status(http.StatusNoContent)
 		recordMetric(metricAuthLogoutSuccess)
 	})
@@ -362,41 +362,44 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 }
 
 func writeSessionCookie(contextGin *gin.Context, configuration ServerConfig, sessionToken string, expiresAt time.Time) {
+	secure := !configuration.AllowInsecureHTTP
 	http.SetCookie(contextGin.Writer, &http.Cookie{
 		Name:     configuration.SessionCookieName,
 		Value:    sessionToken,
 		Path:     "/",
 		Domain:   configuration.CookieDomain,
 		Expires:  expiresAt,
-		Secure:   true,
+		Secure:   secure,
 		HttpOnly: true,
 		SameSite: configuration.SameSiteMode,
 	})
 }
 
 func writeRefreshCookie(contextGin *gin.Context, configuration ServerConfig, opaque string, expiresAt time.Time) {
+	secure := !configuration.AllowInsecureHTTP
 	http.SetCookie(contextGin.Writer, &http.Cookie{
 		Name:     configuration.RefreshCookieName,
 		Value:    opaque,
 		Path:     "/auth",
 		Domain:   configuration.CookieDomain,
 		Expires:  expiresAt,
-		Secure:   true,
+		Secure:   secure,
 		HttpOnly: true,
 		SameSite: configuration.SameSiteMode,
 	})
 }
 
-func clearCookie(contextGin *gin.Context, name string, domain string, sameSite http.SameSite) {
+func clearCookie(contextGin *gin.Context, configuration ServerConfig, name string) {
+	secure := !configuration.AllowInsecureHTTP
 	http.SetCookie(contextGin.Writer, &http.Cookie{
 		Name:     name,
 		Value:    "",
 		Path:     "/",
-		Domain:   domain,
+		Domain:   configuration.CookieDomain,
 		MaxAge:   -1,
-		Secure:   true,
+		Secure:   secure,
 		HttpOnly: true,
-		SameSite: sameSite,
+		SameSite: configuration.SameSiteMode,
 	})
 }
 
