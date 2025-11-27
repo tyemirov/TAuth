@@ -55,6 +55,59 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 8. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
 9. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
 
+### 3.4 Browser helper handshake
+
+`web/auth-client.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
+
+```js
+let pendingNonce = "";
+
+async function prepareGoogleSignIn(baseUrl, clientId) {
+  const response = await fetch(`${baseUrl}/auth/nonce`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "X-Requested-With": "XMLHttpRequest" },
+  });
+  if (!response.ok) {
+    throw new Error("nonce request failed");
+  }
+  pendingNonce = (await response.json()).nonce;
+  google.accounts.id.initialize({
+    client_id: clientId,
+    callback: handleCredential,
+    nonce: pendingNonce,
+    ux_mode: "popup",
+  });
+  google.accounts.id.renderButton(document.getElementById("googleSignIn"), {
+    theme: "outline",
+    size: "large",
+    text: "signin_with",
+  });
+  google.accounts.id.prompt();
+}
+
+async function exchangeGoogleCredential(baseUrl, googleIdToken) {
+  await fetch(`${baseUrl}/auth/google`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      google_id_token: googleIdToken,
+      nonce_token: pendingNonce,
+    }),
+  });
+}
+```
+
+Nonce handling rules:
+
+- TAuth issues one-time nonces via `POST /auth/nonce`; Google never provides one for you.
+- Always supply the nonce to Google Identity Services when calling `google.accounts.id.initialize` (or via `data-nonce` on `g_id_onload`) before prompting the user.
+- Echo the same nonce back to `/auth/google` as `nonce_token`. Requests without a matching nonce fail with `auth.login.nonce_mismatch`.
+- Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`). TAuth accepts hashed or raw forms.
+- Fetch a fresh nonce for every sign-in attempt. Nonces are invalidated once consumed and cannot be reused.
+- The default helpers (`auth-client.js`, the `mpr-ui` header) already implement these invariants and emit events when authentication state changes.
+
 ## 4. Components
 
 ### 4.1 `cmd/server`

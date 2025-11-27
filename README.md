@@ -83,48 +83,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 
 ### 4. Prepare and exchange Google credentials across origins
 
-```js
-let pendingNonce = "";
-
-async function prepareGoogleSignIn() {
-  const response = await fetch("https://tauth.mprlab.com/auth/nonce", {
-    method: "POST",
-    credentials: "include",
-    headers: { "X-Requested-With": "XMLHttpRequest" },
-  });
-  if (!response.ok) {
-    throw new Error("nonce request failed");
-  }
-  const payload = await response.json();
-  pendingNonce = payload.nonce;
-  google.accounts.id.initialize({
-    client_id: "your_web_client_id.apps.googleusercontent.com",
-    callback: handleCredential,
-    nonce: pendingNonce,
-    ux_mode: "popup",
-  });
-  google.accounts.id.renderButton(document.getElementById("googleSignIn"), {
-    theme: "outline",
-    size: "large",
-    text: "signin_with",
-  });
-  google.accounts.id.prompt();
-}
-
-async function exchangeGoogleCredential(idTokenFromGoogle) {
-  await fetch("https://tauth.mprlab.com/auth/google", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      google_id_token: idTokenFromGoogle,
-      nonce_token: pendingNonce,
-    }),
-  });
-}
-```
-
-The login flow is identical to a local setup—the only difference is that every call points at the hosted TAuth origin. Because cookies are scoped to `.mprlab.com`, the `app_session` cookie is now available to product routes on `https://gravity.mprlab.com` while remaining `HttpOnly`.
+`auth-client.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
 
 ### Configure Google Identity Services (popup flow)
 
@@ -149,18 +108,7 @@ The login flow is identical to a local setup—the only difference is that every
 
 > **Tip:** The demo falls back to a public sample client ID when `APP_GOOGLE_WEB_CLIENT_ID` is not set. Replace it with your own Google OAuth Web client in production.
 
-### Local quick-start via Docker Compose
-
-For a quick local run without installing Go, use `examples/docker-compose`:
-
-1. `cd examples/docker-compose`
-2. `cp .env.tauth.example .env.tauth`
-3. Edit `.env.tauth` (set your Google Web Client ID and JWT signing key).
-4. `docker compose up --build`
-
-The compose file builds the TAuth image locally (tagged `tauth-local:latest`) and exposes it on `http://localhost:8080`. Re-run `docker compose up --build` whenever you change Go code. Tear it down with `docker compose down`. Refresh tokens persist inside the `tauth_data` volume—remove it if you want a fresh SQLite file.
-
-That’s it. The client keeps sessions fresh, dispatches events on auth changes, and protects tokens behind `HttpOnly` cookies.
+### Example `/me` payload
 
 Successful exchanges populate `/me` with a rich profile:
 
@@ -181,12 +129,7 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ### Google nonce handling
 
-- TAuth issues one-time nonces via `POST /auth/nonce`. Google does **not** provide a nonce for you.
-- Supply the nonce to Google Identity Services via `google.accounts.id.initialize({ nonce })` or the `data-nonce` attribute on the `g_id_onload` element before prompting the user.
-- Echo the same nonce back to TAuth as `nonce_token` when exchanging the ID token. Tokens without a matching nonce are rejected (`auth.login.nonce_mismatch`).
-- Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`); TAuth accepts that form automatically, so clients should continue sending the raw nonce they received.
-- Fetch a fresh nonce for every sign-in attempt (including retries). TAuth invalidates a nonce as soon as it is consumed.
-- The default `auth-client.js` and `mpr-ui` helpers take care of this flow automatically; custom clients must follow the same sequence.
+Custom clients must follow the nonce exchange documented in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange). The README’s quick-start sticks to the happy-path view; dive into the architecture doc for the exact sequencing (nonce issuance, GIS initialization, credential exchange, and `/auth/google` expectations). The default helpers already implement the full set of guardrails.
 
 ---
 

@@ -286,6 +286,67 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	}
 }
 
+func TestRunServerHonorsContextCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	shutdownTriggered := make(chan struct{})
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		server.RegisterOnShutdown(func() {
+			close(shutdownTriggered)
+		})
+		<-shutdownTriggered
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	viper.Set("listen_addr", ":0")
+	viper.Set("google_web_client_id", "client")
+	viper.Set("jwt_signing_key", "signing-secret")
+	viper.Set("session_ttl", time.Minute)
+	viper.Set("refresh_ttl", time.Hour)
+
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+
+	commandContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(commandContext, serverConfigContextKey, config))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runServer(command, nil)
+	}()
+
+	cancel()
+
+	select {
+	case <-shutdownTriggered:
+	case <-time.After(time.Second):
+		t.Fatalf("expected shutdown to be triggered after context cancellation")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected runServer to exit cleanly after cancellation, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("runServer did not exit after cancellation")
+	}
+}
+
 func TestNewRootCommandHelp(t *testing.T) {
 	cmd := newRootCommand()
 	cmd.SetArgs([]string{"--help"})

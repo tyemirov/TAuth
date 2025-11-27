@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -169,10 +170,14 @@ func runServer(command *cobra.Command, arguments []string) error {
 	defer func() { _ = logger.Sync() }()
 
 	commandContext := command.Context()
-	var contextValue any
-	if commandContext != nil {
-		contextValue = commandContext.Value(serverConfigContextKey)
+	if commandContext == nil {
+		commandContext = context.Background()
 	}
+	shutdownContext, stopShutdownContext := signal.NotifyContext(commandContext, syscall.SIGINT, syscall.SIGTERM)
+	defer stopShutdownContext()
+
+	var contextValue any
+	contextValue = commandContext.Value(serverConfigContextKey)
 	serverConfig, ok := contextValue.(authkit.ServerConfig)
 	if !ok {
 		return configError(configCodeUninitializedServerConf, "server configuration not prepared; PreRunE must execute before RunE")
@@ -219,7 +224,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	var refreshStore authkit.RefreshTokenStore
 
 	if databaseURL != "" {
-		persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+		persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(shutdownContext, databaseURL)
 		if storeErr != nil {
 			return storeErr
 		}
@@ -241,7 +246,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	nonceStore := authkit.NewMemoryNonceStore(serverConfig.NonceTTL)
 
-	validator, validatorErr := buildGoogleTokenValidator(command.Context())
+	validator, validatorErr := buildGoogleTokenValidator(shutdownContext)
 	if validatorErr != nil {
 		return fmt.Errorf("%s: %w", configCodeGoogleValidatorInit, validatorErr)
 	}
@@ -271,24 +276,27 @@ func runServer(command *cobra.Command, arguments []string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	defer shutdownCancel()
+	shutdownOnce := sync.Once{}
+	shutdownServer := func() {
+		shutdownOnce.Do(func() {
+			graceCtx, graceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer graceCancel()
+			if err := server.Shutdown(graceCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("server shutdown error", zap.Error(err))
+			}
+		})
+	}
 
 	go func() {
-		stopSignals := make(chan os.Signal, 1)
-		signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM)
-		<-stopSignals
-		graceCtx, graceCancel := context.WithTimeout(shutdownCtx, 10*time.Second)
-		defer graceCancel()
-		if err := server.Shutdown(graceCtx); err != nil {
-			logger.Error("server shutdown error", zap.Error(err))
-		}
+		<-shutdownContext.Done()
+		shutdownServer()
 	}()
 
 	logger.Info("listening", zap.String("addr", listenAddr))
 	if err := serveHTTP(server); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen error: %w", err)
 	}
+	shutdownServer()
 	return nil
 }
 
