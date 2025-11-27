@@ -49,14 +49,14 @@ Common environment variables:
 | `APP_REFRESH_TTL`           | Refresh token lifetime                                           | `1440h` (60 days)                       |
 | `APP_DATABASE_URL`          | Refresh store DSN                                                | `sqlite:///data/tauth.db`               |
 | `APP_ENABLE_CORS`           | Enable CORS for cross‑origin UIs                                 | `true`                                  |
-| `APP_CORS_ALLOWED_ORIGINS`  | Comma‑separated allowed origins when CORS is enabled             | `https://app.example.com`               |
+| `APP_CORS_ALLOWED_ORIGINS`  | Comma-separated allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `https://app.example.com,https://accounts.google.com` |
 | `APP_DEV_INSECURE_HTTP`     | Allow non‑HTTPS for local development                            | `true`                                  |
 
 Key notes:
 
 - **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Use `APP_COOKIE_DOMAIN` (e.g. `.example.com`) to share cookies across subdomains.
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
-- **CORS**: Leave `APP_ENABLE_CORS` unset when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `APP_CORS_ALLOWED_ORIGINS` explicitly.
+- **CORS**: Leave `APP_ENABLE_CORS` unset when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `APP_CORS_ALLOWED_ORIGINS` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
 
 ### 2.3 Example: hosted deployment
 
