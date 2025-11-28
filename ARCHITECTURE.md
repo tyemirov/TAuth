@@ -224,6 +224,7 @@ Tenant resolution & runtime:
 - Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. The override is disabled by default for production safety.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is enabled via `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). Single-tenant deployments continue to rely on the existing CLI/env flags. Use `--enable_tenant_header_override` in local/testing environments when you need to override tenants via headers instead of hostnames.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on every request to line up with the override flow above.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - refresh token stores, nonce pools, and in-memory user stores are now keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay.
 

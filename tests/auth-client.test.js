@@ -50,10 +50,11 @@ function createFetchWithQueue(sequence) {
     if (!next) {
       throw new Error(`unexpected fetch call to ${requestUrl}`);
     }
+    const headers = Object.assign({}, options.headers || {});
     calls.push({
       url: requestUrl,
       method: (options.method || "GET").toUpperCase(),
-      headers: options.headers,
+      headers,
       body: options.body,
     });
     if (typeof next === "function") {
@@ -63,6 +64,14 @@ function createFetchWithQueue(sequence) {
   };
   fetchImpl.calls = calls;
   return fetchImpl;
+}
+
+function assertHeader(call, headerName, expectedValue) {
+  assert.equal(
+    call.headers && call.headers[headerName],
+    expectedValue,
+    `expected ${headerName} header`,
+  );
 }
 
 test("auth client authenticates when /me succeeds", async () => {
@@ -93,6 +102,7 @@ test("auth client authenticates when /me succeeds", async () => {
   assert.equal(unauthenticatedCount, 0);
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
   assert.deepEqual(events, []);
 });
 
@@ -127,6 +137,9 @@ test("auth client attempts refresh before authenticating", async () => {
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
   assert.equal(fetch.calls[2].url, "https://example.com/me");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
+  assertHeader(fetch.calls[2], "X-Client", "mprlab-ui");
   assert.deepEqual(events, ["refreshed"]);
 });
 
@@ -156,5 +169,64 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.equal(fetch.calls.length, 2);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
+});
+
+test("auth client attaches tenant header when configured", async () => {
+  const profile = {
+    user_id: "user-tenant",
+    user_email: "tenant@example.com",
+    display: "Tenant User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    tenantId: "tenant-123",
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+
+  assertHeader(fetch.calls[0], "X-TAuth-Tenant", "tenant-123");
+});
+
+test("apiFetch retries with tenant header", async () => {
+  const profile = {
+    user_id: "user-tenant",
+    user_email: "tenant@example.com",
+    display: "Tenant User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    function () {
+      return createResponse(401, {});
+    },
+    function () {
+      return createResponse(204, {});
+    },
+    function () {
+      return createResponse(200, {});
+    },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    tenantId: "tenant-abc",
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+
+  const response = await context.apiFetch("https://example.com/api/data", {
+    method: "GET",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(fetch.calls.length, 4);
+  assertHeader(fetch.calls[1], "X-TAuth-Tenant", "tenant-abc");
+  assertHeader(fetch.calls[2], "X-TAuth-Tenant", "tenant-abc");
+  assertHeader(fetch.calls[3], "X-TAuth-Tenant", "tenant-abc");
 });

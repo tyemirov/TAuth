@@ -478,3 +478,15 @@ Use this checklist when integrating:
   - The `aud` claim in the ID token matches `APP_GOOGLE_WEB_CLIENT_ID`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
+- When multiple tenants share the same host, pass `tenantId` to `initAuthClient`:
+
+  ```js
+  initAuthClient({
+    baseUrl: "https://auth.example.com",
+    tenantId: "admin-tenant",
+    onAuthenticated: hydrateDashboard,
+    onUnauthenticated: showLogin,
+  });
+  ```
+
+  The helper automatically sends `X-TAuth-Tenant` with every request so the backend routes to the correct tenant even if the browser origin stays the same.

@@ -7,6 +7,7 @@
     logoutEndpoint: "/auth/logout",
     onAuthenticated: function onAuthenticatedDefault(userProfile) {},
     onUnauthenticated: function onUnauthenticatedDefault() {},
+    tenantId: "",
   };
 
   var runtime = {
@@ -71,7 +72,24 @@
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
     options.baseUrl = options.baseUrl || "/";
+    if (typeof options.tenantId === "string") {
+      options.tenantId = options.tenantId.trim();
+    } else {
+      options.tenantId = "";
+    }
     return options;
+  }
+
+  function withTenantHeader(headers) {
+    var mergedHeaders = Object.assign({}, headers || {});
+    if (
+      runtime.options &&
+      typeof runtime.options.tenantId === "string" &&
+      runtime.options.tenantId !== ""
+    ) {
+      mergedHeaders["X-TAuth-Tenant"] = runtime.options.tenantId;
+    }
+    return mergedHeaders;
   }
 
   async function initAuthClient(passed) {
@@ -82,7 +100,7 @@
         {
           method: "GET",
           credentials: "include",
-          headers: { "X-Client": "mprlab-ui" },
+          headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
         },
       );
       if (meResponse.ok) {
@@ -96,7 +114,9 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({
+            "X-Requested-With": "XMLHttpRequest",
+          }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -106,7 +126,7 @@
           {
             method: "GET",
             credentials: "include",
-            headers: { "X-Client": "mprlab-ui" },
+            headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
           },
         );
         if (retryResponse.ok) {
@@ -131,6 +151,7 @@
       { "X-Client": "mprlab-ui" },
       merged.headers || {},
     );
+    merged.headers = withTenantHeader(merged.headers);
     var execute = function () {
       return fetch(inputUrl, merged);
     };
@@ -149,7 +170,9 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({
+            "X-Requested-With": "XMLHttpRequest",
+          }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -173,7 +196,9 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({
+            "X-Requested-With": "XMLHttpRequest",
+          }),
         },
       );
     } catch (ignore) {}
