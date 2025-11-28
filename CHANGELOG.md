@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs 📚
+- TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
+
 ## [v0.0.6]
 
 ### Features ✨
