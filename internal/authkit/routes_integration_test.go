@@ -445,10 +445,10 @@ func TestAuthCookiesSecureWhenHTTPSOnly(t *testing.T) {
 	})
 	defer restoreValidator()
 
-config := newTestServerConfig()
-config.AllowInsecureHTTP = false
-config.SameSiteMode = http.SameSiteNoneMode
-registry := singleTenantRegistry(config)
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = false
+	config.SameSiteMode = http.SameSiteNoneMode
+	registry := singleTenantRegistry(config)
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 
