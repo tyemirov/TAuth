@@ -187,6 +187,37 @@ type RefreshTokenStore interface {
 
 Viper reads environment variables (prefixed `APP_`) and command-line flags.
 
+### 5.1 Multi-tenant configuration file (preview)
+
+Multi-tenant support is rolling out across TA-100. The first building block is the declarative config file parsed by `internal/tenants`. The JSON document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
+
+```json
+{
+  "tenants": [
+    {
+      "id": "demo",
+      "display_name": "Demo tenant",
+      "hosts": ["demo.localhost", "demo.example.com"],
+      "google_web_client_id": "demo-client.apps.googleusercontent.com",
+      "cookie_domain": "demo.example.com",
+      "session_ttl": "30m",
+      "refresh_ttl": "720h",
+      "nonce_ttl": "10m",
+      "allow_insecure_http": true
+    }
+  ]
+}
+```
+
+Validation rules baked into the loader:
+
+- IDs use lowercase letters/digits/underscores/hyphens; duplicates are rejected.
+- Each host maps to only one tenant; hosts are normalized to lowercase and deduplicated.
+- `google_web_client_id`, `cookie_domain`, and each TTL must be present and non-empty; durations follow Go’s `time.ParseDuration` syntax.
+- `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
+
+Future issues (TA-102 through TA-105) layer routing, resolver, and per-tenant stores on top of this domain model so the rest of the stack can treat tenant lookups as validated data.
+
 ## 6. Persistence Model
 
 The persistent refresh token store manages the `refresh_tokens` table (automigrated via GORM):

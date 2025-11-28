@@ -127,6 +127,39 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ---
 
+## Multi-tenant configuration (preview)
+
+Upcoming work introduces first-class multi-tenant deployments so a single TAuth instance can front several product surfaces (each with its own Google Web client, cookie domain, and TTL settings). Declare tenants in a JSON file:
+
+```json
+{
+  "tenants": [
+    {
+      "id": "demo",
+      "display_name": "Demo tenant",
+      "hosts": ["demo.localhost", "demo.example.com"],
+      "google_web_client_id": "demo-client.apps.googleusercontent.com",
+      "cookie_domain": "demo.example.com",
+      "session_ttl": "30m",
+      "refresh_ttl": "720h",
+      "nonce_ttl": "10m",
+      "allow_insecure_http": true
+    }
+  ]
+}
+```
+
+Rules enforced by the loader:
+
+- IDs must use lowercase letters, digits, underscores, or hyphens (`demo`, `customer_b`).
+- Every host can map to only one tenant; duplicates or blank hosts fail validation.
+- Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid.
+- `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false`.
+
+The new `internal/tenants` package validates the entire file before returning domain objects, enabling the upcoming resolver and routing work to trust tenant data without repeating validation.
+
+---
+
 ### Google nonce handling
 
 Custom clients must follow the nonce exchange documented in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange). The README’s quick-start sticks to the happy-path view; dive into the architecture doc for the exact sequencing (nonce issuance, GIS initialization, credential exchange, and `/auth/google` expectations). The default helpers already implement the full set of guardrails.
