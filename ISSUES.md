@@ -6,7 +6,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## Features (100–199)
 
-- None.
+- [ ] [TA-100] Make TAuth multitenant. Deliver implementation plan and document it as open issues in @ISSUES.md
 
 ## Improvements (212–299)
 
@@ -30,3 +30,4 @@ Gracefully Stopping... press Ctrl+C again to force
 
 ## Planning
 So not work on these, not ready
+
