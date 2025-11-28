@@ -158,6 +158,12 @@ Rules enforced by the loader:
 
 The new `internal/tenants` package validates the entire file before returning domain objects, enabling the upcoming resolver and routing work to trust tenant data without repeating validation.
 
+Request routing:
+
+- By default the resolver matches tenants by the request’s host header (case-insensitive, port stripped). Hosts not declared in the tenant file are rejected.
+- When local tooling needs to hit one TAuth instance with multiple tenants, enable the optional override header (default `X-TAuth-Tenant`) when constructing the resolver so the middleware can select a tenant explicitly.
+- `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
+
 ---
 
 ### Google nonce handling

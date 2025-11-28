@@ -218,6 +218,12 @@ Validation rules baked into the loader:
 
 Future issues (TA-102 through TA-105) layer routing, resolver, and per-tenant stores on top of this domain model so the rest of the stack can treat tenant lookups as validated data.
 
+Tenant resolution preview:
+
+- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes.
+- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`) when multiple tenants share a single host. The override is disabled by default for production safety.
+- `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so upcoming auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
+
 ## 6. Persistence Model
 
 The persistent refresh token store manages the `refresh_tokens` table (automigrated via GORM):
