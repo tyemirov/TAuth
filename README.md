@@ -163,6 +163,7 @@ Request routing:
 - By default the resolver matches tenants by the request’s host header (case-insensitive, port stripped). Hosts not declared in the tenant file are rejected.
 - When local tooling needs to hit one TAuth instance with multiple tenants, enable the optional override header (default `X-TAuth-Tenant`) when constructing the resolver so the middleware can select a tenant explicitly.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
+- Enable multi-tenant mode by launching the server with `--tenants_file=/path/to/tenants.json`. The default single-tenant flags remain supported; omitting `--tenants_file` keeps the current behavior. For local development you can also pass `--enable_tenant_header_override` to accept `X-TAuth-Tenant` overrides instead of relying solely on hostnames.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames.
 
 ---

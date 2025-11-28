@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
 	webassets "github.com/tyemirov/tauth/web"
 	"go.uber.org/zap"
@@ -54,6 +55,8 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
 	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
 	rootCmd.Flags().Duration("nonce_ttl", 5*time.Minute, "Nonce lifetime for Google Sign-In exchanges")
+	rootCmd.Flags().String("tenants_file", "", "Path to tenants JSON config for multi-tenant deployments")
+	rootCmd.Flags().Bool("enable_tenant_header_override", false, "Allow resolving tenant via X-TAuth-Tenant header (dev/local only)")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
 	_ = viper.BindPFlag("cookie_domain", rootCmd.Flags().Lookup("cookie_domain"))
@@ -66,6 +69,8 @@ func newRootCommand() *cobra.Command {
 	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
 	_ = viper.BindPFlag("cors_allowed_origins", rootCmd.Flags().Lookup("cors_allowed_origins"))
 	_ = viper.BindPFlag("nonce_ttl", rootCmd.Flags().Lookup("nonce_ttl"))
+	_ = viper.BindPFlag("tenants_file", rootCmd.Flags().Lookup("tenants_file"))
+	_ = viper.BindPFlag("enable_tenant_header_override", rootCmd.Flags().Lookup("enable_tenant_header_override"))
 
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
@@ -190,37 +195,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 	databaseURL := viper.GetString("database_url")
 	enableCORS := viper.GetBool("enable_cors")
 	corsAllowedOrigins := configStringSlice("cors_allowed_origins")
-
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-	router.Use(zapLoggerMiddleware(logger))
-
-	if enableCORS {
-		corsMiddleware, corsErr := web.PermissiveCORS(corsAllowedOrigins)
-		if corsErr != nil {
-			return corsErr
-		}
-		router.Use(corsMiddleware)
-	}
-
-	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {
-		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
-	})
-
-	router.GET("/static/mpr-sites.js", func(contextGin *gin.Context) {
-		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "mpr-sites.js")
-	})
-
-	router.GET("/demo/config.js", func(contextGin *gin.Context) {
-		web.ServeDemoConfig(contextGin, web.DemoConfig{
-			GoogleClientID: serverConfig.GoogleWebClientID,
-		})
-	})
-
-	router.GET("/demo", func(contextGin *gin.Context) {
-		contextGin.File("web/demo.html")
-	})
+	tenantsFile := strings.TrimSpace(viper.GetString("tenants_file"))
+	enableTenantHeaderOverride := viper.GetBool("enable_tenant_header_override")
 
 	userStore := web.NewInMemoryUsers()
 	var refreshStore authkit.RefreshTokenStore
@@ -238,15 +214,35 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	serverConfig.AllowInsecureHTTP = devInsecureHTTP
-	serverConfig.SameSiteMode = http.SameSiteStrictMode
-	if enableCORS {
-		serverConfig.SameSiteMode = http.SameSiteNoneMode
-	}
-	if devInsecureHTTP {
-		serverConfig.SameSiteMode = http.SameSiteLaxMode
+	serverConfig.SameSiteMode = deriveSameSite(enableCORS, devInsecureHTTP)
+
+	var registry authkit.TenantRegistry
+	var tenantResolver *tenants.Resolver
+	if tenantsFile != "" {
+		tenantConfig, loadErr := tenants.LoadConfig(tenantsFile)
+		if loadErr != nil {
+			return loadErr
+		}
+		derivedRegistry, registryErr := buildTenantRegistry(serverConfig, tenantConfig, enableCORS)
+		if registryErr != nil {
+			return registryErr
+		}
+		registry = derivedRegistry
+		resolverOptions := []tenants.ResolverOption{}
+		if enableTenantHeaderOverride {
+			resolverOptions = append(resolverOptions, tenants.WithHeaderOverride(""))
+		}
+		resolver, resolverErr := tenants.NewResolver(tenantConfig, resolverOptions...)
+		if resolverErr != nil {
+			return resolverErr
+		}
+		tenantResolver = resolver
+	} else {
+		registry = authkit.NewSingleTenantRegistry(serverConfig)
 	}
 
-	nonceStore := authkit.NewMemoryNonceStore(serverConfig.NonceTTL)
+	defaultTenantConfig := registry.DefaultConfig()
+	nonceStore := authkit.NewMemoryNonceStore(registry.DefaultConfig().NonceTTL)
 
 	validator, validatorErr := buildGoogleTokenValidator(shutdownContext)
 	if validatorErr != nil {
@@ -266,10 +262,45 @@ func runServer(command *cobra.Command, arguments []string) error {
 	authkit.ProvideMetrics(metricsRecorder)
 	defer authkit.ProvideMetrics(nil)
 
-	authkit.MountAuthRoutes(router, serverConfig, userStore, refreshStore, nonceStore)
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(zapLoggerMiddleware(logger))
+
+	if enableCORS {
+		corsMiddleware, corsErr := web.PermissiveCORS(corsAllowedOrigins)
+		if corsErr != nil {
+			return corsErr
+		}
+		router.Use(corsMiddleware)
+	}
+
+	if tenantResolver != nil {
+		router.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
+	}
+
+	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {
+		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
+	})
+
+	router.GET("/static/mpr-sites.js", func(contextGin *gin.Context) {
+		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "mpr-sites.js")
+	})
+
+	router.GET("/demo/config.js", func(contextGin *gin.Context) {
+		web.ServeDemoConfig(contextGin, web.DemoConfig{
+			GoogleClientID: defaultTenantConfig.GoogleWebClientID,
+		})
+	})
+
+	router.GET("/demo", func(contextGin *gin.Context) {
+		contextGin.File("web/demo.html")
+	})
+
+	authkit.MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
 
 	protected := router.Group("/api")
-	protected.Use(authkit.RequireSession(serverConfig))
+	protected.Use(authkit.RequireSession(registry))
 	protected.GET("/me", web.HandleWhoAmI(userStore, logger))
 
 	server := &http.Server{
@@ -300,6 +331,38 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	shutdownServer()
 	return nil
+}
+
+func deriveSameSite(enableCORS bool, allowInsecure bool) http.SameSite {
+	if enableCORS {
+		return http.SameSiteNoneMode
+	}
+	if allowInsecure {
+		return http.SameSiteLaxMode
+	}
+	return http.SameSiteStrictMode
+}
+
+func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config, enableCORS bool) (authkit.TenantRegistry, error) {
+	tenantList := tenantConfig.Tenants()
+	if len(tenantList) == 0 {
+		return authkit.TenantRegistry{}, fmt.Errorf("tenants_file: no tenants configured")
+	}
+	configs := make(map[string]authkit.ServerConfig, len(tenantList))
+	for _, tenant := range tenantList {
+		tenantServerConfig := base
+		tenantServerConfig.TenantID = string(tenant.ID())
+		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
+		tenantServerConfig.CookieDomain = tenant.CookieDomain()
+		tenantServerConfig.SessionTTL = tenant.SessionTTL()
+		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
+		tenantServerConfig.NonceTTL = tenant.NonceTTL()
+		tenantServerConfig.AllowInsecureHTTP = tenant.AllowInsecureHTTP()
+		tenantServerConfig.SameSiteMode = deriveSameSite(enableCORS, tenant.AllowInsecureHTTP())
+		configs[tenantServerConfig.TenantID] = tenantServerConfig
+	}
+	defaultTenantID := string(tenantList[0].ID())
+	return authkit.NewTenantRegistryFromMap(defaultTenantID, configs), nil
 }
 
 func zapLoggerMiddleware(logger *zap.Logger) gin.HandlerFunc {

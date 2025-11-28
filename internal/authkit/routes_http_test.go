@@ -96,11 +96,12 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	defer ProvideLogger(nil)
 
 	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
@@ -252,11 +253,12 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	defer ProvideLogger(nil)
 
 	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, config, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
 	server := httptest.NewTLSServer(router)
 	defer server.Close()

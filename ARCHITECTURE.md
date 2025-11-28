@@ -184,6 +184,8 @@ type RefreshTokenStore interface {
 | `APP_DATABASE_URL`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite:///auth.db`                                 |
 | `APP_ENABLE_CORS`          | Enable permissive CORS (cross-origin dev only)      | `true`                                              |
 | `APP_DEV_INSECURE_HTTP`    | Allow non-HTTPS (local development)                 | `true`                                              |
+| `APP_TENANTS_FILE`         | Path to tenants JSON for multi-tenant deployments   | `/etc/tauth/tenants.json`                           |
+| `APP_ENABLE_TENANT_HEADER_OVERRIDE` | Allow `X-TAuth-Tenant` overrides (dev/testing) | `true`                                     |
 
 Viper reads environment variables (prefixed `APP_`) and command-line flags.
 
@@ -223,6 +225,8 @@ Tenant resolution preview:
 - `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes.
 - Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`) when multiple tenants share a single host. The override is disabled by default for production safety.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so upcoming auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
+- Multi-tenant mode is enabled via `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). Single-tenant deployments continue to rely on the existing CLI/env flags. Use `--enable_tenant_header_override` in local/testing environments when you need to override tenants via headers instead of hostnames.
+- All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - refresh token stores, nonce pools, and in-memory user stores are now keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay.
 
 ## 6. Persistence Model

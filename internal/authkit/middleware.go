@@ -10,11 +10,12 @@ import (
 )
 
 // RequireSession validates the session cookie and injects claims.
-func RequireSession(configuration ServerConfig) gin.HandlerFunc {
+func RequireSession(registry TenantRegistry) gin.HandlerFunc {
+	defaultConfig := registry.DefaultConfig()
 	validator, err := sessionvalidator.New(sessionvalidator.Config{
-		SigningKey: configuration.AppJWTSigningKey,
-		Issuer:     configuration.AppJWTIssuer,
-		CookieName: configuration.SessionCookieName,
+		SigningKey: defaultConfig.AppJWTSigningKey,
+		Issuer:     defaultConfig.AppJWTIssuer,
+		CookieName: defaultConfig.SessionCookieName,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("authkit.RequireSession: %v", err))
@@ -25,7 +26,7 @@ func RequireSession(configuration ServerConfig) gin.HandlerFunc {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		expectedTenant := resolveTenantID(contextGin, configuration.TenantID)
+		expectedTenant := resolveTenantID(contextGin, registry)
 		if claims.GetTenantID() == "" || strings.TrimSpace(claims.GetTenantID()) != expectedTenant {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
