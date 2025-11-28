@@ -189,9 +189,9 @@ type RefreshTokenStore interface {
 
 Viper reads environment variables (prefixed `APP_`) and command-line flags.
 
-### 5.1 Multi-tenant configuration file (preview)
+### 5.1 Multi-tenant configuration file
 
-Multi-tenant support is rolling out across TA-100. The first building block is the declarative config file parsed by `internal/tenants`. The JSON document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
+Multi-tenant deployments rely on the declarative config file parsed by `internal/tenants`. The JSON document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
 
 ```json
 {
@@ -218,13 +218,11 @@ Validation rules baked into the loader:
 - `google_web_client_id`, `cookie_domain`, and each TTL must be present and non-empty; durations follow Go’s `time.ParseDuration` syntax.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 
-Future issues (TA-102 through TA-105) layer routing, resolver, and per-tenant stores on top of this domain model so the rest of the stack can treat tenant lookups as validated data.
-
-Tenant resolution preview:
+Tenant resolution & runtime:
 
 - `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes.
-- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`) when multiple tenants share a single host. The override is disabled by default for production safety.
-- `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so upcoming auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
+- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. The override is disabled by default for production safety.
+- `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is enabled via `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). Single-tenant deployments continue to rely on the existing CLI/env flags. Use `--enable_tenant_header_override` in local/testing environments when you need to override tenants via headers instead of hostnames.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - refresh token stores, nonce pools, and in-memory user stores are now keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay.

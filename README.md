@@ -127,9 +127,9 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ---
 
-## Multi-tenant configuration (preview)
+## Multi-tenant configuration
 
-Upcoming work introduces first-class multi-tenant deployments so a single TAuth instance can front several product surfaces (each with its own Google Web client, cookie domain, and TTL settings). Declare tenants in a JSON file:
+TAuth natively supports hosting multiple tenants (each with its own Google Web client, cookie domain, and TTL settings) behind one deployment. Declare tenants in a JSON file:
 
 ```json
 {
@@ -156,14 +156,14 @@ Rules enforced by the loader:
 - Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false`.
 
-The new `internal/tenants` package validates the entire file before returning domain objects, enabling the upcoming resolver and routing work to trust tenant data without repeating validation.
+The `internal/tenants` package validates the entire file before returning domain objects, so downstream routing relies on trusted tenant definitions.
 
 Request routing:
 
 - By default the resolver matches tenants by the request’s host header (case-insensitive, port stripped). Hosts not declared in the tenant file are rejected.
 - When local tooling needs to hit one TAuth instance with multiple tenants, enable the optional override header (default `X-TAuth-Tenant`) when constructing the resolver so the middleware can select a tenant explicitly.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
-- Enable multi-tenant mode by launching the server with `--tenants_file=/path/to/tenants.json`. The default single-tenant flags remain supported; omitting `--tenants_file` keeps the current behavior. For local development you can also pass `--enable_tenant_header_override` to accept `X-TAuth-Tenant` overrides instead of relying solely on hostnames.
+- Enable multi-tenant mode by launching the server with `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). The legacy single-tenant flags remain supported; omitting `--tenants_file` keeps the previous single-tenant behavior. For local development you can pass `--enable_tenant_header_override` to accept `X-TAuth-Tenant` overrides instead of relying solely on hostnames.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames.
 
 ---
