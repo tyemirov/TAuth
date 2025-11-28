@@ -76,6 +76,7 @@ func newRootCommand() *cobra.Command {
 const (
 	sessionCookieName = "app_session"
 	refreshCookieName = "app_refresh"
+	defaultTenantID   = "default"
 
 	configCodeMissingGoogleClientID   = "config.missing_google_web_client_id"
 	configCodeMissingJWTSigningKey    = "config.missing_jwt_signing_key"
@@ -136,6 +137,7 @@ func LoadServerConfig() (authkit.ServerConfig, error) {
 		GoogleWebClientID: googleWebClientID,
 		AppJWTSigningKey:  []byte(jwtSigningKey),
 		AppJWTIssuer:      "mprlab-auth",
+		TenantID:          defaultTenantID,
 		CookieDomain:      viper.GetString("cookie_domain"),
 		SessionCookieName: sessionCookieName,
 		RefreshCookieName: refreshCookieName,

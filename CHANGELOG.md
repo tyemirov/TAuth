@@ -5,6 +5,7 @@
 ### Features ✨
 - TA-101: Added the `internal/tenants` domain model plus JSON loader that validates tenant IDs, hosts, cookies, and TTLs ahead of the multi-tenant routing work.
 - TA-102: Introduced the tenant resolver + gin middleware with optional `X-TAuth-Tenant` overrides plus comprehensive tests so upcoming auth routes can bind per-tenant configs safely.
+- TA-103: Scoped refresh tokens, nonce pools, and the in-memory user store by tenant ID, embedded `tenant_id` inside JWT claims, and enforced tenant-aware `RequireSession` validation to block cross-tenant cookie replay.
 
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.

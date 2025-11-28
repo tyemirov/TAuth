@@ -3,6 +3,7 @@ package authkit
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	sessionvalidator "github.com/tyemirov/tauth/pkg/sessionvalidator"
@@ -21,6 +22,11 @@ func RequireSession(configuration ServerConfig) gin.HandlerFunc {
 	return func(contextGin *gin.Context) {
 		claims, validateErr := validator.ValidateRequest(contextGin.Request)
 		if validateErr != nil {
+			contextGin.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		expectedTenant := resolveTenantID(contextGin, configuration.TenantID)
+		if claims.GetTenantID() == "" || strings.TrimSpace(claims.GetTenantID()) != expectedTenant {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}

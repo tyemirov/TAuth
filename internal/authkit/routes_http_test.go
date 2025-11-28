@@ -275,11 +275,11 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 		t.Fatalf("missing refresh cookie after login")
 	}
 
-	_, tokenID, _, validateErr := refreshStore.Validate(context.Background(), state.refresh)
+	_, tokenID, _, validateErr := refreshStore.Validate(context.Background(), config.TenantID, state.refresh)
 	if validateErr != nil {
 		t.Fatalf("validate refresh token failed: %v", validateErr)
 	}
-	if revokeErr := refreshStore.Revoke(context.Background(), tokenID); revokeErr != nil {
+	if revokeErr := refreshStore.Revoke(context.Background(), config.TenantID, tokenID); revokeErr != nil {
 		t.Fatalf("revoke refresh token failed: %v", revokeErr)
 	}
 

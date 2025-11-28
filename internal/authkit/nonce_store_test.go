@@ -11,7 +11,7 @@ func TestMemoryNonceStoreIssueAndConsume(t *testing.T) {
 	store := NewMemoryNonceStore(2 * time.Minute).(*memoryNonceStore)
 	store.now = func() time.Time { return time.Unix(1000, 0) }
 
-	token, err := store.Issue(context.Background())
+	token, err := store.Issue(context.Background(), "tenant-a")
 	if err != nil {
 		t.Fatalf("issue nonce: %v", err)
 	}
@@ -19,11 +19,15 @@ func TestMemoryNonceStoreIssueAndConsume(t *testing.T) {
 		t.Fatalf("expected token")
 	}
 
-	if err := store.Consume(context.Background(), token); err != nil {
+	if err := store.Consume(context.Background(), "tenant-a", token); err != nil {
 		t.Fatalf("consume nonce: %v", err)
 	}
 
-	if err := store.Consume(context.Background(), token); err != ErrNonceNotFound {
+	if err := store.Consume(context.Background(), "tenant-a", token); err != ErrNonceNotFound {
+		t.Fatalf("expected ErrNonceNotFound, got %v", err)
+	}
+
+	if err := store.Consume(context.Background(), "tenant-b", token); err != ErrNonceNotFound {
 		t.Fatalf("expected ErrNonceNotFound, got %v", err)
 	}
 }
@@ -34,14 +38,14 @@ func TestMemoryNonceStoreExpiry(t *testing.T) {
 	current := time.Unix(1000, 0)
 	store.now = func() time.Time { return current }
 
-	token, err := store.Issue(context.Background())
+	token, err := store.Issue(context.Background(), "tenant-a")
 	if err != nil {
 		t.Fatalf("issue nonce: %v", err)
 	}
 
 	current = current.Add(2 * time.Minute)
 
-	err = store.Consume(context.Background(), token)
+	err = store.Consume(context.Background(), "tenant-a", token)
 	if err != ErrNonceExpired {
 		t.Fatalf("expected ErrNonceExpired, got %v", err)
 	}
