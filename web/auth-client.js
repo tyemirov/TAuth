@@ -7,7 +7,6 @@
     logoutEndpoint: "/auth/logout",
     onAuthenticated: function onAuthenticatedDefault(userProfile) {},
     onUnauthenticated: function onUnauthenticatedDefault() {},
-    tenantId: "",
   };
 
   var runtime = {
@@ -16,7 +15,43 @@
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
+    tenantId: "",
   };
+
+  setTenantId(detectInitialTenantId());
+
+  function detectInitialTenantId() {
+    if (typeof window !== "undefined") {
+      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
+        return window.__TAUTH_TENANT_ID__.trim();
+      }
+    }
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-tenant-id");
+        if (dataValue) {
+          return dataValue.trim();
+        }
+      }
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var attrValue = document.documentElement.getAttribute(
+          "data-tauth-tenant-id",
+        );
+        if (attrValue) {
+          return attrValue.trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  function setTenantId(value) {
+    runtime.tenantId = typeof value === "string" ? value.trim() : "";
+  }
 
   function joinUrl(baseUrl, path) {
     if (baseUrl.endsWith("/") && path.startsWith("/")) {
@@ -72,25 +107,51 @@
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
     options.baseUrl = options.baseUrl || "/";
-    if (typeof options.tenantId === "string") {
-      options.tenantId = options.tenantId.trim();
-    } else {
-      options.tenantId = "";
-    }
     return options;
+  }
+
+  function detectInitialTenantId() {
+    if (typeof window !== "undefined") {
+      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
+        return window.__TAUTH_TENANT_ID__.trim();
+      }
+    }
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-tenant-id");
+        if (dataValue) {
+          return dataValue.trim();
+        }
+      }
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var attrValue = document.documentElement.getAttribute(
+          "data-tauth-tenant-id",
+        );
+        if (attrValue) {
+          return attrValue.trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  function setTenantId(value) {
+    runtime.tenantId = typeof value === "string" ? value.trim() : "";
   }
 
   function withTenantHeader(headers) {
     var mergedHeaders = Object.assign({}, headers || {});
-    if (
-      runtime.options &&
-      typeof runtime.options.tenantId === "string" &&
-      runtime.options.tenantId !== ""
-    ) {
-      mergedHeaders["X-TAuth-Tenant"] = runtime.options.tenantId;
+    if (runtime.tenantId) {
+      mergedHeaders["X-TAuth-Tenant"] = runtime.tenantId;
     }
     return mergedHeaders;
   }
+
+  setTenantId(detectInitialTenantId());
 
   async function initAuthClient(passed) {
     runtime.options = normalizeOptions(passed);
@@ -217,5 +278,6 @@
     window.apiFetch = apiFetch;
     window.getCurrentUser = getCurrentUser;
     window.logout = logout;
+    window.setAuthTenantId = setTenantId;
   }
 })();

@@ -4,7 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
-async function loadAuthClient(fetchImpl, broadcastSink) {
+async function loadAuthClient(fetchImpl, broadcastSink, tenantId) {
   const scriptPath = path.join(__dirname, "..", "web", "auth-client.js");
   const source = await fs.readFile(scriptPath, "utf8");
 
@@ -26,6 +26,24 @@ async function loadAuthClient(fetchImpl, broadcastSink) {
       }
     },
   };
+  context.document = {
+    currentScript: {
+      getAttribute(attributeName) {
+        if (attributeName === "data-tenant-id") {
+          return tenantId || "";
+        }
+        return null;
+      },
+    },
+    documentElement: {
+      getAttribute() {
+        return null;
+      },
+    },
+  };
+  if (typeof tenantId === "string") {
+    context.__TAUTH_TENANT_ID__ = tenantId;
+  }
   context.window = context;
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -182,11 +200,10 @@ test("auth client attaches tenant header when configured", async () => {
     roles: ["user"],
   };
   const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
-  const context = await loadAuthClient(fetch, []);
+  const context = await loadAuthClient(fetch, [], "tenant-123");
 
   await context.initAuthClient({
     baseUrl: "https://example.com",
-    tenantId: "tenant-123",
     onAuthenticated() {},
     onUnauthenticated() {},
   });
@@ -214,9 +231,9 @@ test("apiFetch retries with tenant header", async () => {
     },
   ]);
   const context = await loadAuthClient(fetch, []);
+  context.setAuthTenantId("tenant-abc");
   await context.initAuthClient({
     baseUrl: "https://example.com",
-    tenantId: "tenant-abc",
     onAuthenticated() {},
     onUnauthenticated() {},
   });

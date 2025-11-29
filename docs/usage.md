@@ -133,7 +133,10 @@ For backend services written in Go, use the `pkg/sessionvalidator` package descr
 On your product site, include the script from your TAuth origin:
 
 ```html
-<script src="https://auth.example.com/static/auth-client.js"></script>
+<script
+  src="https://auth.example.com/static/auth-client.js"
+  data-tenant-id="tenant-admin"
+></script>
 ```
 
 If your UI and TAuth share a host (for example both under `https://app.example.com`), you can serve it directly from that origin instead.
@@ -144,6 +147,8 @@ Call `initAuthClient` once during startup, after the script loads:
 
 ```html
 <script>
+  // Optional: override tenant dynamically when the page knows which tenant to use.
+  setAuthTenantId("tenant-admin");
   initAuthClient({
     baseUrl: "https://auth.example.com",
     onAuthenticated(profile) {
@@ -478,15 +483,4 @@ Use this checklist when integrating:
   - The `aud` claim in the ID token matches `APP_GOOGLE_WEB_CLIENT_ID`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
-- When multiple tenants share the same host, pass `tenantId` to `initAuthClient`:
-
-  ```js
-  initAuthClient({
-    baseUrl: "https://auth.example.com",
-    tenantId: "admin-tenant",
-    onAuthenticated: hydrateDashboard,
-    onUnauthenticated: showLogin,
-  });
-  ```
-
-  The helper automatically sends `X-TAuth-Tenant` with every request so the backend routes to the correct tenant even if the browser origin stays the same.
+- When multiple tenants share the same host, ensure the helper knows which tenant to address by either adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper automatically sends `X-TAuth-Tenant` with every request so the backend routes to the correct tenant even if the browser origin stays the same.
