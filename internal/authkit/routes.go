@@ -132,7 +132,9 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		clock = NewSystemClock()
 	}
 	if nonces == nil {
-		nonces = NewMemoryNonceStore(registry.DefaultConfig().NonceTTL)
+		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
+			return registry.Config(tenantID).NonceTTL
+		})
 	}
 
 	router.POST("/auth/nonce", func(contextGin *gin.Context) {
