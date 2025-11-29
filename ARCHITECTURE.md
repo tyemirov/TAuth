@@ -143,6 +143,7 @@ Nonce handling rules:
 - Dispatches events on authentication changes.
 - Attempts silent refresh on 401 using `/auth/refresh`.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share a host in development.
 - Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
@@ -222,7 +223,7 @@ Tenant resolution & runtime:
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Start the server with `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). This file is mandatory for every deployment; there is no legacy single-tenant flag path.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
-- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients never pass a tenant ID explicitly—the resolver derives it from the host on every request.
+- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on hostnames, but when multiple tenants share the same host (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
 ## 6. Persistence Model
 

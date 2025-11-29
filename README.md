@@ -108,6 +108,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <script>
   initAuthClient({
     baseUrl: "https://tauth.mprlab.com",
+    tenantId: "demo", // optional override when multiple tenants share a host
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -202,7 +203,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - For local development or automated tests you can enable the optional header override (`--enable_tenant_header_override`) so `X-TAuth-Tenant: demo` selects a tenant explicitly. Leave it disabled in production.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Start the server with `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). There is no alternative configuration path; single-tenant and multi-tenant deployments both rely on the same file.
-- Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames. Front-ends don’t pass tenant IDs explicitly—the resolver infers them from the host every time.
+- Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames. Front-ends normally rely on hostnames, but when multiple tenants deliberately share the same host (a local dev box, for example), enable the header override and pass `tenantId` to `initAuthClient`. The helper automatically attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and `logout()` so you can switch tenants without changing DNS.
 
 ---
 

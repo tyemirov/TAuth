@@ -161,6 +161,7 @@ Call `initAuthClient` once during startup, after the script loads:
 <script>
   initAuthClient({
     baseUrl: "https://auth.example.com",
+    tenantId: "demo", // optional override for shared-host dev setups
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -217,6 +218,21 @@ The helper:
 - Clears local profile state.
 - Broadcasts `"logged_out"` to other tabs.
 - Invokes `onUnauthenticated()` if provided.
+
+### 4.5 Selecting a tenant explicitly
+
+Most deployments rely on hostnames to resolve tenants. When multiple tenants intentionally share the same host (for example, several apps pointing at `localhost:8080`), enable the TAuth server’s header override (`--enable_tenant_header_override`) and pass `tenantId` to `initAuthClient`:
+
+```js
+initAuthClient({
+  baseUrl: "https://auth-dev.example.com",
+  tenantId: "team-blue",
+  onAuthenticated: hydrateDashboard,
+  onUnauthenticated: showGoogleButton,
+});
+```
+
+The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate hosts when possible).
 
 ---
 

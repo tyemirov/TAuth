@@ -158,3 +158,59 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
   assert.deepEqual(events, []);
 });
+
+test("initAuthClient attaches tenant override header when configured", async () => {
+  const profile = {
+    user_id: "tenant-user",
+    user_email: "tenant@example.com",
+    display: "Tenant User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch);
+
+  await context.initAuthClient({
+    baseUrl: "https://tenant.example.com",
+    tenantId: "demo-tenant",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      throw new Error("should authenticate");
+    },
+  });
+
+  assert.equal(fetch.calls.length, 1);
+  const headers = fetch.calls[0].headers || {};
+  assert.equal(headers["X-TAuth-Tenant"], "demo-tenant");
+});
+
+test("apiFetch sends tenant header during refresh cycle only", async () => {
+  const fetch = createFetchWithQueue([
+    { status: 401, body: {} }, // init /me
+    { status: 401, body: {} }, // init refresh
+    { status: 401, body: {} }, // apiFetch initial attempt
+    { status: 204, body: {} }, // refresh
+    { status: 200, body: {} }, // retry
+  ]);
+  const context = await loadAuthClient(fetch);
+
+  await context.initAuthClient({
+    baseUrl: "https://tenant.example.com",
+    tenantId: "tenant-blue",
+    onUnauthenticated() {},
+  });
+
+  fetch.calls.length = 0;
+
+  await context.apiFetch("https://tenant.example.com/resource", { method: "GET" });
+
+  assert.equal(fetch.calls.length, 3);
+  const initialCallHeaders = fetch.calls[0].headers || {};
+  assert.equal(initialCallHeaders["X-TAuth-Tenant"], undefined);
+
+  const refreshCall = fetch.calls[1];
+  assert.equal(refreshCall.url, "https://tenant.example.com/auth/refresh");
+  assert.equal(refreshCall.headers["X-TAuth-Tenant"], "tenant-blue");
+
+  const retryCallHeaders = fetch.calls[2].headers || {};
+  assert.equal(retryCallHeaders["X-TAuth-Tenant"], undefined);
+});
