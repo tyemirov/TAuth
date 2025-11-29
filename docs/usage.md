@@ -34,27 +34,25 @@ The binary exposes configuration via environment variables (preferred) and CLI f
 
 At minimum you must set:
 
-- `APP_GOOGLE_WEB_CLIENT_ID` – Google OAuth Web client ID (`<client-id>.apps.googleusercontent.com`).
-- `APP_JWT_SIGNING_KEY` – HS256 signing key for access JWTs (use a high‑entropy secret).
+- `APP_TENANTS_FILE` – Path to the tenants JSON file (see section 5.1 in the README for the schema).
+- `APP_JWT_SIGNING_KEY` – HS256 signing key for access JWTs (use a high‑entropy secret shared across all tenants).
 
 Common environment variables:
 
 | Variable                     | Purpose                                                          | Example                                 |
 |------------------------------|------------------------------------------------------------------|-----------------------------------------|
+| Variable                    | Purpose                                                          | Example                                 |
+|-----------------------------|------------------------------------------------------------------|-----------------------------------------|
 | `APP_LISTEN_ADDR`           | HTTP listen address                                              | `:8080`                                 |
-| `APP_COOKIE_DOMAIN`         | Domain for cookies (empty = host only)                           | `.example.com`                          |
-| `APP_GOOGLE_WEB_CLIENT_ID`  | Google OAuth Web client ID                                       | `123.apps.googleusercontent.com`        |
+| `APP_TENANTS_FILE`          | Path to tenants JSON file                                        | `/etc/tauth/tenants.json`               |
 | `APP_JWT_SIGNING_KEY`       | HS256 signing secret                                             | `openssl rand -base64 48`               |
-| `APP_SESSION_TTL`           | Access token lifetime                                            | `15m`                                   |
-| `APP_REFRESH_TTL`           | Refresh token lifetime                                           | `1440h` (60 days)                       |
 | `APP_DATABASE_URL`          | Refresh store DSN                                                | `sqlite:///data/tauth.db`               |
-| `APP_ENABLE_CORS`           | Enable CORS for cross‑origin UIs                                 | `true`                                  |
+| `APP_ENABLE_CORS`           | Enable CORS for cross-origin UIs                                 | `true`                                  |
 | `APP_CORS_ALLOWED_ORIGINS`  | Comma-separated allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `https://app.example.com,https://accounts.google.com` |
-| `APP_DEV_INSECURE_HTTP`     | Allow non‑HTTPS for local development                            | `true`                                  |
 
 Key notes:
 
-- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Use `APP_COOKIE_DOMAIN` (e.g. `.example.com`) to share cookies across subdomains.
+- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant in `APP_TENANTS_FILE` defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains.
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
 - **CORS**: Leave `APP_ENABLE_CORS` unset when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `APP_CORS_ALLOWED_ORIGINS` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
 
@@ -63,21 +61,38 @@ Key notes:
 This example mirrors the README but focuses on the minimum you need to host TAuth at `https://auth.example.com` for a product UI at `https://app.example.com`:
 
 ```bash
+cat > tenants.json <<'JSON'
+{
+  "tenants": [
+    {
+      "id": "prod",
+      "display_name": "Production Tenant",
+      "hosts": ["auth.example.com", "app.example.com"],
+      "google_web_client_id": "your_web_client_id.apps.googleusercontent.com",
+      "cookie_domain": ".example.com",
+      "session_ttl": "15m",
+      "refresh_ttl": "1440h",
+      "nonce_ttl": "5m",
+      "allow_insecure_http": false
+    }
+  ]
+}
+JSON
+
 export APP_LISTEN_ADDR=":8443"
-export APP_GOOGLE_WEB_CLIENT_ID="your_web_client_id.apps.googleusercontent.com"
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_COOKIE_DOMAIN=".example.com"
+export APP_TENANTS_FILE="$(pwd)/tenants.json"
 export APP_ENABLE_CORS="true"
-export APP_CORS_ALLOWED_ORIGINS="https://app.example.com"
+export APP_CORS_ALLOWED_ORIGINS="https://app.example.com,https://accounts.google.com"
 export APP_DATABASE_URL="sqlite:///data/tauth.db"
 
 tauth \
   --listen_addr=":8443" \
-  --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
   --jwt_signing_key="$APP_JWT_SIGNING_KEY" \
-  --cookie_domain="$APP_COOKIE_DOMAIN" \
+  --tenants_file="$APP_TENANTS_FILE" \
   --enable_cors \
-  --cors_allowed_origins="https://app.example.com"
+  --cors_allowed_origins="https://app.example.com" \
+  --cors_allowed_origins="https://accounts.google.com"
 ```
 
 Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
@@ -87,14 +102,14 @@ Run this behind TLS so the service issues `Secure` cookies and the browser accep
 For a full local stack (TAuth + demo UI) without installing Go:
 
 1. `cd examples/docker-compose`
-2. Copy the template: `cp .env.tauth.example .env.tauth`
-3. Edit `.env.tauth` and set:
-   - `APP_GOOGLE_WEB_CLIENT_ID` to your GIS Web client ID.
-   - `APP_JWT_SIGNING_KEY` to a random base64 key.
-4. Start the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
+2. Copy the environment template: `cp .env.tauth.example .env.tauth`
+3. Copy the tenant template: `cp tenants.json.example tenants.json`
+4. Edit `.env.tauth` (set `APP_JWT_SIGNING_KEY`, keep `APP_TENANTS_FILE=/config/tenants.json`, adjust DB/CORS settings as needed).
+5. Edit `tenants.json` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080`.
+6. Start the stack: `docker compose up --build`
+7. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
 
-Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database.
+Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `tenants.json` stays next to the compose file for future edits.
 
 ---
 
@@ -232,7 +247,7 @@ The required sequence for custom clients is:
 4. **Exchange credential** – when GIS invokes your callback with `response.credential`:
    - Call `POST /auth/google` with JSON `{ "google_id_token": "<response.credential>", "nonce_token": "<same nonce>" }` and `credentials: "include"`.
 5. TAuth:
-   - Validates the ID token against `APP_GOOGLE_WEB_CLIENT_ID`.
+   - Validates the ID token against the resolved tenant’s `google_web_client_id`.
    - Verifies the nonce (raw or hashed) and the issuer.
    - Issues `app_session` and `app_refresh` cookies.
    - Returns a profile JSON payload.
@@ -277,7 +292,7 @@ Common failure cases:
 
 - Invalid or expired ID token (`401`).
 - Mismatched nonce (`401`).
-- Audience (`aud`) does not match `APP_GOOGLE_WEB_CLIENT_ID` (`401`).
+- Audience (`aud`) does not match the resolved tenant’s `google_web_client_id` (`401`).
 
 ### 6.3 `GET /me`
 
@@ -470,11 +485,11 @@ Use this checklist when integrating:
 - **401 from `/auth/refresh`** – Refresh cookie missing or revoked; treat as “signed out” and prompt the user to sign in again.
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).
-  - `APP_COOKIE_DOMAIN` matches the registrable domain you expect.
+  - The tenant’s `cookie_domain` matches the registrable domain you expect.
   - CORS is configured correctly when using a split origin (`APP_ENABLE_CORS` and `APP_CORS_ALLOWED_ORIGINS`).
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.
-  - The `aud` claim in the ID token matches `APP_GOOGLE_WEB_CLIENT_ID`.
+  - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.

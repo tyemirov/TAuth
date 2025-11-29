@@ -1,0 +1,15 @@
+{
+  "tenants": [
+    {
+      "id": "local",
+      "display_name": "Local development",
+      "hosts": ["localhost", "127.0.0.1"],
+      "google_web_client_id": "replace-with-your-client-id.apps.googleusercontent.com",
+      "cookie_domain": "localhost",
+      "session_ttl": "30m",
+      "refresh_ttl": "720h",
+      "nonce_ttl": "10m",
+      "allow_insecure_http": true
+    }
+  ]
+}

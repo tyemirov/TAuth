@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/tenants"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
 )
@@ -61,55 +62,11 @@ func TestRunServerMissingConfig(t *testing.T) {
 	}
 }
 
-func TestLoadServerConfigRequiresGoogleClientID(t *testing.T) {
+func TestLoadServerConfigRequiresSigningKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	viper.Reset()
 	defer viper.Reset()
-
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
-
-	_, err := LoadServerConfig()
-	if err == nil {
-		t.Fatalf("expected error when google_web_client_id is missing")
-	}
-	expectedMessage := "config.missing_google_web_client_id: google_web_client_id must be provided"
-	if err.Error() != expectedMessage {
-		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
-	}
-}
-
-func TestLoadServerConfigRequiresPositiveSessionTTL(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
-
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("session_ttl", 0)
-	viper.Set("refresh_ttl", time.Hour)
-
-	_, err := LoadServerConfig()
-	if err == nil {
-		t.Fatalf("expected error when session_ttl is non-positive")
-	}
-
-	expectedMessage := "config.invalid_session_ttl: session_ttl must be greater than zero"
-	if err.Error() != expectedMessage {
-		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
-	}
-}
-
-func TestRunServerMissingSigningKeyReportsField(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
-
-	viper.Set("google_web_client_id", "provided-client-id")
 
 	_, err := LoadServerConfig()
 	if err == nil {
@@ -139,21 +96,35 @@ func TestRunServerValidatorInitFailure(t *testing.T) {
 	defer restoreValidator()
 
 	viper.Set("listen_addr", ":0")
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
+	viper.Set("tenants_file", writeSampleTenantsFile(t))
 
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
-	}
+	config := mustLoadServerConfig(t)
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
 
 	if err := runServer(command, nil); err == nil || err.Error() != "config.google_validator_init: validator_fail" {
 		t.Fatalf("expected google validator init error, got %v", err)
+	}
+}
+
+func TestRunServerRequiresTenantsFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	viper.Reset()
+	defer viper.Reset()
+
+	config := mustLoadServerConfig(t)
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	err := runServer(command, nil)
+	if err == nil {
+		t.Fatalf("expected error when tenants_file missing")
+	}
+	expected := "config.missing_tenants_file: tenants_file must be provided"
+	if err.Error() != expected {
+		t.Fatalf("expected %q, got %q", expected, err.Error())
 	}
 }
 
@@ -177,20 +148,12 @@ func TestRunServerSuccess(t *testing.T) {
 	defer restoreValidator()
 
 	viper.Set("listen_addr", ":0")
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("cookie_domain", "localhost")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
-	viper.Set("dev_insecure_http", true)
+	viper.Set("tenants_file", writeSampleTenantsFile(t))
 	viper.Set("database_url", "sqlite://file::memory:?cache=shared")
 	viper.Set("enable_cors", true)
 	viper.Set("cors_allowed_origins", []string{"http://localhost"})
 
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
-	}
+	config := mustLoadServerConfig(t)
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
@@ -224,18 +187,10 @@ func TestRunServerWithSQLiteFilePath(t *testing.T) {
 	dsn := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(filePath))
 
 	viper.Set("listen_addr", ":0")
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("cookie_domain", "localhost")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
-	viper.Set("dev_insecure_http", true)
+	viper.Set("tenants_file", writeSampleTenantsFile(t))
 	viper.Set("database_url", dsn)
 
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
-	}
+	config := mustLoadServerConfig(t)
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
@@ -266,17 +221,10 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	defer restoreValidator()
 
 	viper.Set("listen_addr", ":0")
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
-	viper.Set("dev_insecure_http", true)
+	viper.Set("tenants_file", writeSampleTenantsFile(t))
 	viper.Set("cors_allowed_origins", []string{"http://localhost"})
 
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
-	}
+	config := mustLoadServerConfig(t)
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
@@ -308,15 +256,9 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 	defer restoreValidator()
 
 	viper.Set("listen_addr", ":0")
-	viper.Set("google_web_client_id", "client")
-	viper.Set("jwt_signing_key", "signing-secret")
-	viper.Set("session_ttl", time.Minute)
-	viper.Set("refresh_ttl", time.Hour)
+	viper.Set("tenants_file", writeSampleTenantsFile(t))
 
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
-	}
+	config := mustLoadServerConfig(t)
 
 	commandContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -344,6 +286,81 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("runServer did not exit after cancellation")
+	}
+}
+
+func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
+	tenantDocument := `{
+  "tenants": [
+    {
+      "id": "alpha",
+      "display_name": "Alpha",
+      "hosts": ["alpha.localhost"],
+      "google_web_client_id": "alpha-client.apps.googleusercontent.com",
+      "cookie_domain": ".example.com",
+      "session_ttl": "20m",
+      "refresh_ttl": "480h",
+      "nonce_ttl": "3m",
+      "allow_insecure_http": true
+    },
+    {
+      "id": "beta",
+      "display_name": "Beta",
+      "hosts": ["beta.localhost"],
+      "google_web_client_id": "beta-client.apps.googleusercontent.com",
+      "cookie_domain": "beta.localhost",
+      "session_ttl": "10m",
+      "refresh_ttl": "240h",
+      "nonce_ttl": "5m",
+      "allow_insecure_http": false
+    }
+  ]
+}`
+
+	configPath := writeTenantsFileContents(t, tenantDocument)
+	tenantConfig, err := tenants.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("expected tenants config to load, got %v", err)
+	}
+
+	base := authkit.ServerConfig{
+		AppJWTSigningKey:  []byte("signing"),
+		AppJWTIssuer:      "issuer",
+		SessionCookieName: sessionCookieName,
+		RefreshCookieName: refreshCookieName,
+	}
+
+	registry, err := buildTenantRegistry(base, tenantConfig, true)
+	if err != nil {
+		t.Fatalf("expected registry build to succeed, got %v", err)
+	}
+
+	alpha := registry.Config("alpha")
+	if alpha.TenantID != "alpha" {
+		t.Fatalf("expected alpha tenant, got %s", alpha.TenantID)
+	}
+	if alpha.GoogleWebClientID != "alpha-client.apps.googleusercontent.com" {
+		t.Fatalf("unexpected google client: %s", alpha.GoogleWebClientID)
+	}
+	if alpha.CookieDomain != ".example.com" {
+		t.Fatalf("unexpected cookie domain: %s", alpha.CookieDomain)
+	}
+	if alpha.NonceTTL != 3*time.Minute {
+		t.Fatalf("expected nonce ttl 3m, got %s", alpha.NonceTTL)
+	}
+	if alpha.SameSiteMode != http.SameSiteNoneMode {
+		t.Fatalf("expected SameSite None with CORS enabled")
+	}
+
+	beta := registry.Config("beta")
+	if beta.AllowInsecureHTTP {
+		t.Fatalf("expected beta to disallow insecure HTTP")
+	}
+	if beta.SessionTTL != 10*time.Minute {
+		t.Fatalf("unexpected session ttl: %s", beta.SessionTTL)
+	}
+	if beta.RefreshTTL != 240*time.Hour {
+		t.Fatalf("unexpected refresh ttl: %s", beta.RefreshTTL)
 	}
 }
 
@@ -425,4 +442,45 @@ func withGoogleValidatorBuilderStub(stub func(ctx context.Context) (authkit.Goog
 	return func() {
 		buildGoogleTokenValidator = previous
 	}
+}
+
+const sampleTenantsDocument = `{
+  "tenants": [
+    {
+      "id": "alpha",
+      "display_name": "Alpha",
+      "hosts": ["alpha.localhost"],
+      "google_web_client_id": "alpha-client.apps.googleusercontent.com",
+      "cookie_domain": "alpha.localhost",
+      "session_ttl": "15m",
+      "refresh_ttl": "720h",
+      "nonce_ttl": "5m",
+      "allow_insecure_http": true
+    }
+  ]
+}`
+
+func writeSampleTenantsFile(t *testing.T) string {
+	t.Helper()
+	return writeTenantsFileContents(t, sampleTenantsDocument)
+}
+
+func writeTenantsFileContents(t *testing.T, contents string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenants.json")
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatalf("failed to write tenants file: %v", err)
+	}
+	return path
+}
+
+func mustLoadServerConfig(t *testing.T) authkit.ServerConfig {
+	t.Helper()
+	viper.Set("jwt_signing_key", "signing-secret")
+	config, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("expected configuration load to succeed, got %v", err)
+	}
+	return config
 }
