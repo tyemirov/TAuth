@@ -16,7 +16,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## Improvements (212–299)
 
-- None.
+- [x] [TA-212] Switch tenant configuration format from JSON to YAML. Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML. — Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
 
 ## BugFixes (330–399)
 

@@ -291,32 +291,27 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 }
 
 func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
-	tenantDocument := `{
-  "tenants": [
-    {
-      "id": "alpha",
-      "display_name": "Alpha",
-      "hosts": ["alpha.localhost"],
-      "google_web_client_id": "alpha-client.apps.googleusercontent.com",
-      "cookie_domain": ".example.com",
-      "session_ttl": "20m",
-      "refresh_ttl": "480h",
-      "nonce_ttl": "3m",
-      "allow_insecure_http": true
-    },
-    {
-      "id": "beta",
-      "display_name": "Beta",
-      "hosts": ["beta.localhost"],
-      "google_web_client_id": "beta-client.apps.googleusercontent.com",
-      "cookie_domain": "beta.localhost",
-      "session_ttl": "10m",
-      "refresh_ttl": "240h",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": false
-    }
-  ]
-}`
+	tenantDocument := `tenants:
+  - id: "alpha"
+    display_name: "Alpha"
+    hosts: ["alpha.localhost"]
+    google_web_client_id: "alpha-client.apps.googleusercontent.com"
+    cookie_domain: ".example.com"
+    session_ttl: "20m"
+    refresh_ttl: "480h"
+    nonce_ttl: "3m"
+    allow_insecure_http: true
+
+  - id: "beta"
+    display_name: "Beta"
+    hosts: ["beta.localhost"]
+    google_web_client_id: "beta-client.apps.googleusercontent.com"
+    cookie_domain: "beta.localhost"
+    session_ttl: "10m"
+    refresh_ttl: "240h"
+    nonce_ttl: "5m"
+    allow_insecure_http: false
+`
 
 	configPath := writeTenantsFileContents(t, tenantDocument)
 	tenantConfig, err := tenants.LoadConfig(configPath)
@@ -428,32 +423,27 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	viper.Reset()
 	defer viper.Reset()
 
-	tenantDocument := `{
-  "tenants": [
-    {
-      "id": "alpha",
-      "display_name": "Alpha",
-      "hosts": ["alpha.localhost"],
-      "google_web_client_id": "alpha-client",
-      "cookie_domain": ".example.com",
-      "session_ttl": "10m",
-      "refresh_ttl": "10m",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": true
-    },
-    {
-      "id": "beta",
-      "display_name": "Beta",
-      "hosts": ["beta.localhost"],
-      "google_web_client_id": "beta-client",
-      "cookie_domain": ".example.com",
-      "session_ttl": "10m",
-      "refresh_ttl": "10m",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": true
-    }
-  ]
-}`
+	tenantDocument := `tenants:
+  - id: "alpha"
+    display_name: "Alpha"
+    hosts: ["alpha.localhost"]
+    google_web_client_id: "alpha-client"
+    cookie_domain: ".example.com"
+    session_ttl: "10m"
+    refresh_ttl: "10m"
+    nonce_ttl: "5m"
+    allow_insecure_http: true
+
+  - id: "beta"
+    display_name: "Beta"
+    hosts: ["beta.localhost"]
+    google_web_client_id: "beta-client"
+    cookie_domain: ".example.com"
+    session_ttl: "10m"
+    refresh_ttl: "10m"
+    nonce_ttl: "5m"
+    allow_insecure_http: true
+`
 	viper.Set("tenants_file", writeTenantsFileContents(t, tenantDocument))
 	viper.Set("listen_addr", ":0")
 	viper.Set("jwt_signing_key", "secret")
@@ -509,21 +499,17 @@ func withGoogleValidatorBuilderStub(stub func(ctx context.Context) (authkit.Goog
 	}
 }
 
-const sampleTenantsDocument = `{
-  "tenants": [
-    {
-      "id": "alpha",
-      "display_name": "Alpha",
-      "hosts": ["alpha.localhost"],
-      "google_web_client_id": "alpha-client.apps.googleusercontent.com",
-      "cookie_domain": "alpha.localhost",
-      "session_ttl": "15m",
-      "refresh_ttl": "720h",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": true
-    }
-  ]
-}`
+const sampleTenantsDocument = `tenants:
+  - id: "alpha"
+    display_name: "Alpha"
+    hosts: ["alpha.localhost"]
+    google_web_client_id: "alpha-client.apps.googleusercontent.com"
+    cookie_domain: "alpha.localhost"
+    session_ttl: "15m"
+    refresh_ttl: "720h"
+    nonce_ttl: "5m"
+    allow_insecure_http: true
+`
 
 func writeSampleTenantsFile(t *testing.T) string {
 	t.Helper()
@@ -533,7 +519,7 @@ func writeSampleTenantsFile(t *testing.T) string {
 func writeTenantsFileContents(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "tenants.json")
+	path := filepath.Join(dir, "tenants.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		t.Fatalf("failed to write tenants file: %v", err)
 	}

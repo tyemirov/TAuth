@@ -10,7 +10,7 @@ services:
       - "8080:8080"
     volumes:
       - tauth_data:/data
-      - ./tenants.json:/config/tenants.json:ro
+      - ./tenants.yaml:/config/tenants.yaml:ro
     restart: unless-stopped
 
 volumes:
