@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -420,6 +421,70 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDemoConfigUsesResolvedTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	viper.Reset()
+	defer viper.Reset()
+
+	tenantDocument := `{
+  "tenants": [
+    {
+      "id": "alpha",
+      "display_name": "Alpha",
+      "hosts": ["alpha.localhost"],
+      "google_web_client_id": "alpha-client",
+      "cookie_domain": ".example.com",
+      "session_ttl": "10m",
+      "refresh_ttl": "10m",
+      "nonce_ttl": "5m",
+      "allow_insecure_http": true
+    },
+    {
+      "id": "beta",
+      "display_name": "Beta",
+      "hosts": ["beta.localhost"],
+      "google_web_client_id": "beta-client",
+      "cookie_domain": ".example.com",
+      "session_ttl": "10m",
+      "refresh_ttl": "10m",
+      "nonce_ttl": "5m",
+      "allow_insecure_http": true
+    }
+  ]
+}`
+	viper.Set("tenants_file", writeTenantsFileContents(t, tenantDocument))
+	viper.Set("listen_addr", ":0")
+	viper.Set("jwt_signing_key", "secret")
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		req := httptest.NewRequest("GET", "/demo/config.js", nil)
+		req.Host = "beta.localhost"
+		w := httptest.NewRecorder()
+		server.Handler.ServeHTTP(w, req)
+
+		if w.Code != 200 {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "beta-client") {
+			t.Errorf("expected beta-client in response, got %s", body)
+		}
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	config := mustLoadServerConfig(t)
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+
+	_ = runServer(command, nil)
 }
 
 func withServeHTTPStub(stub func(server *http.Server) error) func() {
