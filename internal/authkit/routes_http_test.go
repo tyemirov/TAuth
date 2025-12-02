@@ -226,6 +226,14 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	if logoutResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204 from logout, got %d", logoutResp.StatusCode)
 	}
+	for _, cookie := range logoutResp.Cookies() {
+		if cookie.Name == config.SessionCookieName && cookie.Path != "/" {
+			t.Fatalf("expected session cookie path /, got %s", cookie.Path)
+		}
+		if cookie.Name == config.RefreshCookieName && cookie.Path != "/auth" {
+			t.Fatalf("expected refresh cookie path /auth, got %s", cookie.Path)
+		}
+	}
 	state = captureAuthCookies(state, logoutResp.Cookies(), config)
 	_ = logoutResp.Body.Close()
 

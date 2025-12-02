@@ -192,58 +192,58 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.deepEqual(events, []);
 });
 
-test("auth client attaches tenant header when configured", async () => {
+test("initAuthClient attaches tenant override header when configured", async () => {
   const profile = {
-    user_id: "user-tenant",
+    user_id: "tenant-user",
     user_email: "tenant@example.com",
     display: "Tenant User",
     roles: ["user"],
   };
   const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
-  const context = await loadAuthClient(fetch, [], "tenant-123");
+  const context = await loadAuthClient(fetch);
 
   await context.initAuthClient({
-    baseUrl: "https://example.com",
+    baseUrl: "https://tenant.example.com",
+    tenantId: "demo-tenant",
     onAuthenticated() {},
-    onUnauthenticated() {},
+    onUnauthenticated() {
+      throw new Error("should authenticate");
+    },
   });
 
-  assertHeader(fetch.calls[0], "X-TAuth-Tenant", "tenant-123");
+  assert.equal(fetch.calls.length, 1);
+  const headers = fetch.calls[0].headers || {};
+  assert.equal(headers["X-TAuth-Tenant"], "demo-tenant");
 });
 
-test("apiFetch retries with tenant header", async () => {
-  const profile = {
-    user_id: "user-tenant",
-    user_email: "tenant@example.com",
-    display: "Tenant User",
-    roles: ["user"],
-  };
+test("apiFetch sends tenant header during refresh cycle only", async () => {
   const fetch = createFetchWithQueue([
-    { status: 200, body: profile },
-    function () {
-      return createResponse(401, {});
-    },
-    function () {
-      return createResponse(204, {});
-    },
-    function () {
-      return createResponse(200, {});
-    },
+    { status: 401, body: {} }, // init /me
+    { status: 401, body: {} }, // init refresh
+    { status: 401, body: {} }, // apiFetch initial attempt
+    { status: 204, body: {} }, // refresh
+    { status: 200, body: {} }, // retry
   ]);
-  const context = await loadAuthClient(fetch, []);
-  context.setAuthTenantId("tenant-abc");
+  const context = await loadAuthClient(fetch);
+
   await context.initAuthClient({
-    baseUrl: "https://example.com",
-    onAuthenticated() {},
+    baseUrl: "https://tenant.example.com",
+    tenantId: "tenant-blue",
     onUnauthenticated() {},
   });
 
-  const response = await context.apiFetch("https://example.com/api/data", {
-    method: "GET",
-  });
-  assert.equal(response.status, 200);
-  assert.equal(fetch.calls.length, 4);
-  assertHeader(fetch.calls[1], "X-TAuth-Tenant", "tenant-abc");
-  assertHeader(fetch.calls[2], "X-TAuth-Tenant", "tenant-abc");
-  assertHeader(fetch.calls[3], "X-TAuth-Tenant", "tenant-abc");
+  fetch.calls.length = 0;
+
+  await context.apiFetch("https://tenant.example.com/resource", { method: "GET" });
+
+  assert.equal(fetch.calls.length, 3);
+  const initialCallHeaders = fetch.calls[0].headers || {};
+  assert.equal(initialCallHeaders["X-TAuth-Tenant"], undefined);
+
+  const refreshCall = fetch.calls[1];
+  assert.equal(refreshCall.url, "https://tenant.example.com/auth/refresh");
+  assert.equal(refreshCall.headers["X-TAuth-Tenant"], "tenant-blue");
+
+  const retryCallHeaders = fetch.calls[2].headers || {};
+  assert.equal(retryCallHeaders["X-TAuth-Tenant"], undefined);
 });
