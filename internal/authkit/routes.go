@@ -359,8 +359,8 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				}
 			}
 		}
-		clearCookie(contextGin, config, config.SessionCookieName)
-		clearCookie(contextGin, config, config.RefreshCookieName)
+		clearCookie(contextGin, config, config.SessionCookieName, "/")
+		clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
 		contextGin.Status(http.StatusNoContent)
 		recordMetric(metricAuthLogoutSuccess)
 	})
@@ -398,12 +398,12 @@ func writeRefreshCookie(contextGin *gin.Context, configuration ServerConfig, opa
 	})
 }
 
-func clearCookie(contextGin *gin.Context, configuration ServerConfig, name string) {
+func clearCookie(contextGin *gin.Context, configuration ServerConfig, name string, path string) {
 	secure := !configuration.AllowInsecureHTTP
 	http.SetCookie(contextGin.Writer, &http.Cookie{
 		Name:     name,
 		Value:    "",
-		Path:     "/",
+		Path:     path,
 		Domain:   configuration.CookieDomain,
 		MaxAge:   -1,
 		Secure:   secure,

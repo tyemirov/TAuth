@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tyemirov/tauth/internal/tenants"
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/api/idtoken"
 )
@@ -62,6 +65,35 @@ func applyAuthCookies(request *http.Request, state authCookieState, config Serve
 			Path:   "/auth",
 		})
 	}
+}
+
+func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
+	configA := base
+	configA.TenantID = "tenant-a"
+	configA.GoogleWebClientID = "client-tenant-a"
+	configA.CookieDomain = "tenant-a.local"
+	configB := base
+	configB.TenantID = "tenant-b"
+	configB.GoogleWebClientID = "client-tenant-b"
+	configB.CookieDomain = "tenant-b.local"
+	return NewTenantRegistryFromMap(configA.TenantID, map[string]ServerConfig{
+		configA.TenantID: configA,
+		configB.TenantID: configB,
+	})
+}
+
+func mustLoadTenantsConfigFromString(t *testing.T, contents string) tenants.Config {
+	t.Helper()
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "tenants.json")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write tenants file: %v", err)
+	}
+	cfg, err := tenants.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load tenants config: %v", err)
+	}
+	return cfg
 }
 
 func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
@@ -194,6 +226,14 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	if logoutResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204 from logout, got %d", logoutResp.StatusCode)
 	}
+	for _, cookie := range logoutResp.Cookies() {
+		if cookie.Name == config.SessionCookieName && cookie.Path != "/" {
+			t.Fatalf("expected session cookie path /, got %s", cookie.Path)
+		}
+		if cookie.Name == config.RefreshCookieName && cookie.Path != "/auth" {
+			t.Fatalf("expected refresh cookie path /auth, got %s", cookie.Path)
+		}
+	}
 	state = captureAuthCookies(state, logoutResp.Cookies(), config)
 	_ = logoutResp.Body.Close()
 
@@ -219,6 +259,156 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	}
 	if metrics.Count(metricAuthLogoutSuccess) == 0 {
 		t.Fatalf("expected auth.logout.success metric increment")
+	}
+}
+
+func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"token-a": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-tenant-a",
+					"email":          "tenant-a@example.com",
+					"email_verified": true,
+					"name":           "Tenant A User",
+					"picture":        "https://example.com/a.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-tenant-a",
+		},
+		"token-b": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-tenant-b",
+					"email":          "tenant-b@example.com",
+					"email_verified": true,
+					"name":           "Tenant B User",
+					"picture":        "https://example.com/b.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-tenant-b",
+		},
+	}}
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	metrics := NewCounterMetrics()
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	baseConfig := newTestServerConfig()
+	registry := buildMultiTenantRegistry(baseConfig)
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `{
+		"tenants": [
+			{
+				"id": "tenant-a",
+				"display_name": "Tenant A",
+				"hosts": ["tenant-a.localhost"],
+				"google_web_client_id": "client-tenant-a",
+				"cookie_domain": "tenant-a.localhost",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "tenant-b",
+				"display_name": "Tenant B",
+				"hosts": ["tenant-b.localhost"],
+				"google_web_client_id": "client-tenant-b",
+				"cookie_domain": "tenant-b.localhost",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			}
+		]
+	}`)
+
+	resolver, err := tenants.NewResolver(tenantConfig, tenants.WithHeaderOverride(""))
+	if err != nil {
+		t.Fatalf("create resolver: %v", err)
+	}
+
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+
+	client := server.Client()
+
+	loginTenant := func(tenantID string, token string) authCookieState {
+		response, _ := loginWithTenantHeader(t, client, server.URL, validator, token, tenantID)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from login for %s, got %d", tenantID, response.StatusCode)
+		}
+		state := captureAuthCookies(authCookieState{}, response.Cookies(), registry.Config(tenantID))
+		_ = response.Body.Close()
+		return state
+	}
+
+	stateA := loginTenant("tenant-a", "token-a")
+	stateB := loginTenant("tenant-b", "token-b")
+
+	assertProfile := func(state authCookieState, tenantID string, expectedUser string) {
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+		if err != nil {
+			t.Fatalf("build /me request: %v", err)
+		}
+		request.Header.Set("X-TAuth-Tenant", tenantID)
+		applyAuthCookies(request, state, registry.Config(tenantID))
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("/me request failed: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from /me for %s, got %d", tenantID, response.StatusCode)
+		}
+		var payload map[string]interface{}
+		if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+			t.Fatalf("decode /me payload: %v", decodeErr)
+		}
+		if payload["user_id"] != expectedUser {
+			t.Fatalf("expected user %s, got %v", expectedUser, payload["user_id"])
+		}
+	}
+
+	assertProfile(stateA, "tenant-a", "google:sub-tenant-a")
+	assertProfile(stateB, "tenant-b", "google:sub-tenant-b")
+
+	crossRequest, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+	if err != nil {
+		t.Fatalf("build cross request: %v", err)
+	}
+	crossRequest.Header.Set("X-TAuth-Tenant", "tenant-b")
+	applyAuthCookies(crossRequest, stateA, registry.Config("tenant-a"))
+	crossResponse, err := client.Do(crossRequest)
+	if err != nil {
+		t.Fatalf("cross /me request failed: %v", err)
+	}
+	defer crossResponse.Body.Close()
+	if crossResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when tenant headers mismatch, got %d", crossResponse.StatusCode)
 	}
 }
 
@@ -313,8 +503,19 @@ func mustParseURL(raw string) *url.URL {
 }
 
 func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) string {
+	return issueNonceViaClientWithHeaders(t, client, baseURL, nil)
+}
+
+func issueNonceViaClientWithHeaders(t *testing.T, client *http.Client, baseURL string, headers map[string]string) string {
 	t.Helper()
-	response, err := client.Post(baseURL+"/auth/nonce", "application/json", nil)
+	request, err := http.NewRequest(http.MethodPost, baseURL+"/auth/nonce", nil)
+	if err != nil {
+		t.Fatalf("build nonce request: %v", err)
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("request nonce: %v", err)
 	}
@@ -335,8 +536,12 @@ func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) stri
 }
 
 func loginWithNonce(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string) (*http.Response, string) {
+	return loginWithNonceAndHeaders(t, client, baseURL, validator, token, nil)
+}
+
+func loginWithNonceAndHeaders(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string, headers map[string]string) (*http.Response, string) {
 	t.Helper()
-	nonce := issueNonceViaClient(t, client, baseURL)
+	nonce := issueNonceViaClientWithHeaders(t, client, baseURL, headers)
 	result, ok := validator.results[token]
 	if !ok {
 		t.Fatalf("token %s not configured in validator", token)
@@ -353,9 +558,21 @@ func loginWithNonce(t *testing.T, client *http.Client, baseURL string, validator
 	if marshalErr != nil {
 		t.Fatalf("marshal login payload: %v", marshalErr)
 	}
-	response, err := client.Post(baseURL+"/auth/google", "application/json", bytes.NewReader(loginPayload))
+	request, err := http.NewRequest(http.MethodPost, baseURL+"/auth/google", bytes.NewReader(loginPayload))
+	if err != nil {
+		t.Fatalf("build login request failed: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("login request failed: %v", err)
 	}
 	return response, nonce
+}
+func loginWithTenantHeader(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string, tenantID string) (*http.Response, string) {
+	headers := map[string]string{"X-TAuth-Tenant": tenantID}
+	return loginWithNonceAndHeaders(t, client, baseURL, validator, token, headers)
 }
