@@ -3,6 +3,7 @@ package tenants
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -110,10 +111,24 @@ func extractHost(request *http.Request) string {
 	if host == "" {
 		return ""
 	}
-	if colonIndex := strings.IndexByte(host, ':'); colonIndex >= 0 {
-		host = host[:colonIndex]
+
+	hostname := host
+	if strings.Contains(hostname, ":") {
+		if trimmed, _, err := net.SplitHostPort(hostname); err == nil {
+			hostname = trimmed
+		} else if strings.HasPrefix(hostname, "[") {
+			if closing := strings.Index(hostname, "]"); closing >= 0 {
+				hostname = hostname[:closing+1]
+			}
+		}
 	}
-	return normalizeHost(host)
+	hostname = strings.Trim(hostname, "[]")
+	if strings.Count(hostname, ":") == 1 {
+		if colonIndex := strings.IndexByte(hostname, ':'); colonIndex >= 0 {
+			hostname = hostname[:colonIndex]
+		}
+	}
+	return normalizeHost(hostname)
 }
 
 // TenantMiddleware resolves tenants and injects them into gin.Context.

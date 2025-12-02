@@ -247,3 +247,77 @@ test("apiFetch sends tenant header during refresh cycle only", async () => {
   const retryCallHeaders = fetch.calls[2].headers || {};
   assert.equal(retryCallHeaders["X-TAuth-Tenant"], undefined);
 });
+
+test("initAuthClient uses detected tenant id when option omitted", async () => {
+  const profile = {
+    user_id: "detected-user",
+    user_email: "detected@example.com",
+    display: "Detected User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch, [], "script-tenant");
+
+  await context.initAuthClient({
+    baseUrl: "https://tenant.example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      throw new Error("should authenticate with detected tenant");
+    },
+  });
+
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].headers["X-TAuth-Tenant"], "script-tenant");
+});
+
+test("setAuthTenantId before init configures tenant header", async () => {
+  const profile = {
+    user_id: "pref-user",
+    user_email: "pref@example.com",
+    display: "Preferred User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch);
+
+  context.setAuthTenantId("pref-tenant");
+  await context.initAuthClient({
+    baseUrl: "https://tenant.example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      throw new Error("should authenticate with preferred tenant");
+    },
+  });
+
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].headers["X-TAuth-Tenant"], "pref-tenant");
+});
+
+test("setAuthTenantId after init updates future auth requests", async () => {
+  const profile = {
+    user_id: "switch-user",
+    user_email: "switch@example.com",
+    display: "Switch User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 204, body: {} },
+  ]);
+  const context = await loadAuthClient(fetch);
+
+  await context.initAuthClient({
+    baseUrl: "https://tenant.example.com",
+    tenantId: "tenant-one",
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+  assert.equal(fetch.calls[0].headers["X-TAuth-Tenant"], "tenant-one");
+
+  context.setAuthTenantId("tenant-two");
+  await context.logout();
+
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls[1].url, "https://tenant.example.com/auth/logout");
+  assert.equal(fetch.calls[1].headers["X-TAuth-Tenant"], "tenant-two");
+});

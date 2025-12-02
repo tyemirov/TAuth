@@ -259,7 +259,11 @@ func parseHosts(hosts []string, tenantID TenantID) ([]string, error) {
 }
 
 func normalizeHost(host string) string {
-	return strings.ToLower(strings.TrimSpace(host))
+	normalized := strings.ToLower(strings.TrimSpace(host))
+	if strings.HasPrefix(normalized, "[") && strings.HasSuffix(normalized, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(normalized, "["), "]")
+	}
+	return normalized
 }
 
 func parseDuration(raw string) (time.Duration, error) {

@@ -51,7 +51,11 @@
   }
 
   function setTenantId(value) {
-    runtime.tenantId = typeof value === "string" ? value.trim() : "";
+    var normalized = typeof value === "string" ? value.trim() : "";
+    runtime.tenantId = normalized;
+    if (runtime.options) {
+      runtime.options.tenantId = normalized;
+    }
   }
 
   function joinUrl(baseUrl, path) {
@@ -110,18 +114,31 @@
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
     options.baseUrl = options.baseUrl || "/";
-    if (options.tenantId === undefined || options.tenantId === null) {
-      options.tenantId = "";
+    var providedTenant = options.tenantId;
+    if (providedTenant === undefined || providedTenant === null) {
+      options.tenantId = runtime.tenantId || "";
     } else {
-      options.tenantId = String(options.tenantId).trim();
+      options.tenantId = String(providedTenant).trim();
+      if (!options.tenantId && runtime.tenantId) {
+        options.tenantId = runtime.tenantId;
+      }
     }
+    runtime.tenantId = options.tenantId || "";
     return options;
+  }
+
+  function currentTenantId() {
+    if (runtime.options && runtime.options.tenantId) {
+      return runtime.options.tenantId;
+    }
+    return runtime.tenantId;
   }
 
   function withTenantHeader(headers) {
     var combined = Object.assign({}, headers || {});
-    if (runtime.options && runtime.options.tenantId) {
-      combined[tenantHeaderName] = runtime.options.tenantId;
+    var tenantId = currentTenantId();
+    if (tenantId) {
+      combined[tenantHeaderName] = tenantId;
     }
     return combined;
   }
@@ -183,7 +200,6 @@
       { "X-Client": "mprlab-ui" },
       merged.headers || {},
     );
-    merged.headers = withTenantHeader(merged.headers);
     var execute = function () {
       return fetch(inputUrl, merged);
     };

@@ -85,7 +85,7 @@ func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
 func mustLoadTenantsConfigFromString(t *testing.T, contents string) tenants.Config {
 	t.Helper()
 	tempDir := t.TempDir()
-	path := filepath.Join(tempDir, "tenants.json")
+	path := filepath.Join(tempDir, "tenants.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("write tenants file: %v", err)
 	}

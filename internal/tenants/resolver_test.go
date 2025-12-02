@@ -63,6 +63,24 @@ func TestResolverUnknownHost(t *testing.T) {
 	}
 }
 
+func TestResolverSupportsIPv6Hosts(t *testing.T) {
+	config := loadTestConfig(t)
+	resolver, err := NewResolver(config)
+	if err != nil {
+		t.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://[2001:db8::1]/api", nil)
+	request.Host = "[2001:db8::1]:8443"
+
+	tenant, resolveErr := resolver.Resolve(request)
+	if resolveErr != nil {
+		t.Fatalf("expected resolve success for ipv6 host: %v", resolveErr)
+	}
+	if tenant.ID() != "demo" {
+		t.Fatalf("expected demo tenant for ipv6 host, got %s", tenant.ID())
+	}
+}
+
 func TestTenantMiddlewareSetsContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	config := loadTestConfig(t)
@@ -125,7 +143,7 @@ func loadTestConfig(t *testing.T) Config {
 			{
 				"id": "demo",
 				"display_name": "Demo",
-				"hosts": ["demo.example.com", "demo.localhost"],
+				"hosts": ["demo.example.com", "demo.localhost", "[2001:db8::1]"],
 				"google_web_client_id": "demo-client.apps.googleusercontent.com",
 				"cookie_domain": "demo.example.com",
 				"session_ttl": "30m",
@@ -145,7 +163,7 @@ func loadTestConfig(t *testing.T) Config {
 		]
 	}`)
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "tenants.json")
+	configPath := filepath.Join(tempDir, "tenants.yaml")
 	if writeErr := os.WriteFile(configPath, content, 0o600); writeErr != nil {
 		t.Fatalf("failed to write config: %v", writeErr)
 	}

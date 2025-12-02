@@ -49,7 +49,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
 	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
 	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
-	rootCmd.Flags().String("tenants_file", "", "Path to tenants JSON config for multi-tenant deployments")
+	rootCmd.Flags().String("tenants_file", "", "Path to tenants YAML config for multi-tenant deployments (JSON also accepted)")
 	rootCmd.Flags().Bool("enable_tenant_header_override", false, "Allow resolving tenant via X-TAuth-Tenant header (dev/local only)")
 
 	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
