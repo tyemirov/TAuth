@@ -33,14 +33,18 @@ var errJWTMintFailure = errors.New("jwt.mint.failure")
 type JwtCustomClaims = sessionvalidator.Claims
 
 // MintAppJWT creates a signed HS256 access token using the provided clock.
-func MintAppJWT(clock Clock, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
+func MintAppJWT(clock Clock, tenantID string, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, issuer string, signingKey []byte, ttl time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(applicationUserID) == "" {
 		return "", time.Time{}, fmt.Errorf("%w: subject must be non-empty", errJWTMintFailure)
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return "", time.Time{}, fmt.Errorf("%w: tenant must be non-empty", errJWTMintFailure)
 	}
 
 	current := clock.Now().UTC()
 	expiresAt := current.Add(ttl)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, JwtCustomClaims{
+		TenantID:        tenantID,
 		UserID:          applicationUserID,
 		UserEmail:       userEmail,
 		UserDisplayName: userDisplayName,

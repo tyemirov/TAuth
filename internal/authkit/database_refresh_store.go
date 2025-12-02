@@ -39,6 +39,7 @@ func (store *DatabaseRefreshTokenStore) Driver() string {
 
 type refreshTokenRecord struct {
 	TokenID         string `gorm:"column:token_id;primaryKey"`
+	TenantID        string `gorm:"column:tenant_id;index;not null"`
 	UserID          string `gorm:"column:user_id;index;not null"`
 	TokenHash       string `gorm:"column:token_hash;uniqueIndex;not null"`
 	ExpiresUnix     int64  `gorm:"column:expires_unix;not null"`
@@ -76,7 +77,7 @@ func NewDatabaseRefreshTokenStore(ctx context.Context, databaseURL string) (*Dat
 }
 
 // Issue inserts a new refresh token record and returns its identifiers.
-func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
 	now := time.Now().UTC()
 	tokenID := newRefreshTokenID(now)
 	opaqueToken, hashValue, randomErr := generateRefreshOpaque()
@@ -84,6 +85,7 @@ func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, applicationUs
 		return "", "", fmt.Errorf("refresh_store.issue.%s: %w", store.driverLabel, randomErr)
 	}
 	record := refreshTokenRecord{
+		TenantID:        tenantID,
 		TokenID:         tokenID,
 		UserID:          applicationUserID,
 		TokenHash:       hashValue,
@@ -99,13 +101,13 @@ func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, applicationUs
 }
 
 // Validate locates a refresh token by its opaque value.
-func (store *DatabaseRefreshTokenStore) Validate(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
+func (store *DatabaseRefreshTokenStore) Validate(ctx context.Context, tenantID string, tokenOpaque string) (string, string, int64, error) {
 	if strings.TrimSpace(tokenOpaque) == "" {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenEmptyOpaque)
 	}
 	hashValue := hashOpaque(tokenOpaque)
 	var record refreshTokenRecord
-	err := store.db.WithContext(ctx).Where("token_hash = ?", hashValue).Take(&record).Error
+	err := store.db.WithContext(ctx).Where("tenant_id = ? AND token_hash = ?", tenantID, hashValue).Take(&record).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenNotFound)
@@ -123,17 +125,17 @@ func (store *DatabaseRefreshTokenStore) Validate(ctx context.Context, tokenOpaqu
 }
 
 // Revoke marks a refresh token as revoked.
-func (store *DatabaseRefreshTokenStore) Revoke(ctx context.Context, tokenID string) error {
+func (store *DatabaseRefreshTokenStore) Revoke(ctx context.Context, tenantID string, tokenID string) error {
 	now := time.Now().UTC()
 	result := store.db.WithContext(ctx).Model(&refreshTokenRecord{}).
-		Where("token_id = ? AND revoked_at_unix = 0", tokenID).
+		Where("tenant_id = ? AND token_id = ? AND revoked_at_unix = 0", tenantID, tokenID).
 		Update("revoked_at_unix", now.Unix())
 	if result.Error != nil {
 		return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, result.Error)
 	}
 	if result.RowsAffected == 0 {
 		var record refreshTokenRecord
-		findErr := store.db.WithContext(ctx).Where("token_id = ?", tokenID).Take(&record).Error
+		findErr := store.db.WithContext(ctx).Where("tenant_id = ? AND token_id = ?", tenantID, tokenID).Take(&record).Error
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("refresh_store.revoke.%s: %w", store.driverLabel, ErrRefreshTokenNotFound)
 		}

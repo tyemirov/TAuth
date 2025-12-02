@@ -58,6 +58,7 @@ type Validator struct {
 
 // Claims represent the session payload embedded inside TAuth access tokens.
 type Claims struct {
+	TenantID        string   `json:"tenant_id"`
 	UserID          string   `json:"user_id"`
 	UserEmail       string   `json:"user_email"`
 	UserDisplayName string   `json:"user_display_name"`
@@ -72,6 +73,14 @@ func (claims *Claims) GetUserID() string {
 		return ""
 	}
 	return claims.UserID
+}
+
+// GetTenantID returns the tenant identifier embedded in the session.
+func (claims *Claims) GetTenantID() string {
+	if claims == nil {
+		return ""
+	}
+	return claims.TenantID
 }
 
 // GetUserEmail returns the email associated with the session.

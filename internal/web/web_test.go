@@ -81,11 +81,16 @@ func TestPermissiveCORSRejectsBlankOrigins(t *testing.T) {
 }
 
 type stubClaims struct {
+	tenantID  string
 	userID    string
 	userEmail string
 	display   string
 	roles     []string
 	expires   time.Time
+}
+
+func (claims stubClaims) GetTenantID() string {
+	return claims.tenantID
 }
 
 func (claims stubClaims) GetUserID() string {
@@ -113,16 +118,15 @@ func TestHandleWhoAmI(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := NewInMemoryUsers()
-	store.Users["google:sub-1"] = UserProfile{
-		Email:     "user@example.com",
-		Display:   "Demo User",
-		AvatarURL: "https://example.com/avatar.png",
-		Roles:     []string{"user"},
+	_, _, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "Demo User", "https://example.com/avatar.png")
+	if err != nil {
+		t.Fatalf("unexpected upsert error: %v", err)
 	}
 
 	router := gin.New()
 	router.Use(func(contextGin *gin.Context) {
 		contextGin.Set("auth_claims", stubClaims{
+			tenantID:  "tenant-a",
 			userID:    "google:sub-1",
 			userEmail: "user@example.com",
 			display:   "Demo User",
@@ -189,6 +193,7 @@ func TestHandleWhoAmIMissingUser(t *testing.T) {
 	router := gin.New()
 	router.Use(func(contextGin *gin.Context) {
 		contextGin.Set("auth_claims", stubClaims{
+			tenantID:  "tenant-a",
 			userID:    "google:missing",
 			userEmail: "missing@example.com",
 			display:   "Missing",
@@ -241,7 +246,7 @@ func TestServeDemoConfig(t *testing.T) {
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()
-	userID, roles, err := store.UpsertGoogleUser(nil, "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
+	userID, roles, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +257,7 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("expected default role")
 	}
 
-	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, userID)
+	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, "tenant-a", userID)
 	if err != nil {
 		t.Fatalf("unexpected error retrieving profile: %v", err)
 	}
@@ -260,7 +265,11 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("incomplete profile returned")
 	}
 
-	if _, _, _, _, err := store.GetUserProfile(nil, "missing"); err == nil {
+	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-a", "missing"); err == nil {
 		t.Fatalf("expected error for missing user")
+	}
+
+	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-b", userID); err == nil {
+		t.Fatalf("expected error when tenant mismatches")
 	}
 }
