@@ -16,7 +16,43 @@
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
+    tenantId: "",
   };
+
+  setTenantId(detectInitialTenantId());
+
+  function detectInitialTenantId() {
+    if (typeof window !== "undefined") {
+      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
+        return window.__TAUTH_TENANT_ID__.trim();
+      }
+    }
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-tenant-id");
+        if (dataValue) {
+          return dataValue.trim();
+        }
+      }
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var attrValue = document.documentElement.getAttribute(
+          "data-tauth-tenant-id",
+        );
+        if (attrValue) {
+          return attrValue.trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  function setTenantId(value) {
+    runtime.tenantId = typeof value === "string" ? value.trim() : "";
+  }
 
   function joinUrl(baseUrl, path) {
     if (baseUrl.endsWith("/") && path.startsWith("/")) {
@@ -147,6 +183,7 @@
       { "X-Client": "mprlab-ui" },
       merged.headers || {},
     );
+    merged.headers = withTenantHeader(merged.headers);
     var execute = function () {
       return fetch(inputUrl, merged);
     };
@@ -208,5 +245,6 @@
     window.apiFetch = apiFetch;
     window.getCurrentUser = getCurrentUser;
     window.logout = logout;
+    window.setAuthTenantId = setTenantId;
   }
 })();

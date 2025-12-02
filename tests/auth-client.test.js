@@ -4,7 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
-async function loadAuthClient(fetchImpl, broadcastSink) {
+async function loadAuthClient(fetchImpl, broadcastSink, tenantId) {
   const scriptPath = path.join(__dirname, "..", "web", "auth-client.js");
   const source = await fs.readFile(scriptPath, "utf8");
 
@@ -26,6 +26,24 @@ async function loadAuthClient(fetchImpl, broadcastSink) {
       }
     },
   };
+  context.document = {
+    currentScript: {
+      getAttribute(attributeName) {
+        if (attributeName === "data-tenant-id") {
+          return tenantId || "";
+        }
+        return null;
+      },
+    },
+    documentElement: {
+      getAttribute() {
+        return null;
+      },
+    },
+  };
+  if (typeof tenantId === "string") {
+    context.__TAUTH_TENANT_ID__ = tenantId;
+  }
   context.window = context;
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -50,10 +68,11 @@ function createFetchWithQueue(sequence) {
     if (!next) {
       throw new Error(`unexpected fetch call to ${requestUrl}`);
     }
+    const headers = Object.assign({}, options.headers || {});
     calls.push({
       url: requestUrl,
       method: (options.method || "GET").toUpperCase(),
-      headers: options.headers,
+      headers,
       body: options.body,
     });
     if (typeof next === "function") {
@@ -63,6 +82,14 @@ function createFetchWithQueue(sequence) {
   };
   fetchImpl.calls = calls;
   return fetchImpl;
+}
+
+function assertHeader(call, headerName, expectedValue) {
+  assert.equal(
+    call.headers && call.headers[headerName],
+    expectedValue,
+    `expected ${headerName} header`,
+  );
 }
 
 test("auth client authenticates when /me succeeds", async () => {
@@ -93,6 +120,7 @@ test("auth client authenticates when /me succeeds", async () => {
   assert.equal(unauthenticatedCount, 0);
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
   assert.deepEqual(events, []);
 });
 
@@ -127,6 +155,9 @@ test("auth client attempts refresh before authenticating", async () => {
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
   assert.equal(fetch.calls[2].url, "https://example.com/me");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
+  assertHeader(fetch.calls[2], "X-Client", "mprlab-ui");
   assert.deepEqual(events, ["refreshed"]);
 });
 
@@ -156,6 +187,8 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.equal(fetch.calls.length, 2);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
+  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
 });
 
