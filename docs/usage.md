@@ -34,7 +34,7 @@ The binary exposes configuration via environment variables (preferred) and CLI f
 
 At minimum you must set:
 
-- `APP_TENANTS_FILE` – Path to the tenants JSON file (see section 5.1 in the README for the schema).
+- `APP_TENANTS_FILE` – Path to the tenants YAML file (see section 5.1 in the README for the schema).
 - `APP_JWT_SIGNING_KEY` – HS256 signing key for access JWTs (use a high‑entropy secret shared across all tenants).
 
 Common environment variables:
@@ -44,7 +44,7 @@ Common environment variables:
 | Variable                    | Purpose                                                          | Example                                 |
 |-----------------------------|------------------------------------------------------------------|-----------------------------------------|
 | `APP_LISTEN_ADDR`           | HTTP listen address                                              | `:8080`                                 |
-| `APP_TENANTS_FILE`          | Path to tenants JSON file                                        | `/etc/tauth/tenants.json`               |
+| `APP_TENANTS_FILE`          | Path to tenants YAML file                                        | `/etc/tauth/tenants.yaml`               |
 | `APP_JWT_SIGNING_KEY`       | HS256 signing secret                                             | `openssl rand -base64 48`               |
 | `APP_DATABASE_URL`          | Refresh store DSN                                                | `sqlite:///data/tauth.db`               |
 | `APP_ENABLE_CORS`           | Enable CORS for cross-origin UIs                                 | `true`                                  |
@@ -61,27 +61,24 @@ Key notes:
 This example mirrors the README but focuses on the minimum you need to host TAuth at `https://auth.example.com` for a product UI at `https://app.example.com`:
 
 ```bash
-cat > tenants.json <<'JSON'
-{
-  "tenants": [
-    {
-      "id": "prod",
-      "display_name": "Production Tenant",
-      "hosts": ["auth.example.com", "app.example.com"],
-      "google_web_client_id": "your_web_client_id.apps.googleusercontent.com",
-      "cookie_domain": ".example.com",
-      "session_ttl": "15m",
-      "refresh_ttl": "1440h",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": false
-    }
-  ]
-}
-JSON
+cat > tenants.yaml <<'YAML'
+tenants:
+  - id: "prod"
+    display_name: "Production Tenant"
+    hosts:
+      - "auth.example.com"
+      - "app.example.com"
+    google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
+    cookie_domain: ".example.com"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+    allow_insecure_http: false
+YAML
 
 export APP_LISTEN_ADDR=":8443"
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_TENANTS_FILE="$(pwd)/tenants.json"
+export APP_TENANTS_FILE="$(pwd)/tenants.yaml"
 export APP_ENABLE_CORS="true"
 export APP_CORS_ALLOWED_ORIGINS="https://app.example.com,https://accounts.google.com"
 export APP_DATABASE_URL="sqlite:///data/tauth.db"
@@ -103,13 +100,13 @@ For a full local stack (TAuth + demo UI) without installing Go:
 
 1. `cd examples/docker-compose`
 2. Copy the environment template: `cp .env.tauth.example .env.tauth`
-3. Copy the tenant template: `cp tenants.json.example tenants.json`
-4. Edit `.env.tauth` (set `APP_JWT_SIGNING_KEY`, keep `APP_TENANTS_FILE=/config/tenants.json`, adjust DB/CORS settings as needed).
-5. Edit `tenants.json` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080`.
+3. Copy the tenant template: `cp tenants.yaml.example tenants.yaml`
+4. Edit `.env.tauth` (set `APP_JWT_SIGNING_KEY`, keep `APP_TENANTS_FILE=/config/tenants.yaml`, adjust DB/CORS settings as needed).
+5. Edit `tenants.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080`.
 6. Start the stack: `docker compose up --build`
 7. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
 
-Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `tenants.json` stays next to the compose file for future edits.
+Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `tenants.yaml` stays next to the compose file for future edits.
 
 ---
 
@@ -161,6 +158,7 @@ Call `initAuthClient` once during startup, after the script loads:
 <script>
   initAuthClient({
     baseUrl: "https://auth.example.com",
+    tenantId: "demo", // optional override for shared-host dev setups
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -217,6 +215,21 @@ The helper:
 - Clears local profile state.
 - Broadcasts `"logged_out"` to other tabs.
 - Invokes `onUnauthenticated()` if provided.
+
+### 4.5 Selecting a tenant explicitly
+
+Most deployments rely on hostnames to resolve tenants. When multiple tenants intentionally share the same host (for example, several apps pointing at `localhost:8080`), enable the TAuth server’s header override (`--enable_tenant_header_override`) and pass `tenantId` to `initAuthClient`:
+
+```js
+initAuthClient({
+  baseUrl: "https://auth-dev.example.com",
+  tenantId: "team-blue",
+  onAuthenticated: hydrateDashboard,
+  onUnauthenticated: showGoogleButton,
+});
+```
+
+The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate hosts when possible).
 
 ---
 

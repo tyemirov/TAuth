@@ -11,33 +11,32 @@ import (
 
 func TestLoadConfigSuccess(t *testing.T) {
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "tenants.json")
-	configJSON := []byte(`{
-		"tenants": [
-			{
-				"id": "demo",
-				"display_name": "Demo Tenant",
-				"hosts": ["demo.localhost", "demo.example.com"],
-				"google_web_client_id": "demo-client.apps.googleusercontent.com",
-				"cookie_domain": "demo.example.com",
-				"session_ttl": "30m",
-				"refresh_ttl": "720h",
-				"nonce_ttl": "10m",
-				"allow_insecure_http": true
-			},
-			{
-				"id": "prod",
-				"display_name": "Production Tenant",
-				"hosts": ["app.example.com", "app.mprlab.com"],
-				"google_web_client_id": "prod-client.apps.googleusercontent.com",
-				"cookie_domain": ".example.com",
-				"session_ttl": "15m",
-				"refresh_ttl": "1440h",
-				"nonce_ttl": "5m"
-			}
-		]
-	}`)
-	if writeErr := os.WriteFile(configPath, configJSON, 0o600); writeErr != nil {
+	configPath := filepath.Join(tempDir, "tenants.yaml")
+	configYAML := []byte(`tenants:
+  - id: "demo"
+    display_name: "Demo Tenant"
+    hosts:
+      - "demo.localhost"
+      - "demo.example.com"
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+    allow_insecure_http: true
+
+  - id: "prod"
+    display_name: "Production Tenant"
+    hosts:
+      - "app.example.com"
+      - "app.mprlab.com"
+    google_web_client_id: "prod-client.apps.googleusercontent.com"
+    cookie_domain: ".example.com"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+`)
+	if writeErr := os.WriteFile(configPath, configYAML, 0o600); writeErr != nil {
 		t.Fatalf("failed to write config: %v", writeErr)
 	}
 
@@ -97,74 +96,75 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 	}{
 		{
 			name: "missing_id",
-			content: `{
-				"tenants": [
-					{
-						"id": "",
-						"display_name": "Demo Tenant",
-						"hosts": ["demo.localhost"],
-						"google_web_client_id": "demo-client.apps.googleusercontent.com",
-						"cookie_domain": "demo.example.com",
-						"session_ttl": "30m",
-						"refresh_ttl": "720h",
-						"nonce_ttl": "10m"
-					}
-				]
-			}`,
+			content: `tenants:
+  - id: ""
+    display_name: "Demo Tenant"
+    hosts: ["demo.localhost"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+`,
 			expectedCode: "tenant.invalid_id",
 		},
 		{
 			name: "duplicate_host",
-			content: `{
-				"tenants": [
-					{
-						"id": "demo",
-						"display_name": "Demo Tenant",
-						"hosts": ["demo.example.com"],
-						"google_web_client_id": "demo-client.apps.googleusercontent.com",
-						"cookie_domain": "demo.example.com",
-						"session_ttl": "30m",
-						"refresh_ttl": "720h",
-						"nonce_ttl": "10m"
-					},
-					{
-						"id": "prod",
-						"display_name": "Production Tenant",
-						"hosts": ["demo.example.com"],
-						"google_web_client_id": "prod-client.apps.googleusercontent.com",
-						"cookie_domain": ".example.com",
-						"session_ttl": "15m",
-						"refresh_ttl": "1440h",
-						"nonce_ttl": "5m"
-					}
-				]
-			}`,
+			content: `tenants:
+  - id: "demo"
+    display_name: "Demo Tenant"
+    hosts: ["demo.example.com"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+
+  - id: "prod"
+    display_name: "Production Tenant"
+    hosts: ["demo.example.com"]
+    google_web_client_id: "prod-client.apps.googleusercontent.com"
+    cookie_domain: ".example.com"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+`,
 			expectedCode: "tenant.duplicate_host",
 		},
 		{
 			name: "invalid_session_ttl",
-			content: `{
-				"tenants": [
-					{
-						"id": "demo",
-						"display_name": "Demo Tenant",
-						"hosts": ["demo.example.com"],
-						"google_web_client_id": "demo-client.apps.googleusercontent.com",
-						"cookie_domain": "demo.example.com",
-						"session_ttl": "0",
-						"refresh_ttl": "720h",
-						"nonce_ttl": "10m"
-					}
-				]
-			}`,
+			content: `tenants:
+  - id: "demo"
+    display_name: "Demo Tenant"
+    hosts: ["demo.example.com"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "0"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+`,
 			expectedCode: "tenant.invalid_session_ttl",
+		},
+		{
+			name: "unknown_field",
+			content: `tenants:
+  - id: "demo"
+    unknown_field: "unexpected"
+    hosts: ["demo.example.com"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+`,
+			expectedCode: "field unknown_field not found",
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			configPath := filepath.Join(tempDir, "tenants.json")
+			configPath := filepath.Join(tempDir, "tenants.yaml")
 			if err := os.WriteFile(configPath, []byte(testCase.content), 0o600); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
