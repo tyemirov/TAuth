@@ -2,6 +2,7 @@ package tenants
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +181,63 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 				t.Fatalf("expected error to contain code %s, got %v", testCase.expectedCode, loadErr)
 			}
 		})
+	}
+}
+
+func TestLoadConfigExpandsEnvVars(t *testing.T) {
+	t.Setenv("TENANT_COOKIE_DOMAIN", ".example.com")
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "tenants.yaml")
+	configYAML := []byte(`tenants:
+  - id: "demo"
+    display_name: ""
+    hosts: ["demo.localhost"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "${TENANT_COOKIE_DOMAIN}"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+`)
+	if writeErr := os.WriteFile(configPath, configYAML, 0o600); writeErr != nil {
+		t.Fatalf("failed to write config: %v", writeErr)
+	}
+
+	config, loadErr := LoadConfig(configPath)
+	if loadErr != nil {
+		t.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+
+	tenant, exists := config.TenantByID("demo")
+	if !exists {
+		t.Fatalf("expected demo tenant to exist")
+	}
+	if tenant.CookieDomain() != ".example.com" {
+		t.Fatalf("expected cookie domain from env, got %s", tenant.CookieDomain())
+	}
+	if tenant.DisplayName() != "demo" {
+		t.Fatalf("expected fallback display name, got %s", tenant.DisplayName())
+	}
+}
+
+func TestLoadConfigTrimsQuotedPath(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "quoted.yaml")
+	configYAML := []byte(`tenants:
+  - id: "demo"
+    display_name: "Demo"
+    hosts: ["demo.localhost"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.localhost"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+`)
+	if writeErr := os.WriteFile(configPath, configYAML, 0o600); writeErr != nil {
+		t.Fatalf("failed to write config: %v", writeErr)
+	}
+
+	if _, loadErr := LoadConfig(fmt.Sprintf("  \"%s\"  ", configPath)); loadErr != nil {
+		t.Fatalf("expected config to load with quoted path, got %v", loadErr)
 	}
 }
 

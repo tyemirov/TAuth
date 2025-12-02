@@ -51,26 +51,36 @@ Each entry defines:
 ### 2. Launch the service (e.g. on `https://tauth.mprlab.com`)
 
 ```bash
-export APP_LISTEN_ADDR=":8443"                            # or the port your ingress forwards to
-export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_TENANTS_FILE="$(pwd)/tenants.yaml"
-export APP_ENABLE_CORS="true"                            # allow the product origin to call TAuth
-export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com,https://accounts.google.com"
-# Optional persistence (choose one):
-# export APP_DATABASE_URL="postgres://user:pass@db.internal:5432/authdb?sslmode=disable"
-# export APP_DATABASE_URL="sqlite:///auth.db"
+cat > config.yaml <<'YAML'
+server:
+  listen_addr: ":8443"
+  jwt_signing_key: "replace-with-your-signing-key"
+  database_url: "sqlite:///data/tauth.db"
+  enable_cors: true
+  cors_allowed_origins:
+    - "https://gravity.mprlab.com"
+    - "https://accounts.google.com"
+  enable_tenant_header_override: false
 
-tauth --listen_addr=":8443" \
-  --jwt_signing_key="$APP_JWT_SIGNING_KEY" \
-  --tenants_file="$APP_TENANTS_FILE" \
-  --enable_cors \
-  --cors_allowed_origins="https://gravity.mprlab.com" \
-  --cors_allowed_origins="https://accounts.google.com"
+tenants:
+  - id: "gravity"
+    display_name: "Gravity"
+    hosts: ["gravity.mprlab.com"]
+    google_web_client_id: "gravity-client.apps.googleusercontent.com"
+    cookie_domain: ".mprlab.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+    allow_insecure_http: false
+YAML
+
+tauth --config=config.yaml
+# or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
 ```
 
 > SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 
-When multiple product origins need access, provide a comma-separated list via the environment variable (e.g. `export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com,https://gravity-admin.mprlab.com"`) or repeat the CLI flag for each origin.
+When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`.
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com` because both live under `.mprlab.com`.
 
@@ -83,20 +93,20 @@ We ship a compose example under `examples/docker-compose` that builds TAuth from
 
    ```bash
    cp .env.tauth.example .env.tauth
-   # update APP_JWT_SIGNING_KEY and, if desired, override DB/CORS values
+   # set TAUTH_JWT_SIGNING_KEY, TAUTH_GOOGLE_WEB_CLIENT_ID, etc.
    ```
 
-3. Copy the tenant template and replace the placeholder Google OAuth Web client ID with one that covers `http://localhost:8000` and `http://localhost:8080`:
+3. Copy the config template and replace the placeholder Google OAuth Web client ID with one that covers `http://localhost:8000` and `http://localhost:8080` (or keep the environment variable reference if you prefer):
 
    ```bash
-   cp tenants.yaml.example tenants.yaml
-   $EDITOR tenants.yaml
+   cp config.yaml.example config.yaml
+   $EDITOR config.yaml
    ```
 
 4. Build and start the stack: `docker compose up --build`
 5. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8080` via CORS).
 
-Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` to change ports or databases, and edit `tenants.yaml` to adjust hosts, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
+Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, hosts, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
 ### 3. Integrate the browser helper from the product site
 
@@ -143,7 +153,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 - Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
 - Call `/api/me` and verify it returns the signed-in profile.
 
-> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/docker-compose/tenants.yaml.example`. Replace it with your own value before sharing the stack beyond local testing.
+> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/docker-compose/config.yaml.example`. Replace it with your own value before sharing the stack beyond local testing.
 
 ### Example `/me` payload
 
@@ -166,7 +176,7 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ## Multi-tenant configuration
 
-TAuth always reads configuration from a tenants YAML file. A “single-tenant deployment” is simply a file with one entry; adding more entries lets you serve multiple products from the same binary without touching CLI flags.
+TAuth now reads **all** configuration from a single YAML file (`config.yaml` by default). The snippet above shows the server-level keys; the example below highlights the `tenants` section. A “single-tenant deployment” is simply a file with one entry; adding more entries lets you serve multiple products from the same binary without touching CLI flags.
 
 ```yaml
 tenants:
@@ -190,13 +200,14 @@ Rules enforced by the loader:
 - Every host can map to only one tenant; duplicates or blank hosts fail validation. Add every hostname that should resolve to this tenant (API base, UI origin, mTLS proxy host, etc.).
 - `google_web_client_id`, `cookie_domain`, and each TTL must be present and non-empty. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development.
+- Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors.
 
 The `internal/tenants` package validates the entire file before returning domain objects, so downstream routing relies on trusted tenant definitions. Request routing works as follows:
 
 - The resolver matches tenants by the request’s host header (case-insensitive, port stripped). Hosts not declared in the tenant file are rejected before reaching auth routes.
-- For local development or automated tests you can enable the optional header override (`--enable_tenant_header_override`) so `X-TAuth-Tenant: demo` selects a tenant explicitly. Leave it disabled in production.
+- For local development or automated tests you can enable the optional header override (`enable_tenant_header_override: true`) so `X-TAuth-Tenant: demo` selects a tenant explicitly. Leave it disabled in production.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
-- Enable multi-tenant mode by launching the server with `--tenants_file=/path/to/tenants.yaml` (or `APP_TENANTS_FILE`). YAML is the primary format (JSON remains compatible because YAML is a superset). The legacy single-tenant flags remain supported; omitting `--tenants_file` keeps the previous single-tenant behavior. For local development you can pass `--enable_tenant_header_override` to accept `X-TAuth-Tenant` overrides instead of relying solely on hostnames.
+- Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
 - Front-ends that share a single host can opt into an explicit tenant selection by either adding `data-tenant-id="tenant-a"` to the `<script src=".../auth-client.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)`. The helper automatically adds the `X-TAuth-Tenant` header to every request, matching the backend override flow described above.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames.
 
@@ -212,7 +223,7 @@ Custom clients must follow the nonce exchange documented in [ARCHITECTURE.md#goo
 
 - Works out of the box for any single registrable domain—host TAuth once and share cookies across subdomains.
 - Toggle CORS (and `SameSite=None` automatically) when your UI is served from a different origin during development.
-- Point `APP_DATABASE_URL` at Postgres or SQLite to store refresh tokens durably.
+- Set `database_url` to a Postgres or SQLite DSN to store refresh tokens durably.
 - Structured zap logging makes it easy to monitor sign-in, refresh, and logout flows wherever you deploy.
 
 ---

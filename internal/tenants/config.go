@@ -59,6 +59,7 @@ var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
 // LoadConfig reads and validates tenants from the provided YAML file path.
 func LoadConfig(path string) (Config, error) {
 	path = strings.TrimSpace(path)
+	path = strings.Trim(path, `"'`)
 	if path == "" {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, errorCodeInvalidPath)
 	}
@@ -67,12 +68,19 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%w: %s read_file", ErrInvalidTenantConfig, errorCodeInvalidPath)
 	}
 
-	var document tenantFileDocument
-	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
+	expandedPayload := os.ExpandEnv(string(payload))
+
+	var document FileDocument
+	decoder := yaml.NewDecoder(strings.NewReader(expandedPayload))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, err.Error())
 	}
+	return LoadConfigFromDocument(document)
+}
+
+// LoadConfigFromDocument constructs a Config from the parsed YAML document.
+func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	if len(document.Tenants) == 0 {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, errorCodeMissingTenants)
 	}
@@ -178,7 +186,7 @@ func (tenant Tenant) AllowInsecureHTTP() bool {
 	return tenant.allowInsecureHTTP
 }
 
-func buildTenant(raw tenantFileTenant) (Tenant, error) {
+func buildTenant(raw FileTenant) (Tenant, error) {
 	tenantID, idErr := parseTenantID(raw.ID)
 	if idErr != nil {
 		return Tenant{}, idErr
@@ -270,11 +278,13 @@ func parseDuration(raw string) (time.Duration, error) {
 	return time.ParseDuration(strings.TrimSpace(raw))
 }
 
-type tenantFileDocument struct {
-	Tenants []tenantFileTenant `json:"tenants" yaml:"tenants"`
+// FileDocument represents the raw tenants YAML schema.
+type FileDocument struct {
+	Tenants []FileTenant `json:"tenants" yaml:"tenants"`
 }
 
-type tenantFileTenant struct {
+// FileTenant represents a single tenant entry inside the YAML document.
+type FileTenant struct {
 	ID                string   `json:"id" yaml:"id"`
 	DisplayName       string   `json:"display_name" yaml:"display_name"`
 	Hosts             []string `json:"hosts" yaml:"hosts"`

@@ -28,40 +28,43 @@ The `tauth` binary lives under `cmd/server` in this repository. You can:
 - Build it directly with Go (e.g. `go build ./cmd/server`), or
 - Use the provided Docker setup in `examples/docker-compose` for a local stack.
 
-The binary exposes configuration via environment variables (preferred) and CLI flags (for overrides). Viper merges both sources.
+The binary reads configuration exclusively from a YAML file (default `config.yaml`). Use `tauth --config=/path/to/config.yaml` or export `TAUTH_CONFIG_FILE` to point at a different file; no other environment variables or CLI flags are required.
 
 ### 2.2 Core configuration
 
-At minimum you must set:
+`config.yaml` must include the server-level keys below plus at least one tenant:
 
-- `APP_TENANTS_FILE` – Path to the tenants YAML file (see section 5.1 in the README for the schema).
-- `APP_JWT_SIGNING_KEY` – HS256 signing key for access JWTs (use a high‑entropy secret shared across all tenants).
-
-Common environment variables:
-
-| Variable                     | Purpose                                                          | Example                                 |
-|------------------------------|------------------------------------------------------------------|-----------------------------------------|
-| Variable                    | Purpose                                                          | Example                                 |
-|-----------------------------|------------------------------------------------------------------|-----------------------------------------|
-| `APP_LISTEN_ADDR`           | HTTP listen address                                              | `:8080`                                 |
-| `APP_TENANTS_FILE`          | Path to tenants YAML file                                        | `/etc/tauth/tenants.yaml`               |
-| `APP_JWT_SIGNING_KEY`       | HS256 signing secret                                             | `openssl rand -base64 48`               |
-| `APP_DATABASE_URL`          | Refresh store DSN                                                | `sqlite:///data/tauth.db`               |
-| `APP_ENABLE_CORS`           | Enable CORS for cross-origin UIs                                 | `true`                                  |
-| `APP_CORS_ALLOWED_ORIGINS`  | Comma-separated allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `https://app.example.com,https://accounts.google.com` |
+| Key | Purpose | Example |
+| --- | --- | --- |
+| `listen_addr` | HTTP listen address | `:8080` |
+| `jwt_signing_key` | HS256 signing secret (required) | `openssl rand -base64 48` |
+| `database_url` | Refresh store DSN | `sqlite:///data/tauth.db` |
+| `enable_cors` | Enable CORS for cross-origin UIs | `true` / `false` |
+| `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
+| `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/local only) | `true` / `false` |
+| `tenants` | Array of tenant entries (see README §5.1 for schema) | `[...]` |
 
 Key notes:
 
-- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant in `APP_TENANTS_FILE` defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains.
+- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains.
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
-- **CORS**: Leave `APP_ENABLE_CORS` unset when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `APP_CORS_ALLOWED_ORIGINS` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
+- **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
 
 ### 2.3 Example: hosted deployment
 
 This example mirrors the README but focuses on the minimum you need to host TAuth at `https://auth.example.com` for a product UI at `https://app.example.com`:
 
 ```bash
-cat > tenants.yaml <<'YAML'
+cat > config.yaml <<'YAML'
+listen_addr: ":8443"
+jwt_signing_key: "replace-with-your-signing-key"
+database_url: "sqlite:///data/tauth.db"
+enable_cors: true
+cors_allowed_origins:
+  - "https://app.example.com"
+  - "https://accounts.google.com"
+enable_tenant_header_override: false
+
 tenants:
   - id: "prod"
     display_name: "Production Tenant"
@@ -76,20 +79,7 @@ tenants:
     allow_insecure_http: false
 YAML
 
-export APP_LISTEN_ADDR=":8443"
-export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_TENANTS_FILE="$(pwd)/tenants.yaml"
-export APP_ENABLE_CORS="true"
-export APP_CORS_ALLOWED_ORIGINS="https://app.example.com,https://accounts.google.com"
-export APP_DATABASE_URL="sqlite:///data/tauth.db"
-
-tauth \
-  --listen_addr=":8443" \
-  --jwt_signing_key="$APP_JWT_SIGNING_KEY" \
-  --tenants_file="$APP_TENANTS_FILE" \
-  --enable_cors \
-  --cors_allowed_origins="https://app.example.com" \
-  --cors_allowed_origins="https://accounts.google.com"
+tauth --config=config.yaml
 ```
 
 Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
@@ -100,13 +90,13 @@ For a full local stack (TAuth + demo UI) without installing Go:
 
 1. `cd examples/docker-compose`
 2. Copy the environment template: `cp .env.tauth.example .env.tauth`
-3. Copy the tenant template: `cp tenants.yaml.example tenants.yaml`
-4. Edit `.env.tauth` (set `APP_JWT_SIGNING_KEY`, keep `APP_TENANTS_FILE=/config/tenants.yaml`, adjust DB/CORS settings as needed).
-5. Edit `tenants.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080`.
+3. Copy the config template: `cp config.yaml.example config.yaml`
+4. Edit `.env.tauth` (set `TAUTH_CONFIG_FILE=/config/config.yaml`, `TAUTH_JWT_SIGNING_KEY`, `TAUTH_GOOGLE_WEB_CLIENT_ID`, etc.).
+5. Edit `config.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080` (or keep the environment variable references from step 4).
 6. Start the stack: `docker compose up --build`
 7. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
 
-Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `tenants.yaml` stays next to the compose file for future edits.
+Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
 
 ---
 
@@ -381,7 +371,7 @@ import (
 )
 
 func newSessionValidator() (*sessionvalidator.Validator, error) {
-    signingKey := []byte(os.Getenv("APP_JWT_SIGNING_KEY"))
+    signingKey := []byte(os.Getenv("TAUTH_JWT_SIGNING_KEY"))
     return sessionvalidator.New(sessionvalidator.Config{
         SigningKey: signingKey,
         Issuer:     "tauth",
@@ -392,7 +382,7 @@ func newSessionValidator() (*sessionvalidator.Validator, error) {
 
 The configuration mirrors your TAuth deployment:
 
-- `SigningKey` must match `APP_JWT_SIGNING_KEY` used by TAuth.
+- `SigningKey` must match the `jwt_signing_key` configured in TAuth.
 - `Issuer` must match the issuer configured by the server (typically `"tauth"`; see `ARCHITECTURE.md`).
 - `CookieName` defaults to `app_session` and should only be overridden if you have customised the cookie name on the TAuth side.
 
@@ -504,7 +494,7 @@ Use this checklist when integrating:
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).
   - The tenant’s `cookie_domain` matches the registrable domain you expect.
-  - CORS is configured correctly when using a split origin (`APP_ENABLE_CORS` and `APP_CORS_ALLOWED_ORIGINS`).
+  - CORS is configured correctly when using a split origin (`enable_cors` and `cors_allowed_origins` in `config.yaml`).
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.

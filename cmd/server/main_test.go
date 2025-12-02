@@ -15,11 +15,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
+	"gopkg.in/yaml.v3"
 )
 
 func TestZapLoggerMiddleware(t *testing.T) {
@@ -49,9 +49,6 @@ func TestZapLoggerMiddleware(t *testing.T) {
 func TestRunServerMissingConfig(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	viper.Reset()
-	defer viper.Reset()
-
 	err := runServer(&cobra.Command{}, nil)
 	if err == nil {
 		t.Fatalf("expected configuration error")
@@ -63,28 +60,36 @@ func TestRunServerMissingConfig(t *testing.T) {
 	}
 }
 
-func TestLoadServerConfigRequiresSigningKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func TestLoadApplicationConfigRequiresSigningKey(t *testing.T) {
+	cfg := sampleApplicationConfig()
+	cfg.Server.JWTSigningKey = ""
+	path := writeConfigFileFromStruct(t, cfg)
 
-	viper.Reset()
-	defer viper.Reset()
-
-	_, err := LoadServerConfig()
+	_, err := loadApplicationConfig(path)
 	if err == nil {
-		t.Fatalf("expected configuration error when jwt_signing_key missing")
+		t.Fatalf("expected error when jwt_signing_key missing")
 	}
+	if !strings.Contains(err.Error(), configCodeMissingJWTSigningKey) {
+		t.Fatalf("expected jwt signing key error, got %v", err)
+	}
+}
 
-	expectedMessage := "config.missing_jwt_signing_key: jwt_signing_key must be provided"
-	if err.Error() != expectedMessage {
-		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+func TestLoadApplicationConfigRequiresTenants(t *testing.T) {
+	cfg := sampleApplicationConfig()
+	cfg.Tenants = nil
+	path := writeConfigFileFromStruct(t, cfg)
+
+	_, err := loadApplicationConfig(path)
+	if err == nil {
+		t.Fatalf("expected error when tenants missing")
+	}
+	if !strings.Contains(err.Error(), configCodeMissingTenants) {
+		t.Fatalf("expected missing tenants error, got %v", err)
 	}
 }
 
 func TestRunServerValidatorInitFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
 
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		return http.ErrServerClosed
@@ -96,44 +101,17 @@ func TestRunServerValidatorInitFailure(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	viper.Set("listen_addr", ":0")
-	viper.Set("tenants_file", writeSampleTenantsFile(t))
-
-	config := mustLoadServerConfig(t)
-
+	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err == nil || err.Error() != "config.google_validator_init: validator_fail" {
 		t.Fatalf("expected google validator init error, got %v", err)
 	}
 }
 
-func TestRunServerRequiresTenantsFile(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
-
-	config := mustLoadServerConfig(t)
-	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
-
-	err := runServer(command, nil)
-	if err == nil {
-		t.Fatalf("expected error when tenants_file missing")
-	}
-	expected := "config.missing_tenants_file: tenants_file must be provided"
-	if err.Error() != expected {
-		t.Fatalf("expected %q, got %q", expected, err.Error())
-	}
-}
-
 func TestRunServerSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
 
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		if server.Handler == nil {
@@ -148,16 +126,13 @@ func TestRunServerSuccess(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	viper.Set("listen_addr", ":0")
-	viper.Set("tenants_file", writeSampleTenantsFile(t))
-	viper.Set("database_url", "sqlite://file::memory:?cache=shared")
-	viper.Set("enable_cors", true)
-	viper.Set("cors_allowed_origins", []string{"http://localhost"})
-
-	config := mustLoadServerConfig(t)
+	cfg := sampleApplicationConfig()
+	cfg.Server.DatabaseURL = "sqlite://file::memory:?cache=shared"
+	cfg.Server.EnableCORS = true
+	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
@@ -166,9 +141,6 @@ func TestRunServerSuccess(t *testing.T) {
 
 func TestRunServerWithSQLiteFilePath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
 
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		if server.Handler == nil {
@@ -187,14 +159,11 @@ func TestRunServerWithSQLiteFilePath(t *testing.T) {
 	filePath := filepath.Join(tempDir, "tauth.db")
 	dsn := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(filePath))
 
-	viper.Set("listen_addr", ":0")
-	viper.Set("tenants_file", writeSampleTenantsFile(t))
-	viper.Set("database_url", dsn)
-
-	config := mustLoadServerConfig(t)
+	cfg := sampleApplicationConfig()
+	cfg.Server.DatabaseURL = dsn
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed with file-backed sqlite, got %v", err)
@@ -208,9 +177,6 @@ func TestRunServerWithSQLiteFilePath(t *testing.T) {
 func TestRunServerInMemoryStore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	viper.Reset()
-	defer viper.Reset()
-
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		return http.ErrServerClosed
 	})
@@ -221,14 +187,11 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	viper.Set("listen_addr", ":0")
-	viper.Set("tenants_file", writeSampleTenantsFile(t))
-	viper.Set("cors_allowed_origins", []string{"http://localhost"})
-
-	config := mustLoadServerConfig(t)
+	cfg := sampleApplicationConfig()
+	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed with in-memory store, got %v", err)
@@ -237,9 +200,6 @@ func TestRunServerInMemoryStore(t *testing.T) {
 
 func TestRunServerHonorsContextCancellation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	viper.Reset()
-	defer viper.Reset()
 
 	shutdownTriggered := make(chan struct{})
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
@@ -256,16 +216,12 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	viper.Set("listen_addr", ":0")
-	viper.Set("tenants_file", writeSampleTenantsFile(t))
-
-	config := mustLoadServerConfig(t)
-
 	commandContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(commandContext, serverConfigContextKey, config))
+	command.SetContext(context.WithValue(commandContext, appConfigContextKey, &cfg))
 
 	done := make(chan error, 1)
 	go func() {
@@ -368,19 +324,6 @@ func TestNewRootCommandHelp(t *testing.T) {
 	}
 }
 
-func TestConfigStringSlice(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
-
-	viper.Set("sample_slice", []string{"https://one.example , https://two.example", "https://three.example"})
-	result := configStringSlice("sample_slice")
-	expected := []string{"https://one.example", "https://two.example", "https://three.example"}
-
-	if !reflect.DeepEqual(result, expected) {
-		t.Fatalf("expected %v, got %v", expected, result)
-	}
-}
-
 func TestExpandCommaSeparatedEntries(t *testing.T) {
 	t.Parallel()
 
@@ -420,8 +363,6 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 
 func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	viper.Reset()
-	defer viper.Reset()
 
 	tenantDocument := `tenants:
   - id: "alpha"
@@ -444,10 +385,6 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
     nonce_ttl: "5m"
     allow_insecure_http: true
 `
-	viper.Set("tenants_file", writeTenantsFileContents(t, tenantDocument))
-	viper.Set("listen_addr", ":0")
-	viper.Set("jwt_signing_key", "secret")
-
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		req := httptest.NewRequest("GET", "/demo/config.js", nil)
 		req.Host = "beta.localhost"
@@ -470,9 +407,10 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	})
 	defer restoreValidator()
 
-	config := mustLoadServerConfig(t)
+	cfg := sampleApplicationConfig()
+	cfg.Tenants = mustParseTenantsDocument(t, tenantDocument)
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), serverConfigContextKey, config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	_ = runServer(command, nil)
 }
@@ -526,12 +464,63 @@ func writeTenantsFileContents(t *testing.T, contents string) string {
 	return path
 }
 
-func mustLoadServerConfig(t *testing.T) authkit.ServerConfig {
-	t.Helper()
-	viper.Set("jwt_signing_key", "signing-secret")
-	config, err := LoadServerConfig()
-	if err != nil {
-		t.Fatalf("expected configuration load to succeed, got %v", err)
+func sampleApplicationConfig() applicationConfig {
+	return applicationConfig{
+		Server: serverSettings{
+			ListenAddr:                 ":0",
+			JWTSigningKey:              "signing-secret",
+			DatabaseURL:                "",
+			EnableCORS:                 false,
+			CORSAllowedOrigins:         nil,
+			EnableTenantHeaderOverride: false,
+		},
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "alpha",
+				DisplayName:       "Alpha",
+				Hosts:             []string{"alpha.localhost"},
+				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+				CookieDomain:      ".example.com",
+				SessionTTL:        "20m",
+				RefreshTTL:        "480h",
+				NonceTTL:          "3m",
+				AllowInsecureHTTP: true,
+			},
+			{
+				ID:                "beta",
+				DisplayName:       "Beta",
+				Hosts:             []string{"beta.localhost"},
+				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
+				CookieDomain:      "beta.localhost",
+				SessionTTL:        "10m",
+				RefreshTTL:        "240h",
+				AllowInsecureHTTP: true,
+				NonceTTL:          "5m",
+			},
+		},
 	}
-	return config
+}
+
+func writeConfigFileFromStruct(t *testing.T, cfg applicationConfig) string {
+	t.Helper()
+	payload, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	return path
+}
+
+func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenant {
+	t.Helper()
+	var doc tenants.FileDocument
+	decoder := yaml.NewDecoder(strings.NewReader(contents))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&doc); err != nil {
+		t.Fatalf("failed to parse tenants document: %v", err)
+	}
+	return doc.Tenants
 }

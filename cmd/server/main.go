@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
@@ -44,24 +43,7 @@ func newRootCommand() *cobra.Command {
 		RunE:    runServer,
 	}
 
-	rootCmd.Flags().String("listen_addr", ":8080", "HTTP listen address")
-	rootCmd.Flags().String("jwt_signing_key", "", "HS256 signing secret for access JWT")
-	rootCmd.Flags().String("database_url", "", "Database URL for refresh tokens (postgres:// or sqlite://; leave empty for in-memory store)")
-	rootCmd.Flags().Bool("enable_cors", false, "Enable permissive CORS (only if serving cross-origin UI)")
-	rootCmd.Flags().StringSlice("cors_allowed_origins", []string{}, "Allowed origins when CORS is enabled (required if enable_cors is true)")
-	rootCmd.Flags().String("tenants_file", "", "Path to tenants YAML config for multi-tenant deployments (JSON also accepted)")
-	rootCmd.Flags().Bool("enable_tenant_header_override", false, "Allow resolving tenant via X-TAuth-Tenant header (dev/local only)")
-
-	_ = viper.BindPFlag("listen_addr", rootCmd.Flags().Lookup("listen_addr"))
-	_ = viper.BindPFlag("jwt_signing_key", rootCmd.Flags().Lookup("jwt_signing_key"))
-	_ = viper.BindPFlag("database_url", rootCmd.Flags().Lookup("database_url"))
-	_ = viper.BindPFlag("enable_cors", rootCmd.Flags().Lookup("enable_cors"))
-	_ = viper.BindPFlag("cors_allowed_origins", rootCmd.Flags().Lookup("cors_allowed_origins"))
-	_ = viper.BindPFlag("tenants_file", rootCmd.Flags().Lookup("tenants_file"))
-	_ = viper.BindPFlag("enable_tenant_header_override", rootCmd.Flags().Lookup("enable_tenant_header_override"))
-
-	viper.SetEnvPrefix("APP")
-	viper.AutomaticEnv()
+	rootCmd.Flags().String("config", "config.yaml", "Path to application config file (overridden by TAUTH_CONFIG_FILE env)")
 
 	return rootCmd
 }
@@ -72,17 +54,26 @@ const (
 	defaultTenantID   = "default"
 
 	configCodeMissingJWTSigningKey    = "config.missing_jwt_signing_key"
-	configCodeMissingTenantsFile      = "config.missing_tenants_file"
+	configCodeMissingConfigFile       = "config.missing_config_file"
+	configCodeInvalidConfigFile       = "config.invalid_config_file"
+	configCodeMissingTenants          = "config.missing_tenants"
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"
 	configCodeGoogleValidatorInit     = "config.google_validator_init"
 )
 
 type contextKey string
 
-const serverConfigContextKey contextKey = "serverConfig"
+const appConfigContextKey contextKey = "appConfig"
 
 func prepareServerConfig(command *cobra.Command, arguments []string) error {
-	serverConfig, loadErr := LoadServerConfig()
+	configPath, err := command.Flags().GetString("config")
+	if err != nil {
+		return err
+	}
+	if envPath := strings.TrimSpace(os.Getenv("TAUTH_CONFIG_FILE")); envPath != "" {
+		configPath = envPath
+	}
+	appConfig, loadErr := loadApplicationConfig(configPath)
 	if loadErr != nil {
 		return loadErr
 	}
@@ -90,35 +81,12 @@ func prepareServerConfig(command *cobra.Command, arguments []string) error {
 	if existingContext == nil {
 		existingContext = context.Background()
 	}
-	command.SetContext(context.WithValue(existingContext, serverConfigContextKey, serverConfig))
+	command.SetContext(context.WithValue(existingContext, appConfigContextKey, appConfig))
 	return nil
 }
 
 func configError(code, message string) error {
 	return fmt.Errorf("%s: %s", code, message)
-}
-
-func LoadServerConfig() (authkit.ServerConfig, error) {
-	jwtSigningKey := viper.GetString("jwt_signing_key")
-	if jwtSigningKey == "" {
-		return authkit.ServerConfig{}, configError(configCodeMissingJWTSigningKey, "jwt_signing_key must be provided")
-	}
-
-	return authkit.ServerConfig{
-		AppJWTSigningKey:  []byte(jwtSigningKey),
-		AppJWTIssuer:      "mprlab-auth",
-		TenantID:          defaultTenantID,
-		CookieDomain:      "",
-		SessionCookieName: sessionCookieName,
-		RefreshCookieName: refreshCookieName,
-		SessionTTL:        15 * time.Minute,
-		RefreshTTL:        60 * 24 * time.Hour,
-		NonceTTL:          5 * time.Minute,
-	}, nil
-}
-
-func configStringSlice(key string) []string {
-	return expandCommaSeparatedEntries(viper.GetStringSlice(key))
 }
 
 func expandCommaSeparatedEntries(entries []string) []string {
@@ -148,22 +116,29 @@ func runServer(command *cobra.Command, arguments []string) error {
 	shutdownContext, stopShutdownContext := signal.NotifyContext(commandContext, syscall.SIGINT, syscall.SIGTERM)
 	defer stopShutdownContext()
 
-	var contextValue any
-	contextValue = commandContext.Value(serverConfigContextKey)
-	serverConfig, ok := contextValue.(authkit.ServerConfig)
-	if !ok {
+	contextValue := commandContext.Value(appConfigContextKey)
+	appConfig, ok := contextValue.(*applicationConfig)
+	if !ok || appConfig == nil {
 		return configError(configCodeUninitializedServerConf, "server configuration not prepared; PreRunE must execute before RunE")
 	}
 
-	listenAddr := viper.GetString("listen_addr")
-	databaseURL := viper.GetString("database_url")
-	enableCORS := viper.GetBool("enable_cors")
-	corsAllowedOrigins := configStringSlice("cors_allowed_origins")
-	tenantsFile := strings.TrimSpace(viper.GetString("tenants_file"))
-	enableTenantHeaderOverride := viper.GetBool("enable_tenant_header_override")
-	if tenantsFile == "" {
-		return configError(configCodeMissingTenantsFile, "tenants_file must be provided")
+	baseServerConfig := authkit.ServerConfig{
+		AppJWTSigningKey:  []byte(appConfig.Server.JWTSigningKey),
+		AppJWTIssuer:      "mprlab-auth",
+		TenantID:          defaultTenantID,
+		CookieDomain:      "",
+		SessionCookieName: sessionCookieName,
+		RefreshCookieName: refreshCookieName,
+		SessionTTL:        15 * time.Minute,
+		RefreshTTL:        60 * 24 * time.Hour,
+		NonceTTL:          5 * time.Minute,
 	}
+
+	listenAddr := appConfig.Server.ListenAddr
+	databaseURL := strings.TrimSpace(appConfig.Server.DatabaseURL)
+	enableCORS := appConfig.Server.EnableCORS
+	corsAllowedOrigins := expandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
+	enableTenantHeaderOverride := appConfig.Server.EnableTenantHeaderOverride
 
 	userStore := web.NewInMemoryUsers()
 	var refreshStore authkit.RefreshTokenStore
@@ -180,11 +155,11 @@ func runServer(command *cobra.Command, arguments []string) error {
 		logger.Info("using in-memory refresh token store")
 	}
 
-	tenantConfig, loadErr := tenants.LoadConfig(tenantsFile)
+	tenantConfig, loadErr := tenants.LoadConfigFromDocument(appConfig.tenantDocument())
 	if loadErr != nil {
 		return loadErr
 	}
-	registry, registryErr := buildTenantRegistry(serverConfig, tenantConfig, enableCORS)
+	registry, registryErr := buildTenantRegistry(baseServerConfig, tenantConfig, enableCORS)
 	if registryErr != nil {
 		return registryErr
 	}
@@ -306,7 +281,7 @@ func deriveSameSite(enableCORS bool, allowInsecure bool) http.SameSite {
 func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config, enableCORS bool) (authkit.TenantRegistry, error) {
 	tenantList := tenantConfig.Tenants()
 	if len(tenantList) == 0 {
-		return authkit.TenantRegistry{}, fmt.Errorf("tenants_file: no tenants configured")
+		return authkit.TenantRegistry{}, fmt.Errorf("config: no tenants configured")
 	}
 	configs := make(map[string]authkit.ServerConfig, len(tenantList))
 	for _, tenant := range tenantList {

@@ -1,0 +1,20 @@
+server:
+  listen_addr: ":8080"
+  jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY}"
+  database_url: "${TAUTH_DATABASE_URL}"
+  enable_cors: false
+  cors_allowed_origins: []
+  enable_tenant_header_override: true
+
+tenants:
+  - id: "local"
+    display_name: "Local development"
+    hosts:
+      - "localhost"
+      - "127.0.0.1"
+    google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID}"
+    cookie_domain: "${TAUTH_COOKIE_DOMAIN}"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+    allow_insecure_http: true
