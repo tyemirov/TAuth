@@ -5,6 +5,7 @@
     meEndpoint: "/me",
     refreshEndpoint: "/auth/refresh",
     logoutEndpoint: "/auth/logout",
+    tenantId: "",
     onAuthenticated: function onAuthenticatedDefault(userProfile) {},
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
@@ -15,7 +16,43 @@
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
+    tenantId: "",
   };
+
+  setTenantId(detectInitialTenantId());
+
+  function detectInitialTenantId() {
+    if (typeof window !== "undefined") {
+      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
+        return window.__TAUTH_TENANT_ID__.trim();
+      }
+    }
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-tenant-id");
+        if (dataValue) {
+          return dataValue.trim();
+        }
+      }
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var attrValue = document.documentElement.getAttribute(
+          "data-tauth-tenant-id",
+        );
+        if (attrValue) {
+          return attrValue.trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  function setTenantId(value) {
+    runtime.tenantId = typeof value === "string" ? value.trim() : "";
+  }
 
   function joinUrl(baseUrl, path) {
     if (baseUrl.endsWith("/") && path.startsWith("/")) {
@@ -23,6 +60,8 @@
     }
     return baseUrl + path;
   }
+
+  var tenantHeaderName = "X-TAuth-Tenant";
 
   function queueWhileRefreshing(executorFunction) {
     return new Promise(function (resolve, reject) {
@@ -71,7 +110,20 @@
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
     options.baseUrl = options.baseUrl || "/";
+    if (options.tenantId === undefined || options.tenantId === null) {
+      options.tenantId = "";
+    } else {
+      options.tenantId = String(options.tenantId).trim();
+    }
     return options;
+  }
+
+  function withTenantHeader(headers) {
+    var combined = Object.assign({}, headers || {});
+    if (runtime.options && runtime.options.tenantId) {
+      combined[tenantHeaderName] = runtime.options.tenantId;
+    }
+    return combined;
   }
 
   async function initAuthClient(passed) {
@@ -82,7 +134,7 @@
         {
           method: "GET",
           credentials: "include",
-          headers: { "X-Client": "mprlab-ui" },
+          headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
         },
       );
       if (meResponse.ok) {
@@ -96,7 +148,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -106,7 +158,7 @@
           {
             method: "GET",
             credentials: "include",
-            headers: { "X-Client": "mprlab-ui" },
+            headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
           },
         );
         if (retryResponse.ok) {
@@ -131,6 +183,7 @@
       { "X-Client": "mprlab-ui" },
       merged.headers || {},
     );
+    merged.headers = withTenantHeader(merged.headers);
     var execute = function () {
       return fetch(inputUrl, merged);
     };
@@ -149,7 +202,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -173,7 +226,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
     } catch (ignore) {}
@@ -192,5 +245,6 @@
     window.apiFetch = apiFetch;
     window.getCurrentUser = getCurrentUser;
     window.logout = logout;
+    window.setAuthTenantId = setTenantId;
   }
 })();

@@ -40,40 +40,44 @@ func TestRefreshTokenStoresShareSentinelErrors(t *testing.T) {
 
 			store := testCase.store(t)
 
-			_, _, _, err := store.Validate(context.Background(), "missing")
+			_, _, _, err := store.Validate(context.Background(), "tenant-a", "missing")
 			if !errors.Is(err, ErrRefreshTokenNotFound) {
 				t.Fatalf("expected ErrRefreshTokenNotFound, got %v", err)
 			}
 
-			tokenID, opaque, issueErr := store.Issue(context.Background(), "user", time.Now().Add(time.Minute).Unix(), "")
+			tokenID, opaque, issueErr := store.Issue(context.Background(), "tenant-a", "user", time.Now().Add(time.Minute).Unix(), "")
 			if issueErr != nil {
 				t.Fatalf("issue failed: %v", issueErr)
 			}
 
-			if err := store.Revoke(context.Background(), tokenID); err != nil {
+			if err := store.Revoke(context.Background(), "tenant-a", tokenID); err != nil {
 				t.Fatalf("revoke failed: %v", err)
 			}
-			if err := store.Revoke(context.Background(), tokenID); !errors.Is(err, ErrRefreshTokenAlreadyRevoked) {
+			if err := store.Revoke(context.Background(), "tenant-a", tokenID); !errors.Is(err, ErrRefreshTokenAlreadyRevoked) {
 				t.Fatalf("expected ErrRefreshTokenAlreadyRevoked, got %v", err)
 			}
 
-			_, _, _, err = store.Validate(context.Background(), opaque)
+			_, _, _, err = store.Validate(context.Background(), "tenant-a", opaque)
 			if !errors.Is(err, ErrRefreshTokenRevoked) {
 				t.Fatalf("expected ErrRefreshTokenRevoked, got %v", err)
 			}
 
-			expiredID, expiredOpaque, issueExpiredErr := store.Issue(context.Background(), "user", time.Now().Add(-time.Minute).Unix(), "")
+			expiredID, expiredOpaque, issueExpiredErr := store.Issue(context.Background(), "tenant-a", "user", time.Now().Add(-time.Minute).Unix(), "")
 			if issueExpiredErr != nil {
 				t.Fatalf("issue expired failed: %v", issueExpiredErr)
 			}
 
-			_, _, _, err = store.Validate(context.Background(), expiredOpaque)
+			_, _, _, err = store.Validate(context.Background(), "tenant-a", expiredOpaque)
 			if !errors.Is(err, ErrRefreshTokenExpired) {
 				t.Fatalf("expected ErrRefreshTokenExpired, got %v", err)
 			}
 
-			if err := store.Revoke(context.Background(), "missing-token"); !errors.Is(err, ErrRefreshTokenNotFound) {
+			if err := store.Revoke(context.Background(), "tenant-a", "missing-token"); !errors.Is(err, ErrRefreshTokenNotFound) {
 				t.Fatalf("expected ErrRefreshTokenNotFound when revoking missing token, got %v", err)
+			}
+
+			if _, _, _, tenantMismatchErr := store.Validate(context.Background(), "tenant-b", opaque); tenantMismatchErr == nil {
+				t.Fatalf("expected tenant mismatch validation error")
 			}
 
 			// cleanup to avoid unused variable compile warning.

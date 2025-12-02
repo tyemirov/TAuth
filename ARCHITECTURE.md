@@ -50,7 +50,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 3. `MountAuthRoutes` enforces HTTPS unless `AllowInsecureHTTP` is explicitly enabled for local development.
 4. `idtoken.NewValidator` validates issuer and audience against `ServerConfig.GoogleWebClientID`.
 5. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.
-6. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`) embedding `user_avatar_url` alongside the existing claims.
+6. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`) embedding `tenant_id`, `user_avatar_url`, and the other profile claims so downstream services can verify both the user and the tenant context.
 7. `RefreshTokenStore.Issue` creates a new opaque refresh token (hashed before storage) with `RefreshTTL`.
 8. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
 9. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
@@ -143,20 +143,21 @@ Nonce handling rules:
 - Dispatches events on authentication changes.
 - Attempts silent refresh on 401 using `/auth/refresh`.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share a host in development.
 - Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
 
 ```go
 type UserStore interface {
-    UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
-    GetUserProfile(ctx context.Context, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
+    UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+    GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
 
 type RefreshTokenStore interface {
-    Issue(ctx context.Context, applicationUserID string, expiresUnix int64, previousTokenID string) (tokenID string, tokenOpaque string, err error)
-    Validate(ctx context.Context, tokenOpaque string) (applicationUserID string, tokenID string, expiresUnix int64, err error)
-    Revoke(ctx context.Context, tokenID string) error
+    Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (tokenID string, tokenOpaque string, err error)
+    Validate(ctx context.Context, tenantID string, tokenOpaque string) (applicationUserID string, tokenID string, expiresUnix int64, err error)
+    Revoke(ctx context.Context, tenantID string, tokenID string) error
 }
 ```
 
@@ -176,47 +177,51 @@ type RefreshTokenStore interface {
 | Variable / Flag            | Purpose                                             | Example                                             |
 | -------------------------- | --------------------------------------------------- | --------------------------------------------------- |
 | `APP_LISTEN_ADDR`          | HTTP listen address                                 | `:8080`                                             |
-| `APP_COOKIE_DOMAIN`        | Domain for cookies (empty = host only)              | `app.example.com`                                   |
-| `APP_GOOGLE_WEB_CLIENT_ID` | Google OAuth Client ID                              | `<client-id>.apps.googleusercontent.com`            |
 | `APP_JWT_SIGNING_KEY`      | HS256 signing secret                                | `openssl rand -base64 48`                           |
-| `APP_SESSION_TTL`          | Access token lifetime                               | `15m`                                               |
-| `APP_REFRESH_TTL`          | Refresh token lifetime                              | `1440h` (60 days)                                   |
 | `APP_DATABASE_URL`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite:///auth.db`                                 |
 | `APP_ENABLE_CORS`          | Enable permissive CORS (cross-origin dev only)      | `true`                                              |
-| `APP_DEV_INSECURE_HTTP`    | Allow non-HTTPS (local development)                 | `true`                                              |
+| `APP_CORS_ALLOWED_ORIGINS` | Comma-separated list of allowed origins when CORS is enabled (include GIS) | `https://app.example.com,https://accounts.google.com` |
+| `APP_TENANTS_FILE`         | Path to the tenants YAML file (required)            | `/etc/tauth/tenants.yaml`                           |
+| `APP_ENABLE_TENANT_HEADER_OVERRIDE` | Allow `X-TAuth-Tenant` overrides (dev/testing) | `true`                                     |
 
 Viper reads environment variables (prefixed `APP_`) and command-line flags.
 
-### 5.1 Multi-tenant configuration file (preview)
+### 5.1 Multi-tenant configuration file
 
-Multi-tenant support is rolling out across TA-100. The first building block is the declarative config file parsed by `internal/tenants`. The JSON document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
+Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
 
-```json
-{
-  "tenants": [
-    {
-      "id": "demo",
-      "display_name": "Demo tenant",
-      "hosts": ["demo.localhost", "demo.example.com"],
-      "google_web_client_id": "demo-client.apps.googleusercontent.com",
-      "cookie_domain": "demo.example.com",
-      "session_ttl": "30m",
-      "refresh_ttl": "720h",
-      "nonce_ttl": "10m",
-      "allow_insecure_http": true
-    }
-  ]
-}
+```yaml
+tenants:
+  - id: "demo"
+    display_name: "Demo tenant"
+    hosts:
+      - "demo.localhost"
+      - "demo.example.com"
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+    allow_insecure_http: true
 ```
 
 Validation rules baked into the loader:
 
 - IDs use lowercase letters/digits/underscores/hyphens; duplicates are rejected.
-- Each host maps to only one tenant; hosts are normalized to lowercase and deduplicated.
+- `display_name` is required so operators can identify tenants in logs.
+- Each host maps to only one tenant; hosts are normalized to lowercase and deduplicated. List every hostname (auth origin, front-end origin, vanity domain) that should resolve to the tenant.
 - `google_web_client_id`, `cookie_domain`, and each TTL must be present and non-empty; durations follow Go’s `time.ParseDuration` syntax.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 
-Future issues (TA-102 through TA-105) layer routing, resolver, and per-tenant stores on top of this domain model so the rest of the stack can treat tenant lookups as validated data.
+Tenant resolution & runtime:
+
+- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes.
+- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. Leave it disabled in production.
+- `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
+- Multi-tenant mode is enabled via `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). Single-tenant deployments continue to rely on the existing CLI/env flags. Use `--enable_tenant_header_override` in local/testing environments when you need to override tenants via headers instead of hostnames.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on every request to line up with the override flow above.
+- All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
+- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on hostnames, but when multiple tenants share the same host (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
 ## 6. Persistence Model
 
@@ -225,6 +230,7 @@ The persistent refresh token store manages the `refresh_tokens` table (automigra
 ```sql
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     token_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     expires_unix BIGINT NOT NULL,
@@ -242,7 +248,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 ## 7. Security Considerations
 
-- Always run behind HTTPS in production; `APP_DEV_INSECURE_HTTP` is for local use only.
+- Always run behind HTTPS in production; set a tenant’s `allow_insecure_http` to `true` only for local development.
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.
 - Validate Google tokens strictly: issuer, audience, expiry, issued-at.
 - Rate limit `/auth/google` and `/auth/refresh` and monitor failures via zap logs.
@@ -261,7 +267,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 ### 8.2 Split Origin (local labs)
 
 - UI: `http://localhost:5173`, API: `http://localhost:8080`.
-- Set `APP_ENABLE_CORS=true` and `APP_DEV_INSECURE_HTTP=true`.
+- Set `APP_ENABLE_CORS=true` and mark the tenant’s `allow_insecure_http` as `true`.
 - Browser will require HTTPS + `SameSite=None` in production for cross-origin cookies.
 
 ## 9. CLI and Server Lifecycle
@@ -285,7 +291,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 - **401 on `/me` but refresh succeeds** – Access cookie expired; the client will refresh on next call.
 - **401 on `/auth/refresh`** – Refresh cookie missing/expired/revoked; prompt user to sign in again.
-- **Cookies missing** – Verify `APP_COOKIE_DOMAIN`, HTTPS usage, and CORS settings.
+- **Cookies missing** – Verify the tenant’s `cookie_domain`, HTTPS usage, and CORS settings.
 - **Google token rejection** – Confirm OAuth client type (Web) and that `aud` matches configured client ID.
 
 ## 12. Versioning Contract

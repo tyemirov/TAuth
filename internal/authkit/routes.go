@@ -126,13 +126,15 @@ func logAuthError(code string, err error, fields ...zap.Field) {
 }
 
 // MountAuthRoutes registers /auth endpoints and session helpers.
-func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
+func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
 	}
 	if nonces == nil {
-		nonces = NewMemoryNonceStore(configuration.NonceTTL)
+		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
+			return registry.Config(tenantID).NonceTTL
+		})
 	}
 
 	router.POST("/auth/nonce", func(contextGin *gin.Context) {
@@ -140,7 +142,8 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			contextGin.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		token, issueErr := nonces.Issue(contextGin)
+		tenantID := resolveTenantID(contextGin, registry)
+		token, issueErr := nonces.Issue(contextGin, tenantID)
 		if issueErr != nil {
 			logAuthError("auth.nonce.issue_failed", issueErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -150,6 +153,8 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 	})
 
 	router.POST("/auth/google", func(contextGin *gin.Context) {
+		tenantID := resolveTenantID(contextGin, registry)
+		config := registry.Config(tenantID)
 		var inbound struct {
 			GoogleIDToken string `json:"google_id_token"`
 			NonceToken    string `json:"nonce_token"`
@@ -172,14 +177,14 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
 			return
 		}
-		if consumeErr := nonces.Consume(contextGin, inbound.NonceToken); consumeErr != nil {
+		if consumeErr := nonces.Consume(contextGin, tenantID, inbound.NonceToken); consumeErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
 		}
 
-		if !configuration.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.insecure_http", nil)
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
@@ -193,7 +198,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		payload, validateErr := validator.Validate(context.Background(), inbound.GoogleIDToken, configuration.GoogleWebClientID)
+		payload, validateErr := validator.Validate(context.Background(), inbound.GoogleIDToken, config.GoogleWebClientID)
 		if validateErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.invalid_google_token", validateErr)
@@ -241,7 +246,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(contextGin, googleSub, userEmail, userDisplayName, userAvatarURL)
+		applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(contextGin, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
 		if upsertErr != nil || applicationUserID == "" {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.user_store", upsertErr)
@@ -249,7 +254,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 		if mintErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.mint_jwt", mintErr)
@@ -257,8 +262,8 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		refreshDeadline := clock.Now().UTC().Add(configuration.RefreshTTL)
-		_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, refreshDeadline.Unix(), "")
+		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
+		_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), "")
 		if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.issue_refresh", issueErr)
@@ -266,8 +271,8 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		writeSessionCookie(contextGin, configuration, sessionToken, sessionExpiresAt)
-		writeRefreshCookie(contextGin, configuration, refreshOpaque, refreshDeadline)
+		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
+		writeRefreshCookie(contextGin, config, refreshOpaque, refreshDeadline)
 
 		contextGin.JSON(http.StatusOK, gin.H{
 			"user_id":    applicationUserID,
@@ -280,7 +285,9 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 	})
 
 	router.POST("/auth/refresh", func(contextGin *gin.Context) {
-		refreshCookie, cookieErr := contextGin.Request.Cookie(configuration.RefreshCookieName)
+		tenantID := resolveTenantID(contextGin, registry)
+		config := registry.Config(tenantID)
+		refreshCookie, cookieErr := contextGin.Request.Cookie(config.RefreshCookieName)
 		if cookieErr != nil || refreshCookie == nil || strings.TrimSpace(refreshCookie.Value) == "" {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthWarning("auth.refresh.missing_cookie", cookieErr)
@@ -288,7 +295,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		applicationUserID, currentTokenID, expiresUnix, validateErr := refreshTokens.Validate(contextGin, refreshCookie.Value)
+		applicationUserID, currentTokenID, expiresUnix, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
 		if validateErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthWarning("auth.refresh.validate", validateErr)
@@ -302,7 +309,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, applicationUserID)
+		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
 		if profileErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthWarning("auth.refresh.profile", profileErr)
@@ -310,7 +317,7 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, configuration.AppJWTIssuer, configuration.AppJWTSigningKey, configuration.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 		if mintErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.mint_jwt", mintErr)
@@ -318,46 +325,48 @@ func MountAuthRoutes(router gin.IRouter, configuration ServerConfig, users UserS
 			return
 		}
 
-		refreshDeadline := clock.Now().UTC().Add(configuration.RefreshTTL)
-		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, applicationUserID, refreshDeadline.Unix(), currentTokenID)
+		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
+		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
 		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.issue_refresh", issueErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		if revokeErr := refreshTokens.Revoke(contextGin, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
+		if revokeErr := refreshTokens.Revoke(contextGin, tenantID, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.revoke_previous", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		writeSessionCookie(contextGin, configuration, sessionToken, sessionExpiresAt)
-		writeRefreshCookie(contextGin, configuration, newOpaque, refreshDeadline)
+		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
+		writeRefreshCookie(contextGin, config, newOpaque, refreshDeadline)
 
 		contextGin.Status(http.StatusNoContent)
 		recordMetric(metricAuthRefreshSuccess)
 	})
 
 	router.POST("/auth/logout", func(contextGin *gin.Context) {
-		refreshCookie, cookieErr := contextGin.Request.Cookie(configuration.RefreshCookieName)
+		tenantID := resolveTenantID(contextGin, registry)
+		config := registry.Config(tenantID)
+		refreshCookie, cookieErr := contextGin.Request.Cookie(config.RefreshCookieName)
 		if cookieErr == nil && refreshCookie != nil && strings.TrimSpace(refreshCookie.Value) != "" {
-			_, tokenID, _, validateErr := refreshTokens.Validate(contextGin, refreshCookie.Value)
+			_, tokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
 			if validateErr == nil && tokenID != "" {
-				if revokeErr := refreshTokens.Revoke(contextGin, tokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
+				if revokeErr := refreshTokens.Revoke(contextGin, tenantID, tokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
 					logAuthWarning("auth.logout.revoke", revokeErr)
 				}
 			}
 		}
-		clearCookie(contextGin, configuration, configuration.SessionCookieName)
-		clearCookie(contextGin, configuration, configuration.RefreshCookieName)
+		clearCookie(contextGin, config, config.SessionCookieName, "/")
+		clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
 		contextGin.Status(http.StatusNoContent)
 		recordMetric(metricAuthLogoutSuccess)
 	})
 
 	whoAmI := router.Group("/")
-	whoAmI.Use(RequireSession(configuration))
+	whoAmI.Use(RequireSession(registry))
 	whoAmI.GET("/me", web.HandleWhoAmI(users, configuredLogger))
 }
 
@@ -389,12 +398,12 @@ func writeRefreshCookie(contextGin *gin.Context, configuration ServerConfig, opa
 	})
 }
 
-func clearCookie(contextGin *gin.Context, configuration ServerConfig, name string) {
+func clearCookie(contextGin *gin.Context, configuration ServerConfig, name string, path string) {
 	secure := !configuration.AllowInsecureHTTP
 	http.SetCookie(contextGin.Writer, &http.Cookie{
 		Name:     name,
 		Value:    "",
-		Path:     "/",
+		Path:     path,
 		Domain:   configuration.CookieDomain,
 		MaxAge:   -1,
 		Secure:   secure,

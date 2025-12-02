@@ -17,6 +17,7 @@ type MemoryRefreshTokenStore struct {
 }
 
 type memoryRecord struct {
+	TenantID        string
 	TokenID         string
 	UserID          string
 	Hash            string
@@ -35,7 +36,7 @@ func NewMemoryRefreshTokenStore() *MemoryRefreshTokenStore {
 }
 
 // Issue creates a new token, optionally linked to a previous token.
-func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
@@ -47,6 +48,7 @@ func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, applicationUser
 	nowUnix := time.Now().UTC().Unix()
 
 	record := &memoryRecord{
+		TenantID:        tenantID,
 		TokenID:         tokenID,
 		UserID:          applicationUserID,
 		Hash:            hashValue,
@@ -56,22 +58,25 @@ func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, applicationUser
 		IssuedAtUnix:    nowUnix,
 	}
 	store.byID[tokenID] = record
-	store.byHash[hashValue] = tokenID
+	store.byHash[store.hashKey(tenantID, hashValue)] = tokenID
 	return tokenID, opaque, nil
 }
 
 // Validate checks the opaque token and returns user, token id, and expiry.
-func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tokenOpaque string) (string, string, int64, error) {
+func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tenantID string, tokenOpaque string) (string, string, int64, error) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
 	hashValue := store.hash(tokenOpaque)
-	tokenID, ok := store.byHash[hashValue]
+	tokenID, ok := store.byHash[store.hashKey(tenantID, hashValue)]
 	if !ok {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	rec := store.byID[tokenID]
 	if rec == nil {
+		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
+	}
+	if rec.TenantID != tenantID {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
@@ -84,12 +89,15 @@ func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tokenOpaque 
 }
 
 // Revoke marks a token as revoked.
-func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tokenID string) error {
+func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tenantID string, tokenID string) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
 	rec := store.byID[tokenID]
 	if rec == nil {
+		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenNotFound)
+	}
+	if rec.TenantID != tenantID {
 		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
@@ -112,4 +120,8 @@ func (store *MemoryRefreshTokenStore) randomOpaque() (string, string, error) {
 
 func (store *MemoryRefreshTokenStore) hash(opaque string) string {
 	return hashOpaque(opaque)
+}
+
+func (store *MemoryRefreshTokenStore) hashKey(tenantID string, hashValue string) string {
+	return tenantID + "::" + hashValue
 }
