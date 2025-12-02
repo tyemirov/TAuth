@@ -25,20 +25,30 @@ type NonceStore interface {
 }
 
 type memoryNonceStore struct {
-	mutex     sync.Mutex
-	entries   map[string]map[string]time.Time
-	ttl       time.Duration
-	now       func() time.Time
-	tokenSize int
+	mutex       sync.Mutex
+	entries     map[string]map[string]time.Time
+	ttlResolver func(string) time.Duration
+	now         func() time.Time
+	tokenSize   int
 }
 
-// NewMemoryNonceStore constructs an in-memory NonceStore with the provided TTL.
+// NewMemoryNonceStore constructs an in-memory NonceStore with a fixed TTL for all tenants.
 func NewMemoryNonceStore(ttl time.Duration) NonceStore {
+	return NewMemoryNonceStoreWithTTLResolver(func(string) time.Duration {
+		return ttl
+	})
+}
+
+// NewMemoryNonceStoreWithTTLResolver constructs an in-memory NonceStore that derives TTL per tenant.
+func NewMemoryNonceStoreWithTTLResolver(ttlResolver func(string) time.Duration) NonceStore {
+	if ttlResolver == nil {
+		panic("nonce_store: ttlResolver is required")
+	}
 	return &memoryNonceStore{
-		entries:   make(map[string]map[string]time.Time),
-		ttl:       ttl,
-		now:       time.Now,
-		tokenSize: 32,
+		entries:     make(map[string]map[string]time.Time),
+		ttlResolver: ttlResolver,
+		now:         time.Now,
+		tokenSize:   32,
 	}
 }
 
@@ -51,7 +61,7 @@ func (store *memoryNonceStore) Issue(ctx context.Context, tenantID string) (stri
 	defer store.mutex.Unlock()
 	store.ensureTenant(tenantID)
 	store.purgeExpiredLocked(tenantID)
-	store.entries[tenantID][token] = store.now().Add(store.ttl)
+	store.entries[tenantID][token] = store.now().Add(store.ttlResolver(tenantID))
 	return token, nil
 }
 

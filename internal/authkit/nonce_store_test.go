@@ -50,3 +50,38 @@ func TestMemoryNonceStoreExpiry(t *testing.T) {
 		t.Fatalf("expected ErrNonceExpired, got %v", err)
 	}
 }
+
+func TestMemoryNonceStoreSupportsTenantTTL(t *testing.T) {
+	t.Parallel()
+	current := time.Unix(1000, 0)
+	store := NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
+		switch tenantID {
+		case "tenant-a":
+			return time.Minute
+		case "tenant-b":
+			return 2 * time.Second
+		default:
+			return time.Hour
+		}
+	}).(*memoryNonceStore)
+	store.now = func() time.Time { return current }
+
+	tokenA, err := store.Issue(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("issue nonce for tenant-a: %v", err)
+	}
+	tokenB, err := store.Issue(context.Background(), "tenant-b")
+	if err != nil {
+		t.Fatalf("issue nonce for tenant-b: %v", err)
+	}
+
+	current = current.Add(30 * time.Second)
+	if err := store.Consume(context.Background(), "tenant-a", tokenA); err != nil {
+		t.Fatalf("tenant-a nonce should be valid: %v", err)
+	}
+
+	current = current.Add(2 * time.Second)
+	if err := store.Consume(context.Background(), "tenant-b", tokenB); err != ErrNonceExpired {
+		t.Fatalf("tenant-b nonce should be expired, got %v", err)
+	}
+}
