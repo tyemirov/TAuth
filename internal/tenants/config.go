@@ -1,7 +1,6 @@
 package tenants
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config captures the immutable tenant declarations loaded from disk.
@@ -55,7 +56,7 @@ const (
 
 var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
 
-// LoadConfig reads and validates tenants from the provided JSON file path.
+// LoadConfig reads and validates tenants from the provided YAML file path.
 func LoadConfig(path string) (Config, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -67,7 +68,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	var document tenantFileDocument
-	if err := json.Unmarshal(payload, &document); err != nil {
+	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, err.Error())
 	}
 	if len(document.Tenants) == 0 {
@@ -264,17 +267,17 @@ func parseDuration(raw string) (time.Duration, error) {
 }
 
 type tenantFileDocument struct {
-	Tenants []tenantFileTenant `json:"tenants"`
+	Tenants []tenantFileTenant `json:"tenants" yaml:"tenants"`
 }
 
 type tenantFileTenant struct {
-	ID                string   `json:"id"`
-	DisplayName       string   `json:"display_name"`
-	Hosts             []string `json:"hosts"`
-	GoogleWebClientID string   `json:"google_web_client_id"`
-	CookieDomain      string   `json:"cookie_domain"`
-	SessionTTL        string   `json:"session_ttl"`
-	RefreshTTL        string   `json:"refresh_ttl"`
-	NonceTTL          string   `json:"nonce_ttl"`
-	AllowInsecureHTTP bool     `json:"allow_insecure_http"`
+	ID                string   `json:"id" yaml:"id"`
+	DisplayName       string   `json:"display_name" yaml:"display_name"`
+	Hosts             []string `json:"hosts" yaml:"hosts"`
+	GoogleWebClientID string   `json:"google_web_client_id" yaml:"google_web_client_id"`
+	CookieDomain      string   `json:"cookie_domain" yaml:"cookie_domain"`
+	SessionTTL        string   `json:"session_ttl" yaml:"session_ttl"`
+	RefreshTTL        string   `json:"refresh_ttl" yaml:"refresh_ttl"`
+	NonceTTL          string   `json:"nonce_ttl" yaml:"nonce_ttl"`
+	AllowInsecureHTTP bool     `json:"allow_insecure_http" yaml:"allow_insecure_http"`
 }

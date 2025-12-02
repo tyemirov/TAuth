@@ -242,8 +242,12 @@ func runServer(command *cobra.Command, arguments []string) error {
 	})
 
 	router.GET("/demo/config.js", func(contextGin *gin.Context) {
+		clientID := defaultTenantConfig.GoogleWebClientID
+		if tenant, ok := tenants.TenantFromContext(contextGin); ok {
+			clientID = tenant.GoogleWebClientID()
+		}
 		web.ServeDemoConfig(contextGin, web.DemoConfig{
-			GoogleClientID: defaultTenantConfig.GoogleWebClientID,
+			GoogleClientID: clientID,
 		})
 	})
 

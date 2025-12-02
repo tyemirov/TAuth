@@ -16,19 +16,13 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 ## Improvements (212–299)
 
-- None.
+- [x] [TA-212] Switch tenant configuration format from JSON to YAML. Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML. — Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
 
 ## BugFixes (330–399)
 
 - [x] [TA-332] Ensure the cancellat context is propagated. Currently Ctrl-C in the docker container leaves the app in non-exited state and requires a second ctrl-C — Server now shares a signal-aware context across validator and database initialization, runs shutdown with a single 10s timeout path, and exits cleanly on first context cancellation (covered by `TestRunServerHonorsContextCancellation`).
-```
-tauth-1 exited with code 1 (restarting)
-Gracefully Stopping... press Ctrl+C again to force
- Container docker-compose-tauth-1  Stopping
- Container docker-compose-tauth-1  Stopped
-^C
-12:37:23 tyemirov@Vadyms-MacBook-Pro:~/Development/tyemirov/TAuth/examples/docker-compose - [improvement/TA-333-compose-build] $ 
-```
+- [x] [TA-333] Fix ineffective logout for refresh cookies. The `clearCookie` helper uses path `/` for all cookies, but the refresh cookie is scoped to `/auth`. Logout must clear the refresh cookie using the correct path. — Updated `clearCookie` to accept a path argument and ensured `/auth/logout` clears the refresh cookie with `Path=/auth`.
+- [x] [TA-334] Fix `demo/config.js` using default tenant config. The demo configuration endpoint currently serves the default tenant's Google Client ID regardless of the resolved tenant, breaking the demo on multi-tenant setups. It must use `tenants.TenantFromContext`. — Updated `/demo/config.js` handler to resolve tenant from context and serve the correct Google Client ID.
 
 ## Maintenance (410–499)
 
