@@ -22,6 +22,7 @@ func (clock fixedClock) Now() time.Time {
 func mintToken(t *testing.T, signingKey []byte, issuer string, issuedAt time.Time, ttl time.Duration) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+		TenantID:        "demo",
 		UserID:          "user-123",
 		UserEmail:       "user@example.com",
 		UserDisplayName: "Demo User",
@@ -88,6 +89,9 @@ func TestValidateTokenSuccess(t *testing.T) {
 	}
 	if claims.GetUserID() != "user-123" || claims.GetUserEmail() != "user@example.com" {
 		t.Fatalf("unexpected claims: %#v", claims)
+	}
+	if claims.GetTenantID() != "demo" {
+		t.Fatalf("expected tenant demo, got %s", claims.GetTenantID())
 	}
 	if !claims.GetExpiresAt().Equal(now.Add(time.Minute)) {
 		t.Fatalf("unexpected expiry: %v", claims.GetExpiresAt())

@@ -10,6 +10,7 @@ type ServerConfig struct {
 	GoogleWebClientID string
 	AppJWTSigningKey  []byte
 	AppJWTIssuer      string
+	TenantID          string
 	CookieDomain      string
 	SessionCookieName string
 	RefreshCookieName string
