@@ -19,26 +19,23 @@ TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep
 
 ### 1. Describe your tenants
 
-Every deployment — even “single tenant” ones — loads configuration from a JSON file. Define your tenants (hostnames, Google clients, cookie domain, and TTLs) once and pass that file to every TAuth process:
+Every deployment — even “single tenant” ones — loads configuration from a YAML file. Define your tenants (hostnames, Google clients, cookie domain, and TTLs) once and pass that file to every TAuth process:
 
 ```bash
-cat > tenants.json <<'JSON'
-{
-  "tenants": [
-    {
-      "id": "prod",
-      "display_name": "Production tenant",
-      "hosts": ["tauth.mprlab.com", "gravity.mprlab.com"],
-      "google_web_client_id": "your_web_client_id.apps.googleusercontent.com",
-      "cookie_domain": ".mprlab.com",
-      "session_ttl": "15m",
-      "refresh_ttl": "1440h",
-      "nonce_ttl": "5m",
-      "allow_insecure_http": false
-    }
-  ]
-}
-JSON
+cat > tenants.yaml <<'YAML'
+tenants:
+  - id: "prod"
+    display_name: "Production tenant"
+    hosts:
+      - "tauth.mprlab.com"
+      - "gravity.mprlab.com"
+    google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
+    cookie_domain: ".mprlab.com"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+    allow_insecure_http: false
+YAML
 ```
 
 Each entry defines:
@@ -56,7 +53,7 @@ Each entry defines:
 ```bash
 export APP_LISTEN_ADDR=":8443"                            # or the port your ingress forwards to
 export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_TENANTS_FILE="$(pwd)/tenants.json"
+export APP_TENANTS_FILE="$(pwd)/tenants.yaml"
 export APP_ENABLE_CORS="true"                            # allow the product origin to call TAuth
 export APP_CORS_ALLOWED_ORIGINS="https://gravity.mprlab.com,https://accounts.google.com"
 # Optional persistence (choose one):
@@ -92,14 +89,14 @@ We ship a compose example under `examples/docker-compose` that builds TAuth from
 3. Copy the tenant template and replace the placeholder Google OAuth Web client ID with one that covers `http://localhost:8000` and `http://localhost:8080`:
 
    ```bash
-   cp tenants.json.example tenants.json
-   $EDITOR tenants.json
+   cp tenants.yaml.example tenants.yaml
+   $EDITOR tenants.yaml
    ```
 
 4. Build and start the stack: `docker compose up --build`
 5. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8080` via CORS).
 
-Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` to change ports or databases, and edit `tenants.json` to adjust hosts, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
+Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` to change ports or databases, and edit `tenants.yaml` to adjust hosts, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
 ### 3. Integrate the browser helper from the product site
 
@@ -146,7 +143,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 - Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
 - Call `/api/me` and verify it returns the signed-in profile.
 
-> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/docker-compose/tenants.json.example`. Replace it with your own value before sharing the stack beyond local testing.
+> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/docker-compose/tenants.yaml.example`. Replace it with your own value before sharing the stack beyond local testing.
 
 ### Example `/me` payload
 
@@ -169,24 +166,21 @@ Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mp
 
 ## Multi-tenant configuration
 
-TAuth always reads configuration from a tenants JSON file. A “single-tenant deployment” is simply a file with one entry; adding more entries lets you serve multiple products from the same binary without touching CLI flags.
+TAuth always reads configuration from a tenants YAML file. A “single-tenant deployment” is simply a file with one entry; adding more entries lets you serve multiple products from the same binary without touching CLI flags.
 
-```json
-{
-  "tenants": [
-    {
-      "id": "demo",
-      "display_name": "Demo tenant",
-      "hosts": ["demo.localhost", "demo.example.com"],
-      "google_web_client_id": "demo-client.apps.googleusercontent.com",
-      "cookie_domain": "demo.example.com",
-      "session_ttl": "30m",
-      "refresh_ttl": "720h",
-      "nonce_ttl": "10m",
-      "allow_insecure_http": true
-    }
-  ]
-}
+```yaml
+tenants:
+  - id: "demo"
+    display_name: "Demo tenant"
+    hosts:
+      - "demo.localhost"
+      - "demo.example.com"
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    cookie_domain: "demo.example.com"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+    nonce_ttl: "10m"
+    allow_insecure_http: true
 ```
 
 Rules enforced by the loader:
@@ -202,7 +196,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - The resolver matches tenants by the request’s host header (case-insensitive, port stripped). Hosts not declared in the tenant file are rejected before reaching auth routes.
 - For local development or automated tests you can enable the optional header override (`--enable_tenant_header_override`) so `X-TAuth-Tenant: demo` selects a tenant explicitly. Leave it disabled in production.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
-- Start the server with `--tenants_file=/path/to/tenants.json` (or `APP_TENANTS_FILE`). There is no alternative configuration path; single-tenant and multi-tenant deployments both rely on the same file.
+- Start the server with `--tenants_file=/path/to/tenants.yaml` (or `APP_TENANTS_FILE`). There is no alternative configuration path; single-tenant and multi-tenant deployments both rely on the same file.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames. Front-ends normally rely on hostnames, but when multiple tenants deliberately share the same host (a local dev box, for example), enable the header override and pass `tenantId` to `initAuthClient`. The helper automatically attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and `logout()` so you can switch tenants without changing DNS.
 
 ---
