@@ -242,7 +242,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	defaultTenantConfig := registry.DefaultConfig()
-	nonceStore := authkit.NewMemoryNonceStore(registry.DefaultConfig().NonceTTL)
+	nonceStore := authkit.NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
+		return registry.Config(tenantID).NonceTTL
+	})
 
 	validator, validatorErr := buildGoogleTokenValidator(shutdownContext)
 	if validatorErr != nil {
