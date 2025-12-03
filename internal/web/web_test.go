@@ -73,6 +73,35 @@ func TestPermissiveCORS(t *testing.T) {
 	}
 }
 
+func TestPermissiveCORSAllowsTenantHeader(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	middleware, err := PermissiveCORS([]string{"http://localhost"})
+	if err != nil {
+		t.Fatalf("unexpected error configuring CORS: %v", err)
+	}
+	router.Use(middleware)
+	router.OPTIONS("/resource", func(contextGin *gin.Context) {
+		contextGin.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, "/resource", nil)
+	request.Header.Set("Origin", "http://localhost")
+	request.Header.Set("Access-Control-Request-Method", "POST")
+	request.Header.Set("Access-Control-Request-Headers", "X-TAuth-Tenant")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 from preflight, got %d", recorder.Code)
+	}
+	if header := strings.ToLower(recorder.Header().Get("Access-Control-Allow-Headers")); !strings.Contains(header, strings.ToLower("X-TAuth-Tenant")) {
+		t.Fatalf("expected tenant header to be allowed, got %q", header)
+	}
+}
+
 func TestPermissiveCORSRejectsBlankOrigins(t *testing.T) {
 	if _, err := PermissiveCORS(nil); err == nil {
 		t.Fatalf("expected error for nil origin list")
