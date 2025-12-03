@@ -1,7 +1,9 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -210,6 +212,56 @@ func TestHandleWhoAmIMissingUser(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 when user missing, got %d", recorder.Code)
+	}
+}
+
+type failingProfileStore struct {
+	err error
+}
+
+func (store failingProfileStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
+	return "", "", "", nil, store.err
+}
+
+func TestHandleWhoAmIInvalidClaimsType(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(func(contextGin *gin.Context) {
+		contextGin.Set("auth_claims", "not-a-claims")
+	})
+	router.GET("/me", HandleWhoAmI(NewInMemoryUsers(), zap.NewNop()))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid claim type, got %d", recorder.Code)
+	}
+}
+
+func TestHandleWhoAmIStoreError(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	store := failingProfileStore{err: errors.New("store failure")}
+	router := gin.New()
+	router.Use(func(contextGin *gin.Context) {
+		contextGin.Set("auth_claims", stubClaims{
+			tenantID: "tenant-a",
+			userID:   "user-1",
+		})
+	})
+	router.GET("/me", HandleWhoAmI(store, zap.NewNop()))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when store errors, got %d", recorder.Code)
 	}
 }
 

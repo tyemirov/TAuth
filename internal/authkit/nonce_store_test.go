@@ -85,3 +85,24 @@ func TestMemoryNonceStoreSupportsTenantTTL(t *testing.T) {
 		t.Fatalf("tenant-b nonce should be expired, got %v", err)
 	}
 }
+
+func TestMemoryNonceStorePanicsWithoutTenant(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryNonceStore(time.Minute).(*memoryNonceStore)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic when issuing without tenant id")
+		}
+	}()
+	_, _ = store.Issue(context.Background(), "")
+}
+
+func TestNewMemoryNonceStoreWithNilResolverPanics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic when ttl resolver nil")
+		}
+	}()
+	NewMemoryNonceStoreWithTTLResolver(nil)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,6 +58,40 @@ func TestRunServerMissingConfig(t *testing.T) {
 	expectedMessage := "config.uninitialized_server_config: server configuration not prepared; PreRunE must execute before RunE"
 	if err.Error() != expectedMessage {
 		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
+}
+
+func TestPrepareServerConfigLoadsFile(t *testing.T) {
+	configPath := writeConfigFileFromStruct(t, sampleApplicationConfig())
+	command := newRootCommand()
+	if err := command.Flags().Set("config", configPath); err != nil {
+		t.Fatalf("failed to set config flag: %v", err)
+	}
+
+	if err := command.PreRunE(command, nil); err != nil {
+		t.Fatalf("expected prepare to succeed: %v", err)
+	}
+	value := command.Context().Value(appConfigContextKey)
+	if value == nil {
+		t.Fatalf("expected config in context")
+	}
+	loaded, ok := value.(*applicationConfig)
+	if !ok || loaded.Server.JWTSigningKey != "signing-secret" {
+		t.Fatalf("expected loaded config, got %#v", value)
+	}
+}
+
+func TestPrepareServerConfigUsesEnvOverride(t *testing.T) {
+	configPath := writeConfigFileFromStruct(t, sampleApplicationConfig())
+	t.Setenv("TAUTH_CONFIG_FILE", configPath)
+	command := newRootCommand()
+
+	if err := command.PreRunE(command, nil); err != nil {
+		t.Fatalf("expected prepare to succeed with env override: %v", err)
+	}
+	value := command.Context().Value(appConfigContextKey)
+	if _, ok := value.(*applicationConfig); !ok {
+		t.Fatalf("expected applicationConfig in context")
 	}
 }
 
@@ -415,6 +450,53 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	_ = runServer(command, nil)
 }
 
+func TestRunServerEndToEndDemoConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		testServer := httptest.NewServer(server.Handler)
+		defer testServer.Close()
+
+		req, err := http.NewRequest(http.MethodGet, testServer.URL+"/demo/config.js", nil)
+		if err != nil {
+			return err
+		}
+		req.Host = "beta.localhost"
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("expected 200 from /demo/config.js, got %d", resp.StatusCode)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(body), "beta-client.apps.googleusercontent.com") {
+			return fmt.Errorf("expected beta client in config")
+		}
+
+		_ = server.Shutdown(context.Background())
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	cfg := sampleApplicationConfig()
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+
+	if err := runServer(command, nil); err != nil {
+		t.Fatalf("expected server to run, got %v", err)
+	}
+}
+
 func withServeHTTPStub(stub func(server *http.Server) error) func() {
 	previous := serveHTTP
 	serveHTTP = stub
@@ -523,4 +605,28 @@ func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenan
 		t.Fatalf("failed to parse tenants document: %v", err)
 	}
 	return doc.Tenants
+}
+
+func TestDeriveSameSite(t *testing.T) {
+	t.Parallel()
+	if mode := deriveSameSite(true, false); mode != http.SameSiteNoneMode {
+		t.Fatalf("expected SameSiteNone when CORS enabled, got %v", mode)
+	}
+	if mode := deriveSameSite(false, true); mode != http.SameSiteLaxMode {
+		t.Fatalf("expected SameSiteLax when insecure allowed, got %v", mode)
+	}
+	if mode := deriveSameSite(false, false); mode != http.SameSiteStrictMode {
+		t.Fatalf("expected SameSiteStrict for default, got %v", mode)
+	}
+}
+
+func TestPrepareServerConfigMissingFile(t *testing.T) {
+	command := newRootCommand()
+	if err := command.Flags().Set("config", "/path/does/not/exist"); err != nil {
+		t.Fatalf("failed to set config flag: %v", err)
+	}
+	err := command.PreRunE(command, nil)
+	if err == nil || !strings.Contains(err.Error(), configCodeMissingConfigFile) {
+		t.Fatalf("expected missing config file error, got %v", err)
+	}
 }

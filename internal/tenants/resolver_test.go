@@ -81,6 +81,57 @@ func TestResolverSupportsIPv6Hosts(t *testing.T) {
 	}
 }
 
+func TestResolverStripsPortFromHost(t *testing.T) {
+	config := loadTestConfig(t)
+	resolver, err := NewResolver(config)
+	if err != nil {
+		t.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://demo.example.com/api", nil)
+	request.Host = "demo.example.com:8443"
+
+	tenant, resolveErr := resolver.Resolve(request)
+	if resolveErr != nil {
+		t.Fatalf("expected resolve success: %v", resolveErr)
+	}
+	if tenant.ID() != "demo" {
+		t.Fatalf("expected demo tenant, got %s", tenant.ID())
+	}
+}
+
+func TestResolverRejectsInvalidOverride(t *testing.T) {
+	config := loadTestConfig(t)
+	resolver, err := NewResolver(config, WithHeaderOverride(""))
+	if err != nil {
+		t.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://demo.example.com/api", nil)
+	request.Header.Set(defaultTenantHeader, "missing")
+
+	_, resolveErr := resolver.Resolve(request)
+	if !errors.Is(resolveErr, ErrTenantNotFound) {
+		t.Fatalf("expected ErrTenantNotFound for invalid override, got %v", resolveErr)
+	}
+}
+
+func TestResolverUsesURLHostWhenHostHeaderEmpty(t *testing.T) {
+	config := loadTestConfig(t)
+	resolver, err := NewResolver(config)
+	if err != nil {
+		t.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://demo.example.com/api", nil)
+	request.Host = ""
+
+	tenant, resolveErr := resolver.Resolve(request)
+	if resolveErr != nil {
+		t.Fatalf("expected resolve success, got %v", resolveErr)
+	}
+	if tenant.ID() != "demo" {
+		t.Fatalf("expected demo tenant, got %s", tenant.ID())
+	}
+}
+
 func TestTenantMiddlewareSetsContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	config := loadTestConfig(t)

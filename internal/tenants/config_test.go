@@ -184,6 +184,110 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 	}
 }
 
+func TestBuildTenantErrors(t *testing.T) {
+	testCases := []struct {
+		name    string
+		tenant  FileTenant
+		wantErr string
+	}{
+		{
+			name: "missing google client",
+			tenant: FileTenant{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				Hosts:             []string{"demo.localhost"},
+				CookieDomain:      "demo.localhost",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+				AllowInsecureHTTP: true,
+			},
+			wantErr: errorCodeInvalidGoogleID,
+		},
+		{
+			name: "invalid session ttl",
+			tenant: FileTenant{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				Hosts:             []string{"demo.localhost"},
+				GoogleWebClientID: "client",
+				CookieDomain:      "demo.localhost",
+				SessionTTL:        "-1m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+			wantErr: errorCodeInvalidSessionTTL,
+		},
+		{
+			name: "invalid nonce ttl",
+			tenant: FileTenant{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				Hosts:             []string{"demo.localhost"},
+				GoogleWebClientID: "client",
+				CookieDomain:      "demo.localhost",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "-5m",
+			},
+			wantErr: errorCodeInvalidNonceTTL,
+		},
+		{
+			name: "duplicate hosts",
+			tenant: FileTenant{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				Hosts:             []string{"demo.localhost", "DEMO.LOCALHOST"},
+				GoogleWebClientID: "client",
+				CookieDomain:      "demo.localhost",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+			wantErr: errorCodeDuplicateHost,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tc.tenant}})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error %s, got %v", tc.wantErr, err)
+			}
+		})
+	}
+
+	invalidHostConfig := FileDocument{
+		Tenants: []FileTenant{
+			{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				Hosts:             []string{"demo.localhost", "demo.example.com"},
+				GoogleWebClientID: "client",
+				CookieDomain:      "demo.localhost",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+			{
+				ID:                "prod",
+				DisplayName:       "Prod",
+				Hosts:             []string{"demo.localhost"},
+				GoogleWebClientID: "prod-client",
+				CookieDomain:      "prod.localhost",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+		},
+	}
+	_, err := LoadConfigFromDocument(invalidHostConfig)
+	if err == nil || !strings.Contains(err.Error(), errorCodeDuplicateHost) {
+		t.Fatalf("expected duplicate host error, got %v", err)
+	}
+}
+
 func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	t.Setenv("TENANT_COOKIE_DOMAIN", ".example.com")
 	tempDir := t.TempDir()
@@ -238,6 +342,22 @@ func TestLoadConfigTrimsQuotedPath(t *testing.T) {
 
 	if _, loadErr := LoadConfig(fmt.Sprintf("  \"%s\"  ", configPath)); loadErr != nil {
 		t.Fatalf("expected config to load with quoted path, got %v", loadErr)
+	}
+}
+
+func TestConfigTenantsReturnsCopy(t *testing.T) {
+	config := Config{
+		tenants: []Tenant{
+			{id: "demo"},
+		},
+	}
+	list := config.Tenants()
+	if len(list) != 1 || list[0].ID() != "demo" {
+		t.Fatalf("expected one tenant copy")
+	}
+	list[0].id = "mutated"
+	if config.tenants[0].ID() != "demo" {
+		t.Fatalf("expected original slice to remain unchanged")
 	}
 }
 

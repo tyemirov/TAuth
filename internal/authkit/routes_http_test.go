@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +67,54 @@ func applyAuthCookies(request *http.Request, state authCookieState, config Serve
 			Path:   "/auth",
 		})
 	}
+}
+
+type mutableUserStore struct {
+	inner      *testUserStore
+	upsertErr  error
+	profileErr error
+}
+
+func newMutableUserStore() *mutableUserStore {
+	return &mutableUserStore{inner: newTestUserStore()}
+}
+
+func (store *mutableUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	if store.upsertErr != nil {
+		return "", nil, store.upsertErr
+	}
+	return store.inner.UpsertGoogleUser(ctx, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
+}
+
+func (store *mutableUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
+	if store.profileErr != nil {
+		return "", "", "", nil, store.profileErr
+	}
+	return store.inner.GetUserProfile(ctx, tenantID, applicationUserID)
+}
+
+type controlledNonceStore struct {
+	token      string
+	issueErr   error
+	consumeErr error
+}
+
+func (store *controlledNonceStore) Issue(ctx context.Context, tenantID string) (string, error) {
+	if store.issueErr != nil {
+		return "", store.issueErr
+	}
+	store.token = "nonce-token"
+	return store.token, nil
+}
+
+func (store *controlledNonceStore) Consume(ctx context.Context, tenantID string, token string) error {
+	if store.consumeErr != nil {
+		return store.consumeErr
+	}
+	if token != store.token {
+		return ErrNonceNotFound
+	}
+	return nil
 }
 
 func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
@@ -491,6 +541,869 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 
 	if metrics.Count(metricAuthRefreshFailure) == 0 {
 		t.Fatalf("expected auth.refresh.failure metric increment")
+	}
+}
+
+func TestHTTPAuthRefreshProfileStoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"profile-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-profile",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Profile User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	store := newMutableUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, store, refreshStore, nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	loginResp, _ := loginWithNonce(t, client, server.URL, validator, "profile-token")
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from login, got %d", loginResp.StatusCode)
+	}
+	state := captureAuthCookies(authCookieState{}, loginResp.Cookies(), config)
+	_ = loginResp.Body.Close()
+
+	store.inner.setProfile(config.TenantID, "google:sub-profile", testUserProfile{
+		email:   "user@example.com",
+		display: "Profile User",
+		avatar:  "https://example.com/avatar.png",
+		roles:   []string{"user"},
+	})
+	store.profileErr = errors.New("profile failure")
+
+	refreshReq, err := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+	if err != nil {
+		t.Fatalf("build refresh request: %v", err)
+	}
+	applyAuthCookies(refreshReq, state, config)
+	refreshResp, err := client.Do(refreshReq)
+	if err != nil {
+		t.Fatalf("refresh request failed: %v", err)
+	}
+	defer refreshResp.Body.Close()
+	if refreshResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when profile store fails, got %d", refreshResp.StatusCode)
+	}
+}
+
+func TestHTTPAuthNonceIssueFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{issueErr: errors.New("nonce issue failure")})
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/nonce", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when nonce store fails, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginNonceConsumeFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"nonce-consume-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-consume",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Consume Failure",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	nonceStore := &controlledNonceStore{consumeErr: ErrNonceNotFound}
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["nonce-consume-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["nonce-consume-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "nonce-consume-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when nonce consume fails, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginMissingNonce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setupValidator := &fakeGoogleValidator{}
+	ProvideGoogleTokenValidator(setupValidator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	body := map[string]string{
+		"google_id_token": "any-token",
+		"nonce_token":     "",
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing nonce, got %d", response.StatusCode)
+	}
+	var result map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&result); decodeErr != nil {
+		t.Fatalf("decode result: %v", decodeErr)
+	}
+	if result["error"] != "missing_nonce" {
+		t.Fatalf("expected missing_nonce error, got %v", result["error"])
+	}
+}
+
+func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"nonce-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-nonce-mismatch",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Nonce User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          hashOpaque("other-value"),
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["nonce-token"]
+	result.payload.Claims["nonce"] = hashOpaque("other-value")
+	validator.results["nonce-token"] = result
+	body := map[string]string{
+		"google_id_token": "nonce-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for nonce mismatch, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginUserStoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"user-store-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-user-store",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Store User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	store := &failingUserStore{upsertErr: errors.New("user store error")}
+	router := gin.New()
+	MountAuthRoutes(router, registry, store, NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["user-store-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["user-store-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "user-store-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when user store fails, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginHonorsForwardedProto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"forwarded-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-forwarded",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Forwarded Proto",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = false
+	registry := NewSingleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["forwarded-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["forwarded-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "forwarded-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-Proto", "https")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when forwarded proto indicates https, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginUsesDefaultValidatorFactory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalFactory := newGoogleTokenValidator
+	defer func() {
+		newGoogleTokenValidator = originalFactory
+		validatorCache.Lock()
+		validatorCache.value = nil
+		validatorCache.Unlock()
+	}()
+
+	called := false
+	defaultValidator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"default-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-default",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Default Factory",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+	newGoogleTokenValidator = func(ctx context.Context) (GoogleTokenValidator, error) {
+		called = true
+		return defaultValidator, nil
+	}
+
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := defaultValidator.results["default-token"]
+	result.payload.Claims["nonce"] = nonce
+	defaultValidator.results["default-token"] = result
+	body := map[string]string{
+		"google_id_token": "default-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if !called {
+		t.Fatalf("expected default validator factory to be invoked")
+	}
+}
+
+func TestHTTPAuthLoginRefreshIssueFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"refresh-issue-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-refresh-issue",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Refresh Issue",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	refreshStore := &stubRefreshStore{
+		issueFunc: func(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+			return "", "", errors.New("refresh issue failure")
+		},
+	}
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["refresh-issue-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["refresh-issue-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "refresh-issue-token",
+		"nonce_token":     nonce,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when refresh store issue fails, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthRefreshIssueFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"refresh-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-refresh",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Refresh User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	var issuedOpaque string
+	refreshStore := &stubRefreshStore{
+		issueFunc: func(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+			if issuedOpaque == "" {
+				issuedOpaque = "opaque-initial"
+				return "token-initial", issuedOpaque, nil
+			}
+			return "", "", errors.New("second issue failure")
+		},
+		validateFunc: func(ctx context.Context, tenantID string, tokenOpaque string) (string, string, int64, error) {
+			if tokenOpaque != issuedOpaque {
+				return "", "", 0, errors.New("unexpected token")
+			}
+			return "google:sub-refresh", "token-initial", time.Now().Add(time.Minute).Unix(), nil
+		},
+		revokeFunc: func(ctx context.Context, tenantID string, tokenID string) error {
+			return nil
+		},
+	}
+
+	router := gin.New()
+	store := newMutableUserStore()
+	MountAuthRoutes(router, registry, store, refreshStore, nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	loginResp, _ := loginWithNonce(t, client, server.URL, validator, "refresh-token")
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from login, got %d", loginResp.StatusCode)
+	}
+	state := captureAuthCookies(authCookieState{}, loginResp.Cookies(), config)
+	_ = loginResp.Body.Close()
+
+	refreshReq, err := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+	if err != nil {
+		t.Fatalf("build refresh request: %v", err)
+	}
+	applyAuthCookies(refreshReq, state, config)
+	refreshResp, err := client.Do(refreshReq)
+	if err != nil {
+		t.Fatalf("refresh request failed: %v", err)
+	}
+	defer refreshResp.Body.Close()
+	if refreshResp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when refresh issuance fails, got %d", refreshResp.StatusCode)
+	}
+}
+
+func TestNewGoogleTokenValidatorDelegatesToFactory(t *testing.T) {
+	originalFactory := newGoogleTokenValidator
+	defer func() {
+		newGoogleTokenValidator = originalFactory
+	}()
+
+	called := false
+	newGoogleTokenValidator = func(ctx context.Context) (GoogleTokenValidator, error) {
+		called = true
+		return &fakeGoogleValidator{}, nil
+	}
+
+	if _, err := NewGoogleTokenValidator(context.Background()); err != nil {
+		t.Fatalf("unexpected error invoking default validator: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected underlying factory to be invoked")
+	}
+}
+
+func TestHTTPAuthLoginRejectsInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{}
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", strings.NewReader("not-json"))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", response.StatusCode)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode payload: %v", decodeErr)
+	}
+	if payload["error"] != "invalid_json" {
+		t.Fatalf("expected invalid_json error, got %v", payload["error"])
+	}
+}
+
+func TestHTTPAuthLoginRequiresHTTPS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"secure-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-secure",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Secure User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = false
+	registry := NewSingleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["secure-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["secure-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "secure-token",
+		"nonce_token":     nonce,
+	}
+	buffer, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(buffer))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Host = "beta.localhost"
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for insecure HTTP, got %d", response.StatusCode)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode payload: %v", decodeErr)
+	}
+	if payload["error"] != "https_required" {
+		t.Fatalf("expected https_required error, got %v", payload["error"])
+	}
+}
+
+func TestHTTPAuthLoginUnverifiedIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"unverified-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-unverified",
+					"email":          "user@example.com",
+					"email_verified": false,
+					"name":           "Unverified User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["unverified-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["unverified-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "unverified-token",
+		"nonce_token":     nonce,
+	}
+	buffer, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(buffer))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unverified identity, got %d", response.StatusCode)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode payload: %v", decodeErr)
+	}
+	if payload["error"] != "unverified_identity" {
+		t.Fatalf("expected unverified_identity error, got %v", payload["error"])
 	}
 }
 
