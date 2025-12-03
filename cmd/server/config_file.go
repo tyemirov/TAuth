@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/tyemirov/tauth/internal/tenants"
@@ -18,9 +19,37 @@ type serverSettings struct {
 	ListenAddr                 string   `yaml:"listen_addr"`
 	JWTSigningKey              string   `yaml:"jwt_signing_key"`
 	DatabaseURL                string   `yaml:"database_url"`
-	EnableCORS                 bool     `yaml:"enable_cors"`
+	EnableCORS                 yamlBool `yaml:"enable_cors"`
 	CORSAllowedOrigins         []string `yaml:"cors_allowed_origins"`
-	EnableTenantHeaderOverride bool     `yaml:"enable_tenant_header_override"`
+	EnableTenantHeaderOverride yamlBool `yaml:"enable_tenant_header_override"`
+}
+
+type yamlBool bool
+
+func (value *yamlBool) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Tag {
+	case "!!bool":
+		var parsed bool
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	case "!!str":
+		parsed, err := strconv.ParseBool(strings.TrimSpace(node.Value))
+		if err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	default:
+		var parsed bool
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	}
 }
 
 func loadApplicationConfig(path string) (*applicationConfig, error) {

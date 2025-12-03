@@ -24,7 +24,7 @@ func TestLoadConfigSuccess(t *testing.T) {
     session_ttl: "30m"
     refresh_ttl: "720h"
     nonce_ttl: "10m"
-    allow_insecure_http: true
+    allow_insecure_http: "true"
 
   - id: "prod"
     display_name: "Production Tenant"

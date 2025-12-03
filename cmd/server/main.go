@@ -136,9 +136,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	listenAddr := appConfig.Server.ListenAddr
 	databaseURL := strings.TrimSpace(appConfig.Server.DatabaseURL)
-	enableCORS := appConfig.Server.EnableCORS
+	enableCORS := bool(appConfig.Server.EnableCORS)
 	corsAllowedOrigins := expandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
-	enableTenantHeaderOverride := appConfig.Server.EnableTenantHeaderOverride
+	enableTenantHeaderOverride := bool(appConfig.Server.EnableTenantHeaderOverride)
 
 	userStore := web.NewInMemoryUsers()
 	var refreshStore authkit.RefreshTokenStore

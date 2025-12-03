@@ -25,11 +25,11 @@ server:
   listen_addr: "${LISTEN_ADDR}"
   jwt_signing_key: "${SIGNING_KEY}"
   database_url: "${DB_URL}"
-  enable_cors: true
+  enable_cors: "true"
   cors_allowed_origins:
     - "https://one.example"
     - "https://two.example"
-  enable_tenant_header_override: true
+  enable_tenant_header_override: "true"
 
 tenants:
   - id: "demo"
@@ -40,7 +40,7 @@ tenants:
     session_ttl: "15m"
     refresh_ttl: "720h"
     nonce_ttl: "5m"
-    allow_insecure_http: true
+    allow_insecure_http: "true"
 `)
 
 	cfg, err := loadApplicationConfig(configPath)

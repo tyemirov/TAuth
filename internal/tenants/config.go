@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,7 +235,7 @@ func buildTenant(raw FileTenant) (Tenant, error) {
 		sessionTTL:        sessionTTL,
 		refreshTTL:        refreshTTL,
 		nonceTTL:          nonceTTL,
-		allowInsecureHTTP: raw.AllowInsecureHTTP,
+		allowInsecureHTTP: bool(raw.AllowInsecureHTTP),
 	}, nil
 }
 
@@ -293,5 +294,40 @@ type FileTenant struct {
 	SessionTTL        string   `json:"session_ttl" yaml:"session_ttl"`
 	RefreshTTL        string   `json:"refresh_ttl" yaml:"refresh_ttl"`
 	NonceTTL          string   `json:"nonce_ttl" yaml:"nonce_ttl"`
-	AllowInsecureHTTP bool     `json:"allow_insecure_http" yaml:"allow_insecure_http"`
+	AllowInsecureHTTP yamlBool `json:"allow_insecure_http" yaml:"allow_insecure_http"`
+}
+
+type yamlBool bool
+
+func (value *yamlBool) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Tag {
+	case "!!bool":
+		var parsed bool
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	case "!!str":
+		parsed, err := strconv.ParseBool(strings.TrimSpace(node.Value))
+		if err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	case "!!int":
+		var parsed int
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*value = yamlBool(parsed != 0)
+		return nil
+	default:
+		var parsed bool
+		if err := node.Decode(&parsed); err != nil {
+			return err
+		}
+		*value = yamlBool(parsed)
+		return nil
+	}
 }
