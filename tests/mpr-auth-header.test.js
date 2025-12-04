@@ -13,6 +13,7 @@ const LOCAL_ASSET_PATH = path.join(
   "mpr-ui",
   "mpr-ui.js",
 );
+const TEST_GOOGLE_CLIENT_ID = "test-client-id";
 
 let cachedLocalAssetPromise = null;
 
@@ -304,6 +305,7 @@ async function flushAsyncTasks() {
   });
 }
 
+
 test("mpr-ui header handles credential exchange and logout", async () => {
   const loginProfile = {
     user_id: "google:sub-xyz",
@@ -387,29 +389,23 @@ test("mpr-ui header handles credential exchange and logout", async () => {
     baseUrl: "https://auth.example.com",
     siteName: "Demo",
     siteLink: "/demo",
+    googleClientId: TEST_GOOGLE_CLIENT_ID,
   });
 
   assert.equal(controller.state.status, "unauthenticated");
   assert.equal(rootElement.getAttribute("data-user-id"), null);
 
-  const googleOnloadElement = context.document.getElementById("g_id_onload");
-  assert.ok(googleOnloadElement);
-  googleOnloadElement.setAttribute("data-client_id", "test-client-id");
-
   await flushAsyncTasks();
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
-  assert.equal(googleStub.accounts.id.promptCalls, 1);
-  assert.equal(googleStub.accounts.id.initializeCalls.length, 1);
-  assert.equal(googleStub.accounts.id.initializeCalls[0].nonce, "nonce-123");
-  assert.equal(
-    googleStub.accounts.id.initializeCalls[0].client_id,
-    "test-client-id",
+  const googleInitConfig = context.__googleInitConfig;
+  assert.ok(
+    googleInitConfig,
+    "Expected __googleInitConfig to be populated with Google initialize metadata",
   );
-  assert.equal(
-    googleOnloadElement.getAttribute("data-nonce"),
-    "nonce-123",
-  );
+  assert.equal(googleInitConfig.client_id, TEST_GOOGLE_CLIENT_ID);
+  assert.equal(googleInitConfig.nonce, "nonce-123");
+  assert.equal(controller.state.status, "unauthenticated");
 
   await controller.handleCredential({ credential: "token-123" });
   assert.equal(fetch.calls.length, 2);
@@ -497,10 +493,8 @@ test("mpr-ui header surfaces error when nonce issuance fails", async () => {
 
   const controller = context.MPRUI.createAuthHeader(rootElement, {
     baseUrl: "https://auth.example.com",
+    googleClientId: TEST_GOOGLE_CLIENT_ID,
   });
-  const googleOnloadElement = context.document.getElementById("g_id_onload");
-  assert.ok(googleOnloadElement);
-  googleOnloadElement.setAttribute("data-client_id", "test-client-id");
 
   await flushAsyncTasks();
   assert.equal(fetch.calls.length, 1);
@@ -538,7 +532,9 @@ test("mpr-ui header surfaces error when credential missing", async () => {
     initAuthClient,
   });
 
-  const controller = context.MPRUI.createAuthHeader(rootElement, {});
+  const controller = context.MPRUI.createAuthHeader(rootElement, {
+    googleClientId: TEST_GOOGLE_CLIENT_ID,
+  });
 
   controller.handleCredential({});
   assert.equal(events.length, 2);
