@@ -427,7 +427,7 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
 
 	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
 	validRequest.Host = "demo.localhost"
@@ -486,7 +486,7 @@ func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
 
 	makeRecorder := func(origin string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
@@ -551,7 +551,7 @@ func TestHostGateMiddlewareRequiresOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.Use(hostGateMiddleware(config))
+	router.Use(hostGateMiddleware(config, false))
 	router.GET("/ping", func(context *gin.Context) {
 		context.Status(http.StatusNoContent)
 	})
@@ -851,6 +851,52 @@ func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenan
 		t.Fatalf("failed to parse tenants document: %v", err)
 	}
 	return doc.Tenants
+}
+
+func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
+	t.Helper()
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "notes",
+				DisplayName:       "Notes",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				GoogleWebClientID: "notes-client",
+				JWTSigningKey:     "notes-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_notes",
+				RefreshCookieName: "app_refresh_notes",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+			},
+			{
+				ID:                "mpr",
+				DisplayName:       "MPR",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				GoogleWebClientID: "mpr-client",
+				JWTSigningKey:     "mpr-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_mpr",
+				RefreshCookieName: "app_refresh_mpr",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+			},
+		},
+	}
+	config, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("load tenant config: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
+	request.Host = "shared.localhost"
+
+	if hostAllowed(request, config, false) {
+		t.Fatalf("expected ambiguous host without origin to be rejected when header override disabled")
+	}
+	if !hostAllowed(request, config, true) {
+		t.Fatalf("expected ambiguous host without origin to pass when header override enabled")
+	}
 }
 
 func TestDeriveSameSite(t *testing.T) {

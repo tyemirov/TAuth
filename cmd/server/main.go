@@ -207,11 +207,11 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
-	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js", enableTenantHeaderOverride))
+	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js", enableTenantHeaderOverride))
 
 	tenantRouter := router.Group("/")
-	tenantRouter.Use(hostGateMiddleware(tenantConfig))
+	tenantRouter.Use(hostGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
 
 	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
@@ -302,9 +302,9 @@ func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config,
 	return authkit.NewTenantRegistryFromMap(defaultTenantID, configs), nil
 }
 
-func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
+func serveStaticJSHandler(config tenants.Config, asset string, allowHeaderOverride bool) gin.HandlerFunc {
 	return func(contextGin *gin.Context) {
-		if !hostAllowed(contextGin.Request, config) {
+		if !hostAllowed(contextGin.Request, config, allowHeaderOverride) {
 			contextGin.AbortWithStatus(http.StatusForbidden)
 			return
 		}
@@ -312,9 +312,9 @@ func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
 	}
 }
 
-func hostGateMiddleware(config tenants.Config) gin.HandlerFunc {
+func hostGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.HandlerFunc {
 	return func(context *gin.Context) {
-		if !hostAllowed(context.Request, config) {
+		if !hostAllowed(context.Request, config, allowHeaderOverride) {
 			context.AbortWithStatus(http.StatusForbidden)
 			return
 		}
@@ -322,7 +322,7 @@ func hostGateMiddleware(config tenants.Config) gin.HandlerFunc {
 	}
 }
 
-func hostAllowed(request *http.Request, config tenants.Config) bool {
+func hostAllowed(request *http.Request, config tenants.Config, allowHeaderOverride bool) bool {
 	host, port := tenants.ExtractHostPort(request)
 	if host == "" {
 		return false
@@ -337,7 +337,7 @@ func hostAllowed(request *http.Request, config tenants.Config) bool {
 
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
-		return false
+		return allowHeaderOverride
 	}
 	tenantID, ok := config.OriginOwner(origin)
 	if !ok {
