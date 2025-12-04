@@ -177,12 +177,6 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
 			return
 		}
-		if consumeErr := nonces.Consume(contextGin, tenantID, inbound.NonceToken); consumeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
-			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
-			return
-		}
 
 		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
 			recordMetric(metricAuthLoginFailure)
@@ -219,21 +213,34 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		userAvatarURL, _ := payload.Claims["picture"].(string)
 		nonceClaim, _ := payload.Claims["nonce"].(string)
 		if nonceClaim == "" {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.nonce_mismatch", nil, zap.String("google_nonce", nonceClaim))
-			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
-			return
-		}
-		if nonceClaim != inbound.NonceToken {
-			expectedHashedNonce := hashOpaque(inbound.NonceToken)
-			if nonceClaim != expectedHashedNonce {
+			if consumeErr := nonces.Consume(contextGin, tenantID, inbound.NonceToken); consumeErr != nil {
 				recordMetric(metricAuthLoginFailure)
-				logAuthWarning(
-					"auth.login.nonce_mismatch",
-					nil,
-					zap.String("google_nonce", nonceClaim),
-					zap.String("expected_nonce_hashed", expectedHashedNonce),
-				)
+				logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+				return
+			}
+		} else {
+			expectedHashedNonce := hashOpaque(inbound.NonceToken)
+			nonceMatchesInbound := nonceClaim == inbound.NonceToken
+			nonceMatchesHashed := nonceClaim == expectedHashedNonce
+			tokenToConsume := inbound.NonceToken
+			fallbackNonce := false
+			if !nonceMatchesInbound && !nonceMatchesHashed {
+				tokenToConsume = nonceClaim
+				fallbackNonce = true
+			}
+			if consumeErr := nonces.Consume(contextGin, tenantID, tokenToConsume); consumeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				if fallbackNonce {
+					logAuthWarning(
+						"auth.login.nonce_mismatch",
+						consumeErr,
+						zap.String("google_nonce", nonceClaim),
+						zap.String("expected_nonce_hashed", expectedHashedNonce),
+					)
+				} else {
+					logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
+				}
 				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 				return
 			}

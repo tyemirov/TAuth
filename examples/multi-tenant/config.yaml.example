@@ -14,7 +14,6 @@ tenants:
     allowed_hosts:
       - "localhost"
       - "http://localhost:8000"
-      - "http://127.0.0.1:8000"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
     jwt_signing_key: "${TAUTH_NOTES_JWT_SIGNING_KEY}"
     cookie_domain: ""
@@ -30,7 +29,6 @@ tenants:
     allowed_hosts:
       - "localhost"
       - "http://localhost:4173"
-      - "http://127.0.0.1:4173"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"
     jwt_signing_key: "${TAUTH_MPR_JWT_SIGNING_KEY}"
     cookie_domain: ""

@@ -7,7 +7,7 @@ services:
     env_file:
       - ./.env.tauth
     ports:
-      - "8081:8081"
+      - "8082:8082"
     volumes:
       - tauth_data:/data
       - ./config.yaml:/config/config.yaml:ro
@@ -41,6 +41,19 @@ services:
       - "8080:8080"
     volumes:
       - gravity_data:/data
+    restart: unless-stopped
+  
+  mpr-frontend:
+    image: ghcr.io/tyemirov/ghttp:latest
+    pull_policy: always
+    depends_on:
+      tauth:
+        condition: service_started
+    command: ["--directory", "/app/demo", "4173"]
+    ports:
+      - "4173:4173"
+    volumes:
+      - ../tauth-demo/:/app/demo
     restart: unless-stopped
 
 volumes:

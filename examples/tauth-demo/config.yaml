@@ -1,6 +1,5 @@
 server:
   listen_addr: "${TAUTH_LISTEN_ADDR}"
-  jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY}"
   database_url: "${TAUTH_DATABASE_URL}"
   enable_cors: "${TAUTH_ENABLE_CORS}"
   cors_allowed_origins:
@@ -9,13 +8,16 @@ server:
   enable_tenant_header_override: true
 
 tenants:
-  - id: "local"
-    display_name: "Gravity Notes"
-    hosts:
+  - id: "mpr-sites"
+    display_name: "MPR Sites"
+    allowed_hosts:
       - "localhost"
       - "127.0.0.1"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID}"
-    cookie_domain: "${TAUTH_COOKIE_DOMAIN}"
+    jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY}"
+    cookie_domain: ""
+    session_cookie_name: "app_session"
+    refresh_cookie_name: "app_refresh"
     session_ttl: "30m"
     refresh_ttl: "720h"
     nonce_ttl: "10m"

@@ -17,9 +17,8 @@
     pendingRequests: [],
     broadcastChannel: null,
     tenantId: "",
+    originHint: "",
   };
-
-  setTenantId(detectInitialTenantId());
 
   function detectInitialTenantId() {
     if (typeof window !== "undefined") {
@@ -49,6 +48,27 @@
     }
     return "";
   }
+
+  function detectOriginHint() {
+    if (
+      typeof window !== "undefined" &&
+      window.location &&
+      typeof window.location.origin === "string"
+    ) {
+      return window.location.origin;
+    }
+    if (
+      typeof globalThis !== "undefined" &&
+      globalThis.location &&
+      typeof globalThis.location.origin === "string"
+    ) {
+      return globalThis.location.origin;
+    }
+    return "";
+  }
+
+  runtime.originHint = detectOriginHint();
+  setTenantId(detectInitialTenantId());
 
   function setTenantId(value) {
     var normalized = typeof value === "string" ? value.trim() : "";
@@ -134,11 +154,27 @@
     return runtime.tenantId;
   }
 
+  function resolveTenantHeaderValue() {
+    var explicitTenant = currentTenantId();
+    if (explicitTenant) {
+      return explicitTenant;
+    }
+    if (runtime.originHint) {
+      return runtime.originHint;
+    }
+    var detected = detectOriginHint();
+    if (detected) {
+      runtime.originHint = detected;
+      return detected;
+    }
+    return "";
+  }
+
   function withTenantHeader(headers) {
     var combined = Object.assign({}, headers || {});
-    var tenantId = currentTenantId();
-    if (tenantId) {
-      combined[tenantHeaderName] = tenantId;
+    var headerValue = resolveTenantHeaderValue();
+    if (headerValue) {
+      combined[tenantHeaderName] = headerValue;
     }
     return combined;
   }

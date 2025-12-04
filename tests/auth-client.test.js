@@ -4,7 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
-async function loadAuthClient(fetchImpl, broadcastSink, tenantId) {
+async function loadAuthClient(fetchImpl, broadcastSink, tenantId, locationOrigin) {
   const scriptPath = path.join(__dirname, "..", "web", "auth-client.js");
   const source = await fs.readFile(scriptPath, "utf8");
 
@@ -26,6 +26,8 @@ async function loadAuthClient(fetchImpl, broadcastSink, tenantId) {
       }
     },
   };
+  const resolvedOrigin = locationOrigin || "https://ui.example.com";
+  context.location = { origin: resolvedOrigin };
   context.document = {
     currentScript: {
       getAttribute(attributeName) {
@@ -45,6 +47,7 @@ async function loadAuthClient(fetchImpl, broadcastSink, tenantId) {
     context.__TAUTH_TENANT_ID__ = tenantId;
   }
   context.window = context;
+  context.window.location = context.location;
   vm.createContext(context);
   vm.runInContext(source, context);
   return context;
@@ -190,6 +193,38 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
   assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
+});
+
+test("auth client sends tenant header derived from location origin when unset", async () => {
+  const fetch = createFetchWithQueue([
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ]);
+  const events = [];
+  const context = await loadAuthClient(
+    fetch,
+    events,
+    undefined,
+    "http://ui-origin.localhost",
+  );
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+
+  assert.equal(fetch.calls.length, 2);
+  assertHeader(
+    fetch.calls[0],
+    "X-TAuth-Tenant",
+    "http://ui-origin.localhost",
+  );
+  assertHeader(
+    fetch.calls[1],
+    "X-TAuth-Tenant",
+    "http://ui-origin.localhost",
+  );
 });
 
 test("initAuthClient attaches tenant override header when configured", async () => {

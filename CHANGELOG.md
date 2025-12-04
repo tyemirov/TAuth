@@ -17,6 +17,8 @@
 ### Bug Fixes 🐛
 - TA-333: Fixed `clearCookie` path mismatch during logout; refresh cookies (Path `/auth`) are now correctly cleared alongside session cookies.
 - TA-334: Fixed `/demo/config.js` serving default tenant config; now correctly resolves the tenant from the request context to return the appropriate Google Client ID.
+- Accept `X-TAuth-Tenant` overrides that provide a frontend origin and teach `auth-client.js` to fall back to the page origin when no tenant ID is supplied so multi-tenant localhost setups stay logged in on both apps; refreshed resolver/JS tests and documentation to match.
+- Added optional `session_cookie_name` / `refresh_cookie_name` fields to tenant config plus documentation so legacy backends (e.g., Gravity) can continue reading `app_session` cookies while multi-tenant setups keep unique cookie names.
 
 ## [v0.0.6]
 
@@ -63,7 +65,7 @@
 - TA-207: Adopted the mpr-ui footer component in the demo, exposed `renderFooter`/`mprFooter` helpers, and hydrated the footer using the CDN-hosted library.
 - TA-208: Enforced nonce issuance/validation for Google Sign-In via `/auth/nonce`, injected the issued nonce into Google Identity Services initializers (mpr-ui bundles + demo), refreshed docs/examples, expanded Node coverage for nonce provisioning/failure paths, and dropped the bundled `mpr-ui.js` in favour of the CDN-hosted build.
 - TA-210: Reauthored the demo page with LoopAware’s footer contract, reused the Bootstrap 5.3 + Icons stack and public theme script, mirrored the product catalogue, and strengthened Node/browser tests around theme persistence and dropup ARIA semantics.
-- TA-300: Improved CLI configuration errors to enumerate missing keys, ensuring absent `jwt_signing_key` is reported precisely.
+- TA-300: Improved CLI configuration errors to enumerate missing keys, ensuring absent tenant `jwt_signing_key` values are reported precisely.
 - TA-301: Reworked `/api/me` to source claims from the session context, return persisted profiles with expiry metadata, surface `ErrUserProfileNotFound`, and emit zap warnings for anomalies.
 - TA-302: Required explicit origin lists when enabling credentialed CORS via `--cors_allowed_origins` / `APP_CORS_ALLOWED_ORIGINS`, surfacing configuration errors for empty or whitespace-only inputs.
 - TA-406: Accepted comma-separated `APP_CORS_ALLOWED_ORIGINS` values so environment variables mirror CLI flag behavior and keep whitespace-free origins when enabling credentialed CORS.

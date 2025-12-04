@@ -877,9 +877,9 @@ func TestAuthGoogleNonceMismatch(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
-	body := prepareLoginBody(t, router, payload, "valid-token")
-	// prepareLoginBody sets matching nonce; overwrite to force mismatch.
-	body = []byte(`{"google_id_token":"valid-token","nonce_token":"mismatch"}`)
+	issuedNonce := issueNonceForTest(t, router)
+	payload.Claims["nonce"] = "expected-nonce"
+	body := []byte(`{"google_id_token":"valid-token","nonce_token":"` + issuedNonce + `"}`)
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -943,6 +943,49 @@ func TestAuthGoogleAcceptsHashedNonceClaim(t *testing.T) {
 		t.Fatalf("tenant profiles missing after hashed nonce login")
 	} else if _, ok := tenantProfiles["google:sub-hash"]; !ok {
 		t.Fatalf("expected hashed nonce login to persist user profile")
+	}
+}
+
+func TestAuthGoogleAcceptsMissingNonceClaim(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	payload := &idtoken.Payload{Claims: map[string]interface{}{
+		"iss":            "https://accounts.google.com",
+		"sub":            "sub-missing-nonce",
+		"email":          "user@example.com",
+		"email_verified": true,
+		"name":           "Missing Nonce",
+		"picture":        "https://example.com/avatar.png",
+		"nonce":          "",
+	}}
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-token": {
+					payload:          payload,
+					expectedAudience: "client-id",
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	config := newTestServerConfig()
+	registry := singleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	router := gin.New()
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+
+	nonce := issueNonceForTest(t, router)
+	body := []byte(`{"google_id_token":"valid-token","nonce_token":"` + nonce + `"}`)
+	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 when google omits nonce claim, got %d", response.Code)
 	}
 }
 

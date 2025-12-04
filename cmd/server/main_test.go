@@ -75,8 +75,7 @@ func TestPrepareServerConfigLoadsFile(t *testing.T) {
 	if value == nil {
 		t.Fatalf("expected config in context")
 	}
-	loaded, ok := value.(*applicationConfig)
-	if !ok || loaded.Server.JWTSigningKey != "signing-secret" {
+	if _, ok := value.(*applicationConfig); !ok {
 		t.Fatalf("expected loaded config, got %#v", value)
 	}
 }
@@ -92,20 +91,6 @@ func TestPrepareServerConfigUsesEnvOverride(t *testing.T) {
 	value := command.Context().Value(appConfigContextKey)
 	if _, ok := value.(*applicationConfig); !ok {
 		t.Fatalf("expected applicationConfig in context")
-	}
-}
-
-func TestLoadApplicationConfigRequiresSigningKey(t *testing.T) {
-	cfg := sampleApplicationConfig()
-	cfg.Server.JWTSigningKey = ""
-	path := writeConfigFileFromStruct(t, cfg)
-
-	_, err := loadApplicationConfig(path)
-	if err == nil {
-		t.Fatalf("expected error when jwt_signing_key missing")
-	}
-	if !strings.Contains(err.Error(), configCodeMissingJWTSigningKey) {
-		t.Fatalf("expected jwt signing key error, got %v", err)
 	}
 }
 
@@ -285,9 +270,12 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 	tenantDocument := `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    hosts: ["alpha.localhost"]
+    allowed_hosts: ["alpha.localhost"]
     google_web_client_id: "alpha-client.apps.googleusercontent.com"
+    jwt_signing_key: "alpha-tenant-key"
     cookie_domain: ".example.com"
+    session_cookie_name: "app_session_alpha"
+    refresh_cookie_name: "app_refresh_alpha"
     session_ttl: "20m"
     refresh_ttl: "480h"
     nonce_ttl: "3m"
@@ -295,9 +283,12 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 
   - id: "beta"
     display_name: "Beta"
-    hosts: ["beta.localhost"]
+    allowed_hosts: ["beta.localhost"]
     google_web_client_id: "beta-client.apps.googleusercontent.com"
+    jwt_signing_key: "beta-tenant-key"
     cookie_domain: "beta.localhost"
+    session_cookie_name: "app_session_beta"
+    refresh_cookie_name: "app_refresh_beta"
     session_ttl: "10m"
     refresh_ttl: "240h"
     nonce_ttl: "5m"
@@ -335,19 +326,260 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 	if alpha.NonceTTL != 3*time.Minute {
 		t.Fatalf("expected nonce ttl 3m, got %s", alpha.NonceTTL)
 	}
-	if alpha.SameSiteMode != http.SameSiteNoneMode {
-		t.Fatalf("expected SameSite None with CORS enabled")
+	if alpha.SameSiteMode != http.SameSiteLaxMode {
+		t.Fatalf("expected SameSite Lax when CORS enabled but insecure HTTP allowed")
 	}
 
 	beta := registry.Config("beta")
 	if beta.AllowInsecureHTTP {
 		t.Fatalf("expected beta to disallow insecure HTTP")
 	}
+	if beta.SameSiteMode != http.SameSiteNoneMode {
+		t.Fatalf("expected SameSite None for secure tenant behind CORS")
+	}
 	if beta.SessionTTL != 10*time.Minute {
 		t.Fatalf("unexpected session ttl: %s", beta.SessionTTL)
 	}
 	if beta.RefreshTTL != 240*time.Hour {
 		t.Fatalf("unexpected refresh ttl: %s", beta.RefreshTTL)
+	}
+}
+
+func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
+	base := authkit.ServerConfig{
+		AppJWTSigningKey:  []byte("signing"),
+		AppJWTIssuer:      "issuer",
+		SessionCookieName: sessionCookieName,
+		RefreshCookieName: refreshCookieName,
+	}
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "alpha",
+				DisplayName:       "Alpha",
+				AllowedHosts:      []string{"alpha.localhost"},
+				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+				JWTSigningKey:     "alpha-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_alpha",
+				RefreshCookieName: "app_refresh_alpha",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+			{
+				ID:                "beta",
+				DisplayName:       "Beta",
+				AllowedHosts:      []string{"beta.localhost"},
+				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
+				JWTSigningKey:     "beta-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_beta",
+				RefreshCookieName: "app_refresh_beta",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+		},
+	}
+	tenantConfig, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("load tenant config: %v", err)
+	}
+
+	registry, err := buildTenantRegistry(base, tenantConfig, false)
+	if err != nil {
+		t.Fatalf("build registry: %v", err)
+	}
+	alpha := registry.Config("alpha")
+	if alpha.SessionCookieName != "app_session_alpha" || alpha.RefreshCookieName != "app_refresh_alpha" {
+		t.Fatalf("expected alpha cookies to be tenant-specific, got %s / %s", alpha.SessionCookieName, alpha.RefreshCookieName)
+	}
+	beta := registry.Config("beta")
+	if beta.SessionCookieName != "app_session_beta" || beta.RefreshCookieName != "app_refresh_beta" {
+		t.Fatalf("expected beta cookies to be tenant-specific, got %s / %s", beta.SessionCookieName, beta.RefreshCookieName)
+	}
+}
+
+func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "demo",
+				DisplayName:       "Demo",
+				AllowedHosts:      []string{"demo.localhost"},
+				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
+				JWTSigningKey:     "demo-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_demo",
+				RefreshCookieName: "app_refresh_demo",
+				SessionTTL:        "30m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+				AllowInsecureHTTP: true,
+			},
+		},
+	}
+	config, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+
+	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	validRequest.Host = "demo.localhost"
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, validRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
+	}
+
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	unknownRequest.Host = "unknown.localhost"
+	unknownRecorder := httptest.NewRecorder()
+	router.ServeHTTP(unknownRecorder, unknownRequest)
+	if unknownRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown host, got %d", unknownRecorder.Code)
+	}
+}
+
+func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "notes",
+				DisplayName:       "Notes",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
+				JWTSigningKey:     "notes-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_notes",
+				RefreshCookieName: "app_refresh_notes",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+				AllowInsecureHTTP: true,
+			},
+			{
+				ID:                "mpr",
+				DisplayName:       "MPR",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
+				JWTSigningKey:     "mpr-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_mpr",
+				RefreshCookieName: "app_refresh_mpr",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+				AllowInsecureHTTP: true,
+			},
+		},
+	}
+	config, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+
+	makeRecorder := func(origin string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+		request.Host = "shared.localhost"
+		if origin != "" {
+			request.Header.Set("Origin", origin)
+		}
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	if resp := makeRecorder("http://localhost:8000"); resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for notes origin, got %d", resp.Code)
+	}
+	if resp := makeRecorder("http://localhost:4173"); resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for mpr origin, got %d", resp.Code)
+	}
+	if resp := makeRecorder(""); resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when origin missing, got %d", resp.Code)
+	}
+	if resp := makeRecorder("http://unknown.localhost"); resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown origin, got %d", resp.Code)
+	}
+}
+
+func TestHostGateMiddlewareRequiresOriginForAmbiguousHosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "notes",
+				DisplayName:       "Notes",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
+				JWTSigningKey:     "notes-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_notes",
+				RefreshCookieName: "app_refresh_notes",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+			{
+				ID:                "mpr",
+				DisplayName:       "MPR",
+				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
+				JWTSigningKey:     "mpr-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_mpr",
+				RefreshCookieName: "app_refresh_mpr",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+		},
+	}
+	config, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(hostGateMiddleware(config))
+	router.GET("/ping", func(context *gin.Context) {
+		context.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	request.Host = "shared.localhost"
+	request.Header.Set("Origin", "http://localhost:8000")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for allowed origin, got %d", recorder.Code)
+	}
+
+	noOrigin := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	noOrigin.Host = "shared.localhost"
+	noOriginRecorder := httptest.NewRecorder()
+	router.ServeHTTP(noOriginRecorder, noOrigin)
+	if noOriginRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when origin missing, got %d", noOriginRecorder.Code)
+	}
+
+	unknownOrigin := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	unknownOrigin.Host = "shared.localhost"
+	unknownOrigin.Header.Set("Origin", "http://unknown.localhost")
+	unknownOriginRecorder := httptest.NewRecorder()
+	router.ServeHTTP(unknownOriginRecorder, unknownOrigin)
+	if unknownOriginRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown origin, got %d", unknownOriginRecorder.Code)
 	}
 }
 
@@ -402,9 +634,12 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	tenantDocument := `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    hosts: ["alpha.localhost"]
+    allowed_hosts: ["alpha.localhost"]
     google_web_client_id: "alpha-client"
+    jwt_signing_key: "alpha-key"
     cookie_domain: ".example.com"
+    session_cookie_name: "app_session_alpha"
+    refresh_cookie_name: "app_refresh_alpha"
     session_ttl: "10m"
     refresh_ttl: "10m"
     nonce_ttl: "5m"
@@ -412,9 +647,12 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 
   - id: "beta"
     display_name: "Beta"
-    hosts: ["beta.localhost"]
+    allowed_hosts: ["beta.localhost"]
     google_web_client_id: "beta-client"
+    jwt_signing_key: "beta-key"
     cookie_domain: ".example.com"
+    session_cookie_name: "app_session_beta"
+    refresh_cookie_name: "app_refresh_beta"
     session_ttl: "10m"
     refresh_ttl: "10m"
     nonce_ttl: "5m"
@@ -522,9 +760,12 @@ func withGoogleValidatorBuilderStub(stub func(ctx context.Context) (authkit.Goog
 const sampleTenantsDocument = `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    hosts: ["alpha.localhost"]
+    allowed_hosts: ["alpha.localhost"]
     google_web_client_id: "alpha-client.apps.googleusercontent.com"
+    jwt_signing_key: "alpha-key"
     cookie_domain: "alpha.localhost"
+    session_cookie_name: "app_session_alpha"
+    refresh_cookie_name: "app_refresh_alpha"
     session_ttl: "15m"
     refresh_ttl: "720h"
     nonce_ttl: "5m"
@@ -550,7 +791,6 @@ func sampleApplicationConfig() applicationConfig {
 	return applicationConfig{
 		Server: serverSettings{
 			ListenAddr:                 ":0",
-			JWTSigningKey:              "signing-secret",
 			DatabaseURL:                "",
 			EnableCORS:                 false,
 			CORSAllowedOrigins:         nil,
@@ -560,9 +800,12 @@ func sampleApplicationConfig() applicationConfig {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				Hosts:             []string{"alpha.localhost"},
+				AllowedHosts:      []string{"alpha.localhost"},
 				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+				JWTSigningKey:     "alpha-key",
 				CookieDomain:      ".example.com",
+				SessionCookieName: "app_session_alpha",
+				RefreshCookieName: "app_refresh_alpha",
 				SessionTTL:        "20m",
 				RefreshTTL:        "480h",
 				NonceTTL:          "3m",
@@ -571,9 +814,12 @@ func sampleApplicationConfig() applicationConfig {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				Hosts:             []string{"beta.localhost"},
+				AllowedHosts:      []string{"beta.localhost"},
 				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
+				JWTSigningKey:     "beta-key",
 				CookieDomain:      "beta.localhost",
+				SessionCookieName: "app_session_beta",
+				RefreshCookieName: "app_refresh_beta",
 				SessionTTL:        "10m",
 				RefreshTTL:        "240h",
 				AllowInsecureHTTP: true,
@@ -609,6 +855,9 @@ func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenan
 
 func TestDeriveSameSite(t *testing.T) {
 	t.Parallel()
+	if mode := deriveSameSite(true, true); mode != http.SameSiteLaxMode {
+		t.Fatalf("expected SameSiteLax when CORS enabled but HTTP is allowed, got %v", mode)
+	}
 	if mode := deriveSameSite(true, false); mode != http.SameSiteNoneMode {
 		t.Fatalf("expected SameSiteNone when CORS enabled, got %v", mode)
 	}

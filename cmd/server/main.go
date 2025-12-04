@@ -53,7 +53,6 @@ const (
 	refreshCookieName = "app_refresh"
 	defaultTenantID   = "default"
 
-	configCodeMissingJWTSigningKey    = "config.missing_jwt_signing_key"
 	configCodeMissingConfigFile       = "config.missing_config_file"
 	configCodeInvalidConfigFile       = "config.invalid_config_file"
 	configCodeMissingTenants          = "config.missing_tenants"
@@ -123,7 +122,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	baseServerConfig := authkit.ServerConfig{
-		AppJWTSigningKey:  []byte(appConfig.Server.JWTSigningKey),
+		AppJWTSigningKey:  nil,
 		AppJWTIssuer:      "mprlab-auth",
 		TenantID:          defaultTenantID,
 		CookieDomain:      "",
@@ -208,17 +207,14 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
+	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
-	router.GET("/static/auth-client.js", func(contextGin *gin.Context) {
-		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
-	})
+	tenantRouter := router.Group("/")
+	tenantRouter.Use(hostGateMiddleware(tenantConfig))
+	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	router.GET("/static/mpr-sites.js", func(contextGin *gin.Context) {
-		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, "mpr-sites.js")
-	})
-
-	router.GET("/demo/config.js", func(contextGin *gin.Context) {
+	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
 		clientID := defaultTenantConfig.GoogleWebClientID
 		if tenant, ok := tenants.TenantFromContext(contextGin); ok {
 			clientID = tenant.GoogleWebClientID()
@@ -228,13 +224,13 @@ func runServer(command *cobra.Command, arguments []string) error {
 		})
 	})
 
-	router.GET("/demo", func(contextGin *gin.Context) {
+	tenantRouter.GET("/demo", func(contextGin *gin.Context) {
 		contextGin.File("web/demo.html")
 	})
 
-	authkit.MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
+	authkit.MountAuthRoutes(tenantRouter, registry, userStore, refreshStore, nonceStore)
 
-	protected := router.Group("/api")
+	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))
 	protected.GET("/me", web.HandleWhoAmI(userStore, logger))
 
@@ -269,11 +265,14 @@ func runServer(command *cobra.Command, arguments []string) error {
 }
 
 func deriveSameSite(enableCORS bool, allowInsecure bool) http.SameSite {
-	if enableCORS {
+	if enableCORS && !allowInsecure {
 		return http.SameSiteNoneMode
 	}
 	if allowInsecure {
 		return http.SameSiteLaxMode
+	}
+	if enableCORS {
+		return http.SameSiteNoneMode
 	}
 	return http.SameSiteStrictMode
 }
@@ -288,7 +287,10 @@ func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config,
 		tenantServerConfig := base
 		tenantServerConfig.TenantID = string(tenant.ID())
 		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
+		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
+		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()
+		tenantServerConfig.RefreshCookieName = tenant.RefreshCookieName()
 		tenantServerConfig.SessionTTL = tenant.SessionTTL()
 		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
 		tenantServerConfig.NonceTTL = tenant.NonceTTL()
@@ -298,6 +300,55 @@ func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config,
 	}
 	defaultTenantID := string(tenantList[0].ID())
 	return authkit.NewTenantRegistryFromMap(defaultTenantID, configs), nil
+}
+
+func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
+	return func(contextGin *gin.Context) {
+		if !hostAllowed(contextGin.Request, config) {
+			contextGin.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, asset)
+	}
+}
+
+func hostGateMiddleware(config tenants.Config) gin.HandlerFunc {
+	return func(context *gin.Context) {
+		if !hostAllowed(context.Request, config) {
+			context.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		context.Next()
+	}
+}
+
+func hostAllowed(request *http.Request, config tenants.Config) bool {
+	host, port := tenants.ExtractHostPort(request)
+	if host == "" {
+		return false
+	}
+	owners := config.MatchOwners(host, port)
+	if len(owners) == 0 {
+		return false
+	}
+	if len(owners) == 1 {
+		return true
+	}
+
+	origin := strings.TrimSpace(request.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	tenantID, ok := config.OriginOwner(origin)
+	if !ok {
+		return false
+	}
+	for _, owner := range owners {
+		if owner == tenantID {
+			return true
+		}
+	}
+	return false
 }
 
 func zapLoggerMiddleware(logger *zap.Logger) gin.HandlerFunc {

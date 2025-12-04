@@ -17,7 +17,6 @@ type applicationConfig struct {
 
 type serverSettings struct {
 	ListenAddr                 string   `yaml:"listen_addr"`
-	JWTSigningKey              string   `yaml:"jwt_signing_key"`
 	DatabaseURL                string   `yaml:"database_url"`
 	EnableCORS                 yamlBool `yaml:"enable_cors"`
 	CORSAllowedOrigins         []string `yaml:"cors_allowed_origins"`
@@ -72,9 +71,6 @@ func loadApplicationConfig(path string) (*applicationConfig, error) {
 	}
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = ":8080"
-	}
-	if strings.TrimSpace(document.Server.JWTSigningKey) == "" {
-		return nil, configError(configCodeMissingJWTSigningKey, "jwt_signing_key must be provided")
 	}
 	if len(document.Tenants) == 0 {
 		return nil, configError(configCodeMissingTenants, "at least one tenant must be configured")

@@ -143,7 +143,7 @@ Nonce handling rules:
 - Dispatches events on authentication changes.
 - Attempts silent refresh on 401 using `/auth/refresh`.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
-- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share a host in development.
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share a host in development. When you omit `tenantId`, the helper now falls back to the current page origin so header overrides remain accurate even when browsers omit `Origin` on certain requests.
 - Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
@@ -177,12 +177,11 @@ type RefreshTokenStore interface {
 | Variable / Flag            | Purpose                                             | Example                                             |
 | -------------------------- | --------------------------------------------------- | --------------------------------------------------- |
 | `listen_addr`          | HTTP listen address                                 | `:8080`                                             |
-| `jwt_signing_key`      | HS256 signing secret                                | `openssl rand -base64 48`                           |
 | `database_url`         | Refresh store DSN (`postgres://` or `sqlite://`)    | `sqlite:///auth.db`                                 |
 | `enable_cors`          | Enable permissive CORS (cross-origin dev only)      | `true` / `false`                                    |
 | `cors_allowed_origins` | List of allowed origins when CORS is enabled (include GIS) | `["https://app.example.com","https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/testing) | `true`                                     |
-| `tenants`              | Array of tenant entries (id, hosts, client IDs, TTLs) | See README §5 |
+| `tenants`              | Array of tenant entries (id, allowed_hosts, client IDs, TTLs) | See README §5 |
 
 Configuration is loaded from a single YAML file (`config.yaml` by default, override via `tauth --config=/path/to/file` or `TAUTH_CONFIG_FILE`).
 
@@ -194,10 +193,11 @@ Every deployment relies on the declarative config file parsed by `internal/tenan
 tenants:
   - id: "demo"
     display_name: "Demo tenant"
-    hosts:
+    allowed_hosts:
       - "demo.localhost"
-      - "demo.example.com"
+      - "https://app.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
+    jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
     session_ttl: "30m"
     refresh_ttl: "720h"
@@ -209,18 +209,18 @@ Validation rules baked into the loader:
 
 - IDs use lowercase letters/digits/underscores/hyphens; duplicates are rejected.
 - `display_name` is required so operators can identify tenants in logs.
-- Each host maps to only one tenant; hosts are normalized to lowercase and deduplicated. List every hostname (auth origin, front-end origin, vanity domain) that should resolve to the tenant.
-- `google_web_client_id`, `cookie_domain`, and each TTL must be present and non-empty; durations follow Go’s `time.ParseDuration` syntax.
+- Hosts are normalized to lowercase and deduplicated within each tenant definition. When multiple tenants share the same host (e.g. several localhost apps on different ports), the loader marks that host as ambiguous and the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
+- `google_web_client_id` must be present for every tenant. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - Before decoding, the loader expands environment variables (`$VAR` / `${VAR}`) inside the YAML so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values.
 
 Tenant resolution & runtime:
 
-- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes.
-- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. Leave it disabled in production.
+- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes. When multiple tenants intentionally share the same host (for example during localhost demos), include each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) in `allowed_hosts`; the resolver will use the request’s `Origin` header to disambiguate automatically.
+- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. The override now accepts either tenant IDs or frontend origins, and the resolver still validates that the HTTP `Host` header matches the tenant definition before honoring the hint. Leave it disabled in production where hostnames stay unique.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of hostnames.
-- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on every request to line up with the override flow above.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on every request to line up with the override flow above. When no tenant ID is supplied, the helper falls back to the page origin so shared-host setups work without extra wiring.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on hostnames, but when multiple tenants share the same host (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
@@ -254,7 +254,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 - Validate Google tokens strictly: issuer, audience, expiry, issued-at.
 - Rate limit `/auth/google` and `/auth/refresh` and monitor failures via zap logs.
 - Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
-- Rotate the configured `jwt_signing_key` using standard secrets management practices.
+- Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
 - Serve browser code through `/static/auth-client.js` and avoid inline scripts to keep CSP-friendly deployments.
 

@@ -37,6 +37,21 @@ type authCookieState struct {
 	refresh string
 }
 
+const testHostHeader = "X-Test-Host"
+
+func testHostOverrideMiddleware(defaultHost string) gin.HandlerFunc {
+	return func(context *gin.Context) {
+		host := strings.TrimSpace(context.GetHeader(testHostHeader))
+		if host == "" {
+			host = defaultHost
+		}
+		if host != "" {
+			context.Request.Host = host
+		}
+		context.Next()
+	}
+}
+
 func captureAuthCookies(state authCookieState, cookies []*http.Cookie, config ServerConfig) authCookieState {
 	for _, cookie := range cookies {
 		switch cookie.Name {
@@ -122,10 +137,14 @@ func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
 	configA.TenantID = "tenant-a"
 	configA.GoogleWebClientID = "client-tenant-a"
 	configA.CookieDomain = "tenant-a.local"
+	configA.SessionCookieName = base.SessionCookieName + "_tenant-a"
+	configA.RefreshCookieName = base.RefreshCookieName + "_tenant-a"
 	configB := base
 	configB.TenantID = "tenant-b"
 	configB.GoogleWebClientID = "client-tenant-b"
 	configB.CookieDomain = "tenant-b.local"
+	configB.SessionCookieName = base.SessionCookieName + "_tenant-b"
+	configB.RefreshCookieName = base.RefreshCookieName + "_tenant-b"
 	return NewTenantRegistryFromMap(configA.TenantID, map[string]ServerConfig{
 		configA.TenantID: configA,
 		configB.TenantID: configB,
@@ -366,9 +385,12 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 			{
 				"id": "tenant-a",
 				"display_name": "Tenant A",
-				"hosts": ["tenant-a.localhost"],
+				"allowed_hosts": ["tenant-a.localhost"],
 				"google_web_client_id": "client-tenant-a",
+				"jwt_signing_key": "tenant-a-key",
 				"cookie_domain": "tenant-a.localhost",
+				"session_cookie_name": "app_session_tenant_a",
+				"refresh_cookie_name": "app_refresh_tenant_a",
 				"session_ttl": "15m",
 				"refresh_ttl": "1440h",
 				"nonce_ttl": "5m",
@@ -377,9 +399,12 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 			{
 				"id": "tenant-b",
 				"display_name": "Tenant B",
-				"hosts": ["tenant-b.localhost"],
+				"allowed_hosts": ["tenant-b.localhost"],
 				"google_web_client_id": "client-tenant-b",
+				"jwt_signing_key": "tenant-b-key",
 				"cookie_domain": "tenant-b.localhost",
+				"session_cookie_name": "app_session_tenant_b",
+				"refresh_cookie_name": "app_refresh_tenant_b",
 				"session_ttl": "15m",
 				"refresh_ttl": "1440h",
 				"nonce_ttl": "5m",
@@ -398,6 +423,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(testHostOverrideMiddleware("tenant-a.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
@@ -406,8 +432,13 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 
 	client := server.Client()
 
+	tenantHosts := map[string]string{
+		"tenant-a": "tenant-a.localhost",
+		"tenant-b": "tenant-b.localhost",
+	}
+
 	loginTenant := func(tenantID string, token string) authCookieState {
-		response, _ := loginWithTenantHeader(t, client, server.URL, validator, token, tenantID)
+		response, _ := loginWithTenantHeader(t, client, server.URL, validator, token, tenantID, tenantHosts[tenantID])
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200 from login for %s, got %d", tenantID, response.StatusCode)
 		}
@@ -425,6 +456,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 			t.Fatalf("build /me request: %v", err)
 		}
 		request.Header.Set("X-TAuth-Tenant", tenantID)
+		request.Header.Set(testHostHeader, tenantHosts[tenantID])
 		applyAuthCookies(request, state, registry.Config(tenantID))
 		response, err := client.Do(request)
 		if err != nil {
@@ -451,6 +483,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 		t.Fatalf("build cross request: %v", err)
 	}
 	crossRequest.Header.Set("X-TAuth-Tenant", "tenant-b")
+	crossRequest.Header.Set(testHostHeader, tenantHosts["tenant-b"])
 	applyAuthCookies(crossRequest, stateA, registry.Config("tenant-a"))
 	crossResponse, err := client.Do(crossRequest)
 	if err != nil {
@@ -459,6 +492,436 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 	defer crossResponse.Body.Close()
 	if crossResponse.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 when tenant headers mismatch, got %d", crossResponse.StatusCode)
+	}
+}
+
+func TestHTTPAuthOriginsResolveSharedHostTenants(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	metrics := NewCounterMetrics()
+
+	ProvideGoogleTokenValidator(&fakeGoogleValidator{})
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	baseConfig := newTestServerConfig()
+	notesConfig := baseConfig
+	notesConfig.TenantID = "notes"
+	notesConfig.GoogleWebClientID = "notes-client"
+	mprConfig := baseConfig
+	mprConfig.TenantID = "mpr-sites"
+	mprConfig.GoogleWebClientID = "mpr-client"
+	registry := NewTenantRegistryFromMap(notesConfig.TenantID, map[string]ServerConfig{
+		notesConfig.TenantID: notesConfig,
+		mprConfig.TenantID:   mprConfig,
+	})
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `{
+		"tenants": [
+			{
+				"id": "notes",
+				"display_name": "Gravity Notes",
+				"allowed_hosts": ["shared.localhost", "http://localhost:8000"],
+				"google_web_client_id": "notes-client",
+				"jwt_signing_key": "notes-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_notes",
+				"refresh_cookie_name": "app_refresh_notes",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "mpr-sites",
+				"display_name": "MPR Sites",
+				"allowed_hosts": ["shared.localhost", "http://localhost:4173"],
+				"google_web_client_id": "mpr-client",
+				"jwt_signing_key": "mpr-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_mpr",
+				"refresh_cookie_name": "app_refresh_mpr",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			}
+		]
+	}`)
+
+	resolver, err := tenants.NewResolver(tenantConfig)
+	if err != nil {
+		t.Fatalf("create resolver: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(testHostOverrideMiddleware("shared.localhost"))
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{})
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := server.Client()
+
+	testCases := []struct {
+		name       string
+		origin     string
+		wantStatus int
+	}{
+		{
+			name:       "notes origin allowed",
+			origin:     "http://localhost:8000",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "mpr origin allowed",
+			origin:     "http://localhost:4173",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "unknown origin rejected",
+			origin:     "http://unknown.localhost",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "missing origin rejected",
+			origin:     "",
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, testCase := range testCases {
+		tc := testCase
+		t.Run(tc.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/nonce", nil)
+			if err != nil {
+				t.Fatalf("build nonce request: %v", err)
+			}
+			if tc.origin != "" {
+				request.Header.Set("Origin", tc.origin)
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("request nonce failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d", tc.wantStatus, response.StatusCode)
+			}
+			if tc.wantStatus == http.StatusOK {
+				var payload struct {
+					Nonce string `json:"nonce"`
+				}
+				if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+					t.Fatalf("decode nonce payload: %v", decodeErr)
+				}
+				if payload.Nonce == "" {
+					t.Fatalf("expected nonce token in payload")
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPAuthAllowsMultipleTenantSessionsFromSingleClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"notes-token": {
+			payload:          &idtoken.Payload{Claims: map[string]interface{}{"iss": "https://accounts.google.com", "sub": "sub-notes", "email": "notes@example.com", "email_verified": true, "name": "Notes User", "nonce": ""}},
+			expectedAudience: "notes-client",
+		},
+		"mpr-token": {
+			payload:          &idtoken.Payload{Claims: map[string]interface{}{"iss": "https://accounts.google.com", "sub": "sub-mpr", "email": "mpr@example.com", "email_verified": true, "name": "MPR User", "nonce": ""}},
+			expectedAudience: "mpr-client",
+		},
+	}}
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	metrics := NewCounterMetrics()
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	baseConfig := newTestServerConfig()
+	notesConfig := baseConfig
+	notesConfig.TenantID = "notes"
+	notesConfig.GoogleWebClientID = "notes-client"
+	notesConfig.SessionCookieName = notesConfig.SessionCookieName + "_notes"
+	notesConfig.RefreshCookieName = notesConfig.RefreshCookieName + "_notes"
+	mprConfig := baseConfig
+	mprConfig.TenantID = "mpr-sites"
+	mprConfig.GoogleWebClientID = "mpr-client"
+	mprConfig.SessionCookieName = mprConfig.SessionCookieName + "_mpr"
+	mprConfig.RefreshCookieName = mprConfig.RefreshCookieName + "_mpr"
+
+	registry := NewTenantRegistryFromMap(notesConfig.TenantID, map[string]ServerConfig{
+		notesConfig.TenantID: notesConfig,
+		mprConfig.TenantID:   mprConfig,
+	})
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `{
+		"tenants": [
+			{"id":"notes","display_name":"Notes","allowed_hosts":["shared.localhost","http://localhost:8000"],"google_web_client_id":"notes-client","jwt_signing_key":"notes-key","cookie_domain":"","session_cookie_name":"app_session_notes","refresh_cookie_name":"app_refresh_notes","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true},
+			{"id":"mpr-sites","display_name":"MPR","allowed_hosts":["shared.localhost","http://localhost:4173"],"google_web_client_id":"mpr-client","jwt_signing_key":"mpr-key","cookie_domain":"","session_cookie_name":"app_session_mpr","refresh_cookie_name":"app_refresh_mpr","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true}
+		]}`)
+
+	resolver, err := tenants.NewResolver(tenantConfig)
+	if err != nil {
+		t.Fatalf("create resolver: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(testHostOverrideMiddleware("shared.localhost"))
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	loginWithOrigin := func(token string, origin string, tenantID string) authCookieState {
+		headers := map[string]string{
+			testHostHeader: "shared.localhost",
+			"Origin":       origin,
+		}
+		response, _ := loginWithNonceAndHeaders(t, client, server.URL, validator, token, headers)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from login for %s, got %d", origin, response.StatusCode)
+		}
+		state := captureAuthCookies(authCookieState{}, response.Cookies(), registry.Config(tenantID))
+		_ = response.Body.Close()
+		return state
+	}
+
+	mprState := loginWithOrigin("mpr-token", "http://localhost:4173", "mpr-sites")
+	notesState := loginWithOrigin("notes-token", "http://localhost:8000", "notes")
+
+	callMe := func(origin string, tenantID string, state authCookieState) int {
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+		req.Header.Set(testHostHeader, "shared.localhost")
+		req.Header.Set("Origin", origin)
+		applyAuthCookies(req, state, registry.Config(tenantID))
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("/me request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if status := callMe("http://localhost:8000", "notes", notesState); status != http.StatusOK {
+		t.Fatalf("expected 200 from /me for notes, got %d", status)
+	}
+	if status := callMe("http://localhost:4173", "mpr-sites", mprState); status != http.StatusOK {
+		t.Fatalf("expected 200 from /me for mpr, got %d", status)
+	}
+}
+
+func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"notes-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-notes",
+					"email":          "notes@example.com",
+					"email_verified": true,
+					"name":           "Notes User",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "notes-client",
+		},
+		"mpr-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-mpr",
+					"email":          "mpr@example.com",
+					"email_verified": true,
+					"name":           "MPR User",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "mpr-client",
+		},
+	}}
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	metrics := NewCounterMetrics()
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideMetrics(metrics)
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	baseConfig := newTestServerConfig()
+	notesConfig := baseConfig
+	notesConfig.TenantID = "notes"
+	notesConfig.GoogleWebClientID = "notes-client"
+	mprConfig := baseConfig
+	mprConfig.TenantID = "mpr-sites"
+	mprConfig.GoogleWebClientID = "mpr-client"
+
+	registry := NewTenantRegistryFromMap(notesConfig.TenantID, map[string]ServerConfig{
+		notesConfig.TenantID: notesConfig,
+		mprConfig.TenantID:   mprConfig,
+	})
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `{
+		"tenants": [
+			{
+				"id": "notes",
+				"display_name": "Gravity Notes",
+				"allowed_hosts": ["shared.localhost", "http://localhost:8000"],
+				"google_web_client_id": "notes-client",
+				"jwt_signing_key": "notes-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_notes",
+				"refresh_cookie_name": "app_refresh_notes",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "mpr-sites",
+				"display_name": "MPR Sites",
+				"allowed_hosts": ["shared.localhost", "http://localhost:4173"],
+				"google_web_client_id": "mpr-client",
+				"jwt_signing_key": "mpr-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_mpr",
+				"refresh_cookie_name": "app_refresh_mpr",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			}
+		]
+	}`)
+
+	resolver, err := tenants.NewResolver(tenantConfig)
+	if err != nil {
+		t.Fatalf("create resolver: %v", err)
+	}
+
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	nonceStore := &controlledNonceStore{}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(testHostOverrideMiddleware("shared.localhost"))
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+
+	client := server.Client()
+
+	loginWithOrigin := func(origin string, token string, tenantID string) authCookieState {
+		headers := map[string]string{
+			testHostHeader: "shared.localhost",
+			"Origin":       origin,
+		}
+		response, _ := loginWithNonceAndHeaders(t, client, server.URL, validator, token, headers)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from login for %s, got %d", tenantID, response.StatusCode)
+		}
+		state := captureAuthCookies(authCookieState{}, response.Cookies(), registry.Config(tenantID))
+		_ = response.Body.Close()
+		return state
+	}
+
+	notesState := loginWithOrigin("http://localhost:8000", "notes-token", "notes")
+	mprState := loginWithOrigin("http://localhost:4173", "mpr-token", "mpr-sites")
+
+	assertProfile := func(state authCookieState, origin string, tenantID string, expectedUser string) {
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+		if err != nil {
+			t.Fatalf("build /me request: %v", err)
+		}
+		request.Header.Set(testHostHeader, "shared.localhost")
+		request.Header.Set("Origin", origin)
+		applyAuthCookies(request, state, registry.Config(tenantID))
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("/me request failed: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from /me for %s, got %d", tenantID, response.StatusCode)
+		}
+		var payload map[string]interface{}
+		if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+			t.Fatalf("decode /me payload: %v", decodeErr)
+		}
+		if payload["user_id"] != expectedUser {
+			t.Fatalf("expected user %s, got %v", expectedUser, payload["user_id"])
+		}
+	}
+
+	assertRefresh := func(state authCookieState, origin string, tenantID string) {
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+		if err != nil {
+			t.Fatalf("build refresh request: %v", err)
+		}
+		request.Header.Set(testHostHeader, "shared.localhost")
+		request.Header.Set("Origin", origin)
+		applyAuthCookies(request, state, registry.Config(tenantID))
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("refresh request failed: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204 from refresh for %s, got %d", tenantID, response.StatusCode)
+		}
+	}
+
+	assertProfile(notesState, "http://localhost:8000", "notes", "google:sub-notes")
+	assertProfile(mprState, "http://localhost:4173", "mpr-sites", "google:sub-mpr")
+	assertRefresh(notesState, "http://localhost:8000", "notes")
+	assertRefresh(mprState, "http://localhost:4173", "mpr-sites")
+
+	crossRequest, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+	if err != nil {
+		t.Fatalf("build cross request: %v", err)
+	}
+	crossRequest.Header.Set(testHostHeader, "shared.localhost")
+	crossRequest.Header.Set("Origin", "http://localhost:4173")
+	applyAuthCookies(crossRequest, notesState, registry.Config("notes"))
+	crossResponse, err := client.Do(crossRequest)
+	if err != nil {
+		t.Fatalf("cross /me request failed: %v", err)
+	}
+	defer crossResponse.Body.Close()
+	if crossResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when session used with mismatched origin, got %d", crossResponse.StatusCode)
 	}
 }
 
@@ -821,6 +1284,138 @@ func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for nonce mismatch, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginResynchronizesNonceToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"resync-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-resync",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Resync User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	nonceStore := NewMemoryNonceStore(5 * time.Minute)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	firstNonce := issueNonceViaClient(t, client, server.URL)
+	secondNonce := issueNonceViaClient(t, client, server.URL)
+
+	result := validator.results["resync-token"]
+	result.payload.Claims["nonce"] = firstNonce
+	validator.results["resync-token"] = result
+
+	payloadBody, err := json.Marshal(map[string]string{
+		"google_id_token": "resync-token",
+		"nonce_token":     secondNonce,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payloadBody))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when google nonce matches previously issued token, got %d", response.StatusCode)
+	}
+}
+
+func TestHTTPAuthLoginAcceptsEmptyGoogleNonce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"empty-nonce": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-empty-nonce",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Empty Nonce",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	registry := NewSingleTenantRegistry(newTestServerConfig())
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := httptest.NewTLSServer(router)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(t, client, server.URL)
+	result := validator.results["empty-nonce"]
+	result.payload.Claims["nonce"] = ""
+	validator.results["empty-nonce"] = result
+	payloadBody, err := json.Marshal(map[string]string{
+		"google_id_token": "empty-nonce",
+		"nonce_token":     nonce,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payloadBody))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 when google omits nonce claim, got %d", response.StatusCode)
 	}
 }
 
@@ -1485,7 +2080,12 @@ func loginWithNonceAndHeaders(t *testing.T, client *http.Client, baseURL string,
 	}
 	return response, nonce
 }
-func loginWithTenantHeader(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string, tenantID string) (*http.Response, string) {
-	headers := map[string]string{"X-TAuth-Tenant": tenantID}
+func loginWithTenantHeader(t *testing.T, client *http.Client, baseURL string, validator *fakeGoogleValidator, token string, tenantID string, host string) (*http.Response, string) {
+	headers := map[string]string{
+		"X-TAuth-Tenant": tenantID,
+	}
+	if strings.TrimSpace(host) != "" {
+		headers[testHostHeader] = host
+	}
 	return loginWithNonceAndHeaders(t, client, baseURL, validator, token, headers)
 }
