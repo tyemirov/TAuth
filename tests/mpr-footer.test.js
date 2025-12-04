@@ -68,22 +68,61 @@ function createVmContext() {
   return { context, hostElement };
 }
 
-test("mpr-ui exposes renderFooter helper", async () => {
+function createFooterHost() {
+  let innerHTMLValue = "";
+  const footerAttributes = {};
+  const footerRoot = {
+    className: "",
+    setAttribute(name, value) {
+      footerAttributes[name] = String(value);
+    },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(footerAttributes, name)
+        ? footerAttributes[name]
+        : null;
+    },
+    removeAttribute(name) {
+      delete footerAttributes[name];
+    },
+  };
+  return {
+    hostElement: {
+      get innerHTML() {
+        return innerHTMLValue;
+      },
+      set innerHTML(value) {
+        innerHTMLValue = value;
+      },
+      querySelector(selector) {
+        if (selector === 'footer[role="contentinfo"]') {
+          return footerRoot;
+        }
+        return null;
+      },
+    },
+    footerRoot,
+  };
+}
+
+test("mpr-ui exposes mountFooterDom helper", async () => {
   const script = await fs.readFile(SCRIPT_PATH, "utf8");
-  const { context, hostElement } = createVmContext();
+  const { context } = createVmContext();
   vm.runInNewContext(script, context);
 
   assert.ok(
     context.window.MPRUI,
     "Expected MPRUI namespace after script evaluation",
   );
+  const mountFooterDom =
+    context.window.MPRUI.__dom && context.window.MPRUI.__dom.mountFooterDom;
   assert.equal(
-    typeof context.window.MPRUI.renderFooter,
+    typeof mountFooterDom,
     "function",
-    "renderFooter helper should be defined",
+    "mountFooterDom helper should be defined",
   );
 
-  context.window.MPRUI.renderFooter(hostElement, {
+  const { hostElement, footerRoot } = createFooterHost();
+  const renderedRoot = mountFooterDom(hostElement, {
     prefixText: "Built by",
     links: [{ label: "Support", href: "mailto:support@mprlab.com" }],
   });
@@ -91,5 +130,11 @@ test("mpr-ui exposes renderFooter helper", async () => {
   assert.ok(
     hostElement.innerHTML && hostElement.innerHTML.length > 0,
     "Footer markup should be rendered into the host element",
+  );
+  assert.equal(renderedRoot, footerRoot);
+  assert.equal(
+    footerRoot.getAttribute("data-mpr-footer-root"),
+    "true",
+    "Footer root should be marked for styling",
   );
 });

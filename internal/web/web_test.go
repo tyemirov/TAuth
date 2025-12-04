@@ -1,7 +1,9 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +73,35 @@ func TestPermissiveCORS(t *testing.T) {
 	}
 }
 
+func TestPermissiveCORSAllowsTenantHeader(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	middleware, err := PermissiveCORS([]string{"http://localhost"})
+	if err != nil {
+		t.Fatalf("unexpected error configuring CORS: %v", err)
+	}
+	router.Use(middleware)
+	router.OPTIONS("/resource", func(contextGin *gin.Context) {
+		contextGin.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, "/resource", nil)
+	request.Header.Set("Origin", "http://localhost")
+	request.Header.Set("Access-Control-Request-Method", "POST")
+	request.Header.Set("Access-Control-Request-Headers", "X-TAuth-Tenant")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 from preflight, got %d", recorder.Code)
+	}
+	if header := strings.ToLower(recorder.Header().Get("Access-Control-Allow-Headers")); !strings.Contains(header, strings.ToLower("X-TAuth-Tenant")) {
+		t.Fatalf("expected tenant header to be allowed, got %q", header)
+	}
+}
+
 func TestPermissiveCORSRejectsBlankOrigins(t *testing.T) {
 	if _, err := PermissiveCORS(nil); err == nil {
 		t.Fatalf("expected error for nil origin list")
@@ -81,11 +112,16 @@ func TestPermissiveCORSRejectsBlankOrigins(t *testing.T) {
 }
 
 type stubClaims struct {
+	tenantID  string
 	userID    string
 	userEmail string
 	display   string
 	roles     []string
 	expires   time.Time
+}
+
+func (claims stubClaims) GetTenantID() string {
+	return claims.tenantID
 }
 
 func (claims stubClaims) GetUserID() string {
@@ -113,16 +149,15 @@ func TestHandleWhoAmI(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := NewInMemoryUsers()
-	store.Users["google:sub-1"] = UserProfile{
-		Email:     "user@example.com",
-		Display:   "Demo User",
-		AvatarURL: "https://example.com/avatar.png",
-		Roles:     []string{"user"},
+	_, _, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "Demo User", "https://example.com/avatar.png")
+	if err != nil {
+		t.Fatalf("unexpected upsert error: %v", err)
 	}
 
 	router := gin.New()
 	router.Use(func(contextGin *gin.Context) {
 		contextGin.Set("auth_claims", stubClaims{
+			tenantID:  "tenant-a",
 			userID:    "google:sub-1",
 			userEmail: "user@example.com",
 			display:   "Demo User",
@@ -189,6 +224,7 @@ func TestHandleWhoAmIMissingUser(t *testing.T) {
 	router := gin.New()
 	router.Use(func(contextGin *gin.Context) {
 		contextGin.Set("auth_claims", stubClaims{
+			tenantID:  "tenant-a",
 			userID:    "google:missing",
 			userEmail: "missing@example.com",
 			display:   "Missing",
@@ -205,6 +241,56 @@ func TestHandleWhoAmIMissingUser(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 when user missing, got %d", recorder.Code)
+	}
+}
+
+type failingProfileStore struct {
+	err error
+}
+
+func (store failingProfileStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
+	return "", "", "", nil, store.err
+}
+
+func TestHandleWhoAmIInvalidClaimsType(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(func(contextGin *gin.Context) {
+		contextGin.Set("auth_claims", "not-a-claims")
+	})
+	router.GET("/me", HandleWhoAmI(NewInMemoryUsers(), zap.NewNop()))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid claim type, got %d", recorder.Code)
+	}
+}
+
+func TestHandleWhoAmIStoreError(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	store := failingProfileStore{err: errors.New("store failure")}
+	router := gin.New()
+	router.Use(func(contextGin *gin.Context) {
+		contextGin.Set("auth_claims", stubClaims{
+			tenantID: "tenant-a",
+			userID:   "user-1",
+		})
+	})
+	router.GET("/me", HandleWhoAmI(store, zap.NewNop()))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when store errors, got %d", recorder.Code)
 	}
 }
 
@@ -241,7 +327,7 @@ func TestServeDemoConfig(t *testing.T) {
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()
-	userID, roles, err := store.UpsertGoogleUser(nil, "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
+	userID, roles, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +338,7 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("expected default role")
 	}
 
-	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, userID)
+	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, "tenant-a", userID)
 	if err != nil {
 		t.Fatalf("unexpected error retrieving profile: %v", err)
 	}
@@ -260,7 +346,11 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("incomplete profile returned")
 	}
 
-	if _, _, _, _, err := store.GetUserProfile(nil, "missing"); err == nil {
+	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-a", "missing"); err == nil {
 		t.Fatalf("expected error for missing user")
+	}
+
+	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-b", userID); err == nil {
+		t.Fatalf("expected error when tenant mismatches")
 	}
 }

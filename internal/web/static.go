@@ -40,7 +40,7 @@ func PermissiveCORS(allowedOrigins []string) (gin.HandlerFunc, error) {
 	return cors.New(cors.Config{
 		AllowOrigins:     sanitized,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "X-Requested-With", "X-Client"},
+		AllowHeaders:     []string{"Content-Type", "X-Requested-With", "X-Client", "X-TAuth-Tenant"},
 		ExposeHeaders:    []string{"Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,

@@ -54,7 +54,7 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 	}
 
 	expiry := time.Now().Add(10 * time.Minute).Unix()
-	tokenID, opaqueToken, issueErr := store.Issue(context.Background(), "user-123", expiry, "")
+	tokenID, opaqueToken, issueErr := store.Issue(context.Background(), "tenant-a", "user-123", expiry, "")
 	if issueErr != nil {
 		t.Fatalf("issue error: %v", issueErr)
 	}
@@ -62,7 +62,7 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 		t.Fatalf("expected non-empty token id and opaque token")
 	}
 
-	applicationUserID, storedTokenID, expiresUnix, validateErr := store.Validate(context.Background(), opaqueToken)
+	applicationUserID, storedTokenID, expiresUnix, validateErr := store.Validate(context.Background(), "tenant-a", opaqueToken)
 	if validateErr != nil {
 		t.Fatalf("validate error: %v", validateErr)
 	}
@@ -76,22 +76,30 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 		t.Fatalf("expected expiry %d, got %d", expiry, expiresUnix)
 	}
 
-	revokeErr := store.Revoke(context.Background(), tokenID)
+	if _, _, _, mismatchedValidateErr := store.Validate(context.Background(), "tenant-b", opaqueToken); mismatchedValidateErr == nil {
+		t.Fatalf("expected tenant mismatch validation error")
+	}
+
+	revokeErr := store.Revoke(context.Background(), "tenant-a", tokenID)
 	if revokeErr != nil {
 		t.Fatalf("revoke error: %v", revokeErr)
 	}
 
-	_, _, _, postRevokeErr := store.Validate(context.Background(), opaqueToken)
+	_, _, _, postRevokeErr := store.Validate(context.Background(), "tenant-a", opaqueToken)
 	if postRevokeErr == nil {
 		t.Fatalf("expected error after revocation")
 	}
 
-	secondRevokeErr := store.Revoke(context.Background(), tokenID)
+	secondRevokeErr := store.Revoke(context.Background(), "tenant-a", tokenID)
 	if !errors.Is(secondRevokeErr, ErrRefreshTokenAlreadyRevoked) {
 		t.Fatalf("expected ErrRefreshTokenAlreadyRevoked, got %v", secondRevokeErr)
 	}
 
-	missingRevokeErr := store.Revoke(context.Background(), "missing-token")
+	if wrongTenantRevokeErr := store.Revoke(context.Background(), "tenant-b", tokenID); !errors.Is(wrongTenantRevokeErr, ErrRefreshTokenNotFound) {
+		t.Fatalf("expected tenant mismatch revoke to report not found, got %v", wrongTenantRevokeErr)
+	}
+
+	missingRevokeErr := store.Revoke(context.Background(), "tenant-a", "missing-token")
 	if !errors.Is(missingRevokeErr, ErrRefreshTokenNotFound) {
 		t.Fatalf("expected ErrRefreshTokenNotFound, got %v", missingRevokeErr)
 	}
@@ -160,7 +168,7 @@ func TestDatabaseRefreshTokenStoreValidateNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating store: %v", err)
 	}
-	_, _, _, validateErr := store.Validate(context.Background(), "unknown")
+	_, _, _, validateErr := store.Validate(context.Background(), "tenant-a", "unknown")
 	if validateErr == nil {
 		t.Fatalf("expected error for unknown refresh token")
 	}
@@ -195,7 +203,7 @@ func TestDatabaseRefreshTokenStoreIssueRandomFailure(t *testing.T) {
 	refreshTokenRandomSource = failingRandomSource{}
 	defer func() { refreshTokenRandomSource = original }()
 
-	_, _, issueErr := store.Issue(context.Background(), "user", time.Now().Add(time.Minute).Unix(), "")
+	_, _, issueErr := store.Issue(context.Background(), "tenant-a", "user", time.Now().Add(time.Minute).Unix(), "")
 	if issueErr == nil {
 		t.Fatalf("expected random source failure to bubble up")
 	}
@@ -206,7 +214,7 @@ func TestDatabaseRefreshTokenStoreValidateEmptyToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating store: %v", err)
 	}
-	_, _, _, validateErr := store.Validate(context.Background(), "   ")
+	_, _, _, validateErr := store.Validate(context.Background(), "tenant-a", "   ")
 	if !errors.Is(validateErr, ErrRefreshTokenEmptyOpaque) {
 		t.Fatalf("expected ErrRefreshTokenEmptyOpaque, got %v", validateErr)
 	}

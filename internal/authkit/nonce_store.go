@@ -18,68 +18,90 @@ var (
 
 // NonceStore issues one-time nonce tokens to bind Google ID token requests.
 type NonceStore interface {
-	// Issue creates a new nonce token with the configured TTL.
-	Issue(ctx context.Context) (string, error)
+	// Issue creates a new nonce token with the configured TTL for the provided tenant.
+	Issue(ctx context.Context, tenantID string) (string, error)
 	// Consume validates and invalidates an issued nonce token.
-	Consume(ctx context.Context, token string) error
+	Consume(ctx context.Context, tenantID string, token string) error
 }
 
 type memoryNonceStore struct {
-	mutex     sync.Mutex
-	entries   map[string]time.Time
-	ttl       time.Duration
-	now       func() time.Time
-	tokenSize int
+	mutex       sync.Mutex
+	entries     map[string]map[string]time.Time
+	ttlResolver func(string) time.Duration
+	now         func() time.Time
+	tokenSize   int
 }
 
-// NewMemoryNonceStore constructs an in-memory NonceStore with the provided TTL.
+// NewMemoryNonceStore constructs an in-memory NonceStore with a fixed TTL for all tenants.
 func NewMemoryNonceStore(ttl time.Duration) NonceStore {
+	return NewMemoryNonceStoreWithTTLResolver(func(string) time.Duration {
+		return ttl
+	})
+}
+
+// NewMemoryNonceStoreWithTTLResolver constructs an in-memory NonceStore that derives TTL per tenant.
+func NewMemoryNonceStoreWithTTLResolver(ttlResolver func(string) time.Duration) NonceStore {
+	if ttlResolver == nil {
+		panic("nonce_store: ttlResolver is required")
+	}
 	return &memoryNonceStore{
-		entries:   make(map[string]time.Time),
-		ttl:       ttl,
-		now:       time.Now,
-		tokenSize: 32,
+		entries:     make(map[string]map[string]time.Time),
+		ttlResolver: ttlResolver,
+		now:         time.Now,
+		tokenSize:   32,
 	}
 }
 
-func (store *memoryNonceStore) Issue(ctx context.Context) (string, error) {
+func (store *memoryNonceStore) Issue(ctx context.Context, tenantID string) (string, error) {
 	token, err := store.randomToken()
 	if err != nil {
 		return "", err
 	}
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	store.purgeExpiredLocked()
-	store.entries[token] = store.now().Add(store.ttl)
+	store.ensureTenant(tenantID)
+	store.purgeExpiredLocked(tenantID)
+	store.entries[tenantID][token] = store.now().Add(store.ttlResolver(tenantID))
 	return token, nil
 }
 
-func (store *memoryNonceStore) Consume(ctx context.Context, token string) error {
+func (store *memoryNonceStore) Consume(ctx context.Context, tenantID string, token string) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	expiry, ok := store.entries[token]
+	store.ensureTenant(tenantID)
+	expiry, ok := store.entries[tenantID][token]
 	if !ok {
-		store.purgeExpiredLocked()
+		store.purgeExpiredLocked(tenantID)
 		return ErrNonceNotFound
 	}
-	delete(store.entries, token)
+	delete(store.entries[tenantID], token)
 	if store.now().After(expiry) {
-		store.purgeExpiredLocked()
+		store.purgeExpiredLocked(tenantID)
 		return ErrNonceExpired
 	}
-	store.purgeExpiredLocked()
+	store.purgeExpiredLocked(tenantID)
 	return nil
 }
 
-func (store *memoryNonceStore) purgeExpiredLocked() {
-	if len(store.entries) == 0 {
+func (store *memoryNonceStore) purgeExpiredLocked(tenantID string) {
+	tenantEntries := store.entries[tenantID]
+	if len(tenantEntries) == 0 {
 		return
 	}
 	now := store.now()
-	for token, expiry := range store.entries {
+	for token, expiry := range tenantEntries {
 		if now.After(expiry) {
-			delete(store.entries, token)
+			delete(tenantEntries, token)
 		}
+	}
+}
+
+func (store *memoryNonceStore) ensureTenant(tenantID string) {
+	if tenantID == "" {
+		panic("nonce_store: tenant id must be provided")
+	}
+	if _, exists := store.entries[tenantID]; !exists {
+		store.entries[tenantID] = make(map[string]time.Time)
 	}
 }
 

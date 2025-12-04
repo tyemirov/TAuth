@@ -28,73 +28,80 @@ The `tauth` binary lives under `cmd/server` in this repository. You can:
 - Build it directly with Go (e.g. `go build ./cmd/server`), or
 - Use the provided Docker setup in `examples/docker-compose` for a local stack.
 
-The binary exposes configuration via environment variables (preferred) and CLI flags (for overrides). Viper merges both sources.
+The binary reads configuration exclusively from a YAML file (default `config.yaml`). Use `tauth --config=/path/to/config.yaml` or export `TAUTH_CONFIG_FILE` to point at a different file; no other environment variables or CLI flags are required.
 
 ### 2.2 Core configuration
 
-At minimum you must set:
+`config.yaml` must include the server-level keys below plus at least one tenant:
 
-- `APP_GOOGLE_WEB_CLIENT_ID` – Google OAuth Web client ID (`<client-id>.apps.googleusercontent.com`).
-- `APP_JWT_SIGNING_KEY` – HS256 signing key for access JWTs (use a high‑entropy secret).
-
-Common environment variables:
-
-| Variable                     | Purpose                                                          | Example                                 |
-|------------------------------|------------------------------------------------------------------|-----------------------------------------|
-| `APP_LISTEN_ADDR`           | HTTP listen address                                              | `:8080`                                 |
-| `APP_COOKIE_DOMAIN`         | Domain for cookies (empty = host only)                           | `.example.com`                          |
-| `APP_GOOGLE_WEB_CLIENT_ID`  | Google OAuth Web client ID                                       | `123.apps.googleusercontent.com`        |
-| `APP_JWT_SIGNING_KEY`       | HS256 signing secret                                             | `openssl rand -base64 48`               |
-| `APP_SESSION_TTL`           | Access token lifetime                                            | `15m`                                   |
-| `APP_REFRESH_TTL`           | Refresh token lifetime                                           | `1440h` (60 days)                       |
-| `APP_DATABASE_URL`          | Refresh store DSN                                                | `sqlite:///data/tauth.db`               |
-| `APP_ENABLE_CORS`           | Enable CORS for cross‑origin UIs                                 | `true`                                  |
-| `APP_CORS_ALLOWED_ORIGINS`  | Comma-separated allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `https://app.example.com,https://accounts.google.com` |
-| `APP_DEV_INSECURE_HTTP`     | Allow non‑HTTPS for local development                            | `true`                                  |
+| Key | Purpose | Example |
+| --- | --- | --- |
+| `listen_addr` | HTTP listen address | `:8080` |
+| `database_url` | Refresh store DSN | `sqlite:///data/tauth.db` |
+| `enable_cors` | Enable CORS for cross-origin UIs | `true` / `false` |
+| `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
+| `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/local only) | `true` / `false` |
+| `tenants` | Array of tenant entries (see README §5.1 for schema) | `[...]` |
 
 Key notes:
 
-- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Use `APP_COOKIE_DOMAIN` (e.g. `.example.com`) to share cookies across subdomains.
+- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains. Leave the field blank to emit host-only cookies during `localhost` development (browsers reject `Domain=localhost`).
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
-- **CORS**: Leave `APP_ENABLE_CORS` unset when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `APP_CORS_ALLOWED_ORIGINS` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
+- **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
+- **Shared hosts**: If two tenants intentionally share the same host (typical for localhost demos), add each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `allowed_hosts`. TAuth inspects the request `Origin` header to resolve the tenant automatically. You can still enable `enable_tenant_header_override` and send `X-TAuth-Tenant` when you want to override the origin mapping manually.
+- **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
+- **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
 ### 2.3 Example: hosted deployment
 
 This example mirrors the README but focuses on the minimum you need to host TAuth at `https://auth.example.com` for a product UI at `https://app.example.com`:
 
 ```bash
-export APP_LISTEN_ADDR=":8443"
-export APP_GOOGLE_WEB_CLIENT_ID="your_web_client_id.apps.googleusercontent.com"
-export APP_JWT_SIGNING_KEY="$(openssl rand -base64 48)"
-export APP_COOKIE_DOMAIN=".example.com"
-export APP_ENABLE_CORS="true"
-export APP_CORS_ALLOWED_ORIGINS="https://app.example.com"
-export APP_DATABASE_URL="sqlite:///data/tauth.db"
+cat > config.yaml <<'YAML'
+server:
+  listen_addr: ":8443"
+  database_url: "sqlite:///data/tauth.db"
+  enable_cors: true
+  cors_allowed_origins:
+    - "https://app.example.com"
+    - "https://accounts.google.com"
+  enable_tenant_header_override: false
 
-tauth \
-  --listen_addr=":8443" \
-  --google_web_client_id="$APP_GOOGLE_WEB_CLIENT_ID" \
-  --jwt_signing_key="$APP_JWT_SIGNING_KEY" \
-  --cookie_domain="$APP_COOKIE_DOMAIN" \
-  --enable_cors \
-  --cors_allowed_origins="https://app.example.com"
+tenants:
+  - id: "prod"
+    display_name: "Production Tenant"
+    allowed_hosts:
+      - "auth.example.com"
+      - "https://app.example.com"
+    google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
+    jwt_signing_key: "replace-with-your-tenant-signing-key"
+    cookie_domain: ".example.com"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+    allow_insecure_http: false
+YAML
+
+tauth --config=config.yaml
 ```
 
 Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
+
+When migrating an existing tenant that expects the legacy cookie names (`app_session`, `app_refresh`), set the `session_cookie_name` / `refresh_cookie_name` fields inside the tenant block. These fields are always required—choose unique names per tenant to avoid collisions when multiple tenants share `localhost`. Legacy stacks (such as Gravity) can keep `app_session` / `app_refresh`, but doing so means any other tenant using the same names will overwrite those cookies.
 
 ### 2.4 Example: local quick‑start (Docker Compose)
 
 For a full local stack (TAuth + demo UI) without installing Go:
 
 1. `cd examples/docker-compose`
-2. Copy the template: `cp .env.tauth.example .env.tauth`
-3. Edit `.env.tauth` and set:
-   - `APP_GOOGLE_WEB_CLIENT_ID` to your GIS Web client ID.
-   - `APP_JWT_SIGNING_KEY` to a random base64 key.
-4. Start the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
+2. Copy the environment template: `cp .env.tauth.example .env.tauth`
+3. Copy the config template: `cp config.yaml.example config.yaml`
+4. Edit `.env.tauth` (set `TAUTH_CONFIG_FILE=/config/config.yaml` and the per-tenant `TAUTH_GOOGLE_WEB_CLIENT_ID*` / `TAUTH_*_JWT_SIGNING_KEY` values).
+5. Edit `config.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080` (or keep the environment variable references from step 4).
+6. Start the stack: `docker compose up --build`
+7. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
 
-Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database.
+Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
 
 ---
 
@@ -133,7 +140,10 @@ For backend services written in Go, use the `pkg/sessionvalidator` package descr
 On your product site, include the script from your TAuth origin:
 
 ```html
-<script src="https://auth.example.com/static/auth-client.js"></script>
+<script
+  src="https://auth.example.com/static/auth-client.js"
+  data-tenant-id="tenant-admin"
+></script>
 ```
 
 If your UI and TAuth share a host (for example both under `https://app.example.com`), you can serve it directly from that origin instead.
@@ -144,8 +154,11 @@ Call `initAuthClient` once during startup, after the script loads:
 
 ```html
 <script>
+  // Optional: override tenant dynamically when the page knows which tenant to use.
+  setAuthTenantId("tenant-admin");
   initAuthClient({
     baseUrl: "https://auth.example.com",
+    tenantId: "demo", // optional override for shared-host dev setups
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -203,6 +216,21 @@ The helper:
 - Broadcasts `"logged_out"` to other tabs.
 - Invokes `onUnauthenticated()` if provided.
 
+### 4.5 Selecting a tenant explicitly
+
+Most deployments rely on hostnames to resolve tenants. When multiple tenants intentionally share the same host (for example, several apps pointing at `localhost:8080`), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls with either your explicit `tenantId` or, when omitted, the current page origin so shared-host setups continue to function even if certain requests omit `Origin`. You can still pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
+
+```js
+initAuthClient({
+  baseUrl: "https://auth-dev.example.com",
+  tenantId: "team-blue",
+  onAuthenticated: hydrateDashboard,
+  onUnauthenticated: showGoogleButton,
+});
+```
+
+The helper automatically attaches `X-TAuth-Tenant: team-blue` (or the current page origin when no ID is supplied) to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate hosts when possible). The override never bypasses host validation — TAuth still checks that the HTTP `Host` header appears in *some* tenant definition and rejects requests from unlisted hosts even if the header is present.
+
 ---
 
 ## 5. Google Identity Services flow
@@ -232,7 +260,7 @@ The required sequence for custom clients is:
 4. **Exchange credential** – when GIS invokes your callback with `response.credential`:
    - Call `POST /auth/google` with JSON `{ "google_id_token": "<response.credential>", "nonce_token": "<same nonce>" }` and `credentials: "include"`.
 5. TAuth:
-   - Validates the ID token against `APP_GOOGLE_WEB_CLIENT_ID`.
+   - Validates the ID token against the resolved tenant’s `google_web_client_id`.
    - Verifies the nonce (raw or hashed) and the issuer.
    - Issues `app_session` and `app_refresh` cookies.
    - Returns a profile JSON payload.
@@ -277,7 +305,7 @@ Common failure cases:
 
 - Invalid or expired ID token (`401`).
 - Mismatched nonce (`401`).
-- Audience (`aud`) does not match `APP_GOOGLE_WEB_CLIENT_ID` (`401`).
+- Audience (`aud`) does not match the resolved tenant’s `google_web_client_id` (`401`).
 
 ### 6.3 `GET /me`
 
@@ -348,7 +376,7 @@ import (
 )
 
 func newSessionValidator() (*sessionvalidator.Validator, error) {
-    signingKey := []byte(os.Getenv("APP_JWT_SIGNING_KEY"))
+    signingKey := []byte(os.Getenv("TAUTH_NOTES_JWT_SIGNING_KEY"))
     return sessionvalidator.New(sessionvalidator.Config{
         SigningKey: signingKey,
         Issuer:     "tauth",
@@ -359,7 +387,7 @@ func newSessionValidator() (*sessionvalidator.Validator, error) {
 
 The configuration mirrors your TAuth deployment:
 
-- `SigningKey` must match `APP_JWT_SIGNING_KEY` used by TAuth.
+- `SigningKey` must match the `jwt_signing_key` configured for the tenant whose cookies you validate.
 - `Issuer` must match the issuer configured by the server (typically `"tauth"`; see `ARCHITECTURE.md`).
 - `CookieName` defaults to `app_session` and should only be overridden if you have customised the cookie name on the TAuth side.
 
@@ -470,11 +498,12 @@ Use this checklist when integrating:
 - **401 from `/auth/refresh`** – Refresh cookie missing or revoked; treat as “signed out” and prompt the user to sign in again.
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).
-  - `APP_COOKIE_DOMAIN` matches the registrable domain you expect.
-  - CORS is configured correctly when using a split origin (`APP_ENABLE_CORS` and `APP_CORS_ALLOWED_ORIGINS`).
+  - The tenant’s `cookie_domain` matches the registrable domain you expect.
+  - CORS is configured correctly when using a split origin (`enable_cors` and `cors_allowed_origins` in `config.yaml`).
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.
-  - The `aud` claim in the ID token matches `APP_GOOGLE_WEB_CLIENT_ID`.
+  - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
+- When multiple tenants share the same host, list each frontend origin under `allowed_hosts` so TAuth can resolve the tenant from the `Origin` header. You can still override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper automatically sends `X-TAuth-Tenant` whenever you opt into an explicit override, and now falls back to the page origin when no tenant ID is provided.

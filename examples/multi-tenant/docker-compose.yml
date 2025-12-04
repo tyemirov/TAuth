@@ -1,0 +1,61 @@
+services:
+  tauth:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    image: tauth-local:latest
+    env_file:
+      - ./.env.tauth
+    ports:
+      - "8082:8082"
+    volumes:
+      - tauth_data:/data
+      - ./config.yaml:/config/config.yaml:ro
+    restart: unless-stopped
+
+  gravity-frontend:
+    image: ghcr.io/tyemirov/ghttp:latest
+    pull_policy: always
+    depends_on:
+      gravity-backend:
+        condition: service_started
+      tauth:
+        condition: service_started
+    working_dir: /srv/gravity/frontend
+    command: ["--directory", "/srv/gravity/frontend", "8000"]
+    volumes:
+      -  ../../../../MarcoPoloResearchLab/gravity/:/srv/gravity:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  gravity-backend:
+    image: ghcr.io/marcopoloresearchlab/gravity-backend:latest
+    pull_policy: always
+    env_file:
+      - .env.gravity
+    depends_on:
+      tauth:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - gravity_data:/data
+    restart: unless-stopped
+  
+  mpr-frontend:
+    image: ghcr.io/tyemirov/ghttp:latest
+    pull_policy: always
+    depends_on:
+      tauth:
+        condition: service_started
+    command: ["--directory", "/app/demo", "4173"]
+    ports:
+      - "4173:4173"
+    volumes:
+      - ../tauth-demo/:/app/demo
+    restart: unless-stopped
+
+volumes:
+  tauth_data:
+  gravity_data:

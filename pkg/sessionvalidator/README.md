@@ -16,7 +16,7 @@ import (
 
 func main() {
 	validator, err := sessionvalidator.New(sessionvalidator.Config{
-		SigningKey: []byte(os.Getenv("APP_JWT_SIGNING_KEY")),
+		SigningKey: []byte(os.Getenv("TAUTH_NOTES_JWT_SIGNING_KEY")),
 		Issuer:     "tauth",
 		// CookieName defaults to app_session.
 	})

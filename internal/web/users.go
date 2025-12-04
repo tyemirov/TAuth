@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,11 +14,12 @@ import (
 
 // ProfileStore exposes the ability to retrieve user profiles.
 type ProfileStore interface {
-	GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error)
+	GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error)
 }
 
 // ClaimsProvider exposes identity fields extracted from a JWT.
 type ClaimsProvider interface {
+	GetTenantID() string
 	GetUserID() string
 	GetUserEmail() string
 	GetUserDisplayName() string
@@ -29,7 +31,7 @@ var ErrUserNotFound = errors.New("web.user.not_found")
 
 // InMemoryUsers is a simple user store used for demo and local runs.
 type InMemoryUsers struct {
-	Users map[string]UserProfile
+	tenants map[string]map[string]UserProfile
 }
 
 // UserProfile represents an application user.
@@ -42,11 +44,11 @@ type UserProfile struct {
 
 // NewInMemoryUsers constructs a store with an empty map.
 func NewInMemoryUsers() *InMemoryUsers {
-	return &InMemoryUsers{Users: make(map[string]UserProfile)}
+	return &InMemoryUsers{tenants: make(map[string]map[string]UserProfile)}
 }
 
 // UpsertGoogleUser inserts or updates a user based on Google sub.
-func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	applicationUserID := "google:" + googleSub
 	record := UserProfile{
 		Email:     userEmail,
@@ -54,13 +56,20 @@ func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, googleSub stri
 		AvatarURL: userAvatarURL,
 		Roles:     []string{"user"},
 	}
-	store.Users[applicationUserID] = record
+	if _, exists := store.tenants[tenantID]; !exists {
+		store.tenants[tenantID] = make(map[string]UserProfile)
+	}
+	store.tenants[tenantID][applicationUserID] = record
 	return applicationUserID, record.Roles, nil
 }
 
 // GetUserProfile returns a profile by application user id.
-func (store *InMemoryUsers) GetUserProfile(ctx context.Context, applicationUserID string) (string, string, string, []string, error) {
-	record, ok := store.Users[applicationUserID]
+func (store *InMemoryUsers) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
+	records, exists := store.tenants[tenantID]
+	if !exists {
+		return "", "", "", nil, ErrUserNotFound
+	}
+	record, ok := records[applicationUserID]
 	if !ok {
 		return "", "", "", nil, ErrUserNotFound
 	}
@@ -86,7 +95,14 @@ func HandleWhoAmI(store ProfileStore, logger *zap.Logger) gin.HandlerFunc {
 			return
 		}
 
-		userEmail, display, avatarURL, roles, err := store.GetUserProfile(contextGin, provider.GetUserID())
+		tenantID := strings.TrimSpace(provider.GetTenantID())
+		if tenantID == "" {
+			logger.Warn("whoami.missing_tenant")
+			contextGin.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		userEmail, display, avatarURL, roles, err := store.GetUserProfile(contextGin, tenantID, provider.GetUserID())
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
 				logger.Warn("whoami.user_not_found", zap.String("user_id", provider.GetUserID()))

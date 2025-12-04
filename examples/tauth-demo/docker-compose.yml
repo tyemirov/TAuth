@@ -1,0 +1,30 @@
+services:
+  tauth:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    image: tauth-local:latest
+    env_file:
+      - ./.env.tauth
+    ports:
+      - "8082:8082"
+    volumes:
+      - tauth_data:/data
+      - ./config.yaml:/config/config.yaml:ro
+    restart: unless-stopped
+
+  mpr-frontend:
+    image: ghcr.io/tyemirov/ghttp:latest
+    pull_policy: always
+    depends_on:
+      tauth:
+        condition: service_started
+    command: ["--directory", "/app/demo", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app/demo
+    restart: unless-stopped
+
+volumes:
+  tauth_data:

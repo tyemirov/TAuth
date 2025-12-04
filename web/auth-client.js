@@ -5,6 +5,7 @@
     meEndpoint: "/me",
     refreshEndpoint: "/auth/refresh",
     logoutEndpoint: "/auth/logout",
+    tenantId: "",
     onAuthenticated: function onAuthenticatedDefault(userProfile) {},
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
@@ -15,7 +16,67 @@
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
+    tenantId: "",
+    originHint: "",
   };
+
+  function detectInitialTenantId() {
+    if (typeof window !== "undefined") {
+      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
+        return window.__TAUTH_TENANT_ID__.trim();
+      }
+    }
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-tenant-id");
+        if (dataValue) {
+          return dataValue.trim();
+        }
+      }
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var attrValue = document.documentElement.getAttribute(
+          "data-tauth-tenant-id",
+        );
+        if (attrValue) {
+          return attrValue.trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  function detectOriginHint() {
+    if (
+      typeof window !== "undefined" &&
+      window.location &&
+      typeof window.location.origin === "string"
+    ) {
+      return window.location.origin;
+    }
+    if (
+      typeof globalThis !== "undefined" &&
+      globalThis.location &&
+      typeof globalThis.location.origin === "string"
+    ) {
+      return globalThis.location.origin;
+    }
+    return "";
+  }
+
+  runtime.originHint = detectOriginHint();
+  setTenantId(detectInitialTenantId());
+
+  function setTenantId(value) {
+    var normalized = typeof value === "string" ? value.trim() : "";
+    runtime.tenantId = normalized;
+    if (runtime.options) {
+      runtime.options.tenantId = normalized;
+    }
+  }
 
   function joinUrl(baseUrl, path) {
     if (baseUrl.endsWith("/") && path.startsWith("/")) {
@@ -23,6 +84,8 @@
     }
     return baseUrl + path;
   }
+
+  var tenantHeaderName = "X-TAuth-Tenant";
 
   function queueWhileRefreshing(executorFunction) {
     return new Promise(function (resolve, reject) {
@@ -71,7 +134,49 @@
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
     options.baseUrl = options.baseUrl || "/";
+    var providedTenant = options.tenantId;
+    if (providedTenant === undefined || providedTenant === null) {
+      options.tenantId = runtime.tenantId || "";
+    } else {
+      options.tenantId = String(providedTenant).trim();
+      if (!options.tenantId && runtime.tenantId) {
+        options.tenantId = runtime.tenantId;
+      }
+    }
+    runtime.tenantId = options.tenantId || "";
     return options;
+  }
+
+  function currentTenantId() {
+    if (runtime.options && runtime.options.tenantId) {
+      return runtime.options.tenantId;
+    }
+    return runtime.tenantId;
+  }
+
+  function resolveTenantHeaderValue() {
+    var explicitTenant = currentTenantId();
+    if (explicitTenant) {
+      return explicitTenant;
+    }
+    if (runtime.originHint) {
+      return runtime.originHint;
+    }
+    var detected = detectOriginHint();
+    if (detected) {
+      runtime.originHint = detected;
+      return detected;
+    }
+    return "";
+  }
+
+  function withTenantHeader(headers) {
+    var combined = Object.assign({}, headers || {});
+    var headerValue = resolveTenantHeaderValue();
+    if (headerValue) {
+      combined[tenantHeaderName] = headerValue;
+    }
+    return combined;
   }
 
   async function initAuthClient(passed) {
@@ -82,7 +187,7 @@
         {
           method: "GET",
           credentials: "include",
-          headers: { "X-Client": "mprlab-ui" },
+          headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
         },
       );
       if (meResponse.ok) {
@@ -96,7 +201,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -106,7 +211,7 @@
           {
             method: "GET",
             credentials: "include",
-            headers: { "X-Client": "mprlab-ui" },
+            headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
           },
         );
         if (retryResponse.ok) {
@@ -149,7 +254,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
@@ -173,7 +278,7 @@
         {
           method: "POST",
           credentials: "include",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
+          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
     } catch (ignore) {}
@@ -192,5 +297,6 @@
     window.apiFetch = apiFetch;
     window.getCurrentUser = getCurrentUser;
     window.logout = logout;
+    window.setAuthTenantId = setTenantId;
   }
 })();
