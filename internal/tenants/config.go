@@ -94,6 +94,7 @@ func LoadConfig(path string) (Config, error) {
 
 // LoadConfigFromDocument constructs a Config from the parsed YAML document.
 func LoadConfigFromDocument(document FileDocument) (Config, error) {
+	document = expandFileDocumentEnv(document)
 	if len(document.Tenants) == 0 {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, errorCodeMissingTenants)
 	}
@@ -486,6 +487,39 @@ func parseDuration(raw string) (time.Duration, error) {
 // FileDocument represents the raw tenants YAML schema.
 type FileDocument struct {
 	Tenants []FileTenant `json:"tenants" yaml:"tenants"`
+}
+
+func expandFileDocumentEnv(document FileDocument) FileDocument {
+	for index := range document.Tenants {
+		document.Tenants[index] = expandFileTenantEnv(document.Tenants[index])
+	}
+	return document
+}
+
+func expandFileTenantEnv(tenant FileTenant) FileTenant {
+	tenant.ID = os.ExpandEnv(tenant.ID)
+	tenant.DisplayName = os.ExpandEnv(tenant.DisplayName)
+	tenant.AllowedHosts = expandEnvSlice(tenant.AllowedHosts)
+	tenant.GoogleWebClientID = os.ExpandEnv(tenant.GoogleWebClientID)
+	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
+	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
+	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
+	tenant.RefreshCookieName = os.ExpandEnv(tenant.RefreshCookieName)
+	tenant.SessionTTL = os.ExpandEnv(tenant.SessionTTL)
+	tenant.RefreshTTL = os.ExpandEnv(tenant.RefreshTTL)
+	tenant.NonceTTL = os.ExpandEnv(tenant.NonceTTL)
+	return tenant
+}
+
+func expandEnvSlice(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	expanded := make([]string, len(values))
+	for index, value := range values {
+		expanded[index] = os.ExpandEnv(value)
+	}
+	return expanded
 }
 
 // FileTenant represents a single tenant entry inside the YAML document.

@@ -39,6 +39,8 @@ tenants:
 YAML
 ```
 
+Tenant files accept shell-style environment placeholders (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) in any string field. TAuth expands those variables before validation so you can keep secrets or per-host values in `.env` files; missing variables collapse to empty strings, so keep sensible defaults in the YAML when a field is required.
+
 Each entry defines:
 
 - `id` – stable identifier used inside JWTs and storage (lowercase letters/numbers/underscores/hyphens).

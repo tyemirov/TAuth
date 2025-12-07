@@ -15,6 +15,7 @@
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
 
 ### Bug Fixes 🐛
+- TA-339: Expanded the tenant config loader to replace `${VAR}`/`$VAR` placeholders (even when configs are embedded), added regression tests for both document and YAML entry points, and documented the behavior so missing env vars collapse to empty strings without panicking.
 - TA-333: Fixed `clearCookie` path mismatch during logout; refresh cookies (Path `/auth`) are now correctly cleared alongside session cookies.
 - TA-334: Fixed `/demo/config.js` serving default tenant config; now correctly resolves the tenant from the request context to return the appropriate Google Client ID.
 - Accept `X-TAuth-Tenant` overrides that provide a frontend origin and teach `auth-client.js` to fall back to the page origin when no tenant ID is supplied so multi-tenant localhost setups stay logged in on both apps; refreshed resolver/JS tests and documentation to match.

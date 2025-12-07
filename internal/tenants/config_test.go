@@ -520,6 +520,107 @@ func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
+	t.Setenv("TENANT_ALLOWED_HOST", "env.localhost")
+	t.Setenv("TENANT_CLIENT_ID", "env-client.apps.googleusercontent.com")
+	t.Setenv("TENANT_SIGNING_KEY", "env-signing-key")
+	t.Setenv("TENANT_COOKIE_DOMAIN", ".env.example.com")
+	t.Setenv("SESSION_COOKIE_NAME", "env_session_cookie")
+	t.Setenv("REFRESH_COOKIE_NAME", "env_refresh_cookie")
+	t.Setenv("SESSION_TTL", "45m")
+	t.Setenv("REFRESH_TTL", "900h")
+	t.Setenv("NONCE_TTL", "6m")
+
+	document := FileDocument{
+		Tenants: []FileTenant{
+			{
+				ID:                "env-demo",
+				DisplayName:       "Env Demo",
+				AllowedHosts:      []string{"${TENANT_ALLOWED_HOST}"},
+				GoogleWebClientID: "$TENANT_CLIENT_ID",
+				JWTSigningKey:     "${TENANT_SIGNING_KEY}",
+				CookieDomain:      "$TENANT_COOKIE_DOMAIN",
+				SessionCookieName: "$SESSION_COOKIE_NAME",
+				RefreshCookieName: "${REFRESH_COOKIE_NAME}",
+				SessionTTL:        "${SESSION_TTL}",
+				RefreshTTL:        "$REFRESH_TTL",
+				NonceTTL:          "$NONCE_TTL",
+			},
+		},
+	}
+
+	config, err := LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("expected document to load with env vars, got %v", err)
+	}
+	tenant, ok := config.TenantByID("env-demo")
+	if !ok {
+		t.Fatalf("expected env-demo tenant to exist")
+	}
+	if tenant.CookieDomain() != ".env.example.com" {
+		t.Fatalf("expected env cookie domain, got %s", tenant.CookieDomain())
+	}
+	if tenant.GoogleWebClientID() != "env-client.apps.googleusercontent.com" {
+		t.Fatalf("expected env client id, got %s", tenant.GoogleWebClientID())
+	}
+	if string(tenant.SigningKey()) != "env-signing-key" {
+		t.Fatalf("expected env signing key, got %s", tenant.SigningKey())
+	}
+	if !sameStringSlices(tenant.Hosts(), []string{"env.localhost"}) {
+		t.Fatalf("expected env host to be expanded, got %#v", tenant.Hosts())
+	}
+	if tenant.SessionCookieName() != "env_session_cookie" {
+		t.Fatalf("expected env session cookie name, got %s", tenant.SessionCookieName())
+	}
+	if tenant.RefreshCookieName() != "env_refresh_cookie" {
+		t.Fatalf("expected env refresh cookie name, got %s", tenant.RefreshCookieName())
+	}
+	if tenant.SessionTTL() != 45*time.Minute {
+		t.Fatalf("expected env session ttl, got %s", tenant.SessionTTL())
+	}
+	if tenant.RefreshTTL() != 900*time.Hour {
+		t.Fatalf("expected env refresh ttl, got %s", tenant.RefreshTTL())
+	}
+	if tenant.NonceTTL() != 6*time.Minute {
+		t.Fatalf("expected env nonce ttl, got %s", tenant.NonceTTL())
+	}
+}
+
+func TestLoadConfigHandlesMissingEnvVars(t *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			{
+				ID:                "demo",
+				DisplayName:       "${MISSING_DISPLAY_NAME}",
+				AllowedHosts:      []string{"demo.localhost"},
+				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
+				JWTSigningKey:     "demo-key",
+				CookieDomain:      "$UNSET_COOKIE_DOMAIN",
+				SessionCookieName: "app_session_demo",
+				RefreshCookieName: "app_refresh_demo",
+				SessionTTL:        "30m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+		},
+	}
+
+	config, err := LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("expected config to load with missing env vars, got %v", err)
+	}
+	tenant, ok := config.TenantByID("demo")
+	if !ok {
+		t.Fatalf("expected demo tenant to exist")
+	}
+	if tenant.CookieDomain() != "" {
+		t.Fatalf("expected missing cookie domain env to expand to empty string, got %s", tenant.CookieDomain())
+	}
+	if tenant.DisplayName() != "demo" {
+		t.Fatalf("expected fallback display name when env var missing, got %s", tenant.DisplayName())
+	}
+}
+
 func TestLoadConfigTrimsQuotedPath(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "quoted.yaml")
