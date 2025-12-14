@@ -149,7 +149,7 @@ func TestHandleWhoAmI(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	store := NewInMemoryUsers()
-	_, _, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "Demo User", "https://example.com/avatar.png")
+	_, _, err := store.UpsertGoogleUser(context.TODO(), "tenant-a", "sub-1", "user@example.com", "Demo User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected upsert error: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestServeDemoConfig(t *testing.T) {
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()
-	userID, roles, err := store.UpsertGoogleUser(nil, "tenant-a", "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
+	userID, roles, err := store.UpsertGoogleUser(context.TODO(), "tenant-a", "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("expected default role")
 	}
 
-	email, display, avatarURL, storedRoles, err := store.GetUserProfile(nil, "tenant-a", userID)
+	email, display, avatarURL, storedRoles, err := store.GetUserProfile(context.TODO(), "tenant-a", userID)
 	if err != nil {
 		t.Fatalf("unexpected error retrieving profile: %v", err)
 	}
@@ -346,11 +346,11 @@ func TestInMemoryUsers(t *testing.T) {
 		t.Fatalf("incomplete profile returned")
 	}
 
-	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-a", "missing"); err == nil {
+	if _, _, _, _, err := store.GetUserProfile(context.TODO(), "tenant-a", "missing"); err == nil {
 		t.Fatalf("expected error for missing user")
 	}
 
-	if _, _, _, _, err := store.GetUserProfile(nil, "tenant-b", userID); err == nil {
+	if _, _, _, _, err := store.GetUserProfile(context.TODO(), "tenant-b", userID); err == nil {
 		t.Fatalf("expected error when tenant mismatches")
 	}
 }

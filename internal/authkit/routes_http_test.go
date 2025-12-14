@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2000,14 +1999,6 @@ func TestHTTPAuthLoginUnverifiedIdentity(t *testing.T) {
 	if payload["error"] != "unverified_identity" {
 		t.Fatalf("expected unverified_identity error, got %v", payload["error"])
 	}
-}
-
-func mustParseURL(raw string) *url.URL {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		panic(err)
-	}
-	return parsed
 }
 
 func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) string {

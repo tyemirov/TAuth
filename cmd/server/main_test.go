@@ -757,26 +757,6 @@ func withGoogleValidatorBuilderStub(stub func(ctx context.Context) (authkit.Goog
 	}
 }
 
-const sampleTenantsDocument = `tenants:
-  - id: "alpha"
-    display_name: "Alpha"
-    allowed_hosts: ["alpha.localhost"]
-    google_web_client_id: "alpha-client.apps.googleusercontent.com"
-    jwt_signing_key: "alpha-key"
-    cookie_domain: "alpha.localhost"
-    session_cookie_name: "app_session_alpha"
-    refresh_cookie_name: "app_refresh_alpha"
-    session_ttl: "15m"
-    refresh_ttl: "720h"
-    nonce_ttl: "5m"
-    allow_insecure_http: true
-`
-
-func writeSampleTenantsFile(t *testing.T) string {
-	t.Helper()
-	return writeTenantsFileContents(t, sampleTenantsDocument)
-}
-
 func writeTenantsFileContents(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -49,9 +49,11 @@ func newRootCommand() *cobra.Command {
 }
 
 const (
-	sessionCookieName = "app_session"
-	refreshCookieName = "app_refresh"
-	defaultTenantID   = "default"
+	sessionCookieName   = "app_session"
+	refreshCookieName   = "app_refresh"
+	defaultTenantID     = "default"
+	defaultAppJWTIssuer = "tauth"
+	defaultCookieDomain = ""
 
 	configCodeMissingConfigFile       = "config.missing_config_file"
 	configCodeInvalidConfigFile       = "config.invalid_config_file"
@@ -123,9 +125,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	baseServerConfig := authkit.ServerConfig{
 		AppJWTSigningKey:  nil,
-		AppJWTIssuer:      "mprlab-auth",
+		AppJWTIssuer:      defaultAppJWTIssuer,
 		TenantID:          defaultTenantID,
-		CookieDomain:      "",
+		CookieDomain:      defaultCookieDomain,
 		SessionCookieName: sessionCookieName,
 		RefreshCookieName: refreshCookieName,
 		SessionTTL:        15 * time.Minute,

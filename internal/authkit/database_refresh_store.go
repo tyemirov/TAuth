@@ -18,7 +18,6 @@ var (
 	// ErrUnsupportedDialect indicates that no GORM dialector is available for the scheme.
 	ErrUnsupportedDialect = errors.New("refresh_store.unsupported_dialect")
 
-	errEmptyOpaqueToken      = errors.New("refresh_store.empty_token")
 	errEmptyDatabaseURL      = errors.New("refresh_store.empty_database_url")
 	errSQLiteEmptyPath       = errors.New("refresh_store.sqlite.empty_path")
 	errSQLiteInvalidURL      = errors.New("refresh_store.sqlite.invalid_url")
