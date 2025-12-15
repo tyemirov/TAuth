@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"io"
 	"sync"
 	"time"
 )
@@ -30,6 +31,7 @@ type memoryNonceStore struct {
 	ttlResolver func(string) time.Duration
 	now         func() time.Time
 	tokenSize   int
+	randReader  io.Reader
 }
 
 // NewMemoryNonceStore constructs an in-memory NonceStore with a fixed TTL for all tenants.
@@ -49,6 +51,7 @@ func NewMemoryNonceStoreWithTTLResolver(ttlResolver func(string) time.Duration) 
 		ttlResolver: ttlResolver,
 		now:         time.Now,
 		tokenSize:   32,
+		randReader:  rand.Reader,
 	}
 }
 
@@ -107,7 +110,7 @@ func (store *memoryNonceStore) ensureTenant(tenantID string) {
 
 func (store *memoryNonceStore) randomToken() (string, error) {
 	buffer := make([]byte, store.tokenSize)
-	if _, err := rand.Read(buffer); err != nil {
+	if _, err := io.ReadFull(store.randReader, buffer); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil

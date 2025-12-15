@@ -29,9 +29,15 @@ var buildGoogleTokenValidator = func(ctx context.Context) (authkit.GoogleTokenVa
 	return authkit.NewGoogleTokenValidator(ctx)
 }
 
+var executeRootCommand = func() error {
+	return newRootCommand().Execute()
+}
+
+var exitProcess = os.Exit
+
 func main() {
-	if err := newRootCommand().Execute(); err != nil {
-		os.Exit(1)
+	if err := executeRootCommand(); err != nil {
+		exitProcess(1)
 	}
 }
 
@@ -267,9 +273,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 }
 
 func deriveSameSite(enableCORS bool, allowInsecure bool) http.SameSite {
-	if enableCORS && !allowInsecure {
-		return http.SameSiteNoneMode
-	}
 	if allowInsecure {
 		return http.SameSiteLaxMode
 	}

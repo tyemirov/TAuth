@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyemirov/tauth/internal/tenants"
+	"gopkg.in/yaml.v3"
 )
 
 func writeTempConfig(t *testing.T, contents string) string {
@@ -157,5 +158,67 @@ func TestLoadApplicationConfigMultiTenantExample(t *testing.T) {
 	}
 	if mprTenant, ok := tenantConfig.TenantByID("mpr-sites"); !ok || string(mprTenant.SigningKey()) != "mpr-signing-key" {
 		t.Fatalf("expected mpr tenant signing key to be applied")
+	}
+}
+
+func TestYamlBoolUnmarshalYAMLSupportsBoolAndString(t *testing.T) {
+	testCases := []struct {
+		name      string
+		payload   string
+		expected  bool
+		expectErr bool
+	}{
+		{
+			name:     "bool_tag",
+			payload:  "value: true\n",
+			expected: true,
+		},
+		{
+			name:     "string_tag",
+			payload:  "value: \"true\"\n",
+			expected: true,
+		},
+		{
+			name:      "default_tag_error",
+			payload:   "value: 1\n",
+			expectErr: true,
+		},
+		{
+			name:      "string_tag_error",
+			payload:   "value: \"notabool\"\n",
+			expectErr: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var wrapper struct {
+				Value yamlBool `yaml:"value"`
+			}
+			err := yaml.Unmarshal([]byte(testCase.payload), &wrapper)
+			if testCase.expectErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if bool(wrapper.Value) != testCase.expected {
+				t.Fatalf("expected %v, got %v", testCase.expected, bool(wrapper.Value))
+			}
+		})
+	}
+}
+
+func TestYamlBoolUnmarshalYAMLDefaultTagSupportsNull(t *testing.T) {
+	var value yamlBool
+	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: ""}
+	if err := value.UnmarshalYAML(node); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bool(value) {
+		t.Fatalf("expected false, got true")
 	}
 }

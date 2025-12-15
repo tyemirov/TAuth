@@ -174,12 +174,6 @@ func (validator *Validator) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("session.validator.validate_token: %w", ErrInvalidIssuer)
 	}
 	current := validator.clock.Now()
-	if claims.ExpiresAt != nil && current.After(claims.ExpiresAt.Time) {
-		return nil, fmt.Errorf("session.validator.validate_token: %w", ErrTokenExpired)
-	}
-	if claims.NotBefore != nil && current.Before(claims.NotBefore.Time) {
-		return nil, fmt.Errorf("session.validator.validate_token: %w", ErrInvalidToken)
-	}
 	if claims.IssuedAt != nil && current.Before(claims.IssuedAt.Time) {
 		return nil, fmt.Errorf("session.validator.validate_token: %w", ErrInvalidToken)
 	}

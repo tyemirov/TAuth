@@ -2,6 +2,7 @@ package authkit
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -105,4 +106,28 @@ func TestNewMemoryNonceStoreWithNilResolverPanics(t *testing.T) {
 		}
 	}()
 	NewMemoryNonceStoreWithTTLResolver(nil)
+}
+
+type failingReader struct{}
+
+func (failingReader) Read(buffer []byte) (int, error) {
+	return 0, errors.New("nonce_store.random.read_failed")
+}
+
+func TestMemoryNonceStoreIssueFailsWhenRandomReaderFails(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryNonceStore(time.Minute).(*memoryNonceStore)
+	store.randReader = failingReader{}
+
+	if _, err := store.Issue(context.Background(), "tenant-a"); err == nil {
+		t.Fatalf("expected error when random token generation fails")
+	}
+}
+
+func TestMemoryNonceStorePurgeExpiredLockedNoOpsWhenTenantEmpty(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryNonceStore(time.Minute).(*memoryNonceStore)
+	store.entries["tenant-a"] = map[string]time.Time{}
+
+	store.purgeExpiredLocked("tenant-a")
 }

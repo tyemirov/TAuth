@@ -138,10 +138,6 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 	}
 
 	router.POST("/auth/nonce", func(contextGin *gin.Context) {
-		if nonces == nil {
-			contextGin.AbortWithStatus(http.StatusServiceUnavailable)
-			return
-		}
 		tenantID := resolveTenantID(contextGin, registry)
 		token, issueErr := nonces.Issue(contextGin, tenantID)
 		if issueErr != nil {
@@ -163,12 +159,6 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.invalid_json", err)
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
-			return
-		}
-		if nonces == nil {
-			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.nonce_store_unavailable", nil)
-			contextGin.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
 		if strings.TrimSpace(inbound.NonceToken) == "" {

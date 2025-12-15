@@ -3,6 +3,7 @@ package authkit
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,6 +19,65 @@ import (
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/api/idtoken"
 )
+
+type inProcessTransport struct {
+	handler http.Handler
+}
+
+func (transport *inProcessTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if transport.handler == nil {
+		return nil, errors.New("in_process_transport.handler_missing")
+	}
+	if request == nil {
+		return nil, errors.New("in_process_transport.request_missing")
+	}
+	if request.URL == nil {
+		return nil, errors.New("in_process_transport.url_missing")
+	}
+
+	requestClone := request.Clone(request.Context())
+	requestClone.RequestURI = ""
+	if requestClone.Host == "" {
+		requestClone.Host = requestClone.URL.Host
+	}
+	if requestClone.URL.Scheme == "https" {
+		requestClone.TLS = &tls.ConnectionState{}
+	} else {
+		requestClone.TLS = nil
+	}
+
+	recorder := httptest.NewRecorder()
+	transport.handler.ServeHTTP(recorder, requestClone)
+	response := recorder.Result()
+	response.Request = requestClone
+	response.TLS = requestClone.TLS
+	return response, nil
+}
+
+type inProcessServer struct {
+	URL        string
+	httpClient *http.Client
+}
+
+func newInProcessServer(handler http.Handler, useTLS bool) *inProcessServer {
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+
+	return &inProcessServer{
+		URL: scheme + "://in-process.local",
+		httpClient: &http.Client{
+			Transport: &inProcessTransport{handler: handler},
+		},
+	}
+}
+
+func (server *inProcessServer) Client() *http.Client {
+	return server.httpClient
+}
+
+func (server *inProcessServer) Close() {}
 
 type controllableClock struct {
 	current time.Time
@@ -203,7 +263,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 
 	client := server.Client()
@@ -426,7 +486,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 
 	client := server.Client()
@@ -565,7 +625,7 @@ func TestHTTPAuthOriginsResolveSharedHostTenants(t *testing.T) {
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{})
 
-	server := httptest.NewServer(router)
+	server := newInProcessServer(router, false)
 	defer server.Close()
 
 	client := server.Client()
@@ -690,7 +750,7 @@ func TestHTTPAuthAllowsMultipleTenantSessionsFromSingleClient(t *testing.T) {
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -837,7 +897,7 @@ func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
 	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 
 	client := server.Client()
@@ -962,7 +1022,7 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 
 	client := server.Client()
@@ -1043,7 +1103,7 @@ func TestHTTPAuthRefreshProfileStoreError(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, store, refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1084,7 +1144,7 @@ func TestHTTPAuthNonceIssueFailure(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{issueErr: errors.New("nonce issue failure")})
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1136,7 +1196,7 @@ func TestHTTPAuthLoginNonceConsumeFailure(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1186,7 +1246,7 @@ func TestHTTPAuthLoginMissingNonce(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1254,7 +1314,7 @@ func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1320,7 +1380,7 @@ func TestHTTPAuthLoginResynchronizesNonceToken(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1387,7 +1447,7 @@ func TestHTTPAuthLoginAcceptsEmptyGoogleNonce(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1453,7 +1513,7 @@ func TestHTTPAuthLoginUserStoreError(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, store, NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1521,7 +1581,7 @@ func TestHTTPAuthLoginHonorsForwardedProto(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewServer(router)
+	server := newInProcessServer(router, false)
 	defer server.Close()
 	client := server.Client()
 
@@ -1599,7 +1659,7 @@ func TestHTTPAuthLoginUsesDefaultValidatorFactory(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1673,7 +1733,7 @@ func TestHTTPAuthLoginRefreshIssueFailure(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1761,7 +1821,7 @@ func TestHTTPAuthRefreshIssueFailure(t *testing.T) {
 	store := newMutableUserStore()
 	MountAuthRoutes(router, registry, store, refreshStore, nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
@@ -1824,7 +1884,7 @@ func TestHTTPAuthLoginRejectsInvalidJSON(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google", strings.NewReader("not-json"))
@@ -1885,7 +1945,7 @@ func TestHTTPAuthLoginRequiresHTTPS(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewServer(router)
+	server := newInProcessServer(router, false)
 	defer server.Close()
 	client := server.Client()
 
@@ -1960,7 +2020,7 @@ func TestHTTPAuthLoginUnverifiedIdentity(t *testing.T) {
 	router := gin.New()
 	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
 
-	server := httptest.NewTLSServer(router)
+	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
 
