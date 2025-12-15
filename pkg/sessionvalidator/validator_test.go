@@ -52,6 +52,15 @@ func TestNewValidatorRequiresSigningKey(t *testing.T) {
 	}
 }
 
+func TestNewValidatorRequiresIssuer(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{SigningKey: []byte("secret")})
+	if err == nil || !errors.Is(err, ErrMissingIssuer) {
+		t.Fatalf("expected missing issuer error, got %v", err)
+	}
+}
+
 func TestNewValidatorDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -131,6 +140,84 @@ func TestValidateTokenRejectsInvalidCases(t *testing.T) {
 			},
 			expectErr: ErrTokenExpired,
 		},
+		{
+			name: "wrong signing method",
+			tokenFunc: func() string {
+				token := jwt.NewWithClaims(jwt.SigningMethodHS384, Claims{
+					TenantID:        "demo",
+					UserID:          "user-123",
+					UserEmail:       "user@example.com",
+					UserDisplayName: "Demo User",
+					UserAvatarURL:   "https://example.com/avatar.png",
+					UserRoles:       []string{"user"},
+					RegisteredClaims: jwt.RegisteredClaims{
+						Issuer:    "issuer",
+						Subject:   "user-123",
+						IssuedAt:  jwt.NewNumericDate(now),
+						NotBefore: jwt.NewNumericDate(now),
+						ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
+					},
+				})
+				signedValue, signErr := token.SignedString([]byte("secret-key"))
+				if signErr != nil {
+					t.Fatalf("failed to sign token: %v", signErr)
+				}
+				return signedValue
+			},
+			expectErr: ErrInvalidToken,
+		},
+		{
+			name: "not before in the future",
+			tokenFunc: func() string {
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+					TenantID:        "demo",
+					UserID:          "user-123",
+					UserEmail:       "user@example.com",
+					UserDisplayName: "Demo User",
+					UserAvatarURL:   "https://example.com/avatar.png",
+					UserRoles:       []string{"user"},
+					RegisteredClaims: jwt.RegisteredClaims{
+						Issuer:    "issuer",
+						Subject:   "user-123",
+						IssuedAt:  jwt.NewNumericDate(now),
+						NotBefore: jwt.NewNumericDate(now.Add(time.Minute)),
+						ExpiresAt: jwt.NewNumericDate(now.Add(2 * time.Minute)),
+					},
+				})
+				signedValue, signErr := token.SignedString([]byte("secret-key"))
+				if signErr != nil {
+					t.Fatalf("failed to sign token: %v", signErr)
+				}
+				return signedValue
+			},
+			expectErr: ErrInvalidToken,
+		},
+		{
+			name: "issued at in the future",
+			tokenFunc: func() string {
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+					TenantID:        "demo",
+					UserID:          "user-123",
+					UserEmail:       "user@example.com",
+					UserDisplayName: "Demo User",
+					UserAvatarURL:   "https://example.com/avatar.png",
+					UserRoles:       []string{"user"},
+					RegisteredClaims: jwt.RegisteredClaims{
+						Issuer:    "issuer",
+						Subject:   "user-123",
+						IssuedAt:  jwt.NewNumericDate(now.Add(time.Minute)),
+						NotBefore: jwt.NewNumericDate(now.Add(-time.Minute)),
+						ExpiresAt: jwt.NewNumericDate(now.Add(2 * time.Minute)),
+					},
+				})
+				signedValue, signErr := token.SignedString([]byte("secret-key"))
+				if signErr != nil {
+					t.Fatalf("failed to sign token: %v", signErr)
+				}
+				return signedValue
+			},
+			expectErr: ErrInvalidToken,
+		},
 	}
 
 	validator, err := New(Config{
@@ -182,6 +269,18 @@ func TestValidateRequest(t *testing.T) {
 	if missingErr == nil || !errors.Is(missingErr, ErrMissingCookie) {
 		t.Fatalf("expected missing cookie error, got %v", missingErr)
 	}
+
+	emptyCookie := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	emptyCookie.AddCookie(&http.Cookie{Name: "session", Value: "   "})
+	_, emptyCookieErr := validator.ValidateRequest(emptyCookie)
+	if emptyCookieErr == nil || !errors.Is(emptyCookieErr, ErrMissingCookie) {
+		t.Fatalf("expected missing cookie error, got %v", emptyCookieErr)
+	}
+
+	_, nilRequestErr := validator.ValidateRequest(nil)
+	if nilRequestErr == nil || !errors.Is(nilRequestErr, ErrMissingToken) {
+		t.Fatalf("expected missing token error, got %v", nilRequestErr)
+	}
 }
 
 func TestGinMiddleware(t *testing.T) {
@@ -224,5 +323,41 @@ func TestGinMiddleware(t *testing.T) {
 	router.ServeHTTP(responseMissing, requestMissing)
 	if responseMissing.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for missing cookie, got %d", responseMissing.Code)
+	}
+}
+
+func TestGinMiddlewareDefaultsContextKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	now := time.Unix(1700000000, 0).UTC()
+	tokenValue := mintToken(t, []byte("secret-key"), "issuer", now, time.Minute)
+	validator, err := New(Config{
+		SigningKey: []byte("secret-key"),
+		Issuer:     "issuer",
+		Clock:      fixedClock{current: now},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(validator.GinMiddleware(""))
+	router.GET("/protected", func(contextGin *gin.Context) {
+		value, exists := contextGin.Get(DefaultContextKey)
+		if !exists {
+			t.Fatalf("claims missing")
+		}
+		if _, ok := value.(*Claims); !ok {
+			t.Fatalf("unexpected claims type: %T", value)
+		}
+		contextGin.Status(http.StatusOK)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: DefaultCookieName, Value: tokenValue})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
 	}
 }

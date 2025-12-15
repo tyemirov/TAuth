@@ -216,6 +216,30 @@ func TestHandleWhoAmIMissingClaims(t *testing.T) {
 	}
 }
 
+func TestHandleWhoAmIRejectsMissingTenantID(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	store := NewInMemoryUsers()
+	router := gin.New()
+	router.Use(func(contextGin *gin.Context) {
+		contextGin.Set("auth_claims", stubClaims{
+			tenantID: "   ",
+			userID:   "google:sub-1",
+		})
+		contextGin.Next()
+	})
+	router.GET("/me", HandleWhoAmI(store, nil))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when tenant missing, got %d", recorder.Code)
+	}
+}
+
 func TestHandleWhoAmIMissingUser(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
@@ -352,5 +376,12 @@ func TestInMemoryUsers(t *testing.T) {
 
 	if _, _, _, _, err := store.GetUserProfile(context.TODO(), "tenant-b", userID); err == nil {
 		t.Fatalf("expected error when tenant mismatches")
+	}
+}
+
+func TestGetClaimsTypeReturnsNilForNilValue(t *testing.T) {
+	t.Parallel()
+	if getClaimsType(nil) != "nil" {
+		t.Fatalf("expected nil type label")
 	}
 }

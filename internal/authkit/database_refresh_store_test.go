@@ -143,6 +143,37 @@ func TestBuildSQLiteDSNRejectsFileHost(t *testing.T) {
 	}
 }
 
+func TestBuildSQLiteDSNCoversOpaqueAndHostPathVariants(t *testing.T) {
+	opaqueParsed, err := url.Parse("sqlite:file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("failed to parse opaque sqlite url: %v", err)
+	}
+	opaqueDSN, opaqueErr := buildSQLiteDSN(opaqueParsed)
+	if opaqueErr != nil {
+		t.Fatalf("unexpected error building opaque dsn: %v", opaqueErr)
+	}
+	if opaqueDSN != "file::memory:?cache=shared" {
+		t.Fatalf("unexpected opaque dsn: %s", opaqueDSN)
+	}
+
+	hostParsed := &url.URL{
+		Scheme: "sqlite",
+		Host:   "localhost",
+		Path:   "tmp/test.db",
+	}
+	hostDSN, hostErr := buildSQLiteDSN(hostParsed)
+	if hostErr != nil {
+		t.Fatalf("unexpected error building host dsn: %v", hostErr)
+	}
+	if hostDSN != "localhost/tmp/test.db" {
+		t.Fatalf("unexpected host dsn: %s", hostDSN)
+	}
+
+	if _, nilErr := buildSQLiteDSN(nil); nilErr == nil {
+		t.Fatalf("expected error for nil url")
+	}
+}
+
 func TestResolveDialectorRejectsFileHost(t *testing.T) {
 	_, _, err := resolveDialector("sqlite://file:/data/tauth.db")
 	if err == nil {

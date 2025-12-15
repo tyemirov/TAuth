@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -222,10 +221,12 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	shutdownTriggered := make(chan struct{})
+	serverReady := make(chan struct{})
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		server.RegisterOnShutdown(func() {
 			close(shutdownTriggered)
 		})
+		close(serverReady)
 		<-shutdownTriggered
 		return http.ErrServerClosed
 	})
@@ -247,6 +248,12 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 	go func() {
 		done <- runServer(command, nil)
 	}()
+
+	select {
+	case <-serverReady:
+	case <-time.After(time.Second):
+		t.Fatalf("runServer did not start serving before cancellation")
+	}
 
 	cancel()
 
@@ -697,27 +704,14 @@ func TestRunServerEndToEndDemoConfig(t *testing.T) {
 	defer restoreValidator()
 
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
-		testServer := httptest.NewServer(server.Handler)
-		defer testServer.Close()
-
-		req, err := http.NewRequest(http.MethodGet, testServer.URL+"/demo/config.js", nil)
-		if err != nil {
-			return err
-		}
+		req := httptest.NewRequest(http.MethodGet, "/demo/config.js", nil)
 		req.Host = "beta.localhost"
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
+		recorder := httptest.NewRecorder()
+		server.Handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			return fmt.Errorf("expected 200 from /demo/config.js, got %d", recorder.Code)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("expected 200 from /demo/config.js, got %d", resp.StatusCode)
-		}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-		if !strings.Contains(string(body), "beta-client.apps.googleusercontent.com") {
+		if !strings.Contains(recorder.Body.String(), "beta-client.apps.googleusercontent.com") {
 			return fmt.Errorf("expected beta client in config")
 		}
 
