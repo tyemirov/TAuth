@@ -55,6 +55,7 @@ I will replace the GAuss redirect login flow with the TAuth browser flow.
 
 - Load /static/auth-client.js from the TAuth host and initialize it on app startup.
 - Use the authenticated and unauthenticated callbacks to drive the UI state, replacing the GAuss login page and redirect flow.
+- Use `getAuthEndpoints()` to derive `/auth/nonce` and `/auth/google` URLs from the helper (the base URL defaults to the script origin unless overridden).
 - Route all authenticated API calls through a fetch wrapper that can call /auth/refresh when a 401 response is returned.
 - Replace GAuss logout with /auth/logout so refresh tokens are revoked and cookies are cleared.
 

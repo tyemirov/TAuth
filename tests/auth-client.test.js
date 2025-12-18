@@ -4,9 +4,16 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
-async function loadAuthClient(fetchImpl, broadcastSink, tenantId, locationOrigin) {
+async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   const scriptPath = path.join(__dirname, "..", "web", "auth-client.js");
   const source = await fs.readFile(scriptPath, "utf8");
+  const resolvedOptions = options || {};
+  const resolvedTenantId = resolvedOptions.tenantId;
+  const resolvedOrigin =
+    resolvedOptions.locationOrigin || "https://ui.example.com";
+  const scriptSrc = resolvedOptions.scriptSrc || "";
+  const dataBaseUrl = resolvedOptions.dataBaseUrl || "";
+  const documentBaseUrl = resolvedOptions.documentBaseUrl || "";
 
   const context = {
     fetch: fetchImpl,
@@ -26,25 +33,34 @@ async function loadAuthClient(fetchImpl, broadcastSink, tenantId, locationOrigin
       }
     },
   };
-  const resolvedOrigin = locationOrigin || "https://ui.example.com";
   context.location = { origin: resolvedOrigin };
   context.document = {
     currentScript: {
       getAttribute(attributeName) {
         if (attributeName === "data-tenant-id") {
-          return tenantId || "";
+          return resolvedTenantId || "";
+        }
+        if (attributeName === "data-base-url") {
+          return dataBaseUrl || "";
+        }
+        if (attributeName === "src") {
+          return scriptSrc || "";
+        }
+        return null;
+      },
+      src: scriptSrc,
+    },
+    documentElement: {
+      getAttribute(attributeName) {
+        if (attributeName === "data-tauth-base-url") {
+          return documentBaseUrl || "";
         }
         return null;
       },
     },
-    documentElement: {
-      getAttribute() {
-        return null;
-      },
-    },
   };
-  if (typeof tenantId === "string") {
-    context.__TAUTH_TENANT_ID__ = tenantId;
+  if (typeof resolvedTenantId === "string") {
+    context.__TAUTH_TENANT_ID__ = resolvedTenantId;
   }
   context.window = context;
   context.window.location = context.location;
@@ -201,12 +217,9 @@ test("auth client sends tenant header derived from location origin when unset", 
     { status: 401, body: {} },
   ]);
   const events = [];
-  const context = await loadAuthClient(
-    fetch,
-    events,
-    undefined,
-    "http://ui-origin.localhost",
-  );
+  const context = await loadAuthClient(fetch, events, {
+    locationOrigin: "http://ui-origin.localhost",
+  });
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
@@ -225,6 +238,96 @@ test("auth client sends tenant header derived from location origin when unset", 
     "X-TAuth-Tenant",
     "http://ui-origin.localhost",
   );
+});
+
+test("auth client derives baseUrl from script hints", async () => {
+  const scenarios = [
+    {
+      name: "script origin fallback",
+      loadOptions: {
+        scriptSrc: "https://auth.example.com/static/auth-client.js",
+      },
+      expectedUrl: "https://auth.example.com/me",
+    },
+    {
+      name: "data-base-url override",
+      loadOptions: {
+        scriptSrc: "https://auth.example.com/static/auth-client.js",
+        dataBaseUrl: "https://override.example.com",
+      },
+      expectedUrl: "https://override.example.com/me",
+    },
+    {
+      name: "document base url override",
+      loadOptions: {
+        scriptSrc: "https://auth.example.com/static/auth-client.js",
+        documentBaseUrl: "https://document.example.com",
+      },
+      expectedUrl: "https://document.example.com/me",
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const fetch = createFetchWithQueue([
+      {
+        status: 200,
+        body: {
+          user_id: "user-123",
+          user_email: "user@example.com",
+          display: "Demo User",
+          roles: ["user"],
+        },
+      },
+    ]);
+    const context = await loadAuthClient(fetch, [], scenario.loadOptions);
+
+    await context.initAuthClient({
+      onAuthenticated() {},
+      onUnauthenticated() {},
+    });
+
+    assert.equal(
+      fetch.calls[0].url,
+      scenario.expectedUrl,
+      `expected baseUrl from ${scenario.name}`,
+    );
+  }
+});
+
+test("auth client exposes endpoint map for core routes", async () => {
+  const fetch = createFetchWithQueue([
+    {
+      status: 200,
+      body: {
+        user_id: "endpoint-user",
+        user_email: "endpoint@example.com",
+        display: "Endpoint User",
+        roles: ["user"],
+      },
+    },
+  ]);
+  const context = await loadAuthClient(fetch, [], {
+    scriptSrc: "https://auth.example.com/static/auth-client.js",
+  });
+
+  await context.initAuthClient({
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+
+  const endpoints = context.getAuthEndpoints();
+  const expected = {
+    baseUrl: "https://auth.example.com",
+    meUrl: "https://auth.example.com/me",
+    refreshUrl: "https://auth.example.com/auth/refresh",
+    logoutUrl: "https://auth.example.com/auth/logout",
+    nonceUrl: "https://auth.example.com/auth/nonce",
+    googleUrl: "https://auth.example.com/auth/google",
+  };
+
+  for (const [key, value] of Object.entries(expected)) {
+    assert.equal(endpoints[key], value, `expected ${key} endpoint`);
+  }
 });
 
 test("initAuthClient attaches tenant override header when configured", async () => {
@@ -291,7 +394,9 @@ test("initAuthClient uses detected tenant id when option omitted", async () => {
     roles: ["user"],
   };
   const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
-  const context = await loadAuthClient(fetch, [], "script-tenant");
+  const context = await loadAuthClient(fetch, [], {
+    tenantId: "script-tenant",
+  });
 
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",

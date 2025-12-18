@@ -9,6 +9,7 @@ tools/
 *.json
 !package.json
 !package-lock.json
+!tsconfig.json
 # Managed by gix gitignore workflow
 .env.*
 .DS_Store
