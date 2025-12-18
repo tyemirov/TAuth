@@ -15,3 +15,6 @@ tools/
 qodana.yaml
 .idea/
 bin/
+.cache/
+.gocache/
+coverage.out
