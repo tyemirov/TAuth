@@ -166,7 +166,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if loadErr != nil {
 		return loadErr
 	}
-	registry, registryErr := buildTenantRegistry(baseServerConfig, tenantConfig, enableCORS)
+	sameSiteResolver := authkit.NewSameSiteResolver(enableCORS)
+	registry, registryErr := authkit.BuildTenantRegistry(baseServerConfig, tenantConfig, sameSiteResolver)
 	if registryErr != nil {
 		return registryErr
 	}
@@ -270,41 +271,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	shutdownServer()
 	return nil
-}
-
-func deriveSameSite(enableCORS bool, allowInsecure bool) http.SameSite {
-	if allowInsecure {
-		return http.SameSiteLaxMode
-	}
-	if enableCORS {
-		return http.SameSiteNoneMode
-	}
-	return http.SameSiteStrictMode
-}
-
-func buildTenantRegistry(base authkit.ServerConfig, tenantConfig tenants.Config, enableCORS bool) (authkit.TenantRegistry, error) {
-	tenantList := tenantConfig.Tenants()
-	if len(tenantList) == 0 {
-		return authkit.TenantRegistry{}, fmt.Errorf("config: no tenants configured")
-	}
-	configs := make(map[string]authkit.ServerConfig, len(tenantList))
-	for _, tenant := range tenantList {
-		tenantServerConfig := base
-		tenantServerConfig.TenantID = string(tenant.ID())
-		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
-		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
-		tenantServerConfig.CookieDomain = tenant.CookieDomain()
-		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()
-		tenantServerConfig.RefreshCookieName = tenant.RefreshCookieName()
-		tenantServerConfig.SessionTTL = tenant.SessionTTL()
-		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
-		tenantServerConfig.NonceTTL = tenant.NonceTTL()
-		tenantServerConfig.AllowInsecureHTTP = tenant.AllowInsecureHTTP()
-		tenantServerConfig.SameSiteMode = deriveSameSite(enableCORS, tenant.AllowInsecureHTTP())
-		configs[tenantServerConfig.TenantID] = tenantServerConfig
-	}
-	defaultTenantID := string(tenantList[0].ID())
-	return authkit.NewTenantRegistryFromMap(defaultTenantID, configs), nil
 }
 
 func serveStaticJSHandler(config tenants.Config, asset string, allowHeaderOverride bool) gin.HandlerFunc {

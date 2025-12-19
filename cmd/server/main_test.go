@@ -315,7 +315,8 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 		RefreshCookieName: refreshCookieName,
 	}
 
-	registry, err := buildTenantRegistry(base, tenantConfig, true)
+	sameSiteResolver := authkit.NewSameSiteResolver(true)
+	registry, err := authkit.BuildTenantRegistry(base, tenantConfig, sameSiteResolver)
 	if err != nil {
 		t.Fatalf("expected registry build to succeed, got %v", err)
 	}
@@ -394,7 +395,8 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 		t.Fatalf("load tenant config: %v", err)
 	}
 
-	registry, err := buildTenantRegistry(base, tenantConfig, false)
+	sameSiteResolver := authkit.NewSameSiteResolver(false)
+	registry, err := authkit.BuildTenantRegistry(base, tenantConfig, sameSiteResolver)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
 	}
@@ -875,16 +877,16 @@ func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
 
 func TestDeriveSameSite(t *testing.T) {
 	t.Parallel()
-	if mode := deriveSameSite(true, true); mode != http.SameSiteLaxMode {
+	if mode := authkit.NewSameSiteResolver(true)(true); mode != http.SameSiteLaxMode {
 		t.Fatalf("expected SameSiteLax when CORS enabled but HTTP is allowed, got %v", mode)
 	}
-	if mode := deriveSameSite(true, false); mode != http.SameSiteNoneMode {
+	if mode := authkit.NewSameSiteResolver(true)(false); mode != http.SameSiteNoneMode {
 		t.Fatalf("expected SameSiteNone when CORS enabled, got %v", mode)
 	}
-	if mode := deriveSameSite(false, true); mode != http.SameSiteLaxMode {
+	if mode := authkit.NewSameSiteResolver(false)(true); mode != http.SameSiteLaxMode {
 		t.Fatalf("expected SameSiteLax when insecure allowed, got %v", mode)
 	}
-	if mode := deriveSameSite(false, false); mode != http.SameSiteStrictMode {
+	if mode := authkit.NewSameSiteResolver(false)(false); mode != http.SameSiteStrictMode {
 		t.Fatalf("expected SameSiteStrict for default, got %v", mode)
 	}
 }
