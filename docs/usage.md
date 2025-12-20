@@ -273,7 +273,7 @@ When using `auth-client.js` or the mpr‑ui header component, this flow is handl
 
 ## 6. HTTP endpoints
 
-This section documents the public HTTP surface from a client’s perspective. See `ARCHITECTURE.md` for a stable contract summary and versioning notes.
+This section documents the public HTTP surface from a client’s perspective. See `ARCHITECTURE.md` for a stable contract summary and versioning notes. These endpoints are served exclusively by the TAuth server; consuming applications should call them, not reimplement them.
 
 ### 6.1 `POST /auth/nonce`
 
@@ -363,6 +363,7 @@ Optional demo page shipped with the repository. Intended for local development o
 ## 6.8 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
+If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
 
 ### 6.8.1 Basic validator setup
 

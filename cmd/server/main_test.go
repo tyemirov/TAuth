@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"go.uber.org/zap"
@@ -74,7 +75,7 @@ func TestPrepareServerConfigLoadsFile(t *testing.T) {
 	if value == nil {
 		t.Fatalf("expected config in context")
 	}
-	if _, ok := value.(*applicationConfig); !ok {
+	if _, ok := value.(*appconfig.ApplicationConfig); !ok {
 		t.Fatalf("expected loaded config, got %#v", value)
 	}
 }
@@ -88,7 +89,7 @@ func TestPrepareServerConfigUsesEnvOverride(t *testing.T) {
 		t.Fatalf("expected prepare to succeed with env override: %v", err)
 	}
 	value := command.Context().Value(appConfigContextKey)
-	if _, ok := value.(*applicationConfig); !ok {
+	if _, ok := value.(*appconfig.ApplicationConfig); !ok {
 		t.Fatalf("expected applicationConfig in context")
 	}
 }
@@ -98,7 +99,7 @@ func TestLoadApplicationConfigRequiresTenants(t *testing.T) {
 	cfg.Tenants = nil
 	path := writeConfigFileFromStruct(t, cfg)
 
-	_, err := loadApplicationConfig(path)
+	_, err := appconfig.LoadConfig(path)
 	if err == nil {
 		t.Fatalf("expected error when tenants missing")
 	}
@@ -763,9 +764,9 @@ func writeTenantsFileContents(t *testing.T, contents string) string {
 	return path
 }
 
-func sampleApplicationConfig() applicationConfig {
-	return applicationConfig{
-		Server: serverSettings{
+func sampleApplicationConfig() appconfig.ApplicationConfig {
+	return appconfig.ApplicationConfig{
+		Server: appconfig.ServerSettings{
 			ListenAddr:                 ":0",
 			DatabaseURL:                "",
 			EnableCORS:                 false,
@@ -805,7 +806,7 @@ func sampleApplicationConfig() applicationConfig {
 	}
 }
 
-func writeConfigFileFromStruct(t *testing.T, cfg applicationConfig) string {
+func writeConfigFileFromStruct(t *testing.T, cfg appconfig.ApplicationConfig) string {
 	t.Helper()
 	payload, err := yaml.Marshal(cfg)
 	if err != nil {

@@ -3,6 +3,7 @@
 *Google Sign-In + JWT sessions for single-origin apps*
 
 TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `auth-client.js` module.
+TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
 ---
 

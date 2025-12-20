@@ -16,6 +16,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-107] TAuth requires certain endpoints in the consuming application. Can these endpoints be automatically supplied by the TAuth client instead of a consuming application implementing these steps itself?
 Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /me. If we can supply them, even partially, that would ease the burden of integration with TAuth further. In case we can implement it, update @docs/migration.md documentation — Added auth-client base URL auto-detection + `getAuthEndpoints()`, updated migration guidance, expanded auth-client regression tests, and ensured the demo footer/persistence flows stay compatible with the legacy mpr-ui bundle during browser automation.
 - [x] [TA-107] Reopen: embed the auth endpoints in Gin apps so backend clients can mount `/auth/*` + `/me` without reimplementing them. — Added `pkg/tauthserver` with option wiring, shared tenant registry builder, and integration-style tests that exercise the mounted endpoints.
+- [x] [TA-107] Correction: remove endpoint-embedding packages, keep `/auth/*` + `/me` server-only, and expand `pkg/sessionvalidator` to load issuer/cookie names from `config.yaml`; docs now state the endpoint contract explicitly.
 
 ## Improvements (212–299)
 

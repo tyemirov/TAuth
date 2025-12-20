@@ -17,6 +17,7 @@ TAuth is a standalone service that verifies Google Identity Services ID tokens a
 
 - Session cookies are app_session (JWT access token) and app_refresh (opaque refresh token).
 - Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /me.
+- These endpoints are provided by the TAuth server only; consuming apps should call them rather than implement them.
 - Tenant configuration is YAML-driven and includes host routing, cookie domain, Google web client ID, signing keys, and TTLs.
 - Session validation is performed by verifying the JWT signature, issuer, and time-based claims in app_session.
 

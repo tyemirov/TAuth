@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
@@ -58,12 +59,12 @@ const (
 	sessionCookieName   = "app_session"
 	refreshCookieName   = "app_refresh"
 	defaultTenantID     = "default"
-	defaultAppJWTIssuer = "tauth"
+	defaultAppJWTIssuer = appconfig.DefaultJWTIssuer
 	defaultCookieDomain = ""
 
-	configCodeMissingConfigFile       = "config.missing_config_file"
-	configCodeInvalidConfigFile       = "config.invalid_config_file"
-	configCodeMissingTenants          = "config.missing_tenants"
+	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
+	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
+	configCodeMissingTenants          = appconfig.ErrorCodeMissingTenants
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"
 	configCodeGoogleValidatorInit     = "config.google_validator_init"
 )
@@ -80,7 +81,7 @@ func prepareServerConfig(command *cobra.Command, arguments []string) error {
 	if envPath := strings.TrimSpace(os.Getenv("TAUTH_CONFIG_FILE")); envPath != "" {
 		configPath = envPath
 	}
-	appConfig, loadErr := loadApplicationConfig(configPath)
+	appConfig, loadErr := appconfig.LoadConfig(configPath)
 	if loadErr != nil {
 		return loadErr
 	}
@@ -124,7 +125,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	defer stopShutdownContext()
 
 	contextValue := commandContext.Value(appConfigContextKey)
-	appConfig, ok := contextValue.(*applicationConfig)
+	appConfig, ok := contextValue.(*appconfig.ApplicationConfig)
 	if !ok || appConfig == nil {
 		return configError(configCodeUninitializedServerConf, "server configuration not prepared; PreRunE must execute before RunE")
 	}
@@ -162,7 +163,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 		logger.Info("using in-memory refresh token store")
 	}
 
-	tenantConfig, loadErr := tenants.LoadConfigFromDocument(appConfig.tenantDocument())
+	tenantConfig, loadErr := tenants.LoadConfigFromDocument(appConfig.TenantDocument())
 	if loadErr != nil {
 		return loadErr
 	}

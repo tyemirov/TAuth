@@ -10,7 +10,7 @@
 - TA-104: Wired multi-tenant routing end-to-end (`--tenants_file`, optional header overrides, `TenantRegistry`), so each request uses the correct per-tenant cookie domains/TTLs and host mismatches fallback cleanly.
 - TA-106: Made the tenants JSON file mandatory for every deployment, rewired CLI/tests, and refreshed docs so single-tenant and multi-tenant setups share the same configuration workflow.
 - TA-105: Added the `tenantId` option to `auth-client.js`, updated documentation so front-ends know when to use the override header, and expanded Node tests covering two tenants + header-based refresh flows.
-- TA-107: `auth-client.js` now derives its base URL from the script origin and exposes `getAuthEndpoints()`; added `pkg/tauthserver` to embed `/auth/*` + `/me` endpoints in Gin apps with shared tenant registry wiring.
+- TA-107: `auth-client.js` now derives its base URL from the script origin and exposes `getAuthEndpoints()`; `pkg/sessionvalidator` can now load tenant signing keys, issuer, and cookie names from `config.yaml` for downstream JWT validation.
 
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
