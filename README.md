@@ -83,6 +83,8 @@ tauth --config=config.yaml
 # or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
 ```
 
+Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys are reported as fingerprints only).
+
 > SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 
 When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`.

@@ -50,7 +50,8 @@ func newRootCommand() *cobra.Command {
 		RunE:    runServer,
 	}
 
-	rootCmd.Flags().String("config", "config.yaml", "Path to application config file (overridden by TAUTH_CONFIG_FILE env)")
+	rootCmd.PersistentFlags().String("config", "config.yaml", "Path to application config file (overridden by TAUTH_CONFIG_FILE env)")
+	rootCmd.AddCommand(newPreflightCommand())
 
 	return rootCmd
 }
@@ -74,12 +75,9 @@ type contextKey string
 const appConfigContextKey contextKey = "appConfig"
 
 func prepareServerConfig(command *cobra.Command, arguments []string) error {
-	configPath, err := command.Flags().GetString("config")
+	configPath, err := resolveConfigPath(command)
 	if err != nil {
 		return err
-	}
-	if envPath := strings.TrimSpace(os.Getenv("TAUTH_CONFIG_FILE")); envPath != "" {
-		configPath = envPath
 	}
 	appConfig, loadErr := appconfig.LoadConfig(configPath)
 	if loadErr != nil {
@@ -91,6 +89,30 @@ func prepareServerConfig(command *cobra.Command, arguments []string) error {
 	}
 	command.SetContext(context.WithValue(existingContext, appConfigContextKey, appConfig))
 	return nil
+}
+
+func resolveConfigPath(command *cobra.Command) (string, error) {
+	configPath, err := readConfigFlag(command)
+	if err != nil {
+		return "", err
+	}
+	if envPath := strings.TrimSpace(os.Getenv("TAUTH_CONFIG_FILE")); envPath != "" {
+		configPath = envPath
+	}
+	return configPath, nil
+}
+
+func readConfigFlag(command *cobra.Command) (string, error) {
+	if command.Flags().Lookup("config") != nil {
+		return command.Flags().GetString("config")
+	}
+	if command.PersistentFlags().Lookup("config") != nil {
+		return command.PersistentFlags().GetString("config")
+	}
+	if command.InheritedFlags().Lookup("config") != nil {
+		return command.InheritedFlags().GetString("config")
+	}
+	return "", fmt.Errorf("%s: config flag not defined", configCodeMissingConfigFile)
 }
 
 func configError(code, message string) error {

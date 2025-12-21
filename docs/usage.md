@@ -103,6 +103,16 @@ For a full local stack (TAuth + demo UI) without installing Go:
 
 Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
 
+### 2.5 Preflight validation (pre-start)
+
+Use the preflight command to validate configuration and emit a redacted effective-config report before you launch the service:
+
+```bash
+tauth preflight --config=config.yaml
+```
+
+The report includes effective server settings, per-tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints (never raw keys). To include the raw `allowed_hosts` list, pass `--include-hosts`.
+
 ---
 
 ## 3. Sessions and cookies

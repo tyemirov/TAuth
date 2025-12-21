@@ -64,7 +64,7 @@ func TestRunServerMissingConfig(t *testing.T) {
 func TestPrepareServerConfigLoadsFile(t *testing.T) {
 	configPath := writeConfigFileFromStruct(t, sampleApplicationConfig())
 	command := newRootCommand()
-	if err := command.Flags().Set("config", configPath); err != nil {
+	if err := command.PersistentFlags().Set("config", configPath); err != nil {
 		t.Fatalf("failed to set config flag: %v", err)
 	}
 
@@ -894,7 +894,7 @@ func TestDeriveSameSite(t *testing.T) {
 
 func TestPrepareServerConfigMissingFile(t *testing.T) {
 	command := newRootCommand()
-	if err := command.Flags().Set("config", "/path/does/not/exist"); err != nil {
+	if err := command.PersistentFlags().Set("config", "/path/does/not/exist"); err != nil {
 		t.Fatalf("failed to set config flag: %v", err)
 	}
 	err := command.PreRunE(command, nil)
