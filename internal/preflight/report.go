@@ -14,7 +14,7 @@ import (
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
 	"github.com/tyemirov/tauth/internal/tenants"
-	"github.com/tyemirov/tauth/pkg/preflight"
+	"github.com/tyemirov/utils/preflight"
 )
 
 const (
