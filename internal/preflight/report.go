@@ -2,8 +2,6 @@ package preflight
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,42 +14,29 @@ import (
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/pkg/preflight"
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v1"
+	reportSchemaVersion        = "tauth.preflight.v2"
 	endpointContractVersion    = "tauth.http.v1"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
 	errorCodeBuildRegistry     = "preflight.build_registry"
 	errorCodeRefreshStoreCheck = "preflight.refresh_store"
-	errorCodeEncodeReport      = "preflight.encode_report"
+	errorCodeBuildServiceInfo  = "preflight.build_service_info"
+	errorCodeBuildReport       = "preflight.build_report"
+	refreshStoreName           = "refresh_store"
+	refreshStoreDriverKey      = "driver"
+	refreshStoreTypeMemory     = "memory"
+	refreshStoreTypeDatabase   = "database"
 )
 
 var errPreflight = errors.New("preflight.invalid")
 
-type hostRedactionMode int
-
-const (
-	hostRedactionModeRedacted hostRedactionMode = iota + 1
-	hostRedactionModeFull
-)
-
-type reportPayload struct {
-	SchemaVersion string          `json:"schema_version"`
-	Service       servicePayload  `json:"service"`
-	Server        serverPayload   `json:"server"`
-	Tenants       []tenantPayload `json:"tenants"`
-	Dependencies  dependencies    `json:"dependencies"`
-}
-
-type servicePayload struct {
-	Name                    string `json:"service_name"`
-	Version                 string `json:"version"`
-	Commit                  string `json:"build_commit"`
-	BuildTime               string `json:"build_time"`
-	ConfigSchemaVersion     string `json:"config_schema_version"`
-	EndpointContractVersion string `json:"endpoint_contract_version"`
+type effectiveConfigPayload struct {
+	Server  serverPayload   `json:"server"`
+	Tenants []tenantPayload `json:"tenants"`
 }
 
 type serverPayload struct {
@@ -80,27 +65,17 @@ type tenantPayload struct {
 	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
 }
 
-type dependencies struct {
-	RefreshStore refreshStorePayload `json:"refresh_store"`
-}
-
-type refreshStorePayload struct {
-	Type   string `json:"type"`
-	Driver string `json:"driver"`
-	Ready  bool   `json:"ready"`
-}
-
 // BuildRedactedReport builds a preflight report with redacted hostnames.
 func BuildRedactedReport(configPath string) ([]byte, error) {
-	return buildReport(configPath, hostRedactionModeRedacted)
+	return buildReport(configPath, preflight.RedactionModeRedacted)
 }
 
 // BuildFullReport builds a preflight report with full hostnames.
 func BuildFullReport(configPath string) ([]byte, error) {
-	return buildReport(configPath, hostRedactionModeFull)
+	return buildReport(configPath, preflight.RedactionModeFull)
 }
 
-func buildReport(configPath string, mode hostRedactionMode) ([]byte, error) {
+func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error) {
 	config, loadErr := appconfig.LoadConfig(configPath)
 	if loadErr != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeLoadConfig, loadErr)
@@ -114,35 +89,30 @@ func buildReport(configPath string, mode hostRedactionMode) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeBuildRegistry, registryErr)
 	}
 
-	refreshStore, refreshStoreErr := buildRefreshStorePayload(config.Server.DatabaseURL)
-	if refreshStoreErr != nil {
-		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeRefreshStoreCheck, refreshStoreErr)
+	serviceInfo, serviceErr := preflight.NewServiceInfo(
+		buildinfo.ServiceName,
+		buildinfo.Version,
+		buildinfo.Commit,
+		buildinfo.BuildTime,
+		appconfig.ConfigSchemaVersion,
+		endpointContractVersion,
+	)
+	if serviceErr != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeBuildServiceInfo, serviceErr)
 	}
 
-	report := reportPayload{
-		SchemaVersion: reportSchemaVersion,
-		Service: servicePayload{
-			Name:                    buildinfo.ServiceName,
-			Version:                 buildinfo.Version,
-			Commit:                  buildinfo.Commit,
-			BuildTime:               buildinfo.BuildTime,
-			ConfigSchemaVersion:     appconfig.ConfigSchemaVersion,
-			EndpointContractVersion: endpointContractVersion,
-		},
-		Server: serverPayload{
-			EnableCORS:                 bool(config.Server.EnableCORS),
-			CORSAllowedOrigins:         append([]string(nil), config.Server.CORSAllowedOrigins...),
-			EnableTenantHeaderOverride: bool(config.Server.EnableTenantHeaderOverride),
-		},
-		Tenants:      buildTenantPayloads(tenantConfig, registry, mode),
-		Dependencies: dependencies{RefreshStore: refreshStore},
+	reporter := configReporter{
+		config:       config,
+		tenantConfig: tenantConfig,
+		registry:     registry,
 	}
+	refreshStoreChecker := refreshStoreDependency{databaseURL: config.Server.DatabaseURL}
 
-	reportBytes, marshalErr := json.MarshalIndent(report, "", "  ")
-	if marshalErr != nil {
-		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeEncodeReport, marshalErr)
+	reportBytes, reportErr := preflight.BuildReport(context.Background(), reportSchemaVersion, serviceInfo, reporter, []preflight.DependencyChecker{refreshStoreChecker}, mode)
+	if reportErr != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeBuildReport, reportErr)
 	}
-	return append(reportBytes, '\n'), nil
+	return reportBytes, nil
 }
 
 func buildTenantRegistry(config *appconfig.ApplicationConfig, tenantConfig tenants.Config) (authkit.TenantRegistry, error) {
@@ -153,7 +123,29 @@ func buildTenantRegistry(config *appconfig.ApplicationConfig, tenantConfig tenan
 	return authkit.BuildTenantRegistry(baseConfig, tenantConfig, sameSiteResolver)
 }
 
-func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry, mode hostRedactionMode) []tenantPayload {
+type configReporter struct {
+	config       *appconfig.ApplicationConfig
+	tenantConfig tenants.Config
+	registry     authkit.TenantRegistry
+}
+
+func (reporter configReporter) Build(mode preflight.RedactionMode) (json.RawMessage, error) {
+	payload := effectiveConfigPayload{
+		Server: serverPayload{
+			EnableCORS:                 bool(reporter.config.Server.EnableCORS),
+			CORSAllowedOrigins:         append([]string(nil), reporter.config.Server.CORSAllowedOrigins...),
+			EnableTenantHeaderOverride: bool(reporter.config.Server.EnableTenantHeaderOverride),
+		},
+		Tenants: buildTenantPayloads(reporter.tenantConfig, reporter.registry, mode),
+	}
+	payloadBytes, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return nil, marshalErr
+	}
+	return payloadBytes, nil
+}
+
+func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry, mode preflight.RedactionMode) []tenantPayload {
 	tenantList := config.Tenants()
 	payloads := make([]tenantPayload, 0, len(tenantList))
 	for _, tenant := range tenantList {
@@ -162,14 +154,14 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 		hosts := tenant.Hosts()
 		hostHashes := make([]string, 0, len(hosts))
 		for _, host := range hosts {
-			hostHashes = append(hostHashes, sha256Hex([]byte(host)))
+			hostHashes = append(hostHashes, preflight.HashSHA256Hex([]byte(host)))
 		}
 		sort.Strings(hostHashes)
 
 		payload := tenantPayload{
 			TenantID:                 tenantID,
 			DisplayName:              tenant.DisplayName(),
-			AllowedHostsRedacted:     mode == hostRedactionModeRedacted,
+			AllowedHostsRedacted:     mode == preflight.RedactionModeRedacted,
 			AllowedHostsCount:        len(hosts),
 			AllowedHostHashes:        hostHashes,
 			GoogleWebClientID:        tenant.GoogleWebClientID(),
@@ -182,10 +174,10 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			AllowInsecureHTTP:        tenant.AllowInsecureHTTP(),
 			SameSiteMode:             formatSameSiteMode(serverConfig.SameSiteMode),
 			JWTIssuer:                serverConfig.AppJWTIssuer,
-			JWTSigningKeyFingerprint: sha256Hex(tenant.SigningKey()),
+			JWTSigningKeyFingerprint: preflight.HashSHA256Hex(tenant.SigningKey()),
 		}
 
-		if mode == hostRedactionModeFull {
+		if mode == preflight.RedactionModeFull {
 			payload.AllowedHosts = append([]string(nil), hosts...)
 		}
 		payloads = append(payloads, payload)
@@ -193,25 +185,35 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 	return payloads
 }
 
-func buildRefreshStorePayload(databaseURL string) (refreshStorePayload, error) {
-	trimmedURL := strings.TrimSpace(databaseURL)
+type refreshStoreDependency struct {
+	databaseURL string
+}
+
+func (dependency refreshStoreDependency) Check(ctx context.Context) (preflight.DependencyStatus, error) {
+	trimmedURL := strings.TrimSpace(dependency.databaseURL)
 	if trimmedURL == "" {
-		return refreshStorePayload{
-			Type:   "memory",
-			Driver: "memory",
-			Ready:  true,
+		return preflight.DependencyStatus{
+			Name:  refreshStoreName,
+			Type:  refreshStoreTypeMemory,
+			Ready: true,
+			Details: map[string]string{
+				refreshStoreDriverKey: refreshStoreTypeMemory,
+			},
 		}, nil
 	}
-	contextDeadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	contextDeadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	store, storeErr := authkit.NewDatabaseRefreshTokenStore(contextDeadline, trimmedURL)
 	if storeErr != nil {
-		return refreshStorePayload{}, storeErr
+		return preflight.DependencyStatus{}, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeRefreshStoreCheck, storeErr)
 	}
-	return refreshStorePayload{
-		Type:   "database",
-		Driver: store.Driver(),
-		Ready:  true,
+	return preflight.DependencyStatus{
+		Name:  refreshStoreName,
+		Type:  refreshStoreTypeDatabase,
+		Ready: true,
+		Details: map[string]string{
+			refreshStoreDriverKey: store.Driver(),
+		},
 	}, nil
 }
 
@@ -226,13 +228,4 @@ func formatSameSiteMode(mode http.SameSite) string {
 	default:
 		return "Default"
 	}
-}
-
-func sha256Hex(payload []byte) string {
-	return hex.EncodeToString(hashSHA256(payload))
-}
-
-func hashSHA256(payload []byte) []byte {
-	hasher := sha256.Sum256(payload)
-	return hasher[:]
 }

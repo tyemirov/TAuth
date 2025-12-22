@@ -111,7 +111,14 @@ Use the preflight command to validate configuration and emit a redacted effectiv
 tauth preflight --config=config.yaml
 ```
 
-The report includes effective server settings, per-tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints (never raw keys). To include the raw `allowed_hosts` list, pass `--include-hosts`.
+The report includes effective server settings, per-tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints (never raw keys). Redacted reports still emit `allowed_host_hashes` and `jwt_signing_key_fingerprint` so external validators can compare secrets without exposing them. To include the raw `allowed_hosts` list, pass `--include-hosts`.
+
+The JSON payload is versioned and shaped as:
+- `schema_version`, `service` metadata
+- `effective_config` (server + tenant settings)
+- `dependencies` (preflight checks with readiness status)
+
+The preflight builder is generalized under `pkg/preflight` with a Viper-based adapter (`pkg/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
 
 ---
 
