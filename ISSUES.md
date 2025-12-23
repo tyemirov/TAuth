@@ -47,6 +47,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — README now surfaces the hosted + local deployments, points custom flows at ARCHITECTURE.md, and the detailed GIS/nonce handshake (with sample code) was moved under `ARCHITECTURE.md#google-sign-in-exchange`.
 - [x] [TA-411] Move the preflight package from `pkg/preflight` to `tools/utils/preflight` and update references. — Relocated the preflight module into the shared utils repo, rewired imports, and updated documentation references.
 - [x] [TA-412] Replace local utils replaces with remote module usage so only `github.com/tyemirov/utils/preflight` is required. — Removed the local replace, pinned the utils module version, and updated documentation references.
+- [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image. — Added `/web` as a Docker volume and copied the web assets into the image.
 
 ## Planning
 So not work on these, not ready
