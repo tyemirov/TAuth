@@ -17,6 +17,7 @@ TAuth is a standalone service that verifies Google Identity Services ID tokens a
 
 - Session cookies are app_session (JWT access token) and app_refresh (opaque refresh token).
 - Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /me.
+- These endpoints are provided by the TAuth server only; consuming apps should call them rather than implement them.
 - Tenant configuration is YAML-driven and includes host routing, cookie domain, Google web client ID, signing keys, and TTLs.
 - Session validation is performed by verifying the JWT signature, issuer, and time-based claims in app_session.
 
@@ -55,6 +56,7 @@ I will replace the GAuss redirect login flow with the TAuth browser flow.
 
 - Load /static/auth-client.js from the TAuth host and initialize it on app startup.
 - Use the authenticated and unauthenticated callbacks to drive the UI state, replacing the GAuss login page and redirect flow.
+- Use `getAuthEndpoints()` to derive `/auth/nonce` and `/auth/google` URLs from the helper (the base URL defaults to the script origin unless overridden).
 - Route all authenticated API calls through a fetch wrapper that can call /auth/refresh when a 401 response is returned.
 - Replace GAuss logout with /auth/logout so refresh tokens are revoked and cookies are cleared.
 

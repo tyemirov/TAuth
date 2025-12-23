@@ -36,6 +36,8 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | GET    | `/static/auth-client.js` | Serve the client helper                        | `200` JavaScript                            |
 | GET    | `/demo`         | Static demo page (local development)                   | `200` HTML                                  |
 
+These endpoints are implemented only by the TAuth server. Consuming applications should call them, not host copies.
+
 ### 3.2 Cookies
 
 - `app_session`: short-lived JWT access token (`HttpOnly`, `Secure`, `SameSite` strict by default).
@@ -171,6 +173,7 @@ type RefreshTokenStore interface {
 - Smart constructor enforces signing key and issuer configuration, with optional cookie name overrides.
 - Provides `ValidateToken`, `ValidateRequest`, and a Gin middleware adapter to populate typed `Claims`.
 - Shares the same claim shape (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`) used by the server.
+- Includes `LoadTenantAuthConfig` to derive tenant signing keys, issuer, and cookie names from the same `config.yaml` used by TAuth.
 
 ## 5. Configuration Surface
 
@@ -274,6 +277,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 ## 9. CLI and Server Lifecycle
 
 - Cobra command `tauth` reads configuration from a single YAML file (`--config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`).
+- `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
 - Graceful shutdown listens for `SIGINT`/`SIGTERM`, allowing 10s for in-flight requests.
 - zap middleware logs method, path, status, IP, and latency for each request.
 - Integration tests use the exported CLI wiring to spin up in-memory servers (`go test ./...`).

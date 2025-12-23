@@ -103,6 +103,23 @@ For a full local stack (TAuth + demo UI) without installing Go:
 
 Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
 
+### 2.5 Preflight validation (pre-start)
+
+Use the preflight command to validate configuration and emit a redacted effective-config report before you launch the service:
+
+```bash
+tauth preflight --config=config.yaml
+```
+
+The report includes effective server settings, per-tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints (never raw keys). Redacted reports still emit `allowed_host_hashes` and `jwt_signing_key_fingerprint` so external validators can compare secrets without exposing them. To include the raw `allowed_hosts` list, pass `--include-hosts`.
+
+The JSON payload is versioned and shaped as:
+- `schema_version`, `service` metadata
+- `effective_config` (server + tenant settings)
+- `dependencies` (preflight checks with readiness status)
+
+The preflight builder is generalized under `github.com/tyemirov/utils/preflight` with a Viper-based adapter (`github.com/tyemirov/utils/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
+
 ---
 
 ## 3. Sessions and cookies
@@ -273,7 +290,7 @@ When using `auth-client.js` or the mpr‑ui header component, this flow is handl
 
 ## 6. HTTP endpoints
 
-This section documents the public HTTP surface from a client’s perspective. See `ARCHITECTURE.md` for a stable contract summary and versioning notes.
+This section documents the public HTTP surface from a client’s perspective. See `ARCHITECTURE.md` for a stable contract summary and versioning notes. These endpoints are served exclusively by the TAuth server; consuming applications should call them, not reimplement them.
 
 ### 6.1 `POST /auth/nonce`
 
@@ -363,6 +380,7 @@ Optional demo page shipped with the repository. Intended for local development o
 ## 6.8 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
+If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
 
 ### 6.8.1 Basic validator setup
 

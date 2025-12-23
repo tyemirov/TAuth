@@ -6,25 +6,26 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"gopkg.in/yaml.v3"
 )
 
-func writeTempConfig(t *testing.T, contents string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
+func writeTempConfig(testingHandle *testing.T, contents string) string {
+	testingHandle.Helper()
+	path := filepath.Join(testingHandle.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("failed to write config: %v", err)
+		testingHandle.Fatalf("failed to write config: %v", err)
 	}
 	return path
 }
 
-func TestLoadApplicationConfigParsesServerAndTenants(t *testing.T) {
-	t.Setenv("LISTEN_ADDR", ":9090")
-	t.Setenv("SIGNING_KEY", "env-signing")
-	t.Setenv("DB_URL", "sqlite:///data/tauth.db")
+func TestLoadApplicationConfigParsesServerAndTenants(testingHandle *testing.T) {
+	testingHandle.Setenv("LISTEN_ADDR", ":9090")
+	testingHandle.Setenv("SIGNING_KEY", "env-signing")
+	testingHandle.Setenv("DB_URL", "sqlite:///data/tauth.db")
 
-	configPath := writeTempConfig(t, `
+	configPath := writeTempConfig(testingHandle, `
 server:
   listen_addr: "${LISTEN_ADDR}"
   database_url: "${DB_URL}"
@@ -49,29 +50,29 @@ tenants:
     allow_insecure_http: "true"
 `)
 
-	cfg, err := loadApplicationConfig(configPath)
-	if err != nil {
-		t.Fatalf("expected config to load, got %v", err)
+	config, loadErr := appconfig.LoadConfig(configPath)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
-	if cfg.Server.ListenAddr != ":9090" {
-		t.Fatalf("unexpected listen addr: %s", cfg.Server.ListenAddr)
+	if config.Server.ListenAddr != ":9090" {
+		testingHandle.Fatalf("unexpected listen addr: %s", config.Server.ListenAddr)
 	}
-	if cfg.Server.DatabaseURL != "sqlite:///data/tauth.db" {
-		t.Fatalf("unexpected db url")
+	if config.Server.DatabaseURL != "sqlite:///data/tauth.db" {
+		testingHandle.Fatalf("unexpected db url")
 	}
-	if !cfg.Server.EnableCORS || len(cfg.Server.CORSAllowedOrigins) != 2 {
-		t.Fatalf("expected CORS origins to be parsed")
+	if !config.Server.EnableCORS || len(config.Server.CORSAllowedOrigins) != 2 {
+		testingHandle.Fatalf("expected CORS origins to be parsed")
 	}
-	if !cfg.Server.EnableTenantHeaderOverride {
-		t.Fatalf("expected header override to be enabled")
+	if !config.Server.EnableTenantHeaderOverride {
+		testingHandle.Fatalf("expected header override to be enabled")
 	}
-	if len(cfg.Tenants) != 1 || cfg.Tenants[0].ID != "demo" {
-		t.Fatalf("expected single demo tenant")
+	if len(config.Tenants) != 1 || config.Tenants[0].ID != "demo" {
+		testingHandle.Fatalf("expected single demo tenant")
 	}
 }
 
-func TestLoadApplicationConfigDefaults(t *testing.T) {
-	configPath := writeTempConfig(t, `
+func TestLoadApplicationConfigDefaults(testingHandle *testing.T) {
+	configPath := writeTempConfig(testingHandle, `
 server:
   database_url: ""
 
@@ -88,80 +89,80 @@ tenants:
     nonce_ttl: "5m"
 `)
 
-	cfg, err := loadApplicationConfig(configPath)
-	if err != nil {
-		t.Fatalf("expected config to load, got %v", err)
+	config, loadErr := appconfig.LoadConfig(configPath)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
-	if cfg.Server.ListenAddr != ":8080" {
-		t.Fatalf("expected default listen addr, got %s", cfg.Server.ListenAddr)
-	}
-}
-
-func TestLoadApplicationConfigRejectsEmptyPath(t *testing.T) {
-	if _, err := loadApplicationConfig("  "); err == nil {
-		t.Fatalf("expected error for empty path")
+	if config.Server.ListenAddr != appconfig.DefaultListenAddr {
+		testingHandle.Fatalf("expected default listen addr, got %s", config.Server.ListenAddr)
 	}
 }
 
-func TestLoadApplicationConfigMultiTenantExample(t *testing.T) {
-	t.Setenv("TAUTH_LISTEN_ADDR", ":8082")
-	t.Setenv("TAUTH_DATABASE_URL", "sqlite:///data/example.db")
-	t.Setenv("TAUTH_ENABLE_CORS", "true")
-	t.Setenv("TAUTH_CORS_ORIGIN_1", "http://localhost:8000")
-	t.Setenv("TAUTH_CORS_ORIGIN_2", "http://127.0.0.1:8000")
-	t.Setenv("TAUTH_CORS_ORIGIN_3", "http://localhost:4173")
-	t.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID1", "notes-client")
-	t.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
-	t.Setenv("TAUTH_NOTES_JWT_SIGNING_KEY", "notes-signing-key")
-	t.Setenv("TAUTH_MPR_JWT_SIGNING_KEY", "mpr-signing-key")
-	t.Setenv("TAUTH_ALLOW_INSECURE_HTTP", "true")
+func TestLoadApplicationConfigRejectsEmptyPath(testingHandle *testing.T) {
+	if _, err := appconfig.LoadConfig("  "); err == nil {
+		testingHandle.Fatalf("expected error for empty path")
+	}
+}
+
+func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
+	testingHandle.Setenv("TAUTH_LISTEN_ADDR", ":8082")
+	testingHandle.Setenv("TAUTH_DATABASE_URL", "sqlite:///data/example.db")
+	testingHandle.Setenv("TAUTH_ENABLE_CORS", "true")
+	testingHandle.Setenv("TAUTH_CORS_ORIGIN_1", "http://localhost:8000")
+	testingHandle.Setenv("TAUTH_CORS_ORIGIN_2", "http://127.0.0.1:8000")
+	testingHandle.Setenv("TAUTH_CORS_ORIGIN_3", "http://localhost:4173")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID1", "notes-client")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
+	testingHandle.Setenv("TAUTH_NOTES_JWT_SIGNING_KEY", "notes-signing-key")
+	testingHandle.Setenv("TAUTH_MPR_JWT_SIGNING_KEY", "mpr-signing-key")
+	testingHandle.Setenv("TAUTH_ALLOW_INSECURE_HTTP", "true")
 
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatalf("runtime caller unavailable")
+		testingHandle.Fatalf("runtime caller unavailable")
 	}
 	baseDir := filepath.Dir(filename)
 	configPath := filepath.Join(baseDir, "..", "..", "examples", "multi-tenant", "config.yaml")
 	if _, err := os.Stat(configPath); err != nil {
-		t.Fatalf("example config missing: %v", err)
+		testingHandle.Fatalf("example config missing: %v", err)
 	}
 
-	cfg, err := loadApplicationConfig(configPath)
-	if err != nil {
-		t.Fatalf("expected config to load, got %v", err)
+	config, loadErr := appconfig.LoadConfig(configPath)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
-	if cfg.Server.ListenAddr != ":8082" {
-		t.Fatalf("unexpected listen addr: %s", cfg.Server.ListenAddr)
+	if config.Server.ListenAddr != ":8082" {
+		testingHandle.Fatalf("unexpected listen addr: %s", config.Server.ListenAddr)
 	}
-	if !cfg.Server.EnableCORS {
-		t.Fatalf("expected CORS to be enabled")
+	if !config.Server.EnableCORS {
+		testingHandle.Fatalf("expected CORS to be enabled")
 	}
-	if len(cfg.Server.CORSAllowedOrigins) != 3 {
-		t.Fatalf("expected three CORS origins, got %d", len(cfg.Server.CORSAllowedOrigins))
+	if len(config.Server.CORSAllowedOrigins) != 3 {
+		testingHandle.Fatalf("expected three CORS origins, got %d", len(config.Server.CORSAllowedOrigins))
 	}
-	if len(cfg.Tenants) != 2 {
-		t.Fatalf("expected two tenants in example config")
+	if len(config.Tenants) != 2 {
+		testingHandle.Fatalf("expected two tenants in example config")
 	}
 
-	tenantConfig, err := tenants.LoadConfigFromDocument(cfg.tenantDocument())
-	if err != nil {
-		t.Fatalf("expected tenant document to load, got %v", err)
+	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
+	if tenantErr != nil {
+		testingHandle.Fatalf("expected tenant document to load, got %v", tenantErr)
 	}
 	if tenant, ok := tenantConfig.OriginOwner("http://localhost:8000"); !ok || tenant != "notes" {
-		t.Fatalf("expected notes tenant for gravity origin, got %s", tenant)
+		testingHandle.Fatalf("expected notes tenant for gravity origin, got %s", tenant)
 	}
 	if tenant, ok := tenantConfig.OriginOwner("http://localhost:4173"); !ok || tenant != "mpr-sites" {
-		t.Fatalf("expected mpr-sites tenant for demo origin, got %s", tenant)
+		testingHandle.Fatalf("expected mpr-sites tenant for demo origin, got %s", tenant)
 	}
 	if notesTenant, ok := tenantConfig.TenantByID("notes"); !ok || string(notesTenant.SigningKey()) != "notes-signing-key" {
-		t.Fatalf("expected notes tenant signing key to be applied")
+		testingHandle.Fatalf("expected notes tenant signing key to be applied")
 	}
 	if mprTenant, ok := tenantConfig.TenantByID("mpr-sites"); !ok || string(mprTenant.SigningKey()) != "mpr-signing-key" {
-		t.Fatalf("expected mpr tenant signing key to be applied")
+		testingHandle.Fatalf("expected mpr tenant signing key to be applied")
 	}
 }
 
-func TestYamlBoolUnmarshalYAMLSupportsBoolAndString(t *testing.T) {
+func TestYamlBoolUnmarshalYAMLSupportsBoolAndString(testingHandle *testing.T) {
 	testCases := []struct {
 		name      string
 		payload   string
@@ -191,34 +192,34 @@ func TestYamlBoolUnmarshalYAMLSupportsBoolAndString(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
+		testingHandle.Run(testCase.name, func(testingHandle *testing.T) {
 			var wrapper struct {
-				Value yamlBool `yaml:"value"`
+				Value appconfig.YamlBool `yaml:"value"`
 			}
 			err := yaml.Unmarshal([]byte(testCase.payload), &wrapper)
 			if testCase.expectErr {
 				if err == nil {
-					t.Fatalf("expected error")
+					testingHandle.Fatalf("expected error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				testingHandle.Fatalf("unexpected error: %v", err)
 			}
 			if bool(wrapper.Value) != testCase.expected {
-				t.Fatalf("expected %v, got %v", testCase.expected, bool(wrapper.Value))
+				testingHandle.Fatalf("expected %v, got %v", testCase.expected, bool(wrapper.Value))
 			}
 		})
 	}
 }
 
-func TestYamlBoolUnmarshalYAMLDefaultTagSupportsNull(t *testing.T) {
-	var value yamlBool
+func TestYamlBoolUnmarshalYAMLDefaultTagSupportsNull(testingHandle *testing.T) {
+	var value appconfig.YamlBool
 	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: ""}
 	if err := value.UnmarshalYAML(node); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		testingHandle.Fatalf("unexpected error: %v", err)
 	}
 	if bool(value) {
-		t.Fatalf("expected false, got true")
+		testingHandle.Fatalf("expected false, got true")
 	}
 }

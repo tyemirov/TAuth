@@ -301,8 +301,33 @@
                     { value: "dark", dataset: { "bs-theme": "dark" } },
                 ];
                 const footerLinks = Array.isArray(window.MPR_SITES)
-                    ? window.MPR_SITES
+                    ? window.MPR_SITES.map((siteEntry) => ({
+                          label: siteEntry.label,
+                          url: siteEntry.href,
+                      }))
                     : [];
+                const persistedTheme = readPersistedTheme(themePersistenceKey);
+
+                function readPersistedTheme(storageKey) {
+                    if (!storageKey) {
+                        return "";
+                    }
+                    try {
+                        return window.localStorage.getItem(storageKey) || "";
+                    } catch (_error) {
+                        return "";
+                    }
+                }
+
+                function writePersistedTheme(storageKey, modeValue) {
+                    if (!storageKey || !modeValue) {
+                        return;
+                    }
+                    try {
+                        window.localStorage.setItem(storageKey, modeValue);
+                    } catch (_error) {
+                    }
+                }
 
                 function syncBodyTheme(nextMode) {
                     const resolvedMode = typeof nextMode === "string" && nextMode ? nextMode : "light";
@@ -326,10 +351,23 @@
                             modes: themeModes,
                         });
                     }
-                    if (window.MPRUI && typeof window.MPRUI.configureThemePersistence === "function") {
+                    if (persistedTheme && window.MPRUI && typeof window.MPRUI.setThemeMode === "function") {
+                        window.MPRUI.setThemeMode(persistedTheme);
+                    }
+                    const hasThemePersistence =
+                        window.MPRUI && typeof window.MPRUI.configureThemePersistence === "function";
+                    if (hasThemePersistence) {
                         window.MPRUI.configureThemePersistence({
                             enabled: true,
                             storageKey: themePersistenceKey,
+                        });
+                    } else if (window.MPRUI && typeof window.MPRUI.onThemeChange === "function") {
+                        window.MPRUI.onThemeChange((detail) => {
+                            const modeValue = detail && typeof detail.mode === "string" ? detail.mode : "";
+                            if (modeValue) {
+                                syncBodyTheme(modeValue);
+                                writePersistedTheme(themePersistenceKey, modeValue);
+                            }
                         });
                     }
                     if (window.MPRUI && typeof window.MPRUI.getThemeMode === "function") {
@@ -346,6 +384,9 @@
                                   : null;
                         if (modeValue) {
                             syncBodyTheme(modeValue);
+                            if (!hasThemePersistence) {
+                                writePersistedTheme(themePersistenceKey, modeValue);
+                            }
                         }
                     });
                     MPRUI.renderSiteHeader(headerHost, {

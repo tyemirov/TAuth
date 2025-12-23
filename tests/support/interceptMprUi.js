@@ -7,11 +7,17 @@ async function interceptMprUiRequest(page, scriptBody) {
   if (!page || typeof page.setRequestInterception !== "function") {
     throw new Error("interceptMprUiRequest requires a Puppeteer page instance");
   }
+  const hasLegacyHelpers =
+    typeof scriptBody === "string" && scriptBody.includes("renderSiteHeader");
   await page.setRequestInterception(true);
   async function handleRequest(request) {
     try {
       const url = request.url();
       if (url === MPR_UI_CDN_PREFIX || url.startsWith(MPR_UI_CDN_PREFIX + "?")) {
+        if (!hasLegacyHelpers) {
+          await request.continue();
+          return;
+        }
         await request.respond({
           status: 200,
           contentType: "application/javascript; charset=utf-8",

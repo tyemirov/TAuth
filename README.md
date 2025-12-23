@@ -3,6 +3,7 @@
 *Google Sign-In + JWT sessions for single-origin apps*
 
 TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `auth-client.js` module.
+TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
 ---
 
@@ -81,6 +82,8 @@ YAML
 tauth --config=config.yaml
 # or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
 ```
+
+Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys and allowed hosts are reported as fingerprints only so validators can compare without seeing secrets).
 
 > SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 

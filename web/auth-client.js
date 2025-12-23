@@ -1,8 +1,59 @@
+// @ts-check
 /* @mprlab/auth-client */
 (function () {
+  /**
+   * @typedef {Record<string, unknown>} UserProfile
+   */
+
+  /**
+   * @typedef {Object} AuthClientOptions
+   * @property {string} baseUrl
+   * @property {string} meEndpoint
+   * @property {string} nonceEndpoint
+   * @property {string} googleEndpoint
+   * @property {string} refreshEndpoint
+   * @property {string} logoutEndpoint
+   * @property {string} tenantId
+   * @property {(profile: UserProfile) => void} onAuthenticated
+   * @property {() => void} onUnauthenticated
+   */
+
+  /**
+   * @typedef {Object} AuthClientInitOptions
+   * @property {string=} baseUrl
+   * @property {string=} meEndpoint
+   * @property {string=} nonceEndpoint
+   * @property {string=} googleEndpoint
+   * @property {string=} refreshEndpoint
+   * @property {string=} logoutEndpoint
+   * @property {string=} tenantId
+   * @property {(profile: UserProfile) => void=} onAuthenticated
+   * @property {() => void=} onUnauthenticated
+   */
+
+  /**
+   * @typedef {Object} AuthEndpointMap
+   * @property {string} baseUrl
+   * @property {string} meUrl
+   * @property {string} nonceUrl
+   * @property {string} googleUrl
+   * @property {string} refreshUrl
+   * @property {string} logoutUrl
+   */
+
+  /**
+   * @typedef {Object} PendingRequest
+   * @property {(value: Response | PromiseLike<Response>) => void} resolve
+   * @property {(reason?: unknown) => void} reject
+   * @property {() => Promise<Response>} executorFunction
+   */
+
+  /** @type {AuthClientOptions} */
   var defaultOptions = {
     baseUrl: "/",
     meEndpoint: "/me",
+    nonceEndpoint: "/auth/nonce",
+    googleEndpoint: "/auth/google",
     refreshEndpoint: "/auth/refresh",
     logoutEndpoint: "/auth/logout",
     tenantId: "",
@@ -10,6 +61,7 @@
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
 
+  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, tenantId: string, originHint: string, baseUrlHint: string }} */
   var runtime = {
     options: null,
     userProfile: null,
@@ -18,12 +70,14 @@
     broadcastChannel: null,
     tenantId: "",
     originHint: "",
+    baseUrlHint: "",
   };
 
   function detectInitialTenantId() {
     if (typeof window !== "undefined") {
-      if (typeof window.__TAUTH_TENANT_ID__ === "string") {
-        return window.__TAUTH_TENANT_ID__.trim();
+      var globalTenantId = window["__TAUTH_TENANT_ID__"];
+      if (typeof globalTenantId === "string") {
+        return globalTenantId.trim();
       }
     }
     if (typeof document !== "undefined") {
@@ -49,6 +103,21 @@
     return "";
   }
 
+  function parseOriginFromUrl(urlValue) {
+    if (!urlValue || typeof URL !== "function") {
+      return "";
+    }
+    var baseOrigin = runtime.originHint || detectOriginHint();
+    try {
+      if (baseOrigin) {
+        return new URL(urlValue, baseOrigin).origin;
+      }
+      return new URL(urlValue).origin;
+    } catch (error) {
+      return "";
+    }
+  }
+
   function detectOriginHint() {
     if (
       typeof window !== "undefined" &&
@@ -67,9 +136,62 @@
     return "";
   }
 
-  runtime.originHint = detectOriginHint();
-  setTenantId(detectInitialTenantId());
+  function detectInitialBaseUrl() {
+    if (typeof window !== "undefined") {
+      var globalBaseUrl = window["__TAUTH_BASE_URL__"];
+      if (typeof globalBaseUrl === "string" && globalBaseUrl.trim()) {
+        return globalBaseUrl.trim();
+      }
+    }
 
+    if (typeof document !== "undefined") {
+      var currentScript = document.currentScript;
+      var dataBaseUrl = "";
+      var scriptSrc = "";
+
+      if (currentScript && typeof currentScript.getAttribute === "function") {
+        var dataValue = currentScript.getAttribute("data-base-url");
+        if (dataValue) {
+          dataBaseUrl = dataValue.trim();
+        }
+        var scriptValue = currentScript.getAttribute("src");
+        if (scriptValue) {
+          scriptSrc = scriptValue;
+        }
+      }
+
+      if (dataBaseUrl) {
+        return dataBaseUrl;
+      }
+
+      if (
+        document.documentElement &&
+        typeof document.documentElement.getAttribute === "function"
+      ) {
+        var documentValue = document.documentElement.getAttribute(
+          "data-tauth-base-url",
+        );
+        if (documentValue) {
+          return documentValue.trim();
+        }
+      }
+
+      var parsedOrigin = parseOriginFromUrl(scriptSrc);
+      if (parsedOrigin) {
+        return parsedOrigin;
+      }
+    }
+    return "";
+  }
+
+  runtime.originHint = detectOriginHint();
+  runtime.baseUrlHint = detectInitialBaseUrl();
+  setTenantId(detectInitialTenantId());
+  runtime.options = normalizeOptions({});
+
+  /**
+   * @param {string} value
+   */
   function setTenantId(value) {
     var normalized = typeof value === "string" ? value.trim() : "";
     runtime.tenantId = normalized;
@@ -114,8 +236,26 @@
     runtime.userProfile = userProfile;
   }
 
+  /**
+   * @returns {UserProfile | null}
+   */
   function getCurrentUser() {
     return runtime.userProfile;
+  }
+
+  /**
+   * @returns {AuthEndpointMap}
+   */
+  function getAuthEndpoints() {
+    var options = runtime.options || normalizeOptions({});
+    return {
+      baseUrl: options.baseUrl,
+      meUrl: joinUrl(options.baseUrl, options.meEndpoint),
+      nonceUrl: joinUrl(options.baseUrl, options.nonceEndpoint),
+      googleUrl: joinUrl(options.baseUrl, options.googleEndpoint),
+      refreshUrl: joinUrl(options.baseUrl, options.refreshEndpoint),
+      logoutUrl: joinUrl(options.baseUrl, options.logoutEndpoint),
+    };
   }
 
   function ensureBroadcastChannel() {
@@ -131,9 +271,23 @@
     }
   }
 
+  /**
+   * @param {AuthClientInitOptions} passed
+   * @returns {AuthClientOptions}
+   */
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
-    options.baseUrl = options.baseUrl || "/";
+    var hasExplicitBaseUrl =
+      passed && Object.prototype.hasOwnProperty.call(passed, "baseUrl");
+    var baseUrlCandidate =
+      hasExplicitBaseUrl && typeof passed.baseUrl === "string"
+        ? passed.baseUrl.trim()
+        : "";
+    if (hasExplicitBaseUrl) {
+      options.baseUrl = baseUrlCandidate || runtime.baseUrlHint || "/";
+    } else {
+      options.baseUrl = runtime.baseUrlHint || options.baseUrl || "/";
+    }
     var providedTenant = options.tenantId;
     if (providedTenant === undefined || providedTenant === null) {
       options.tenantId = runtime.tenantId || "";
@@ -179,6 +333,10 @@
     return combined;
   }
 
+  /**
+   * @param {AuthClientInitOptions} passed
+   * @returns {Promise<void>}
+   */
   async function initAuthClient(passed) {
     runtime.options = normalizeOptions(passed);
     try {
@@ -229,6 +387,11 @@
     }
   }
 
+  /**
+   * @param {string} inputUrl
+   * @param {RequestInit=} initOptions
+   * @returns {Promise<Response>}
+   */
   async function apiFetch(inputUrl, initOptions) {
     var merged = Object.assign({}, initOptions || {});
     merged.credentials = "include";
@@ -271,6 +434,9 @@
     }
   }
 
+  /**
+   * @returns {Promise<void>}
+   */
   async function logout() {
     try {
       await fetch(
@@ -293,10 +459,11 @@
   }
 
   if (typeof window !== "undefined") {
-    window.initAuthClient = initAuthClient;
-    window.apiFetch = apiFetch;
-    window.getCurrentUser = getCurrentUser;
-    window.logout = logout;
-    window.setAuthTenantId = setTenantId;
+    window["initAuthClient"] = initAuthClient;
+    window["apiFetch"] = apiFetch;
+    window["getCurrentUser"] = getCurrentUser;
+    window["getAuthEndpoints"] = getAuthEndpoints;
+    window["logout"] = logout;
+    window["setAuthTenantId"] = setTenantId;
   }
 })();

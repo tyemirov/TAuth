@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"go.uber.org/zap"
@@ -63,7 +64,7 @@ func TestRunServerMissingConfig(t *testing.T) {
 func TestPrepareServerConfigLoadsFile(t *testing.T) {
 	configPath := writeConfigFileFromStruct(t, sampleApplicationConfig())
 	command := newRootCommand()
-	if err := command.Flags().Set("config", configPath); err != nil {
+	if err := command.PersistentFlags().Set("config", configPath); err != nil {
 		t.Fatalf("failed to set config flag: %v", err)
 	}
 
@@ -74,7 +75,7 @@ func TestPrepareServerConfigLoadsFile(t *testing.T) {
 	if value == nil {
 		t.Fatalf("expected config in context")
 	}
-	if _, ok := value.(*applicationConfig); !ok {
+	if _, ok := value.(*appconfig.ApplicationConfig); !ok {
 		t.Fatalf("expected loaded config, got %#v", value)
 	}
 }
@@ -88,7 +89,7 @@ func TestPrepareServerConfigUsesEnvOverride(t *testing.T) {
 		t.Fatalf("expected prepare to succeed with env override: %v", err)
 	}
 	value := command.Context().Value(appConfigContextKey)
-	if _, ok := value.(*applicationConfig); !ok {
+	if _, ok := value.(*appconfig.ApplicationConfig); !ok {
 		t.Fatalf("expected applicationConfig in context")
 	}
 }
@@ -98,7 +99,7 @@ func TestLoadApplicationConfigRequiresTenants(t *testing.T) {
 	cfg.Tenants = nil
 	path := writeConfigFileFromStruct(t, cfg)
 
-	_, err := loadApplicationConfig(path)
+	_, err := appconfig.LoadConfig(path)
 	if err == nil {
 		t.Fatalf("expected error when tenants missing")
 	}
@@ -315,7 +316,8 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 		RefreshCookieName: refreshCookieName,
 	}
 
-	registry, err := buildTenantRegistry(base, tenantConfig, true)
+	sameSiteResolver := authkit.NewSameSiteResolver(true)
+	registry, err := authkit.BuildTenantRegistry(base, tenantConfig, sameSiteResolver)
 	if err != nil {
 		t.Fatalf("expected registry build to succeed, got %v", err)
 	}
@@ -394,7 +396,8 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 		t.Fatalf("load tenant config: %v", err)
 	}
 
-	registry, err := buildTenantRegistry(base, tenantConfig, false)
+	sameSiteResolver := authkit.NewSameSiteResolver(false)
+	registry, err := authkit.BuildTenantRegistry(base, tenantConfig, sameSiteResolver)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
 	}
@@ -761,9 +764,9 @@ func writeTenantsFileContents(t *testing.T, contents string) string {
 	return path
 }
 
-func sampleApplicationConfig() applicationConfig {
-	return applicationConfig{
-		Server: serverSettings{
+func sampleApplicationConfig() appconfig.ApplicationConfig {
+	return appconfig.ApplicationConfig{
+		Server: appconfig.ServerSettings{
 			ListenAddr:                 ":0",
 			DatabaseURL:                "",
 			EnableCORS:                 false,
@@ -803,7 +806,7 @@ func sampleApplicationConfig() applicationConfig {
 	}
 }
 
-func writeConfigFileFromStruct(t *testing.T, cfg applicationConfig) string {
+func writeConfigFileFromStruct(t *testing.T, cfg appconfig.ApplicationConfig) string {
 	t.Helper()
 	payload, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -875,23 +878,23 @@ func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
 
 func TestDeriveSameSite(t *testing.T) {
 	t.Parallel()
-	if mode := deriveSameSite(true, true); mode != http.SameSiteLaxMode {
+	if mode := authkit.NewSameSiteResolver(true)(true); mode != http.SameSiteLaxMode {
 		t.Fatalf("expected SameSiteLax when CORS enabled but HTTP is allowed, got %v", mode)
 	}
-	if mode := deriveSameSite(true, false); mode != http.SameSiteNoneMode {
+	if mode := authkit.NewSameSiteResolver(true)(false); mode != http.SameSiteNoneMode {
 		t.Fatalf("expected SameSiteNone when CORS enabled, got %v", mode)
 	}
-	if mode := deriveSameSite(false, true); mode != http.SameSiteLaxMode {
+	if mode := authkit.NewSameSiteResolver(false)(true); mode != http.SameSiteLaxMode {
 		t.Fatalf("expected SameSiteLax when insecure allowed, got %v", mode)
 	}
-	if mode := deriveSameSite(false, false); mode != http.SameSiteStrictMode {
+	if mode := authkit.NewSameSiteResolver(false)(false); mode != http.SameSiteStrictMode {
 		t.Fatalf("expected SameSiteStrict for default, got %v", mode)
 	}
 }
 
 func TestPrepareServerConfigMissingFile(t *testing.T) {
 	command := newRootCommand()
-	if err := command.Flags().Set("config", "/path/does/not/exist"); err != nil {
+	if err := command.PersistentFlags().Set("config", "/path/does/not/exist"); err != nil {
 		t.Fatalf("failed to set config flag: %v", err)
 	}
 	err := command.PreRunE(command, nil)

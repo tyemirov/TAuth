@@ -13,7 +13,7 @@ import (
 	"github.com/tyemirov/tauth/internal/tenants"
 )
 
-func TestDeriveSameSiteCoversCombinations(t *testing.T) {
+func TestSameSiteResolverCoversCombinations(t *testing.T) {
 	testCases := []struct {
 		name          string
 		enableCORS    bool
@@ -48,7 +48,8 @@ func TestDeriveSameSiteCoversCombinations(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := deriveSameSite(testCase.enableCORS, testCase.allowInsecure); got != testCase.expected {
+			resolver := authkit.NewSameSiteResolver(testCase.enableCORS)
+			if got := resolver(testCase.allowInsecure); got != testCase.expected {
 				t.Fatalf("expected %v, got %v", testCase.expected, got)
 			}
 		})

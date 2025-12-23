@@ -38,6 +38,10 @@ func main() {
 }
 ```
 
+If you already have access to the same `config.yaml` used by TAuth, call
+`LoadTenantAuthConfig` to derive the signing key, issuer, and cookie names for
+a given tenant ID, then pass `ValidatorConfig()` into `New`.
+
 ## Features
 
 - Smart constructor validates configuration up front.
@@ -45,6 +49,8 @@ func main() {
 - Gin middleware adapter with configurable context key.
 - Exposes typed claims struct matching TAuth’s JWT payload (user id, email,
   display name, avatar URL, roles, expiry metadata).
+- Helper to load tenant-specific signing keys, issuer, and cookie names from
+  the TAuth config file.
 
 ## Testing
 
