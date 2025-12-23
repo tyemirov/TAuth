@@ -1,6 +1,34 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.0]
+
+### Features ✨
+- Introduced WebAssetsVolume configuration and landing page updates with footer integration and layout improvements.
+- Added EmbeddedAuthServer for mounting auth routes and auth endpoint helpers with automatic base URL resolution.
+- Added pre-start configuration report and validation via `tauth preflight` with redacted effective-config report for external validation.
+
+### Improvements ⚙️
+- Migrated preflight package to reusable `github.com/tyemirov/utils/preflight`; enhanced Viper adapter to support YAML + env bindings.
+- Auth client now auto-detects base URL and exposes `getAuthEndpoints()`; sessionvalidator loader supports tenant config from `config.yaml`.
+- Updated Dockerfile to add `/web` volume for web assets; updated dependencies and module namespace.
+- Added GitHub Pages landing page with dark neon theme, presentation layout, mpr-ui footer integration, and removed palette suggestions.
+- Increased test coverage to 95%, adding sandbox-safe integration tests and expanded coverage on multiple modules.
+
+### Bug Fixes 🐛
+- Cleaned host collision rules and fixed multi-tenant hygiene validation in preflight.
+- Fixed config loading and validation including env variable placeholder support and handling missing env vars gracefully.
+
+### Testing 🧪
+- Added extensive unit and integration tests for sessionvalidator, config loaders, tenant runtime, preflight reports, and server coverage.
+- Integration tests use in-memory servers for end-to-end tenant routing and auth flow validation.
+
+### Docs 📚
+- Documented new `tauth preflight` command and effective-config report format; updated migration guides.
+- Added detailed architecture and usage guides, including server-only endpoint contracts and sessionvalidator configuration.
+- Provided migration documentation for GAuss to TAuth and updated README with deployment tips and preflight usage.
+- Added landing page documentation and demo HTML with updated footer and UI components.
+
+## [v0.0.8]
 
 ### Features ✨
 - TA-212: Switched tenant configuration format from JSON to YAML to improve readability. Updated loader to parse YAML, and all documentation/examples now reference `tenants.yaml`.
