@@ -26,6 +26,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 
 - [x] [TA-212] Switch tenant configuration format from JSON to YAML. Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML. — Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
 - [x] [TA-340] Collapse CLI/env configuration into a single YAML file. — Replaced the Viper-based flag/env matrix with `config.yaml`, added a dedicated loader (`--config` / `TAUTH_CONFIG_FILE`), updated Compose examples, docs, and tests to consume the unified file, and exposed `tenants.LoadConfigFromDocument` for embedding.
+- [x] [TA-112] Remove the palette suggestions section from the landing page. — Removed the palette section and navigation link from `docs/index.html`.
 
 ## BugFixes (330–399)
 
@@ -46,6 +47,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — README now surfaces the hosted + local deployments, points custom flows at ARCHITECTURE.md, and the detailed GIS/nonce handshake (with sample code) was moved under `ARCHITECTURE.md#google-sign-in-exchange`.
 - [x] [TA-411] Move the preflight package from `pkg/preflight` to `tools/utils/preflight` and update references. — Relocated the preflight module into the shared utils repo, rewired imports, and updated documentation references.
 - [x] [TA-412] Replace local utils replaces with remote module usage so only `github.com/tyemirov/utils/preflight` is required. — Removed the local replace, pinned the utils module version, and updated documentation references.
+- [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image. — Added `/web` as a Docker volume and copied the web assets into the image.
 
 ## Planning
 So not work on these, not ready
