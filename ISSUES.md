@@ -19,6 +19,8 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-107] Correction: remove endpoint-embedding packages, keep `/auth/*` + `/me` server-only, and expand `pkg/sessionvalidator` to load issuer/cookie names from `config.yaml`; docs now state the endpoint contract explicitly.
 - [x] [TA-108] Add preflight validation + redacted effective-config report so external validators can verify orchestrated services before launch. — Scope is pre-start only (no runtime endpoints). Required output includes: service metadata (version/build/config schema version), effective server settings (CORS + allowed origins, tenant header override), per-tenant effective settings (tenant id/display name, allowed_hosts optionally redacted, google_web_client_id, cookie_domain, session_cookie_name/refresh_cookie_name, session/refresh/nonce TTLs, allow_insecure_http, derived SameSite mode, jwt_issuer), and secret fingerprints only (jwt_signing_key_fingerprint, never raw keys). External validator responsibilities: compare issuer/cookie names/cookie domain expectations, verify JWT signing key match via fingerprint comparison, validate multi-tenant hygiene (no cookie collisions on shared hosts, ambiguity rules), and validate CORS origin requirements (notably accounts.google.com). Deliverable includes stable error codes + a versioned JSON schema for the report. — Added `tauth preflight` output/report builder with redacted host mode, dependency checks, and documentation.
 - [x] [TA-109] Generalize preflight implementation for Viper-based services with YAML + env bindings. — Added `tools/utils/preflight` builder interfaces, Viper config adapter with redaction hooks, refactored TAuth preflight to reuse the shared schema, and documented the generic preflight contract.
+- [x] [TA-110] Add a GitHub Pages landing page under `docs/index.html` with a dark neon theme, hero CTA + code snippet, feature cards, deep-dive sections, docs links, and palette suggestions. — Added `docs/index.html` with the requested structure, copy, and palette guidance for GitHub Pages hosting.
+- [x] [TA-111] Integrate the mpr-ui footer component into the GitHub Pages landing page. — Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
 
 - [ ] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
   Style it visually and structurally.
@@ -47,6 +49,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 
 - [x] [TA-212] Switch tenant configuration format from JSON to YAML. Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML. — Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
 - [x] [TA-340] Collapse CLI/env configuration into a single YAML file. — Replaced the Viper-based flag/env matrix with `config.yaml`, added a dedicated loader (`--config` / `TAUTH_CONFIG_FILE`), updated Compose examples, docs, and tests to consume the unified file, and exposed `tenants.LoadConfigFromDocument` for embedding.
+- [x] [TA-112] Remove the palette suggestions section from the landing page. — Removed the palette section and navigation link from `docs/index.html`.
 
 ## BugFixes (330–399)
 
@@ -67,6 +70,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user. Move the technical details to ARCHITECTURE.md. — README now surfaces the hosted + local deployments, points custom flows at ARCHITECTURE.md, and the detailed GIS/nonce handshake (with sample code) was moved under `ARCHITECTURE.md#google-sign-in-exchange`.
 - [x] [TA-411] Move the preflight package from `pkg/preflight` to `tools/utils/preflight` and update references. — Relocated the preflight module into the shared utils repo, rewired imports, and updated documentation references.
 - [x] [TA-412] Replace local utils replaces with remote module usage so only `github.com/tyemirov/utils/preflight` is required. — Removed the local replace, pinned the utils module version, and updated documentation references.
+- [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image. — Added `/web` as a Docker volume and copied the web assets into the image.
 
 ## Planning
 So not work on these, not ready

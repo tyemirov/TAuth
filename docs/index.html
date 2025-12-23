@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="TAuth is a single-origin authentication service for Google Identity Services that mints first-party JWT cookies with preflight validation and multi-tenant support.">
+    <title>TAuth - Google Sign-In, owned sessions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css">
+    <style>
+      :root {
+        --ink-100: #f7f9fb;
+        --ink-70: #c6d0db;
+        --ink-40: #93a0b0;
+        --background: #0b1015;
+        --surface: #121821;
+        --surface-strong: #17202a;
+        --accent: #6fffe9;
+        --accent-soft: rgba(111, 255, 233, 0.18);
+        --ember: #ffb366;
+        --grid-line: rgba(255, 255, 255, 0.06);
+        --shadow: 0 18px 45px rgba(2, 8, 12, 0.55);
+        --font-heading: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --font-body: "Instrument Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        --mpr-color-surface-primary: var(--surface);
+        --mpr-color-surface-elevated: var(--surface-strong);
+        --mpr-color-text-primary: var(--ink-100);
+        --mpr-color-text-muted: var(--ink-40);
+        --mpr-color-accent: var(--accent);
+        --mpr-color-border: var(--grid-line);
+        --mpr-shadow-elevated: var(--shadow);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-body);
+        color: var(--ink-100);
+        background: radial-gradient(circle at 15% 20%, rgba(111, 255, 233, 0.12), transparent 45%),
+          radial-gradient(circle at 80% 10%, rgba(255, 179, 102, 0.1), transparent 40%),
+          radial-gradient(circle at 70% 80%, rgba(111, 255, 233, 0.08), transparent 50%),
+          var(--background);
+        min-height: 100vh;
+        line-height: 1.6;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .skip-link {
+        position: absolute;
+        left: -999px;
+        top: 0;
+        background: var(--accent);
+        color: #0a0f14;
+        padding: 8px 14px;
+        border-radius: 999px;
+        z-index: 20;
+      }
+
+      .skip-link:focus {
+        left: 20px;
+        top: 20px;
+      }
+
+      .page {
+        position: relative;
+        padding: 28px 6vw 80px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 16px 0 28px;
+      }
+
+      .logo {
+        font-family: var(--font-heading);
+        font-weight: 600;
+        font-size: 20px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .nav {
+        display: flex;
+        gap: 18px;
+        font-size: 14px;
+        color: var(--ink-70);
+      }
+
+      .nav a {
+        padding-bottom: 4px;
+        border-bottom: 1px solid transparent;
+      }
+
+      .nav a:hover {
+        border-color: var(--accent);
+      }
+
+      .cta {
+        padding: 12px 20px;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .cta-primary {
+        background: var(--accent);
+        color: #0a0f14;
+        box-shadow: 0 14px 30px rgba(111, 255, 233, 0.25);
+      }
+
+      .cta-secondary {
+        border: 1px solid var(--grid-line);
+        color: var(--ink-100);
+        background: rgba(18, 24, 33, 0.6);
+      }
+
+      .cta:hover {
+        transform: translateY(-2px);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 48px;
+        align-items: center;
+        padding: 20px 0 60px;
+      }
+
+      .eyebrow {
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.24em;
+        color: var(--ink-40);
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family: var(--font-heading);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        margin: 0 0 16px;
+      }
+
+      h1 {
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1.15;
+      }
+
+      h2 {
+        font-size: clamp(24px, 4vw, 34px);
+      }
+
+      h3 {
+        font-size: 18px;
+      }
+
+      .lead {
+        color: var(--ink-70);
+        font-size: 18px;
+        max-width: 520px;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .hero-meta {
+        margin-top: 28px;
+        display: flex;
+        gap: 24px;
+        color: var(--ink-40);
+        font-size: 13px;
+      }
+
+      .panel {
+        background: linear-gradient(135deg, rgba(23, 32, 42, 0.9), rgba(12, 16, 23, 0.8));
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero-visual {
+        padding: 24px;
+      }
+
+      .terminal {
+        padding: 20px;
+        border-radius: 16px;
+        background: rgba(8, 12, 18, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-family: var(--font-heading);
+        font-size: 13px;
+        color: var(--ink-100);
+      }
+
+      .terminal-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 14px;
+        color: var(--ink-40);
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 11px;
+      }
+
+      .terminal-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--ink-70);
+        font-family: var(--font-heading);
+      }
+
+      code {
+        font-family: var(--font-heading);
+        color: var(--accent);
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 24px;
+        margin: 50px 0;
+      }
+
+      .feature-card {
+        padding: 24px;
+        border-radius: 18px;
+        background: rgba(18, 24, 33, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .feature-card svg {
+        width: 28px;
+        height: 28px;
+        color: var(--accent);
+        margin-bottom: 16px;
+      }
+
+      .section {
+        margin-top: 80px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 36px;
+        align-items: center;
+      }
+
+      .section-copy {
+        color: var(--ink-70);
+        font-size: 16px;
+      }
+
+      .code-card {
+        padding: 24px;
+        border-radius: 18px;
+        background: rgba(14, 18, 25, 0.9);
+        border: 1px solid rgba(111, 255, 233, 0.2);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+
+      .docs-links {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .docs-link {
+        padding: 14px 18px;
+        border-radius: 14px;
+        background: rgba(18, 24, 33, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      mpr-footer {
+        margin-top: 90px;
+      }
+
+      .reveal {
+        animation: fadeUp 0.8s ease forwards;
+        opacity: 0;
+      }
+
+      .reveal.delay-1 {
+        animation-delay: 0.1s;
+      }
+
+      .reveal.delay-2 {
+        animation-delay: 0.2s;
+      }
+
+      .reveal.delay-3 {
+        animation-delay: 0.3s;
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 720px) {
+        .site-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .nav {
+          flex-wrap: wrap;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .reveal {
+          animation: none;
+          opacity: 1;
+        }
+
+        .cta {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">TAuth</div>
+        <nav class="nav" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#flow">Flow</a>
+          <a href="#docs">Get started</a>
+        </nav>
+        <a class="cta cta-primary" href="usage.html">Get started</a>
+      </header>
+
+      <main id="main">
+        <section class="hero">
+          <div class="hero-copy reveal delay-1">
+            <div class="eyebrow">Google Sign-In, owned sessions</div>
+            <h1>Ship a complete auth layer without shipping tokens.</h1>
+            <p class="lead">
+              TAuth sits between Google Identity Services and your UI. It mints first-party JWT cookies,
+              rotates refresh tokens, and exposes a clean, single-origin contract that front-ends can trust.
+            </p>
+            <div class="hero-actions">
+              <a class="cta cta-primary" href="usage.html">Read the docs</a>
+              <a class="cta cta-secondary" href="https://github.com/tyemirov/TAuth">View on GitHub</a>
+            </div>
+            <div class="hero-meta">
+              <span>Single binary</span>
+              <span>Multi-tenant</span>
+              <span>Preflight ready</span>
+            </div>
+          </div>
+          <div class="hero-visual panel reveal delay-2">
+            <div class="terminal">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot" style="background: var(--ember);"></span>
+                <span class="terminal-dot" style="background: #7fb4ff;"></span>
+                tauth preflight
+              </div>
+              <pre><code>$ tauth preflight --config=config.yaml
+schema_version: tauth.preflight.v2
+service: tauth v0.x
+effective_config: redacted
+dependencies: refresh_store OK</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="features" class="feature-grid">
+          <article class="feature-card reveal delay-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M4 6h16v12H4z"></path>
+              <path d="M8 10h8M8 14h6"></path>
+            </svg>
+            <h3>First-party cookies</h3>
+            <p>Access sessions live in HttpOnly cookies, not local storage. SameSite rules are derived per tenant.</p>
+          </article>
+          <article class="feature-card reveal delay-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M12 3l7 4v10l-7 4-7-4V7z"></path>
+              <path d="M12 7v10"></path>
+            </svg>
+            <h3>Tenant aware</h3>
+            <p>Host multiple products with tenant-specific cookies, issuers, and refresh TTLs in one config.</p>
+          </article>
+          <article class="feature-card reveal delay-3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M4 12h16"></path>
+              <path d="M12 4v16"></path>
+            </svg>
+            <h3>Preflight validation</h3>
+            <p>Emit a redacted config report so orchestrators can validate secrets and endpoints before launch.</p>
+          </article>
+          <article class="feature-card reveal delay-3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M6 8h12M6 12h12M6 16h8"></path>
+            </svg>
+            <h3>Drop-in client</h3>
+            <p>Use the hosted auth-client.js to handle nonce exchange, refresh retries, and logout state.</p>
+          </article>
+        </section>
+
+        <section id="flow" class="section">
+          <div class="split">
+            <div class="reveal delay-1">
+              <h2>Layout structure</h2>
+              <p class="section-copy">
+                Hero, feature grid, deep dives, and a focused get-started block keep the story crisp for GitHub Pages.
+                Everything is tuned for a dark, neon-accented presentation with monospace headings.
+              </p>
+            </div>
+            <div class="code-card reveal delay-2">
+              <pre><code>Sections:
+- Hero + preflight snippet
+- Feature blocks
+- Auth flow, JWT validation, tenant config
+- Get started links
+- Footer integration</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="split">
+            <div class="reveal delay-1">
+              <h2>Auth flow built for product teams</h2>
+              <p class="section-copy">
+                Clients post Google credentials to /auth/google, receive signed cookies, and hit /me for profile data.
+                Refresh and logout are server-only, keeping token handling off the frontend.
+              </p>
+            </div>
+            <div class="code-card reveal delay-2">
+              <pre><code>POST /auth/nonce
+POST /auth/google
+POST /auth/refresh
+POST /auth/logout
+GET  /me</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="split">
+            <div class="reveal delay-1">
+              <h2>Downstream JWT validation</h2>
+              <p class="section-copy">
+                Downstream Go services validate the app_session cookie with shared issuer and signing key settings.
+                The sessionvalidator helper loads tenant config so every service agrees on cookie names.
+              </p>
+            </div>
+            <div class="code-card reveal delay-2">
+              <pre><code>validator, err := sessionvalidator.New(
+  sessionvalidator.Config{
+    SigningKey: signingKey,
+    Issuer: "tauth",
+  },
+)</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="split">
+            <div class="reveal delay-1">
+              <h2>Tenant config as a contract</h2>
+              <p class="section-copy">
+                A single YAML file describes every tenant, cookie domain, and TTL. The resolver maps requests to the
+                correct tenant by host or optional headers for shared origins.
+              </p>
+            </div>
+            <div class="code-card reveal delay-2">
+              <pre><code>tenants:
+  - id: "notes"
+    allowed_hosts: ["notes.localhost"]
+    google_web_client_id: "..."
+    jwt_signing_key: "..."
+    session_cookie_name: "app_session_notes"</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="docs" class="section">
+          <div class="split">
+            <div class="reveal delay-1">
+              <h2>Get started in minutes</h2>
+              <p class="section-copy">
+                Launch the binary, point it at config.yaml, and let the hosted client handle the browser-side exchange.
+              </p>
+              <div class="docs-links">
+                <a class="docs-link" href="usage.html">Usage guide <span>docs/usage.md</span></a>
+                <a class="docs-link" href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md">Architecture <span>ARCHITECTURE.md</span></a>
+                <a class="docs-link" href="https://github.com/tyemirov/TAuth/blob/master/docs/migration.md">Migration guide <span>docs/migration.md</span></a>
+              </div>
+            </div>
+            <div class="panel hero-visual reveal delay-2">
+              <div class="terminal">
+                <div class="terminal-header">
+                  <span class="terminal-dot"></span>
+                  <span class="terminal-dot" style="background: var(--ember);"></span>
+                  <span class="terminal-dot" style="background: #7fb4ff;"></span>
+                  quickstart
+                </div>
+                <pre><code>$ tauth --config=config.yaml
+listen :8443
+cookies: app_session / app_refresh
+auth-client.js: /static/auth-client.js</code></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <mpr-footer
+        prefix-text="Built for GitHub Pages"
+        toggle-label="Explore"
+        sticky="false"
+        privacy-link-label="Privacy &amp; Terms"
+        privacy-link-href="https://github.com/tyemirov/TAuth/blob/master/LICENSE"
+        links='[
+          { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth", "target": "_blank", "rel": "noopener noreferrer" },
+          { "label": "Docs", "url": "usage.html" },
+          { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions", "target": "_blank", "rel": "noopener noreferrer" }
+        ]'
+      ></mpr-footer>
+    </div>
+    <script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"></script>
+  </body>
+</html>
