@@ -1,14 +1,23 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="TAuth is a single-origin authentication service for Google Identity Services that mints first-party JWT cookies with preflight validation and multi-tenant support.">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="TAuth is a single-origin authentication service for Google Identity Services that mints first-party JWT cookies with preflight validation and multi-tenant support."
+    />
     <title>TAuth - Google Sign-In, owned sessions</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
+    />
     <style>
       :root {
         --ink-100: #f7f9fb;
@@ -22,8 +31,10 @@
         --ember: #ffb366;
         --grid-line: rgba(255, 255, 255, 0.06);
         --shadow: 0 18px 45px rgba(2, 8, 12, 0.55);
-        --font-heading: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        --font-body: "Instrument Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        --font-heading: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+          Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --font-body: "Instrument Sans", "Segoe UI", "Helvetica Neue", Arial,
+          sans-serif;
         --mpr-color-surface-primary: var(--surface);
         --mpr-color-surface-elevated: var(--surface-strong);
         --mpr-color-text-primary: var(--ink-100);
@@ -41,9 +52,21 @@
         margin: 0;
         font-family: var(--font-body);
         color: var(--ink-100);
-        background: radial-gradient(circle at 15% 20%, rgba(111, 255, 233, 0.12), transparent 45%),
-          radial-gradient(circle at 80% 10%, rgba(255, 179, 102, 0.1), transparent 40%),
-          radial-gradient(circle at 70% 80%, rgba(111, 255, 233, 0.08), transparent 50%),
+        background: radial-gradient(
+            circle at 15% 20%,
+            rgba(111, 255, 233, 0.12),
+            transparent 45%
+          ),
+          radial-gradient(
+            circle at 80% 10%,
+            rgba(255, 179, 102, 0.1),
+            transparent 40%
+          ),
+          radial-gradient(
+            circle at 70% 80%,
+            rgba(111, 255, 233, 0.08),
+            transparent 50%
+          ),
           var(--background);
         min-height: 100vh;
         line-height: 1.6;
@@ -196,7 +219,11 @@
       }
 
       .panel {
-        background: linear-gradient(135deg, rgba(23, 32, 42, 0.9), rgba(12, 16, 23, 0.8));
+        background: linear-gradient(
+          135deg,
+          rgba(23, 32, 42, 0.9),
+          rgba(12, 16, 23, 0.8)
+        );
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 20px;
         box-shadow: var(--shadow);
@@ -382,12 +409,17 @@
             <div class="eyebrow">Google Sign-In, owned sessions</div>
             <h1>Ship a complete auth layer without shipping tokens.</h1>
             <p class="lead">
-              TAuth sits between Google Identity Services and your UI. It mints first-party JWT cookies,
-              rotates refresh tokens, and exposes a clean, single-origin contract that front-ends can trust.
+              TAuth sits between Google Identity Services and your UI. It mints
+              first-party JWT cookies, rotates refresh tokens, and exposes a
+              clean, single-origin contract that front-ends can trust.
             </p>
             <div class="hero-actions">
               <a class="cta cta-primary" href="usage.html">Read the docs</a>
-              <a class="cta cta-secondary" href="https://github.com/tyemirov/TAuth">View on GitHub</a>
+              <a
+                class="cta cta-secondary"
+                href="https://github.com/tyemirov/TAuth"
+                >View on GitHub</a
+              >
             </div>
             <div class="hero-meta">
               <span>Single binary</span>
@@ -399,8 +431,11 @@
             <div class="terminal">
               <div class="terminal-header">
                 <span class="terminal-dot"></span>
-                <span class="terminal-dot" style="background: var(--ember);"></span>
-                <span class="terminal-dot" style="background: #7fb4ff;"></span>
+                <span
+                  class="terminal-dot"
+                  style="background: var(--ember)"
+                ></span>
+                <span class="terminal-dot" style="background: #7fb4ff"></span>
                 tauth preflight
               </div>
               <pre><code>$ tauth preflight --config=config.yaml
@@ -414,35 +449,67 @@ dependencies: refresh_store OK</code></pre>
 
         <section id="features" class="feature-grid">
           <article class="feature-card reveal delay-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
               <path d="M4 6h16v12H4z"></path>
               <path d="M8 10h8M8 14h6"></path>
             </svg>
             <h3>First-party cookies</h3>
-            <p>Access sessions live in HttpOnly cookies, not local storage. SameSite rules are derived per tenant.</p>
+            <p>
+              Access sessions live in HttpOnly cookies, not local storage.
+              SameSite rules are derived per tenant.
+            </p>
           </article>
           <article class="feature-card reveal delay-2">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
               <path d="M12 3l7 4v10l-7 4-7-4V7z"></path>
               <path d="M12 7v10"></path>
             </svg>
             <h3>Tenant aware</h3>
-            <p>Host multiple products with tenant-specific cookies, issuers, and refresh TTLs in one config.</p>
+            <p>
+              Host multiple products with tenant-specific cookies, issuers, and
+              refresh TTLs in one config.
+            </p>
           </article>
           <article class="feature-card reveal delay-3">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
               <path d="M4 12h16"></path>
               <path d="M12 4v16"></path>
             </svg>
             <h3>Preflight validation</h3>
-            <p>Emit a redacted config report so orchestrators can validate secrets and endpoints before launch.</p>
+            <p>
+              Emit a redacted config report so orchestrators can validate
+              secrets and endpoints before launch.
+            </p>
           </article>
           <article class="feature-card reveal delay-3">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
               <path d="M6 8h12M6 12h12M6 16h8"></path>
             </svg>
             <h3>Drop-in client</h3>
-            <p>Use the hosted auth-client.js to handle nonce exchange, refresh retries, and logout state.</p>
+            <p>
+              Use the hosted auth-client.js to handle nonce exchange, refresh
+              retries, and logout state.
+            </p>
           </article>
         </section>
 
@@ -451,8 +518,9 @@ dependencies: refresh_store OK</code></pre>
             <div class="reveal delay-1">
               <h2>Layout structure</h2>
               <p class="section-copy">
-                Hero, feature grid, deep dives, and a focused get-started block keep the story crisp for GitHub Pages.
-                Everything is tuned for a dark, neon-accented presentation with monospace headings.
+                Hero, feature grid, deep dives, and a focused get-started block
+                keep the story crisp for GitHub Pages. Everything is tuned for a
+                dark, neon-accented presentation with monospace headings.
               </p>
             </div>
             <div class="code-card reveal delay-2">
@@ -471,8 +539,9 @@ dependencies: refresh_store OK</code></pre>
             <div class="reveal delay-1">
               <h2>Auth flow built for product teams</h2>
               <p class="section-copy">
-                Clients post Google credentials to /auth/google, receive signed cookies, and hit /me for profile data.
-                Refresh and logout are server-only, keeping token handling off the frontend.
+                Clients post Google credentials to /auth/google, receive signed
+                cookies, and hit /me for profile data. Refresh and logout are
+                server-only, keeping token handling off the frontend.
               </p>
             </div>
             <div class="code-card reveal delay-2">
@@ -490,8 +559,10 @@ GET  /me</code></pre>
             <div class="reveal delay-1">
               <h2>Downstream JWT validation</h2>
               <p class="section-copy">
-                Downstream Go services validate the app_session cookie with shared issuer and signing key settings.
-                The sessionvalidator helper loads tenant config so every service agrees on cookie names.
+                Downstream Go services validate the app_session cookie with
+                shared issuer and signing key settings. The sessionvalidator
+                helper loads tenant config so every service agrees on cookie
+                names.
               </p>
             </div>
             <div class="code-card reveal delay-2">
@@ -510,8 +581,9 @@ GET  /me</code></pre>
             <div class="reveal delay-1">
               <h2>Tenant config as a contract</h2>
               <p class="section-copy">
-                A single YAML file describes every tenant, cookie domain, and TTL. The resolver maps requests to the
-                correct tenant by host or optional headers for shared origins.
+                A single YAML file describes every tenant, cookie domain, and
+                TTL. The resolver maps requests to the correct tenant by host or
+                optional headers for shared origins.
               </p>
             </div>
             <div class="code-card reveal delay-2">
@@ -530,20 +602,34 @@ GET  /me</code></pre>
             <div class="reveal delay-1">
               <h2>Get started in minutes</h2>
               <p class="section-copy">
-                Launch the binary, point it at config.yaml, and let the hosted client handle the browser-side exchange.
+                Launch the binary, point it at config.yaml, and let the hosted
+                client handle the browser-side exchange.
               </p>
               <div class="docs-links">
-                <a class="docs-link" href="usage.html">Usage guide <span>docs/usage.md</span></a>
-                <a class="docs-link" href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md">Architecture <span>ARCHITECTURE.md</span></a>
-                <a class="docs-link" href="https://github.com/tyemirov/TAuth/blob/master/docs/migration.md">Migration guide <span>docs/migration.md</span></a>
+                <a class="docs-link" href="usage.html"
+                  >Usage guide <span>docs/usage.md</span></a
+                >
+                <a
+                  class="docs-link"
+                  href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md"
+                  >Architecture <span>ARCHITECTURE.md</span></a
+                >
+                <a
+                  class="docs-link"
+                  href="https://github.com/tyemirov/TAuth/blob/master/docs/migration.md"
+                  >Migration guide <span>docs/migration.md</span></a
+                >
               </div>
             </div>
             <div class="panel hero-visual reveal delay-2">
               <div class="terminal">
                 <div class="terminal-header">
                   <span class="terminal-dot"></span>
-                  <span class="terminal-dot" style="background: var(--ember);"></span>
-                  <span class="terminal-dot" style="background: #7fb4ff;"></span>
+                  <span
+                    class="terminal-dot"
+                    style="background: var(--ember)"
+                  ></span>
+                  <span class="terminal-dot" style="background: #7fb4ff"></span>
                   quickstart
                 </div>
                 <pre><code>$ tauth --config=config.yaml
@@ -554,22 +640,54 @@ auth-client.js: /static/auth-client.js</code></pre>
             </div>
           </div>
         </section>
-
       </main>
 
       <mpr-footer
-        prefix-text="Built for GitHub Pages"
-        toggle-label="Explore"
+        links-collection='{
+          "style": "drop-up",
+          "text": "Built by Marco Polo Research Lab",
+          "links": [
+            { "label": "Marco Polo Research Lab", "url": "https://mprlab.com" },
+            { "label": "Gravity Notes", "url": "https://gravity.mprlab.com" },
+            { "label": "LoopAware", "url": "https://loopaware.mprlab.com" },
+            { "label": "Allergy Wheel", "url": "https://allergy.mprlab.com" },
+            { "label": "Social Threader", "url": "https://threader.mprlab.com" },
+            { "label": "RSVP", "url": "https://rsvp.mprlab.com" },
+            { "label": "Countdown Calendar", "url": "https://countdown.mprlab.com" },
+            { "label": "LLM Crossword", "url": "https://llm-crossword.mprlab.com" },
+            { "label": "Prompt Bubbles", "url": "https://prompts.mprlab.com" },
+            { "label": "Wallpapers", "url": "https://wallpapers.mprlab.com" },
+            { "label": "CTX", "url": "https://ctx.mprlab.com" }
+          ]
+        }'
+        privacy-link-label="MIT License"
+        privacy-modal-content='
+      &lt;h1&gt;MIT License — ctx&lt;/h1&gt;
+      &lt;p&gt;&lt;strong&gt;Copyright (c) 2025&lt;/strong&gt;
+      Marco Polo Research Lab&lt;/p&gt;
+      &lt;p&gt;Permission is hereby granted, free of charge, to any person obtaining a copy
+      of this software and associated documentation files (the "Software"), to deal
+      in the Software without restriction, including without limitation the rights
+      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+      copies of the Software, and to permit persons to whom the Software is
+      furnished to do so, subject to the following conditions:&lt;/p&gt;
+      &lt;p&gt;The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.&lt;/p&gt;
+      &lt;p&gt;THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+      SOFTWARE.&lt;/p&gt;
+    '
         sticky="false"
-        privacy-link-label="Privacy &amp; Terms"
-        privacy-link-href="https://github.com/tyemirov/TAuth/blob/master/LICENSE"
-        links='[
-          { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth", "target": "_blank", "rel": "noopener noreferrer" },
-          { "label": "Docs", "url": "usage.html" },
-          { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions", "target": "_blank", "rel": "noopener noreferrer" }
-        ]'
-      ></mpr-footer>
+      >
+      </mpr-footer>
     </div>
-    <script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"
+    ></script>
   </body>
 </html>
