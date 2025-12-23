@@ -19,6 +19,9 @@ const ErrorCodeInvalidConfigFile = "config.invalid_config_file"
 // ErrorCodeMissingTenants is returned when no tenants are defined.
 const ErrorCodeMissingTenants = "config.missing_tenants"
 
+// ConfigSchemaVersion identifies the config.yaml schema version.
+const ConfigSchemaVersion = "tauth.config.v1"
+
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
 
