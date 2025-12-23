@@ -20,6 +20,7 @@
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
 - TA-110: Added a GitHub Pages landing page at `docs/index.html` with the new presentation layout and CTAs.
+- TA-111: Swapped the landing page footer to the mpr-ui `<mpr-footer>` custom element.
 
 ### Bug Fixes 🐛
 - TA-339: Expanded the tenant config loader to replace `${VAR}`/`$VAR` placeholders (even when configs are embedded), added regression tests for both document and YAML entry points, and documented the behavior so missing env vars collapse to empty strings without panicking.
