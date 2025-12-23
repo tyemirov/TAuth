@@ -20,6 +20,29 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-108] Add preflight validation + redacted effective-config report so external validators can verify orchestrated services before launch. — Scope is pre-start only (no runtime endpoints). Required output includes: service metadata (version/build/config schema version), effective server settings (CORS + allowed origins, tenant header override), per-tenant effective settings (tenant id/display name, allowed_hosts optionally redacted, google_web_client_id, cookie_domain, session_cookie_name/refresh_cookie_name, session/refresh/nonce TTLs, allow_insecure_http, derived SameSite mode, jwt_issuer), and secret fingerprints only (jwt_signing_key_fingerprint, never raw keys). External validator responsibilities: compare issuer/cookie names/cookie domain expectations, verify JWT signing key match via fingerprint comparison, validate multi-tenant hygiene (no cookie collisions on shared hosts, ambiguity rules), and validate CORS origin requirements (notably accounts.google.com). Deliverable includes stable error codes + a versioned JSON schema for the report. — Added `tauth preflight` output/report builder with redacted host mode, dependency checks, and documentation.
 - [x] [TA-109] Generalize preflight implementation for Viper-based services with YAML + env bindings. — Added `tools/utils/preflight` builder interfaces, Viper config adapter with redaction hooks, refactored TAuth preflight to reuse the shared schema, and documented the generic preflight contract.
 
+- [ ] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
+  Style it visually and structurally.
+  Follow these principles:
+  • Hero section with bold product tagline, subheading, primary CTA, and screenshot/code example
+  • Value-props as three or four concise feature blocks with icons
+  • Clean documentation links or “Get Started” area
+  • Two or three deeper feature sections with side-by-side text + screenshots/code
+  • Dark theme with neon accent
+  • Monospace for headings and code snippets
+  • Strong visual hierarchy, wide spacing, minimal borders
+  • Footer with GitHub/Docs/Community links
+  Provide me with:
+ 
+  A rewritten layout structure
+ 
+  Restyled copy in the tone of top developer platforms
+ 
+  Matching CSS (no frameworks unless requested)
+ 
+  Light/dark palette suggestions
+  Keep everything production-grade and concise.
+  Use GitHub as a hosting solution (an index.html file under docs/)
+
 ## Improvements (212–299)
 
 - [x] [TA-212] Switch tenant configuration format from JSON to YAML. Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML. — Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
