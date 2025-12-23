@@ -118,7 +118,7 @@ The JSON payload is versioned and shaped as:
 - `effective_config` (server + tenant settings)
 - `dependencies` (preflight checks with readiness status)
 
-The preflight builder is generalized under `tools/utils/preflight` with a Viper-based adapter (`tools/utils/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
+The preflight builder is generalized under `github.com/tyemirov/utils/preflight` with a Viper-based adapter (`github.com/tyemirov/utils/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
 
 ---
 

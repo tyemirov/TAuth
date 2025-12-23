@@ -8,7 +8,7 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/spf13/cobra v1.8.1
-	github.com/tyemirov/utils v0.0.0
+	github.com/tyemirov/utils v0.1.4-0.20251222005337-d211cd32460a
 	go.uber.org/zap v1.27.0
 	google.golang.org/api v0.204.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -80,5 +80,3 @@ require (
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/sqlite v1.23.1 // indirect
 )
-
-replace github.com/tyemirov/utils => ./tools/utils
