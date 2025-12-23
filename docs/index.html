@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css">
     <style>
       :root {
         --ink-100: #f7f9fb;
@@ -23,6 +24,13 @@
         --shadow: 0 18px 45px rgba(2, 8, 12, 0.55);
         --font-heading: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         --font-body: "Instrument Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        --mpr-color-surface-primary: var(--surface);
+        --mpr-color-surface-elevated: var(--surface-strong);
+        --mpr-color-text-primary: var(--ink-100);
+        --mpr-color-text-muted: var(--ink-40);
+        --mpr-color-accent: var(--accent);
+        --mpr-color-border: var(--grid-line);
+        --mpr-shadow-elevated: var(--shadow);
       }
 
       * {
@@ -300,52 +308,8 @@
         align-items: center;
       }
 
-      .palette-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 18px;
-        margin-top: 20px;
-      }
-
-      .palette-card {
-        padding: 18px;
-        border-radius: 16px;
-        background: rgba(18, 24, 33, 0.6);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-      }
-
-      .swatch-row {
-        display: flex;
-        gap: 10px;
-        margin-top: 12px;
-      }
-
-      .swatch {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-      }
-
-      footer {
+      mpr-footer {
         margin-top: 90px;
-        padding-top: 30px;
-        border-top: 1px solid var(--grid-line);
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        justify-content: space-between;
-        color: var(--ink-40);
-        font-size: 14px;
-      }
-
-      .footer-links {
-        display: flex;
-        gap: 18px;
-      }
-
-      .footer-links a:hover {
-        color: var(--accent);
       }
 
       .reveal {
@@ -408,7 +372,6 @@
           <a href="#features">Features</a>
           <a href="#flow">Flow</a>
           <a href="#docs">Get started</a>
-          <a href="#palette">Palette</a>
         </nav>
         <a class="cta cta-primary" href="usage.html">Get started</a>
       </header>
@@ -498,7 +461,7 @@ dependencies: refresh_store OK</code></pre>
 - Feature blocks
 - Auth flow, JWT validation, tenant config
 - Get started links
-- Palette suggestions + footer</code></pre>
+- Footer integration</code></pre>
             </div>
           </div>
         </section>
@@ -592,41 +555,21 @@ auth-client.js: /static/auth-client.js</code></pre>
           </div>
         </section>
 
-        <section id="palette" class="section">
-          <h2 class="reveal delay-1">Palette suggestions</h2>
-          <div class="palette-grid">
-            <div class="palette-card reveal delay-2">
-              <h3>Dark theme</h3>
-              <p class="section-copy">Base: #0b1015, Surface: #121821, Neon: #6fffe9, Ember: #ffb366</p>
-              <div class="swatch-row">
-                <div class="swatch" style="background: #0b1015;"></div>
-                <div class="swatch" style="background: #121821;"></div>
-                <div class="swatch" style="background: #6fffe9;"></div>
-                <div class="swatch" style="background: #ffb366;"></div>
-              </div>
-            </div>
-            <div class="palette-card reveal delay-3">
-              <h3>Light theme</h3>
-              <p class="section-copy">Base: #f7f5f2, Ink: #0b1015, Accent: #16d2b9, Ember: #ff9f4a</p>
-              <div class="swatch-row">
-                <div class="swatch" style="background: #f7f5f2;"></div>
-                <div class="swatch" style="background: #0b1015;"></div>
-                <div class="swatch" style="background: #16d2b9;"></div>
-                <div class="swatch" style="background: #ff9f4a;"></div>
-              </div>
-            </div>
-          </div>
-        </section>
       </main>
 
-      <footer>
-        <div>Built for GitHub Pages. Deploy with /docs/index.html.</div>
-        <div class="footer-links">
-          <a href="https://github.com/tyemirov/TAuth">GitHub</a>
-          <a href="usage.html">Docs</a>
-          <a href="https://github.com/tyemirov/TAuth/discussions">Community</a>
-        </div>
-      </footer>
+      <mpr-footer
+        prefix-text="Built for GitHub Pages"
+        toggle-label="Explore"
+        sticky="false"
+        privacy-link-label="Privacy &amp; Terms"
+        privacy-link-href="https://github.com/tyemirov/TAuth/blob/master/LICENSE"
+        links='[
+          { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth", "target": "_blank", "rel": "noopener noreferrer" },
+          { "label": "Docs", "url": "usage.html" },
+          { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions", "target": "_blank", "rel": "noopener noreferrer" }
+        ]'
+      ></mpr-footer>
     </div>
+    <script defer src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"></script>
   </body>
 </html>
