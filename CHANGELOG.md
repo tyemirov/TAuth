@@ -23,6 +23,9 @@
 - TA-111: Swapped the landing page footer to the mpr-ui `<mpr-footer>` custom element.
 - TA-112: Removed the palette suggestions section from the landing page.
 
+### Improvements ⚙️
+- TA-113: Added `/web` as a Docker volume and copied web assets into the image.
+
 ### Bug Fixes 🐛
 - TA-339: Expanded the tenant config loader to replace `${VAR}`/`$VAR` placeholders (even when configs are embedded), added regression tests for both document and YAML entry points, and documented the behavior so missing env vars collapse to empty strings without panicking.
 - TA-333: Fixed `clearCookie` path mismatch during logout; refresh cookies (Path `/auth`) are now correctly cleared alongside session cookies.
