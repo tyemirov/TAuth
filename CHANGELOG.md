@@ -12,7 +12,10 @@
 - TA-105: Added the `tenantId` option to `auth-client.js`, updated documentation so front-ends know when to use the override header, and expanded Node tests covering two tenants + header-based refresh flows.
 - TA-107: `auth-client.js` now derives its base URL from the script origin and exposes `getAuthEndpoints()`; `pkg/sessionvalidator` can now load tenant signing keys, issuer, and cookie names from `config.yaml` for downstream JWT validation.
 - TA-108: Added `tauth preflight` to emit a redacted effective-config report and validate dependencies before launch, plus build metadata in the report for external validators.
-- TA-109: Generalized preflight reporting with `pkg/preflight`, added a Viper-based adapter for YAML + env bindings, and refactored TAuth preflight to reuse the shared schema.
+- TA-109: Generalized preflight reporting with `github.com/tyemirov/utils/preflight`, added a Viper-based adapter for YAML + env bindings, and refactored TAuth preflight to reuse the shared schema.
+
+### Improvements ⚙️
+- TA-411: Moved the preflight package to `github.com/tyemirov/utils/preflight` to make it reusable outside the TAuth module.
 
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.

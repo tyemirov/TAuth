@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	preflightpkg "github.com/tyemirov/tauth/pkg/preflight"
+	preflightpkg "github.com/tyemirov/utils/preflight"
 )
 
 const (

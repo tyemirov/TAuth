@@ -277,7 +277,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 ## 9. CLI and Server Lifecycle
 
 - Cobra command `tauth` reads configuration from a single YAML file (`--config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`).
-- `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `pkg/preflight` builder.
+- `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
 - Graceful shutdown listens for `SIGINT`/`SIGTERM`, allowing 10s for in-flight requests.
 - zap middleware logs method, path, status, IP, and latency for each request.
 - Integration tests use the exported CLI wiring to spin up in-memory servers (`go test ./...`).
