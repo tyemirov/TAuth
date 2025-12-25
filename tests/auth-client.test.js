@@ -1,3 +1,4 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
@@ -15,6 +16,54 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   const dataBaseUrl = resolvedOptions.dataBaseUrl || "";
   const documentBaseUrl = resolvedOptions.documentBaseUrl || "";
 
+  const broadcastChannels = [];
+  class BroadcastChannel {
+    constructor() {
+      this.messageListeners = [];
+      this.onmessage = null;
+      broadcastChannels.push(this);
+    }
+
+    addEventListener(eventName, handler) {
+      if (eventName !== "message") {
+        return;
+      }
+      this.messageListeners.push(handler);
+    }
+
+    removeEventListener(eventName, handler) {
+      if (eventName !== "message") {
+        return;
+      }
+      const listenerIndex = this.messageListeners.indexOf(handler);
+      if (listenerIndex >= 0) {
+        this.messageListeners.splice(listenerIndex, 1);
+      }
+    }
+
+    postMessage(message) {
+      if (broadcastSink) {
+        broadcastSink.push(message);
+      }
+      for (const channel of broadcastChannels) {
+        if (channel === this) {
+          continue;
+        }
+        channel.__dispatch(message);
+      }
+    }
+
+    __dispatch(message) {
+      const event = { data: message };
+      if (typeof this.onmessage === "function") {
+        this.onmessage(event);
+      }
+      for (const handler of this.messageListeners) {
+        handler(event);
+      }
+    }
+  }
+
   const context = {
     fetch: fetchImpl,
     console,
@@ -24,14 +73,7 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
     URL,
     Request: global.Request,
     Headers: global.Headers,
-    BroadcastChannel: class {
-      constructor() {}
-      postMessage(message) {
-        if (broadcastSink) {
-          broadcastSink.push(message);
-        }
-      }
-    },
+    BroadcastChannel,
   };
   context.location = { origin: resolvedOrigin };
   context.document = {
@@ -64,6 +106,11 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   }
   context.window = context;
   context.window.location = context.location;
+  context.__dispatchBroadcast = function dispatchBroadcast(message) {
+    for (const channel of broadcastChannels) {
+      channel.__dispatch(message);
+    }
+  };
   vm.createContext(context);
   vm.runInContext(source, context);
   return context;
@@ -460,4 +507,69 @@ test("setAuthTenantId after init updates future auth requests", async () => {
   assert.equal(fetch.calls.length, 2);
   assert.equal(fetch.calls[1].url, "https://tenant.example.com/auth/logout");
   assert.equal(fetch.calls[1].headers["X-TAuth-Tenant"], "tenant-two");
+});
+
+test("auth client syncs profile on refreshed broadcast", async () => {
+  const firstProfile = {
+    user_id: "initial-user",
+    user_email: "initial@example.com",
+    display: "Initial User",
+    roles: ["user"],
+  };
+  const refreshedProfile = {
+    user_id: "refreshed-user",
+    user_email: "refreshed@example.com",
+    display: "Refreshed User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: firstProfile },
+    { status: 200, body: refreshedProfile },
+  ]);
+  const context = await loadAuthClient(fetch);
+
+  const authenticatedProfiles = [];
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated(profile) {
+      authenticatedProfiles.push(profile);
+    },
+    onUnauthenticated() {
+      throw new Error("should stay authenticated");
+    },
+  });
+
+  context.__dispatchBroadcast("refreshed");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(authenticatedProfiles.length, 2);
+  assert.deepEqual(authenticatedProfiles[1], refreshedProfile);
+  assert.equal(fetch.calls.length, 2);
+});
+
+test("auth client clears state on logged_out broadcast", async () => {
+  const profile = {
+    user_id: "logout-user",
+    user_email: "logout@example.com",
+    display: "Logout User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch);
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  context.__dispatchBroadcast("logged_out");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(fetch.calls.length, 1);
 });

@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const nonceTokenByteLength = 32
+
 var (
 	// ErrNonceNotFound indicates the supplied nonce token was not issued or already consumed.
 	ErrNonceNotFound = errors.New("nonce not found")
@@ -50,7 +52,7 @@ func NewMemoryNonceStoreWithTTLResolver(ttlResolver func(string) time.Duration) 
 		entries:     make(map[string]map[string]time.Time),
 		ttlResolver: ttlResolver,
 		now:         time.Now,
-		tokenSize:   32,
+		tokenSize:   nonceTokenByteLength,
 		randReader:  rand.Reader,
 	}
 }

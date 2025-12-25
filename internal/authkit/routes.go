@@ -311,7 +311,7 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 
-		applicationUserID, currentTokenID, expiresUnix, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
+		applicationUserID, currentTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
 		if validateErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			if errors.Is(validateErr, ErrRefreshTokenRevoked) {
@@ -319,9 +319,8 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				contextGin.AbortWithStatus(http.StatusUnauthorized)
 				return
 			}
-			if isClearableRefreshTokenError(validateErr) {
+			if isUnauthorizedRefreshTokenError(validateErr) {
 				logAuthWarning("auth.refresh.validate", validateErr)
-				clearAuthCookies(contextGin, config)
 				contextGin.AbortWithStatus(http.StatusUnauthorized)
 				return
 			}
@@ -329,20 +328,12 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		if time.Unix(expiresUnix, 0).Before(clock.Now().UTC()) {
-			recordMetric(metricAuthRefreshFailure)
-			logAuthWarning("auth.refresh.expired", nil)
-			clearAuthCookies(contextGin, config)
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
 
 		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
 		if profileErr != nil {
 			recordMetric(metricAuthRefreshFailure)
-			logAuthWarning("auth.refresh.profile", profileErr)
-			clearAuthCookies(contextGin, config)
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
+			logAuthError("auth.refresh.profile", profileErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
@@ -401,7 +392,7 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 
 	whoAmI := router.Group("/")
 	whoAmI.Use(RequireSession(registry))
-	whoAmI.GET("/me", web.HandleWhoAmI(users, configuredLogger))
+	whoAmI.GET("/me", web.HandleWhoAmI(configuredLogger))
 }
 
 func writeSessionCookie(contextGin *gin.Context, configuration ServerConfig, sessionToken string, expiresAt time.Time) {
@@ -456,12 +447,7 @@ func clearCookieVariants(contextGin *gin.Context, configuration ServerConfig, na
 	}
 }
 
-func clearAuthCookies(contextGin *gin.Context, configuration ServerConfig) {
-	clearCookie(contextGin, configuration, configuration.SessionCookieName, "/")
-	clearCookie(contextGin, configuration, configuration.RefreshCookieName, "/auth")
-}
-
-func isClearableRefreshTokenError(err error) bool {
+func isUnauthorizedRefreshTokenError(err error) bool {
 	return errors.Is(err, ErrRefreshTokenEmptyOpaque) ||
 		errors.Is(err, ErrRefreshTokenNotFound) ||
 		errors.Is(err, ErrRefreshTokenExpired)

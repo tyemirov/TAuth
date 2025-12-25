@@ -61,13 +61,17 @@
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
 
-  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, tenantId: string, originHint: string, baseUrlHint: string }} */
+  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string, originHint: string, baseUrlHint: string }} */
   var runtime = {
     options: null,
     userProfile: null,
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
+    broadcastListeners: [],
+    broadcastListenerAttached: false,
+    broadcastHandlerAttached: false,
+    profileSyncPromise: null,
     tenantId: "",
     originHint: "",
     baseUrlHint: "",
@@ -208,6 +212,10 @@
   }
 
   var tenantHeaderName = "X-TAuth-Tenant";
+  var broadcastChannelName = "auth";
+  var broadcastEventRefreshed = "refreshed";
+  var broadcastEventLoggedOut = "logged_out";
+  var broadcastWaitTimeoutMs = 360;
 
   function queueWhileRefreshing(executorFunction) {
     return new Promise(function (resolve, reject) {
@@ -236,6 +244,26 @@
     runtime.userProfile = userProfile;
   }
 
+  function applyAuthenticatedProfile(profile) {
+    setUserProfile(profile);
+    if (
+      runtime.options &&
+      typeof runtime.options.onAuthenticated === "function"
+    ) {
+      runtime.options.onAuthenticated(profile);
+    }
+  }
+
+  function applyUnauthenticated() {
+    setUserProfile(null);
+    if (
+      runtime.options &&
+      typeof runtime.options.onUnauthenticated === "function"
+    ) {
+      runtime.options.onUnauthenticated();
+    }
+  }
+
   /**
    * @returns {UserProfile | null}
    */
@@ -260,8 +288,117 @@
 
   function ensureBroadcastChannel() {
     if (!runtime.broadcastChannel && typeof BroadcastChannel !== "undefined") {
-      runtime.broadcastChannel = new BroadcastChannel("auth");
+      runtime.broadcastChannel = new BroadcastChannel(broadcastChannelName);
     }
+  }
+
+  function ensureBroadcastDispatch() {
+    if (!runtime.broadcastChannel || runtime.broadcastListenerAttached) {
+      return;
+    }
+    runtime.broadcastListenerAttached = true;
+    runtime.broadcastChannel.onmessage = function handleBroadcastDispatch(event) {
+      var listeners = runtime.broadcastListeners.slice();
+      for (var listenerIndex = 0; listenerIndex < listeners.length; listenerIndex++) {
+        listeners[listenerIndex](event);
+      }
+    };
+  }
+
+  function addBroadcastListener(listener) {
+    ensureBroadcastChannel();
+    ensureBroadcastDispatch();
+    if (!runtime.broadcastChannel) {
+      return function noop() {};
+    }
+    runtime.broadcastListeners.push(listener);
+    return function removeListener() {
+      var listeners = runtime.broadcastListeners;
+      for (
+        var listenerIndex = 0;
+        listenerIndex < listeners.length;
+        listenerIndex++
+      ) {
+        if (listeners[listenerIndex] === listener) {
+          listeners.splice(listenerIndex, 1);
+          break;
+        }
+      }
+    };
+  }
+
+  function ensureBroadcastListener() {
+    if (runtime.broadcastHandlerAttached) {
+      return;
+    }
+    runtime.broadcastHandlerAttached = true;
+    addBroadcastListener(handleBroadcastMessage);
+  }
+
+  function normalizeBroadcastMessage(message) {
+    if (!message) {
+      return "";
+    }
+    if (typeof message === "string") {
+      return message;
+    }
+    if (typeof message === "object" && typeof message.type === "string") {
+      return message.type;
+    }
+    return "";
+  }
+
+  function handleBroadcastMessage(event) {
+    var messageType = normalizeBroadcastMessage(event && event.data);
+    if (messageType === broadcastEventRefreshed) {
+      handleExternalRefresh();
+      return;
+    }
+    if (messageType === broadcastEventLoggedOut) {
+      handleExternalLogout();
+    }
+  }
+
+  function handleExternalRefresh() {
+    if (!runtime.options) {
+      return;
+    }
+    syncProfileFromServer();
+  }
+
+  function handleExternalLogout() {
+    applyUnauthenticated();
+  }
+
+  function waitForBroadcast(messageType, timeoutMs) {
+    ensureBroadcastChannel();
+    if (!runtime.broadcastChannel) {
+      return Promise.resolve(false);
+    }
+    return new Promise(function (resolve) {
+      var isResolved = false;
+      var removeListener = addBroadcastListener(function (event) {
+        var message = normalizeBroadcastMessage(event && event.data);
+        if (message !== messageType) {
+          return;
+        }
+        if (isResolved) {
+          return;
+        }
+        isResolved = true;
+        removeListener();
+        clearTimeout(timerId);
+        resolve(true);
+      });
+      var timerId = setTimeout(function () {
+        if (isResolved) {
+          return;
+        }
+        isResolved = true;
+        removeListener();
+        resolve(false);
+      }, timeoutMs);
+    });
   }
 
   function broadcast(message) {
@@ -333,29 +470,47 @@
     return combined;
   }
 
-  /**
-   * @param {AuthClientInitOptions} passed
-   * @returns {Promise<void>}
-   */
-  async function initAuthClient(passed) {
-    runtime.options = normalizeOptions(passed);
+  async function fetchCurrentProfile() {
+    var options = runtime.options || normalizeOptions({});
     try {
-      var meResponse = await fetch(
-        joinUrl(runtime.options.baseUrl, runtime.options.meEndpoint),
+      var response = await fetch(
+        joinUrl(options.baseUrl, options.meEndpoint),
         {
           method: "GET",
           credentials: "include",
           headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
         },
       );
-      if (meResponse.ok) {
-        var profile = await meResponse.json();
-        setUserProfile(profile);
-        runtime.options.onAuthenticated(profile);
-        return;
+      if (!response.ok) {
+        return null;
       }
+      return await response.json();
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function syncProfileFromServer() {
+    if (runtime.profileSyncPromise) {
+      return runtime.profileSyncPromise;
+    }
+    runtime.profileSyncPromise = (async function syncProfile() {
+      var profile = await fetchCurrentProfile();
+      if (profile) {
+        applyAuthenticatedProfile(profile);
+      }
+      return profile;
+    })();
+    return runtime.profileSyncPromise.finally(function () {
+      runtime.profileSyncPromise = null;
+    });
+  }
+
+  async function attemptRefresh() {
+    var options = runtime.options || normalizeOptions({});
+    try {
       var refreshResponse = await fetch(
-        joinUrl(runtime.options.baseUrl, runtime.options.refreshEndpoint),
+        joinUrl(options.baseUrl, options.refreshEndpoint),
         {
           method: "POST",
           credentials: "include",
@@ -363,27 +518,58 @@
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
-        broadcast("refreshed");
-        var retryResponse = await fetch(
-          joinUrl(runtime.options.baseUrl, runtime.options.meEndpoint),
-          {
-            method: "GET",
-            credentials: "include",
-            headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
-          },
-        );
-        if (retryResponse.ok) {
-          var profileAfter = await retryResponse.json();
-          setUserProfile(profileAfter);
-          runtime.options.onAuthenticated(profileAfter);
+        broadcast(broadcastEventRefreshed);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function waitForPeerRefresh() {
+    var received = await waitForBroadcast(
+      broadcastEventRefreshed,
+      broadcastWaitTimeoutMs,
+    );
+    if (!received) {
+      return false;
+    }
+    await syncProfileFromServer();
+    return true;
+  }
+
+  /**
+   * @param {AuthClientInitOptions} passed
+   * @returns {Promise<void>}
+   */
+  async function initAuthClient(passed) {
+    runtime.options = normalizeOptions(passed);
+    ensureBroadcastListener();
+    try {
+      var profile = await fetchCurrentProfile();
+      if (profile) {
+        applyAuthenticatedProfile(profile);
+        return;
+      }
+      var refreshSucceeded = await attemptRefresh();
+      if (refreshSucceeded) {
+        var refreshedProfile = await fetchCurrentProfile();
+        if (refreshedProfile) {
+          applyAuthenticatedProfile(refreshedProfile);
           return;
         }
       }
-      setUserProfile(null);
-      runtime.options.onUnauthenticated();
+      var peerRecovered = await waitForPeerRefresh();
+      if (peerRecovered) {
+        return;
+      }
+      if (runtime.userProfile) {
+        return;
+      }
+      applyUnauthenticated();
     } catch (initializationError) {
-      setUserProfile(null);
-      runtime.options.onUnauthenticated();
+      applyUnauthenticated();
     }
   }
 
@@ -399,6 +585,7 @@
       { "X-Client": "mprlab-ui" },
       merged.headers || {},
     );
+    ensureBroadcastListener();
     var execute = function () {
       return fetch(inputUrl, merged);
     };
@@ -412,23 +599,20 @@
     }
     runtime.isRefreshing = true;
     try {
-      var refreshResponse = await fetch(
-        joinUrl(runtime.options.baseUrl, runtime.options.refreshEndpoint),
-        {
-          method: "POST",
-          credentials: "include",
-          headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
-        },
-      );
-      if (refreshResponse.ok || refreshResponse.status === 204) {
-        broadcast("refreshed");
+      var refreshSucceeded = await attemptRefresh();
+      if (refreshSucceeded) {
         var retryResponse = await execute();
         flushPendingRequests(null);
         return retryResponse;
-      } else {
-        flushPendingRequests(new Error("refresh_failed"));
-        return firstResponse;
       }
+      var peerRecovered = await waitForPeerRefresh();
+      if (peerRecovered) {
+        var recoveredResponse = await execute();
+        flushPendingRequests(null);
+        return recoveredResponse;
+      }
+      flushPendingRequests(new Error("refresh_failed"));
+      return firstResponse;
     } finally {
       runtime.isRefreshing = false;
     }
@@ -448,14 +632,8 @@
         },
       );
     } catch (ignore) {}
-    setUserProfile(null);
-    broadcast("logged_out");
-    if (
-      runtime.options &&
-      typeof runtime.options.onUnauthenticated === "function"
-    ) {
-      runtime.options.onUnauthenticated();
-    }
+    applyUnauthenticated();
+    broadcast(broadcastEventLoggedOut);
   }
 
   if (typeof window !== "undefined") {

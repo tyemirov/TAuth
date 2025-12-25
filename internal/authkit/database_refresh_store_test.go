@@ -11,7 +11,7 @@ import (
 )
 
 func TestResolveDialectorUnsupportedScheme(t *testing.T) {
-	_, _, err := resolveDialector("mysql://user:pass@localhost/db")
+	_, _, err := resolveDialector("mysql://user:pass@localhost/db", refreshStoreErrorPrefix)
 	if err == nil {
 		t.Fatalf("expected error for unsupported scheme")
 	}
@@ -21,7 +21,7 @@ func TestResolveDialectorUnsupportedScheme(t *testing.T) {
 }
 
 func TestResolveDialectorMissingScheme(t *testing.T) {
-	_, _, err := resolveDialector("localhost/db")
+	_, _, err := resolveDialector("localhost/db", refreshStoreErrorPrefix)
 	if err == nil {
 		t.Fatalf("expected error for missing scheme")
 	}
@@ -31,7 +31,7 @@ func TestResolveDialectorMissingScheme(t *testing.T) {
 }
 
 func TestResolveDialectorSQLite(t *testing.T) {
-	dialector, driverLabel, err := resolveDialector("sqlite://file::memory:?cache=shared")
+	dialector, driverLabel, err := resolveDialector("sqlite://file::memory:?cache=shared", refreshStoreErrorPrefix)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,12 +106,12 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 }
 
 func TestBuildSQLiteDSNVariants(t *testing.T) {
-	_, _, err := resolveDialector("sqlite://localhost/tmp/test.db?mode=ro")
+	_, _, err := resolveDialector("sqlite://localhost/tmp/test.db?mode=ro", refreshStoreErrorPrefix)
 	if err != nil {
 		t.Fatalf("unexpected error resolving host-based sqlite DSN: %v", err)
 	}
 
-	_, _, err = resolveDialector("sqlite://")
+	_, _, err = resolveDialector("sqlite://", refreshStoreErrorPrefix)
 	if !errors.Is(err, errSQLiteEmptyPath) {
 		t.Fatalf("expected errSQLiteEmptyPath, got %v", err)
 	}
@@ -175,7 +175,7 @@ func TestBuildSQLiteDSNCoversOpaqueAndHostPathVariants(t *testing.T) {
 }
 
 func TestResolveDialectorRejectsFileHost(t *testing.T) {
-	_, _, err := resolveDialector("sqlite://file:/data/tauth.db")
+	_, _, err := resolveDialector("sqlite://file:/data/tauth.db", refreshStoreErrorPrefix)
 	if err == nil {
 		t.Fatalf("expected error for file host DSN")
 	}

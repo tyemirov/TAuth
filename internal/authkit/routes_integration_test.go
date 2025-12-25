@@ -1078,7 +1078,7 @@ func TestAuthRefreshExpiredToken(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := &stubRefreshStore{
 		validateFunc: func(ctx context.Context, tenantID string, tokenOpaque string) (string, string, int64, error) {
-			return "user", "token", time.Now().Add(-time.Minute).Unix(), nil
+			return "", "", 0, ErrRefreshTokenExpired
 		},
 	}
 	router := gin.New()
@@ -1111,8 +1111,8 @@ func TestAuthRefreshProfileFailure(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when profile lookup fails, got %d", response.Code)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when profile lookup fails, got %d", response.Code)
 	}
 }
 

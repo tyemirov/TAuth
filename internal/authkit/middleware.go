@@ -42,7 +42,12 @@ func RequireSession(registry TenantRegistry) gin.HandlerFunc {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		if claims.GetTenantID() == "" || strings.TrimSpace(claims.GetTenantID()) != expectedTenant {
+		tenantID := strings.TrimSpace(claims.GetTenantID())
+		if tenantID == "" {
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if tenantID != expectedTenant {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}

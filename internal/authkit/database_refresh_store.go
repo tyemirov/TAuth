@@ -4,25 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
-	sqliteDialector "github.com/glebarez/sqlite"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-)
-
-var (
-	// ErrUnsupportedDialect indicates that no GORM dialector is available for the scheme.
-	ErrUnsupportedDialect = errors.New("refresh_store.unsupported_dialect")
-
-	errEmptyDatabaseURL      = errors.New("refresh_store.empty_database_url")
-	errSQLiteEmptyPath       = errors.New("refresh_store.sqlite.empty_path")
-	errSQLiteInvalidURL      = errors.New("refresh_store.sqlite.invalid_url")
-	errSQLiteUnsupportedHost = errors.New("refresh_store.sqlite.unsupported_host")
-	errUnsupportedNoScheme   = errors.New("refresh_store.unsupported_no_scheme")
 )
 
 // DatabaseRefreshTokenStore persists rotating refresh tokens using GORM.
@@ -53,24 +38,12 @@ func (refreshTokenRecord) TableName() string {
 
 // NewDatabaseRefreshTokenStore constructs a GORM-backed store.
 func NewDatabaseRefreshTokenStore(ctx context.Context, databaseURL string) (*DatabaseRefreshTokenStore, error) {
-	if strings.TrimSpace(databaseURL) == "" {
-		return nil, fmt.Errorf("refresh_store.open: %w", errEmptyDatabaseURL)
-	}
-	dialector, driverLabel, err := resolveDialector(databaseURL)
-	if err != nil {
-		return nil, err
-	}
-	gormDB, openErr := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, refreshStoreErrorPrefix, &refreshTokenRecord{})
 	if openErr != nil {
-		return nil, fmt.Errorf("refresh_store.open.%s: %w", driverLabel, openErr)
-	}
-	if migrateErr := gormDB.WithContext(ctx).AutoMigrate(&refreshTokenRecord{}); migrateErr != nil {
-		return nil, fmt.Errorf("refresh_store.migrate.%s: %w", driverLabel, migrateErr)
+		return nil, openErr
 	}
 	return &DatabaseRefreshTokenStore{
-		db:          gormDB,
+		db:          databaseHandle,
 		driverLabel: driverLabel,
 	}, nil
 }
@@ -147,60 +120,4 @@ func (store *DatabaseRefreshTokenStore) Revoke(ctx context.Context, tenantID str
 		return nil
 	}
 	return nil
-}
-
-func resolveDialector(databaseURL string) (gorm.Dialector, string, error) {
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		return nil, "", fmt.Errorf("refresh_store.parse_url: %w", err)
-	}
-	if parsed.Scheme == "" {
-		return nil, "", fmt.Errorf("refresh_store.dialect: %w", errUnsupportedNoScheme)
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "postgres", "postgresql":
-		return postgres.Open(databaseURL), "postgres", nil
-	case "sqlite", "sqlite3":
-		dsn, dsnErr := buildSQLiteDSN(parsed)
-		if dsnErr != nil {
-			return nil, "", fmt.Errorf("refresh_store.sqlite: %w", dsnErr)
-		}
-		return sqliteDialector.Open(dsn), "sqlite", nil
-	default:
-		return nil, "", fmt.Errorf("refresh_store.dialect.%s: %w", strings.ToLower(parsed.Scheme), ErrUnsupportedDialect)
-	}
-}
-
-func buildSQLiteDSN(parsed *url.URL) (string, error) {
-	if parsed == nil {
-		return "", errSQLiteInvalidURL
-	}
-	var builder strings.Builder
-	switch {
-	case parsed.Opaque != "":
-		builder.WriteString(parsed.Opaque)
-	case parsed.Host != "":
-		host := parsed.Host
-		normalizedHost := strings.TrimSuffix(host, ":")
-		if strings.EqualFold(normalizedHost, "file") {
-			return "", errSQLiteUnsupportedHost
-		}
-		builder.WriteString(host)
-		if parsed.Path != "" {
-			if !strings.HasPrefix(parsed.Path, "/") {
-				builder.WriteString("/")
-			}
-			builder.WriteString(parsed.Path)
-		}
-	default:
-		builder.WriteString(parsed.Path)
-	}
-	if builder.Len() == 0 {
-		return "", errSQLiteEmptyPath
-	}
-	if parsed.RawQuery != "" {
-		builder.WriteString("?")
-		builder.WriteString(parsed.RawQuery)
-	}
-	return builder.String(), nil
 }

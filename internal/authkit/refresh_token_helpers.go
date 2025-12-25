@@ -19,15 +19,19 @@ func newRefreshTokenID(now time.Time) string {
 }
 
 func generateRefreshOpaque() (string, string, error) {
-	randomBytes := make([]byte, refreshOpaqueByteLength)
-	if _, err := io.ReadFull(refreshTokenRandomSource, randomBytes); err != nil {
-		return "", "", fmt.Errorf("refresh_store.random: %w", err)
-	}
-	opaque := base64.RawURLEncoding.EncodeToString(randomBytes)
-	return opaque, hashOpaque(opaque), nil
+	return generateOpaqueToken(refreshTokenRandomSource, refreshOpaqueByteLength, refreshStoreErrorPrefix)
 }
 
 func hashOpaque(opaque string) string {
 	sum := sha256.Sum256([]byte(opaque))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func generateOpaqueToken(randomSource io.Reader, tokenSize int, errorPrefix string) (string, string, error) {
+	randomBytes := make([]byte, tokenSize)
+	if _, err := io.ReadFull(randomSource, randomBytes); err != nil {
+		return "", "", fmt.Errorf("%s.random: %w", errorPrefix, err)
+	}
+	opaque := base64.RawURLEncoding.EncodeToString(randomBytes)
+	return opaque, hashOpaque(opaque), nil
 }
