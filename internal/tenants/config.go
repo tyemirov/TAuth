@@ -46,25 +46,45 @@ type hostKey struct {
 // TenantID identifies each tenant block.
 type TenantID string
 
+type tenantCookieScope struct {
+	tenantID          TenantID
+	cookieDomain      string
+	hostnames         []string
+	sessionCookieName string
+	refreshCookieName string
+}
+
 // ErrInvalidTenantConfig indicates the underlying configuration payload is invalid.
 var ErrInvalidTenantConfig = errors.New("tenantconfig.invalid")
 
 const (
-	tenantIDPattern                   = "^[a-z0-9][a-z0-9_-]{1,63}$"
-	defaultNonceTTL                   = 5 * time.Minute
-	errorCodeInvalidPath              = "tenant.invalid_path"
-	errorCodeMissingTenants           = "tenant.missing_records"
-	errorCodeDuplicateTenantID        = "tenant.duplicate_id"
-	errorCodeInvalidID                = "tenant.invalid_id"
-	errorCodeMissingHosts             = "tenant.missing_hosts"
-	errorCodeDuplicateHost            = "tenant.duplicate_host"
-	errorCodeInvalidGoogleID          = "tenant.invalid_google_client_id"
-	errorCodeInvalidSessionTTL        = "tenant.invalid_session_ttl"
-	errorCodeInvalidRefreshTTL        = "tenant.invalid_refresh_ttl"
-	errorCodeInvalidNonceTTL          = "tenant.invalid_nonce_ttl"
-	errorCodeMissingSigningKey        = "tenant.missing_signing_key"
-	errorCodeMissingSessionCookieName = "tenant.missing_session_cookie_name"
-	errorCodeMissingRefreshCookieName = "tenant.missing_refresh_cookie_name"
+	tenantIDPattern                     = "^[a-z0-9][a-z0-9_-]{1,63}$"
+	defaultNonceTTL                     = 5 * time.Minute
+	errorCodeInvalidPath                = "tenant.invalid_path"
+	errorCodeMissingTenants             = "tenant.missing_records"
+	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
+	errorCodeInvalidID                  = "tenant.invalid_id"
+	errorCodeMissingHosts               = "tenant.missing_hosts"
+	errorCodeDuplicateHost              = "tenant.duplicate_host"
+	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
+	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
+	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
+	errorCodeInvalidNonceTTL            = "tenant.invalid_nonce_ttl"
+	errorCodeMissingSigningKey          = "tenant.missing_signing_key"
+	errorCodeMissingSessionCookieName   = "tenant.missing_session_cookie_name"
+	errorCodeMissingRefreshCookieName   = "tenant.missing_refresh_cookie_name"
+	errorCodeDuplicateSessionCookieName = "tenant.duplicate_session_cookie_name"
+	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
+	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
+)
+
+const (
+	cookieDomainSeparator          = "."
+	cookieOverlapDomainFormat      = "domain=%s"
+	cookieOverlapHostFormat        = "host=%s"
+	cookieScopeErrorFormat         = "%w: %s tenant=%s"
+	cookieScopeOriginErrorFormat   = "%w: %s tenant=%s origin=%s"
+	duplicateCookieNameErrorFormat = "%w: %s cookie_name=%s tenant=%s other_tenant=%s overlap=%s"
 )
 
 var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
@@ -103,11 +123,16 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	hostToTenantIDs := make(map[hostKey][]TenantID)
 	originToTenantIDs := make(map[string][]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
+	cookieScopes := make([]tenantCookieScope, 0, len(document.Tenants))
 
 	for _, entry := range document.Tenants {
 		tenant, keys, origins, err := buildTenant(entry)
 		if err != nil {
 			return Config{}, err
+		}
+		cookieScope, cookieScopeErr := buildTenantCookieScope(tenant, keys, origins)
+		if cookieScopeErr != nil {
+			return Config{}, cookieScopeErr
 		}
 		if _, exists := tenantIndex[tenant.id]; exists {
 			return Config{}, fmt.Errorf("%w: %s id=%s", ErrInvalidTenantConfig, errorCodeDuplicateTenantID, tenant.id)
@@ -120,11 +145,19 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 		}
 		tenantIndex[tenant.id] = tenant
 		orderedTenants = append(orderedTenants, tenant)
+		cookieScopes = append(cookieScopes, cookieScope)
 	}
 
 	sort.SliceStable(orderedTenants, func(i, j int) bool {
 		return string(orderedTenants[i].id) < string(orderedTenants[j].id)
 	})
+
+	sort.SliceStable(cookieScopes, func(leftIndex, rightIndex int) bool {
+		return string(cookieScopes[leftIndex].tenantID) < string(cookieScopes[rightIndex].tenantID)
+	})
+	if validationErr := validateCookieNameIsolation(cookieScopes); validationErr != nil {
+		return Config{}, validationErr
+	}
 
 	return Config{
 		tenants:           orderedTenants,
@@ -417,6 +450,189 @@ func parseHosts(hosts []string, tenantID TenantID) ([]string, []hostKey, []strin
 		keys = append(keys, key)
 	}
 	return cleanHosts, keys, origins, nil
+}
+
+func buildTenantCookieScope(tenant Tenant, hostKeys []hostKey, origins []string) (tenantCookieScope, error) {
+	hostnames, hostErr := extractTenantHostnames(tenant.id, hostKeys, origins)
+	if hostErr != nil {
+		return tenantCookieScope{}, hostErr
+	}
+	return tenantCookieScope{
+		tenantID:          tenant.id,
+		cookieDomain:      normalizeCookieDomain(tenant.cookieDomain),
+		hostnames:         hostnames,
+		sessionCookieName: tenant.sessionCookieName,
+		refreshCookieName: tenant.refreshCookieName,
+	}, nil
+}
+
+func extractTenantHostnames(tenantID TenantID, hostKeys []hostKey, origins []string) ([]string, error) {
+	hostSet := make(map[string]struct{})
+	for _, key := range hostKeys {
+		hostValue := strings.TrimSpace(key.host)
+		if hostValue != "" {
+			hostSet[hostValue] = struct{}{}
+		}
+	}
+	for _, origin := range origins {
+		originHost, originErr := hostFromOrigin(origin)
+		if originErr != nil {
+			return nil, fmt.Errorf(cookieScopeOriginErrorFormat, ErrInvalidTenantConfig, errorCodeInvalidCookieScope, tenantID, origin)
+		}
+		hostSet[originHost] = struct{}{}
+	}
+	if len(hostSet) == 0 {
+		return nil, fmt.Errorf(cookieScopeErrorFormat, ErrInvalidTenantConfig, errorCodeInvalidCookieScope, tenantID)
+	}
+	hostnames := make([]string, 0, len(hostSet))
+	for hostname := range hostSet {
+		hostnames = append(hostnames, hostname)
+	}
+	sort.Strings(hostnames)
+	return hostnames, nil
+}
+
+func hostFromOrigin(origin string) (string, error) {
+	parsed, parseErr := url.Parse(origin)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("origin host missing")
+	}
+	hostValue, _, hostErr := normalizeHostPort(parsed.Host)
+	if hostErr != nil {
+		return "", hostErr
+	}
+	return hostValue, nil
+}
+
+func validateCookieNameIsolation(cookieScopes []tenantCookieScope) error {
+	if len(cookieScopes) < 2 {
+		return nil
+	}
+	for firstIndex := 0; firstIndex < len(cookieScopes); firstIndex++ {
+		firstScope := cookieScopes[firstIndex]
+		for secondIndex := firstIndex + 1; secondIndex < len(cookieScopes); secondIndex++ {
+			secondScope := cookieScopes[secondIndex]
+			overlapDescription, overlaps := cookieScopesOverlap(firstScope, secondScope)
+			if !overlaps {
+				continue
+			}
+			if firstScope.sessionCookieName == secondScope.sessionCookieName {
+				return fmt.Errorf(duplicateCookieNameErrorFormat, ErrInvalidTenantConfig, errorCodeDuplicateSessionCookieName, firstScope.sessionCookieName, firstScope.tenantID, secondScope.tenantID, overlapDescription)
+			}
+			if firstScope.refreshCookieName == secondScope.refreshCookieName {
+				return fmt.Errorf(duplicateCookieNameErrorFormat, ErrInvalidTenantConfig, errorCodeDuplicateRefreshCookieName, firstScope.refreshCookieName, firstScope.tenantID, secondScope.tenantID, overlapDescription)
+			}
+		}
+	}
+	return nil
+}
+
+func cookieScopesOverlap(firstScope tenantCookieScope, secondScope tenantCookieScope) (string, bool) {
+	firstDomain := firstScope.cookieDomain
+	secondDomain := secondScope.cookieDomain
+	if firstDomain != "" && secondDomain != "" {
+		if domainsOverlap(firstDomain, secondDomain) {
+			return fmt.Sprintf(cookieOverlapDomainFormat, overlappingDomain(firstDomain, secondDomain)), true
+		}
+		return "", false
+	}
+	if firstDomain != "" {
+		return domainHostOverlap(firstDomain, secondScope.hostnames)
+	}
+	if secondDomain != "" {
+		return domainHostOverlap(secondDomain, firstScope.hostnames)
+	}
+	sharedHost := sharedHostName(firstScope.hostnames, secondScope.hostnames)
+	if sharedHost == "" {
+		return "", false
+	}
+	return fmt.Sprintf(cookieOverlapHostFormat, sharedHost), true
+}
+
+func domainHostOverlap(domain string, hostnames []string) (string, bool) {
+	hostMatch := hostMatchingDomain(domain, hostnames)
+	if hostMatch == "" {
+		return "", false
+	}
+	return fmt.Sprintf(cookieOverlapHostFormat, hostMatch), true
+}
+
+func hostMatchingDomain(domain string, hostnames []string) string {
+	for _, hostValue := range hostnames {
+		if domainContainsHost(domain, hostValue) {
+			return hostValue
+		}
+	}
+	return ""
+}
+
+func sharedHostName(firstHostnames []string, secondHostnames []string) string {
+	if len(firstHostnames) == 0 || len(secondHostnames) == 0 {
+		return ""
+	}
+	hostSet := make(map[string]struct{}, len(firstHostnames))
+	for _, hostValue := range firstHostnames {
+		hostSet[hostValue] = struct{}{}
+	}
+	for _, hostValue := range secondHostnames {
+		if _, exists := hostSet[hostValue]; exists {
+			return hostValue
+		}
+	}
+	return ""
+}
+
+func domainsOverlap(firstDomain string, secondDomain string) bool {
+	if firstDomain == "" || secondDomain == "" {
+		return false
+	}
+	if firstDomain == secondDomain {
+		return true
+	}
+	if domainContainsHost(firstDomain, secondDomain) {
+		return true
+	}
+	if domainContainsHost(secondDomain, firstDomain) {
+		return true
+	}
+	return false
+}
+
+func overlappingDomain(firstDomain string, secondDomain string) string {
+	if firstDomain == secondDomain {
+		return firstDomain
+	}
+	if domainContainsHost(firstDomain, secondDomain) {
+		return firstDomain
+	}
+	if domainContainsHost(secondDomain, firstDomain) {
+		return secondDomain
+	}
+	return firstDomain
+}
+
+func domainContainsHost(domain string, host string) bool {
+	normalizedDomain := normalizeCookieDomain(domain)
+	normalizedHost := normalizeHost(host)
+	if normalizedDomain == "" || normalizedHost == "" {
+		return false
+	}
+	if normalizedDomain == normalizedHost {
+		return true
+	}
+	return strings.HasSuffix(normalizedHost, cookieDomainSeparator+normalizedDomain)
+}
+
+func normalizeCookieDomain(domain string) string {
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return ""
+	}
+	lowered := strings.ToLower(trimmed)
+	return strings.TrimLeft(lowered, cookieDomainSeparator)
 }
 
 func normalizeHost(host string) string {
