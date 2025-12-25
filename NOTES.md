@@ -106,3 +106,5 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
 
 - TA-343: Persisted user/nonce stores with shared DB helpers, stopped clearing cookies on refresh failures, switched `/me` to claim-backed responses, added auth-client broadcast sync, and expanded multi-tenant refresh/persistence tests.
 - Tests: `go vet ./...`, `ineffassign ./...`, and `go test ./...` pass. `npm test` failed in `tests/mpr-auth-header.test.js` and `tests/mpr-footer.test.js` (missing `__googleInitConfig` + `mountFooterDom`); `npm run verify` passed. `staticcheck ./...` failed due to Go toolchain mismatch (module requires go1.25.4, staticcheck built with go1.25.3).
+- TA-345: Validated tenant cookie scope collisions so overlapping hosts/domains cannot share session or refresh cookie names, with new tenant config regression coverage.
+- Tests: `go vet ./...`, `staticcheck ./...`, `ineffassign ./...`, `go test ./...`.
