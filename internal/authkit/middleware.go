@@ -28,7 +28,11 @@ func RequireSession(registry TenantRegistry) gin.HandlerFunc {
 	}
 	defaultValidator := validators[registry.defaultTenantID]
 	return func(contextGin *gin.Context) {
-		expectedTenant := resolveTenantID(contextGin, registry)
+		expectedTenant, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
 		validator := validators[expectedTenant]
 		if validator == nil {
 			validator = defaultValidator

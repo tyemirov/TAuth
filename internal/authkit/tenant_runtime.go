@@ -70,3 +70,17 @@ func resolveTenantID(context *gin.Context, registry TenantRegistry) string {
 	}
 	return registry.defaultTenantID
 }
+
+func resolveTenantIDRequired(context *gin.Context, registry TenantRegistry) (string, bool) {
+	if context != nil {
+		if tenant, ok := tenants.TenantFromContext(context); ok {
+			if tenantID := strings.TrimSpace(string(tenant.ID())); tenantID != "" {
+				return tenantID, true
+			}
+		}
+	}
+	if len(registry.configs) <= 1 {
+		return registry.defaultTenantID, true
+	}
+	return "", false
+}
