@@ -101,13 +101,3 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
     3. Plan the required changes to close the open issues. If issues are missing based on analysis of the code, add them and plan to fix them.
     4. Use PLAN.md for an individual issue to plan the fix
     5. Read the documentation of gthe 3rd party libraries before implementing changes
-
-## 2025-12-24
-
-- TA-343: Persisted user/nonce stores with shared DB helpers, stopped clearing cookies on refresh failures, switched `/me` to claim-backed responses, added auth-client broadcast sync, and expanded multi-tenant refresh/persistence tests.
-- Tests: `go vet ./...`, `ineffassign ./...`, and `go test ./...` pass. `npm test` failed in `tests/mpr-auth-header.test.js` and `tests/mpr-footer.test.js` (missing `__googleInitConfig` + `mountFooterDom`); `npm run verify` passed. `staticcheck ./...` failed due to Go toolchain mismatch (module requires go1.25.4, staticcheck built with go1.25.3).
-
-## 2025-12-24
-
-- TA-344: accept duplicate refresh cookies by validating all candidates, add candidate-count logging, and cover with an auth refresh regression test.
-- Tests: `go vet ./...`, `ineffassign ./...`, `staticcheck ./...`, and `go test ./...` pass.
