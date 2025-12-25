@@ -170,7 +170,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	corsAllowedOrigins := expandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	enableTenantHeaderOverride := bool(appConfig.Server.EnableTenantHeaderOverride)
 
-	userStore := web.NewInMemoryUsers()
+	var userStore authkit.UserStore
 	var refreshStore authkit.RefreshTokenStore
 
 	if databaseURL != "" {
@@ -180,9 +180,17 @@ func runServer(command *cobra.Command, arguments []string) error {
 		}
 		refreshStore = persistentStore
 		logger.Info("using persistent refresh token store", zap.String("driver", persistentStore.Driver()))
+		persistentUserStore, userStoreErr := authkit.NewDatabaseUserStore(shutdownContext, databaseURL)
+		if userStoreErr != nil {
+			return userStoreErr
+		}
+		userStore = persistentUserStore
+		logger.Info("using persistent user store", zap.String("driver", persistentUserStore.Driver()))
 	} else {
 		refreshStore = authkit.NewMemoryRefreshTokenStore()
 		logger.Info("using in-memory refresh token store")
+		userStore = web.NewInMemoryUsers()
+		logger.Info("using in-memory user store")
 	}
 
 	tenantConfig, loadErr := tenants.LoadConfigFromDocument(appConfig.TenantDocument())
@@ -204,9 +212,22 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	defaultTenantConfig := registry.DefaultConfig()
-	nonceStore := authkit.NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
-		return registry.Config(tenantID).NonceTTL
-	})
+	var nonceStore authkit.NonceStore
+	if databaseURL != "" {
+		persistentNonceStore, nonceStoreErr := authkit.NewDatabaseNonceStoreWithTTLResolver(shutdownContext, databaseURL, func(tenantID string) time.Duration {
+			return registry.Config(tenantID).NonceTTL
+		})
+		if nonceStoreErr != nil {
+			return nonceStoreErr
+		}
+		nonceStore = persistentNonceStore
+		logger.Info("using persistent nonce store", zap.String("driver", persistentNonceStore.Driver()))
+	} else {
+		nonceStore = authkit.NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
+			return registry.Config(tenantID).NonceTTL
+		})
+		logger.Info("using in-memory nonce store")
+	}
 
 	validator, validatorErr := buildGoogleTokenValidator(shutdownContext)
 	if validatorErr != nil {
@@ -264,7 +285,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))
-	protected.GET("/me", web.HandleWhoAmI(userStore, logger))
+	protected.GET("/me", web.HandleWhoAmI(logger))
 
 	server := &http.Server{
 		Addr:              listenAddr,

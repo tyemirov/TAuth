@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Improvements ⚙️
+- Added shared database helper utilities plus persistent user + nonce stores when database storage is enabled.
+- `/me` now relies on JWT claims, and refresh flows no longer clear cookies on validation failures.
+
+### Bug Fixes 🐛
+- Fail fast when tenant context is missing in authenticated flows.
+
+### Testing 🧪
+- Added coverage for database-backed user/nonce stores, auth-client broadcast sync, and concurrent multi-tenant refresh with persistent storage.
+
 ## [v0.9.0]
 
 ### Features ✨

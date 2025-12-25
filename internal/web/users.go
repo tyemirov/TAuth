@@ -12,17 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// ProfileStore exposes the ability to retrieve user profiles.
-type ProfileStore interface {
-	GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error)
-}
-
 // ClaimsProvider exposes identity fields extracted from a JWT.
 type ClaimsProvider interface {
 	GetTenantID() string
 	GetUserID() string
 	GetUserEmail() string
 	GetUserDisplayName() string
+	GetUserAvatarURL() string
 	GetUserRoles() []string
 	GetExpiresAt() time.Time
 }
@@ -77,7 +73,7 @@ func (store *InMemoryUsers) GetUserProfile(ctx context.Context, tenantID string,
 }
 
 // HandleWhoAmI returns the authenticated user's profile.
-func HandleWhoAmI(store ProfileStore, logger *zap.Logger) gin.HandlerFunc {
+func HandleWhoAmI(logger *zap.Logger) gin.HandlerFunc {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -98,28 +94,16 @@ func HandleWhoAmI(store ProfileStore, logger *zap.Logger) gin.HandlerFunc {
 		tenantID := strings.TrimSpace(provider.GetTenantID())
 		if tenantID == "" {
 			logger.Warn("whoami.missing_tenant")
-			contextGin.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-
-		userEmail, display, avatarURL, roles, err := store.GetUserProfile(contextGin, tenantID, provider.GetUserID())
-		if err != nil {
-			if errors.Is(err, ErrUserNotFound) {
-				logger.Warn("whoami.user_not_found", zap.String("user_id", provider.GetUserID()))
-				contextGin.AbortWithStatus(http.StatusNotFound)
-				return
-			}
-			logger.Error("whoami.profile_error", zap.String("user_id", provider.GetUserID()), zap.Error(err))
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
 		contextGin.JSON(http.StatusOK, gin.H{
 			"user_id":    provider.GetUserID(),
-			"user_email": userEmail,
-			"display":    display,
-			"avatar_url": avatarURL,
-			"roles":      roles,
+			"user_email": provider.GetUserEmail(),
+			"display":    provider.GetUserDisplayName(),
+			"avatar_url": provider.GetUserAvatarURL(),
+			"roles":      provider.GetUserRoles(),
 			"expires":    provider.GetExpiresAt(),
 		})
 	}

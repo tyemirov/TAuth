@@ -1056,22 +1056,9 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 		t.Fatalf("expected 401 from invalid refresh token, got %d", refreshResp.StatusCode)
 	}
 
-	cookies := refreshResp.Cookies()
-	assertCookieCleared := func(name string, path string) {
-		t.Helper()
-		found := false
-		for _, cookie := range cookies {
-			if cookie.Name == name && cookie.Path == path && cookie.MaxAge == -1 {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("expected cleared cookie name=%s path=%s", name, path)
-		}
+	if len(refreshResp.Cookies()) != 0 {
+		t.Fatalf("expected refresh failure not to modify cookies")
 	}
-	assertCookieCleared(config.SessionCookieName, "/")
-	assertCookieCleared(config.RefreshCookieName, "/auth")
 
 	if metrics.Count(metricAuthRefreshFailure) == 0 {
 		t.Fatalf("expected auth.refresh.failure metric increment")
@@ -1300,25 +1287,11 @@ func TestHTTPAuthRefreshProfileStoreError(t *testing.T) {
 		t.Fatalf("refresh request failed: %v", err)
 	}
 	defer refreshResp.Body.Close()
-	if refreshResp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when profile store fails, got %d", refreshResp.StatusCode)
+	if refreshResp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when profile store fails, got %d", refreshResp.StatusCode)
 	}
-	cookies := refreshResp.Cookies()
-	foundSessionClear := false
-	foundRefreshClear := false
-	for _, cookie := range cookies {
-		if cookie.Name == config.SessionCookieName && cookie.Path == "/" && cookie.MaxAge == -1 {
-			foundSessionClear = true
-		}
-		if cookie.Name == config.RefreshCookieName && cookie.Path == "/auth" && cookie.MaxAge == -1 {
-			foundRefreshClear = true
-		}
-	}
-	if !foundSessionClear {
-		t.Fatalf("expected session cookie to be cleared when refresh profile lookup fails")
-	}
-	if !foundRefreshClear {
-		t.Fatalf("expected refresh cookie to be cleared when refresh profile lookup fails")
+	if len(refreshResp.Cookies()) != 0 {
+		t.Fatalf("expected profile store failure not to modify cookies")
 	}
 }
 
@@ -1648,6 +1621,320 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 	for err := range errorChannel {
 		if err != nil {
 			t.Fatalf("concurrent refresh failed: %v", err)
+		}
+	}
+}
+
+func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"token-ps": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-ps",
+					"email":          "ps@example.com",
+					"email_verified": true,
+					"name":           "PS User",
+				},
+			},
+			expectedAudience: "client-ps",
+		},
+		"token-loopaware": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-loopaware",
+					"email":          "loopaware@example.com",
+					"email_verified": true,
+					"name":           "Loopaware User",
+				},
+			},
+			expectedAudience: "client-loopaware",
+		},
+		"token-gravity": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-gravity",
+					"email":          "gravity@example.com",
+					"email_verified": true,
+					"name":           "Gravity User",
+				},
+			},
+			expectedAudience: "client-gravity",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(testContext))
+	defer ProvideLogger(nil)
+
+	tenantConfigs := map[string]ServerConfig{
+		"ps": {
+			GoogleWebClientID: "client-ps",
+			AppJWTSigningKey:  []byte("ps-signing-key-1234567890"),
+			AppJWTIssuer:      "test-issuer",
+			TenantID:          "ps",
+			CookieDomain:      "",
+			SessionCookieName: "app_session_ps",
+			RefreshCookieName: "app_refresh_ps",
+			SessionTTL:        time.Minute,
+			RefreshTTL:        15 * time.Minute,
+			NonceTTL:          5 * time.Minute,
+			SameSiteMode:      http.SameSiteStrictMode,
+			AllowInsecureHTTP: true,
+		},
+		"loopaware": {
+			GoogleWebClientID: "client-loopaware",
+			AppJWTSigningKey:  []byte("loopaware-signing-key-1234567890"),
+			AppJWTIssuer:      "test-issuer",
+			TenantID:          "loopaware",
+			CookieDomain:      "",
+			SessionCookieName: "app_session_loopaware",
+			RefreshCookieName: "app_refresh_loopaware",
+			SessionTTL:        time.Minute,
+			RefreshTTL:        15 * time.Minute,
+			NonceTTL:          5 * time.Minute,
+			SameSiteMode:      http.SameSiteStrictMode,
+			AllowInsecureHTTP: true,
+		},
+		"gravity": {
+			GoogleWebClientID: "client-gravity",
+			AppJWTSigningKey:  []byte("gravity-signing-key-1234567890"),
+			AppJWTIssuer:      "test-issuer",
+			TenantID:          "gravity",
+			CookieDomain:      "",
+			SessionCookieName: "app_session_gravity",
+			RefreshCookieName: "app_refresh_gravity",
+			SessionTTL:        time.Minute,
+			RefreshTTL:        15 * time.Minute,
+			NonceTTL:          5 * time.Minute,
+			SameSiteMode:      http.SameSiteStrictMode,
+			AllowInsecureHTTP: true,
+		},
+	}
+
+	registry := NewTenantRegistryFromMap("ps", tenantConfigs)
+	tenantConfig := mustLoadTenantsConfigFromString(testContext, `{
+		"tenants": [
+			{
+				"id": "ps",
+				"display_name": "ProductScanner",
+				"allowed_hosts": ["shared.localhost", "http://ps.localhost"],
+				"google_web_client_id": "client-ps",
+				"jwt_signing_key": "ps-signing",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_ps",
+				"refresh_cookie_name": "app_refresh_ps",
+				"session_ttl": "1m",
+				"refresh_ttl": "15m",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "loopaware",
+				"display_name": "Loopaware",
+				"allowed_hosts": ["shared.localhost", "http://loopaware.localhost"],
+				"google_web_client_id": "client-loopaware",
+				"jwt_signing_key": "loopaware-signing",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_loopaware",
+				"refresh_cookie_name": "app_refresh_loopaware",
+				"session_ttl": "1m",
+				"refresh_ttl": "15m",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "gravity",
+				"display_name": "Gravity",
+				"allowed_hosts": ["shared.localhost", "http://gravity.localhost"],
+				"google_web_client_id": "client-gravity",
+				"jwt_signing_key": "gravity-signing",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_gravity",
+				"refresh_cookie_name": "app_refresh_gravity",
+				"session_ttl": "1m",
+				"refresh_ttl": "15m",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			}
+		]
+	}`)
+
+	resolver, err := tenants.NewResolver(tenantConfig)
+	if err != nil {
+		testContext.Fatalf("create resolver: %v", err)
+	}
+
+	databaseURL := sqliteDatabaseURL(testContext)
+	userStore, userStoreErr := NewDatabaseUserStore(context.Background(), databaseURL)
+	if userStoreErr != nil {
+		testContext.Fatalf("create user store: %v", userStoreErr)
+	}
+	refreshStore, refreshStoreErr := NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+	if refreshStoreErr != nil {
+		testContext.Fatalf("create refresh store: %v", refreshStoreErr)
+	}
+	nonceStore, nonceStoreErr := NewDatabaseNonceStoreWithTTLResolver(context.Background(), databaseURL, func(tenantID string) time.Duration {
+		return registry.Config(tenantID).NonceTTL
+	})
+	if nonceStoreErr != nil {
+		testContext.Fatalf("create nonce store: %v", nonceStoreErr)
+	}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(testHostOverrideMiddleware("shared.localhost"))
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	testCases := []struct {
+		name            string
+		tenantID        string
+		origin          string
+		loginToken      string
+		expectedUserID  string
+		refreshAttempts int
+	}{
+		{
+			name:            "ProductScanner",
+			tenantID:        "ps",
+			origin:          "http://ps.localhost",
+			loginToken:      "token-ps",
+			expectedUserID:  "google:sub-ps",
+			refreshAttempts: 10,
+		},
+		{
+			name:            "Loopaware",
+			tenantID:        "loopaware",
+			origin:          "http://loopaware.localhost",
+			loginToken:      "token-loopaware",
+			expectedUserID:  "google:sub-loopaware",
+			refreshAttempts: 10,
+		},
+		{
+			name:            "Gravity",
+			tenantID:        "gravity",
+			origin:          "http://gravity.localhost",
+			loginToken:      "token-gravity",
+			expectedUserID:  "google:sub-gravity",
+			refreshAttempts: 10,
+		},
+	}
+
+	type tenantState struct {
+		config ServerConfig
+		state  authCookieState
+	}
+
+	stateByTenant := make(map[string]tenantState, len(testCases))
+	for _, testCase := range testCases {
+		headers := map[string]string{
+			testHostHeader: "shared.localhost",
+			"Origin":       testCase.origin,
+		}
+		loginResponse, _ := loginWithNonceAndHeaders(testContext, client, server.URL, validator, testCase.loginToken, headers)
+		if loginResponse.StatusCode != http.StatusOK {
+			testContext.Fatalf("expected 200 from login for %s, got %d", testCase.tenantID, loginResponse.StatusCode)
+		}
+		config := registry.Config(testCase.tenantID)
+		state := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
+		_ = loginResponse.Body.Close()
+		if state.refresh == "" || state.session == "" {
+			testContext.Fatalf("expected session+refresh cookies for %s", testCase.tenantID)
+		}
+		stateByTenant[testCase.tenantID] = tenantState{config: config, state: state}
+	}
+
+	refreshTenant := func(testCase struct {
+		name            string
+		tenantID        string
+		origin          string
+		loginToken      string
+		expectedUserID  string
+		refreshAttempts int
+	}) error {
+		tenantValue := stateByTenant[testCase.tenantID]
+		currentState := tenantValue.state
+		config := tenantValue.config
+
+		for attemptIndex := 0; attemptIndex < testCase.refreshAttempts; attemptIndex++ {
+			refreshRequest, err := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+			if err != nil {
+				return err
+			}
+			refreshRequest.Header.Set(testHostHeader, "shared.localhost")
+			refreshRequest.Header.Set("Origin", testCase.origin)
+			applyAuthCookies(refreshRequest, currentState, config)
+			refreshResponse, err := client.Do(refreshRequest)
+			if err != nil {
+				return err
+			}
+			_ = refreshResponse.Body.Close()
+			if refreshResponse.StatusCode != http.StatusNoContent {
+				return errors.New("refresh did not return 204")
+			}
+			currentState = captureAuthCookies(currentState, refreshResponse.Cookies(), config)
+
+			meRequest, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
+			if err != nil {
+				return err
+			}
+			meRequest.Header.Set(testHostHeader, "shared.localhost")
+			meRequest.Header.Set("Origin", testCase.origin)
+			applyAuthCookies(meRequest, currentState, config)
+			meResponse, err := client.Do(meRequest)
+			if err != nil {
+				return err
+			}
+			if meResponse.StatusCode != http.StatusOK {
+				_ = meResponse.Body.Close()
+				return errors.New("me did not return 200")
+			}
+			var payload map[string]interface{}
+			if decodeErr := json.NewDecoder(meResponse.Body).Decode(&payload); decodeErr != nil {
+				_ = meResponse.Body.Close()
+				return decodeErr
+			}
+			_ = meResponse.Body.Close()
+			userID, _ := payload["user_id"].(string)
+			if userID != testCase.expectedUserID {
+				return errors.New("unexpected user id")
+			}
+		}
+		return nil
+	}
+
+	var waitGroup sync.WaitGroup
+	errorChannel := make(chan error, len(testCases))
+	for _, testCase := range testCases {
+		testCaseCopy := testCase
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			if err := refreshTenant(testCaseCopy); err != nil {
+				errorChannel <- err
+			}
+		}()
+	}
+	waitGroup.Wait()
+	close(errorChannel)
+
+	for err := range errorChannel {
+		if err != nil {
+			testContext.Fatalf("concurrent refresh failed: %v", err)
 		}
 	}
 }
