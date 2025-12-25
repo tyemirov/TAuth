@@ -75,3 +75,4 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 
 ## Planning
 So not work on these, not ready
+- [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test. — `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.

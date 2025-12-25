@@ -1065,6 +1065,79 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	}
 }
 
+func TestHTTPAuthRefreshUsesValidCookieAmongDuplicates(testContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"valid-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-refresh-duplicate",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "HTTP User",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(testContext))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+
+	client := server.Client()
+
+	loginResponse, _ := loginWithNonce(testContext, client, server.URL, validator, "valid-token")
+	if loginResponse.StatusCode != http.StatusOK {
+		testContext.Fatalf("expected 200 from login, got %d", loginResponse.StatusCode)
+	}
+	state := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
+	_ = loginResponse.Body.Close()
+
+	if state.refresh == "" {
+		testContext.Fatalf("missing refresh cookie after login")
+	}
+
+	refreshRequest, requestErr := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+	if requestErr != nil {
+		testContext.Fatalf("building refresh request failed: %v", requestErr)
+	}
+	refreshRequest.AddCookie(&http.Cookie{
+		Name:   config.RefreshCookieName,
+		Value:  "invalid-refresh-cookie",
+		Domain: refreshRequest.URL.Hostname(),
+		Path:   "/auth",
+	})
+	applyAuthCookies(refreshRequest, state, config)
+
+	refreshResponse, responseErr := client.Do(refreshRequest)
+	if responseErr != nil {
+		testContext.Fatalf("refresh request failed: %v", responseErr)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusNoContent {
+		testContext.Fatalf("expected 204 from refresh with duplicate cookies, got %d", refreshResponse.StatusCode)
+	}
+}
+
 type validateFailureRefreshStore struct {
 	delegate    RefreshTokenStore
 	validateErr error
