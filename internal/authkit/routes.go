@@ -303,29 +303,39 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 		config := registry.Config(tenantID)
-		refreshCookie, cookieErr := contextGin.Request.Cookie(config.RefreshCookieName)
-		if cookieErr != nil || refreshCookie == nil || strings.TrimSpace(refreshCookie.Value) == "" {
+		refreshCookieValues := refreshCookieCandidates(contextGin.Request, config.RefreshCookieName)
+		if len(refreshCookieValues) == 0 {
 			recordMetric(metricAuthRefreshFailure)
-			logAuthWarning("auth.refresh.missing_cookie", cookieErr)
+			logAuthWarning("auth.refresh.missing_cookie", nil)
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
-		applicationUserID, currentTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
-		if validateErr != nil {
+		var applicationUserID string
+		var currentTokenID string
+		validationSucceeded := false
+		var lastUnauthorizedErr error
+		for _, cookieValue := range refreshCookieValues {
+			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, cookieValue)
+			if validateErr == nil {
+				applicationUserID = candidateUserID
+				currentTokenID = candidateTokenID
+				validationSucceeded = true
+				break
+			}
+			if errors.Is(validateErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(validateErr) {
+				lastUnauthorizedErr = validateErr
+				continue
+			}
 			recordMetric(metricAuthRefreshFailure)
-			if errors.Is(validateErr, ErrRefreshTokenRevoked) {
-				logAuthWarning("auth.refresh.validate", validateErr)
-				contextGin.AbortWithStatus(http.StatusUnauthorized)
-				return
-			}
-			if isUnauthorizedRefreshTokenError(validateErr) {
-				logAuthWarning("auth.refresh.validate", validateErr)
-				contextGin.AbortWithStatus(http.StatusUnauthorized)
-				return
-			}
-			logAuthError("auth.refresh.validate", validateErr)
+			logAuthError("auth.refresh.validate", validateErr, zap.Int("cookie_candidates", len(refreshCookieValues)))
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if !validationSucceeded {
+			recordMetric(metricAuthRefreshFailure)
+			logAuthWarning("auth.refresh.validate", lastUnauthorizedErr, zap.Int("cookie_candidates", len(refreshCookieValues)))
+			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
@@ -445,6 +455,35 @@ func clearCookieVariants(contextGin *gin.Context, configuration ServerConfig, na
 			SameSite: configuration.SameSiteMode,
 		})
 	}
+}
+
+func refreshCookieCandidates(request *http.Request, cookieName string) []string {
+	if request == nil {
+		return nil
+	}
+	trimmedName := strings.TrimSpace(cookieName)
+	if trimmedName == "" {
+		return nil
+	}
+	parsedCookies := request.Cookies()
+	if len(parsedCookies) == 0 {
+		return nil
+	}
+	candidates := make([]string, 0, len(parsedCookies))
+	for _, cookie := range parsedCookies {
+		if cookie == nil {
+			continue
+		}
+		if cookie.Name != trimmedName {
+			continue
+		}
+		trimmedValue := strings.TrimSpace(cookie.Value)
+		if trimmedValue == "" {
+			continue
+		}
+		candidates = append(candidates, trimmedValue)
+	}
+	return candidates
 }
 
 func isUnauthorizedRefreshTokenError(err error) bool {

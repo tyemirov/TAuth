@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+const (
+	testGoogleWebClientID = "client.apps.googleusercontent.com"
+	testSessionTTL        = "30m"
+	testRefreshTTL        = "720h"
+)
+
 func TestLoadConfigSuccess(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "tenants.yaml")
@@ -306,6 +312,79 @@ func TestConfigAllowsSharedHosts(t *testing.T) {
 	}
 	if tenant, ok := config.OriginOwner("http://localhost:4173"); !ok || tenant != "admin" {
 		t.Fatalf("expected origin to resolve to admin, got %s", tenant)
+	}
+}
+
+func TestLoadConfigRejectsOverlappingCookieNames(testContext *testing.T) {
+	const (
+		alphaTenantID           = "alpha"
+		betaTenantID            = "beta"
+		alphaSigningKey         = "alpha-key"
+		betaSigningKey          = "beta-key"
+		alphaHost               = "alpha.example.com"
+		betaHost                = "beta.example.com"
+		sharedHost              = "shared.localhost"
+		sharedSessionCookieName = "app_session_shared"
+		sharedRefreshCookieName = "app_refresh_shared"
+		alphaSessionCookieName  = "app_session_alpha"
+		betaSessionCookieName   = "app_session_beta"
+		alphaRefreshCookieName  = "app_refresh_alpha"
+		betaRefreshCookieName   = "app_refresh_beta"
+		exampleCookieDomain     = ".example.com"
+		subdomainCookieDomain   = "beta.example.com"
+	)
+
+	testCases := []struct {
+		name         string
+		document     FileDocument
+		expectedCode string
+	}{
+		{
+			name: "shared_host_duplicate_session_cookie",
+			document: FileDocument{
+				Tenants: []FileTenant{
+					buildTestTenant(alphaTenantID, []string{sharedHost}, "", sharedSessionCookieName, alphaRefreshCookieName, alphaSigningKey),
+					buildTestTenant(betaTenantID, []string{sharedHost}, "", sharedSessionCookieName, betaRefreshCookieName, betaSigningKey),
+				},
+			},
+			expectedCode: errorCodeDuplicateSessionCookieName,
+		},
+		{
+			name: "overlapping_domain_duplicate_refresh_cookie",
+			document: FileDocument{
+				Tenants: []FileTenant{
+					buildTestTenant(alphaTenantID, []string{alphaHost}, exampleCookieDomain, alphaSessionCookieName, sharedRefreshCookieName, alphaSigningKey),
+					buildTestTenant(betaTenantID, []string{betaHost}, subdomainCookieDomain, betaSessionCookieName, sharedRefreshCookieName, betaSigningKey),
+				},
+			},
+			expectedCode: errorCodeDuplicateRefreshCookieName,
+		},
+		{
+			name: "domain_host_overlap_duplicate_session_cookie",
+			document: FileDocument{
+				Tenants: []FileTenant{
+					buildTestTenant(alphaTenantID, []string{alphaHost}, exampleCookieDomain, sharedSessionCookieName, alphaRefreshCookieName, alphaSigningKey),
+					buildTestTenant(betaTenantID, []string{betaHost}, "", sharedSessionCookieName, betaRefreshCookieName, betaSigningKey),
+				},
+			},
+			expectedCode: errorCodeDuplicateSessionCookieName,
+		},
+	}
+
+	for testCaseIndex := range testCases {
+		testCase := testCases[testCaseIndex]
+		testContext.Run(testCase.name, func(subTestContext *testing.T) {
+			_, loadErr := LoadConfigFromDocument(testCase.document)
+			if loadErr == nil {
+				subTestContext.Fatalf("expected config error")
+			}
+			if !errors.Is(loadErr, ErrInvalidTenantConfig) {
+				subTestContext.Fatalf("expected ErrInvalidTenantConfig, got %v", loadErr)
+			}
+			if !containsStableCode(loadErr, testCase.expectedCode) {
+				subTestContext.Fatalf("expected error to contain code %s, got %v", testCase.expectedCode, loadErr)
+			}
+		})
 	}
 }
 
@@ -659,6 +738,20 @@ func TestConfigTenantsReturnsCopy(t *testing.T) {
 	list[0].id = "mutated"
 	if config.tenants[0].ID() != "demo" {
 		t.Fatalf("expected original slice to remain unchanged")
+	}
+}
+
+func buildTestTenant(tenantID string, allowedHosts []string, cookieDomain string, sessionCookieName string, refreshCookieName string, signingKey string) FileTenant {
+	return FileTenant{
+		ID:                tenantID,
+		AllowedHosts:      allowedHosts,
+		GoogleWebClientID: testGoogleWebClientID,
+		JWTSigningKey:     signingKey,
+		CookieDomain:      cookieDomain,
+		SessionCookieName: sessionCookieName,
+		RefreshCookieName: refreshCookieName,
+		SessionTTL:        testSessionTTL,
+		RefreshTTL:        testRefreshTTL,
 	}
 }
 
