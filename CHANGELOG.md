@@ -8,9 +8,14 @@
 
 ### Bug Fixes 🐛
 - Fail fast when tenant context is missing in authenticated flows.
+- Accept valid refresh tokens when duplicate cookies share a name by checking all candidates.
+- Reject duplicate session/refresh cookie names across overlapping tenant scopes.
+- Reject cross-type cookie name reuse (session vs refresh) across overlapping tenant scopes.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores, auth-client broadcast sync, and concurrent multi-tenant refresh with persistent storage.
+- Added regression coverage for duplicate refresh cookies and overlapping cookie-name validation.
+- Added regression coverage for cross-type cookie name collisions across tenants.
 
 ## [v0.9.0]
 
