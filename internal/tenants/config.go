@@ -75,6 +75,7 @@ const (
 	errorCodeMissingRefreshCookieName   = "tenant.missing_refresh_cookie_name"
 	errorCodeDuplicateSessionCookieName = "tenant.duplicate_session_cookie_name"
 	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
+	errorCodeDuplicateCookieNameCross   = "tenant.duplicate_cookie_name_cross_type"
 	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
 )
 
@@ -524,6 +525,12 @@ func validateCookieNameIsolation(cookieScopes []tenantCookieScope) error {
 			}
 			if firstScope.refreshCookieName == secondScope.refreshCookieName {
 				return fmt.Errorf(duplicateCookieNameErrorFormat, ErrInvalidTenantConfig, errorCodeDuplicateRefreshCookieName, firstScope.refreshCookieName, firstScope.tenantID, secondScope.tenantID, overlapDescription)
+			}
+			if firstScope.sessionCookieName == secondScope.refreshCookieName {
+				return fmt.Errorf(duplicateCookieNameErrorFormat, ErrInvalidTenantConfig, errorCodeDuplicateCookieNameCross, firstScope.sessionCookieName, firstScope.tenantID, secondScope.tenantID, overlapDescription)
+			}
+			if firstScope.refreshCookieName == secondScope.sessionCookieName {
+				return fmt.Errorf(duplicateCookieNameErrorFormat, ErrInvalidTenantConfig, errorCodeDuplicateCookieNameCross, firstScope.refreshCookieName, firstScope.tenantID, secondScope.tenantID, overlapDescription)
 			}
 		}
 	}

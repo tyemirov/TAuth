@@ -369,6 +369,16 @@ func TestLoadConfigRejectsOverlappingCookieNames(testContext *testing.T) {
 			},
 			expectedCode: errorCodeDuplicateSessionCookieName,
 		},
+		{
+			name: "shared_host_cross_type_cookie_name",
+			document: FileDocument{
+				Tenants: []FileTenant{
+					buildTestTenant(alphaTenantID, []string{sharedHost}, "", sharedSessionCookieName, alphaRefreshCookieName, alphaSigningKey),
+					buildTestTenant(betaTenantID, []string{sharedHost}, "", betaSessionCookieName, sharedSessionCookieName, betaSigningKey),
+				},
+			},
+			expectedCode: errorCodeDuplicateCookieNameCross,
+		},
 	}
 
 	for testCaseIndex := range testCases {
