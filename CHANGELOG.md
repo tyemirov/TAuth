@@ -1,25 +1,37 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.5]
+
+### Features ✨
+- `tauth.js` exposes nonce issuance and Google credential exchange helpers for client integrations.
+- Require explicit base URL in `initAuthClient`; remove script-origin inference in the auth client.
+- Added GitHub Pages deployment workflow for the `web/` directory.
 
 ### Improvements ⚙️
-- Added shared database helper utilities plus persistent user + nonce stores when database storage is enabled.
-- `/me` now relies on JWT claims, and refresh flows no longer clear cookies on validation failures.
-- `tauth.js` now requires an explicit base URL via `initAuthClient` and no longer infers it from the script origin.
-- Static browser helpers now live at `/tauth.js` and `/mpr-sites.js` to align with GitHub Pages hosting.
-- `tauth.js` now exposes nonce issuance and Google credential exchange helpers for client integrations.
+- Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` and `/mpr-sites.js` for better GitHub Pages compatibility.
+- Static browser helpers no longer infer the API host from the script origin.
+- Updated docs, examples, and tests to reflect the rename and new base URL requirements.
+- Improved shared database helpers and persistent stores for users and nonces with database storage enabled.
+- `/me` endpoint now uses JWT claims and better handles refresh flow failures.
+- Added test coverage for auth-client nonce and credential exchange helpers.
+- Relaxed origin checks for static auth-client serving on shared hosts to support Safari/WebKit.
 
 ### Bug Fixes 🐛
-- Fail fast when tenant context is missing in authenticated flows.
-- Accept valid refresh tokens when duplicate cookies share a name by checking all candidates.
-- Reject duplicate session/refresh cookie names across overlapping tenant scopes.
-- Reject cross-type cookie name reuse (session vs refresh) across overlapping tenant scopes.
+- Removed legacy auth-client server route.
+- Allowed static auth-client serving on shared hosts even when Origin headers are missing.
+- Enforced nonce requirement for Google Sign-In exchanges; mismatched nonces cause authentication failure.
 
 ### Testing 🧪
-- Added coverage for database-backed user/nonce stores, auth-client broadcast sync, and concurrent multi-tenant refresh with persistent storage.
-- Added regression coverage for duplicate refresh cookies and overlapping cookie-name validation.
-- Added regression coverage for cross-type cookie name collisions across tenants.
-- Added auth-client coverage for nonce and credential exchange helpers.
+- Added coverage for database-backed user/nonce stores.
+- Added regression tests for refresh cookie duplication, overlapping cookie scopes, and cross-type cookie collisions.
+- Added regression coverage for tenant configuration validation related to cookie name collisions.
+- Added auth-client tests for nonce and credential exchange helpers.
+
+### Docs 📚
+- Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.
+- Documented the explicit base URL requirement for `tauth.js` initialization.
+- Updated issue tracker with new features and bug fixes related to auth client renaming and API changes.
+- Enhanced usage guides and examples to reflect new deployment and integration workflows.
 
 ## [v0.9.0]
 
