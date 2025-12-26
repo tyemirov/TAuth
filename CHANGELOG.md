@@ -5,6 +5,7 @@
 ### Improvements ⚙️
 - Added shared database helper utilities plus persistent user + nonce stores when database storage is enabled.
 - `/me` now relies on JWT claims, and refresh flows no longer clear cookies on validation failures.
+- `auth-client.js` now requires an explicit base URL (via `initAuthClient` or script hints) and no longer infers it from the script origin.
 
 ### Bug Fixes 🐛
 - Fail fast when tenant context is missing in authenticated flows.

@@ -154,16 +154,17 @@ For backend services written in Go, use the `pkg/sessionvalidator` package descr
 
 ### 4.1 Loading the helper
 
-On your product site, include the script from your TAuth origin:
+On your product site, include the script from wherever you host the asset and make the API base URL explicit:
 
 ```html
 <script
-  src="https://auth.example.com/static/auth-client.js"
+  src="https://tauth.mprlab.com/static/auth-client.js"
+  data-base-url="https://auth.example.com"
   data-tenant-id="tenant-admin"
 ></script>
 ```
 
-If your UI and TAuth share a host (for example both under `https://app.example.com`), you can serve it directly from that origin instead.
+You can also set the base URL via `data-tauth-base-url` on `<html>` or `window.__TAUTH_BASE_URL__` before the script loads. If your UI and TAuth share a host, set `baseUrl` explicitly to that origin (or `/`) so the helper never guesses.
 
 ### 4.2 Initialising on page load
 

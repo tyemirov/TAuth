@@ -144,6 +144,8 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <div id="googleSignIn"></div>
 ```
 
+`auth-client.js` does not infer the API base URL from the script origin. Provide `baseUrl` explicitly in `initAuthClient` (or set `data-base-url`, `data-tauth-base-url`, or `window.__TAUTH_BASE_URL__`) whenever the static asset is hosted separately from the API.
+
 ### 4. Prepare and exchange Google credentials across origins
 
 `auth-client.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).

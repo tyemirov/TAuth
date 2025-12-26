@@ -107,21 +107,6 @@
     return "";
   }
 
-  function parseOriginFromUrl(urlValue) {
-    if (!urlValue || typeof URL !== "function") {
-      return "";
-    }
-    var baseOrigin = runtime.originHint || detectOriginHint();
-    try {
-      if (baseOrigin) {
-        return new URL(urlValue, baseOrigin).origin;
-      }
-      return new URL(urlValue).origin;
-    } catch (error) {
-      return "";
-    }
-  }
-
   function detectOriginHint() {
     if (
       typeof window !== "undefined" &&
@@ -151,16 +136,11 @@
     if (typeof document !== "undefined") {
       var currentScript = document.currentScript;
       var dataBaseUrl = "";
-      var scriptSrc = "";
 
       if (currentScript && typeof currentScript.getAttribute === "function") {
         var dataValue = currentScript.getAttribute("data-base-url");
         if (dataValue) {
           dataBaseUrl = dataValue.trim();
-        }
-        var scriptValue = currentScript.getAttribute("src");
-        if (scriptValue) {
-          scriptSrc = scriptValue;
         }
       }
 
@@ -179,11 +159,6 @@
           return documentValue.trim();
         }
       }
-
-      var parsedOrigin = parseOriginFromUrl(scriptSrc);
-      if (parsedOrigin) {
-        return parsedOrigin;
-      }
     }
     return "";
   }
@@ -191,7 +166,6 @@
   runtime.originHint = detectOriginHint();
   runtime.baseUrlHint = detectInitialBaseUrl();
   setTenantId(detectInitialTenantId());
-  runtime.options = normalizeOptions({});
 
   /**
    * @param {string} value
@@ -421,9 +395,12 @@
         ? passed.baseUrl.trim()
         : "";
     if (hasExplicitBaseUrl) {
-      options.baseUrl = baseUrlCandidate || runtime.baseUrlHint || "/";
+      options.baseUrl = baseUrlCandidate || runtime.baseUrlHint;
     } else {
-      options.baseUrl = runtime.baseUrlHint || options.baseUrl || "/";
+      options.baseUrl = runtime.baseUrlHint;
+    }
+    if (!options.baseUrl) {
+      throw new Error("tauth.missing_base_url");
     }
     var providedTenant = options.tenantId;
     if (providedTenant === undefined || providedTenant === null) {
