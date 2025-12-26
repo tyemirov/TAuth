@@ -437,9 +437,9 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
 
-	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	validRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	validRequest.Host = "demo.localhost"
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, validRequest)
@@ -447,7 +447,7 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
 	}
 
-	unknownRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	unknownRequest.Host = "unknown.localhost"
 	unknownRecorder := httptest.NewRecorder()
 	router.ServeHTTP(unknownRecorder, unknownRequest)
@@ -496,10 +496,10 @@ func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
 
 	makeRecorder := func(origin string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+		request := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 		request.Host = "shared.localhost"
 		if origin != "" {
 			request.Header.Set("Origin", origin)

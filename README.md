@@ -2,7 +2,7 @@
 
 *Google Sign-In + JWT sessions for single-origin apps*
 
-TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `auth-client.js` module.
+TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
 ---
@@ -127,7 +127,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 ### 3. Integrate the browser helper from the product site
 
 ```html
-<script src="https://tauth.mprlab.com/static/auth-client.js"></script>
+<script src="https://tauth.mprlab.com/tauth.js"></script>
 <script>
   initAuthClient({
     baseUrl: "https://tauth.mprlab.com",
@@ -144,11 +144,13 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <div id="googleSignIn"></div>
 ```
 
-`auth-client.js` does not infer the API base URL from the script origin. Provide `baseUrl` explicitly in `initAuthClient` (or set `data-base-url`, `data-tauth-base-url`, or `window.__TAUTH_BASE_URL__`) whenever the static asset is hosted separately from the API.
+The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `web/` directory, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
+
+`tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin.
 
 ### 4. Prepare and exchange Google credentials across origins
 
-`auth-client.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
+`tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
 
 ### Configure Google Identity Services (popup flow)
 
@@ -227,7 +229,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - For local development or automated tests you can enable the optional header override (`enable_tenant_header_override: true`). When enabled, TAuth accepts either a tenant ID (`X-TAuth-Tenant: demo`) or a frontend origin (`X-TAuth-Tenant: http://localhost:8000`) as the override hint. This keeps shared-host setups working even when certain requests omit `Origin` headers. Leave it disabled in production when every tenant owns unique hosts.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
-- Front-ends that share a single host can still opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../auth-client.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `auth-client.js` automatically adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls (falling back to the current page origin whenever you don’t provide a tenant ID) while leaving your product’s API traffic untouched.
+- Front-ends that share a single host can still opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` automatically adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls (falling back to the current page origin whenever you don’t provide a tenant ID) while leaving your product’s API traffic untouched.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between hostnames.
 
 ---
@@ -252,7 +254,7 @@ Custom clients must follow the nonce exchange documented in [ARCHITECTURE.md#goo
 - Read the authoritative usage guide in [`docs/usage.md`](docs/usage.md) for end-to-end setup and integration details.
 - Dive into [ARCHITECTURE.md](ARCHITECTURE.md) for endpoints, request flows, and deployment guidance.
 - Read [POLICY.md](POLICY.md) for the confident-programming rules enforced across the codebase.
-- Inspect `web/auth-client.js` to extend UI hooks or wire additional analytics.
+- Inspect `web/tauth.js` to extend UI hooks or wire additional analytics.
 - Validate sessions from other Go services with [`pkg/sessionvalidator`](pkg/sessionvalidator/README.md).
 
 ---

@@ -6,16 +6,12 @@ const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
 async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
-  const scriptPath = path.join(__dirname, "..", "web", "auth-client.js");
+  const scriptPath = path.join(__dirname, "..", "web", "tauth.js");
   const source = await fs.readFile(scriptPath, "utf8");
   const resolvedOptions = options || {};
   const resolvedTenantId = resolvedOptions.tenantId;
   const resolvedOrigin =
     resolvedOptions.locationOrigin || "https://ui.example.com";
-  const resolvedBaseUrl = resolvedOptions.globalBaseUrl;
-  const scriptSrc = resolvedOptions.scriptSrc || "";
-  const dataBaseUrl = resolvedOptions.dataBaseUrl || "";
-  const documentBaseUrl = resolvedOptions.documentBaseUrl || "";
 
   const broadcastChannels = [];
   class BroadcastChannel {
@@ -83,30 +79,17 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
         if (attributeName === "data-tenant-id") {
           return resolvedTenantId || "";
         }
-        if (attributeName === "data-base-url") {
-          return dataBaseUrl || "";
-        }
-        if (attributeName === "src") {
-          return scriptSrc || "";
-        }
         return null;
       },
-      src: scriptSrc,
     },
     documentElement: {
       getAttribute(attributeName) {
-        if (attributeName === "data-tauth-base-url") {
-          return documentBaseUrl || "";
-        }
         return null;
       },
     },
   };
   if (typeof resolvedTenantId === "string") {
     context.__TAUTH_TENANT_ID__ = resolvedTenantId;
-  }
-  if (typeof resolvedBaseUrl === "string") {
-    context.__TAUTH_BASE_URL__ = resolvedBaseUrl;
   }
   context.window = context;
   context.window.location = context.location;
@@ -291,63 +274,9 @@ test("auth client sends tenant header derived from location origin when unset", 
   );
 });
 
-test("auth client derives baseUrl from explicit hints", async () => {
-  const scenarios = [
-    {
-      name: "data-base-url override",
-      loadOptions: {
-        dataBaseUrl: "https://override.example.com",
-      },
-      expectedUrl: "https://override.example.com/me",
-    },
-    {
-      name: "document base url override",
-      loadOptions: {
-        documentBaseUrl: "https://document.example.com",
-      },
-      expectedUrl: "https://document.example.com/me",
-    },
-    {
-      name: "global base url override",
-      loadOptions: {
-        globalBaseUrl: "https://global.example.com",
-      },
-      expectedUrl: "https://global.example.com/me",
-    },
-  ];
-
-  for (const scenario of scenarios) {
-    const fetch = createFetchWithQueue([
-      {
-        status: 200,
-        body: {
-          user_id: "user-123",
-          user_email: "user@example.com",
-          display: "Demo User",
-          roles: ["user"],
-        },
-      },
-    ]);
-    const context = await loadAuthClient(fetch, [], scenario.loadOptions);
-
-    await context.initAuthClient({
-      onAuthenticated() {},
-      onUnauthenticated() {},
-    });
-
-    assert.equal(
-      fetch.calls[0].url,
-      scenario.expectedUrl,
-      `expected baseUrl from ${scenario.name}`,
-    );
-  }
-});
-
-test("auth client rejects missing baseUrl even when script origin is set", async () => {
+test("auth client rejects missing baseUrl", async () => {
   const fetch = createFetchWithQueue([{ status: 200, body: {} }]);
-  const context = await loadAuthClient(fetch, [], {
-    scriptSrc: "https://auth.example.com/static/auth-client.js",
-  });
+  const context = await loadAuthClient(fetch, []);
 
   await assert.rejects(
     context.initAuthClient({

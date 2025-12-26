@@ -101,3 +101,6 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
     3. Plan the required changes to close the open issues. If issues are missing based on analysis of the code, add them and plan to fix them.
     4. Use PLAN.md for an individual issue to plan the fix
     5. Read the documentation of gthe 3rd party libraries before implementing changes
+
+## 2025-12-25
+- Renamed `web/auth-client.js` to `web/tauth.js`, served it at `/tauth.js` (plus `/mpr-sites.js`), removed base URL hint plumbing, refreshed docs/examples/tests, added GitHub Pages deploy for `web/`, and ran `npm run verify`, `npm test`, `go fmt ./...`, `go vet ./...`, `go test ./...`.

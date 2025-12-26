@@ -7,7 +7,7 @@ const path = require("node:path");
 async function startDemoServer() {
   const [demoHtml, authClientSource, sitesSource, mprUiSource] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "..", "web", "demo.html"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "..", "web", "auth-client.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "mpr-sites.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "tools", "mpr-ui", "mpr-ui.js"), "utf8"),
   ]);
@@ -20,13 +20,13 @@ async function startDemoServer() {
       response.end(demoHtml);
       return;
     }
-    if (method === "GET" && url === "/static/auth-client.js") {
+    if (method === "GET" && url === "/tauth.js") {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(authClientSource);
       return;
     }
-    if (method === "GET" && url === "/static/mpr-sites.js") {
+    if (method === "GET" && url === "/mpr-sites.js") {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(sitesSource);

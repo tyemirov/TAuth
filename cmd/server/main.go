@@ -260,8 +260,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
-	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
+	router.GET("/tauth.js", serveStaticJSHandler(tenantConfig, "tauth.js"))
+	router.GET("/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(hostGateMiddleware(tenantConfig, enableTenantHeaderOverride))

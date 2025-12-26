@@ -20,7 +20,7 @@
 
   /**
    * @typedef {Object} AuthClientInitOptions
-   * @property {string=} baseUrl
+   * @property {string} baseUrl
    * @property {string=} meEndpoint
    * @property {string=} nonceEndpoint
    * @property {string=} googleEndpoint
@@ -50,7 +50,7 @@
 
   /** @type {AuthClientOptions} */
   var defaultOptions = {
-    baseUrl: "/",
+    baseUrl: "",
     meEndpoint: "/me",
     nonceEndpoint: "/auth/nonce",
     googleEndpoint: "/auth/google",
@@ -61,7 +61,7 @@
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
 
-  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string, originHint: string, baseUrlHint: string }} */
+  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string, originHint: string }} */
   var runtime = {
     options: null,
     userProfile: null,
@@ -74,7 +74,6 @@
     profileSyncPromise: null,
     tenantId: "",
     originHint: "",
-    baseUrlHint: "",
   };
 
   function detectInitialTenantId() {
@@ -125,46 +124,7 @@
     return "";
   }
 
-  function detectInitialBaseUrl() {
-    if (typeof window !== "undefined") {
-      var globalBaseUrl = window["__TAUTH_BASE_URL__"];
-      if (typeof globalBaseUrl === "string" && globalBaseUrl.trim()) {
-        return globalBaseUrl.trim();
-      }
-    }
-
-    if (typeof document !== "undefined") {
-      var currentScript = document.currentScript;
-      var dataBaseUrl = "";
-
-      if (currentScript && typeof currentScript.getAttribute === "function") {
-        var dataValue = currentScript.getAttribute("data-base-url");
-        if (dataValue) {
-          dataBaseUrl = dataValue.trim();
-        }
-      }
-
-      if (dataBaseUrl) {
-        return dataBaseUrl;
-      }
-
-      if (
-        document.documentElement &&
-        typeof document.documentElement.getAttribute === "function"
-      ) {
-        var documentValue = document.documentElement.getAttribute(
-          "data-tauth-base-url",
-        );
-        if (documentValue) {
-          return documentValue.trim();
-        }
-      }
-    }
-    return "";
-  }
-
   runtime.originHint = detectOriginHint();
-  runtime.baseUrlHint = detectInitialBaseUrl();
   setTenantId(detectInitialTenantId());
 
   /**
@@ -249,7 +209,7 @@
    * @returns {AuthEndpointMap}
    */
   function getAuthEndpoints() {
-    var options = runtime.options || normalizeOptions({});
+    var options = requireOptions();
     return {
       baseUrl: options.baseUrl,
       meUrl: joinUrl(options.baseUrl, options.meEndpoint),
@@ -388,20 +348,12 @@
    */
   function normalizeOptions(passed) {
     var options = Object.assign({}, defaultOptions, passed || {});
-    var hasExplicitBaseUrl =
-      passed && Object.prototype.hasOwnProperty.call(passed, "baseUrl");
     var baseUrlCandidate =
-      hasExplicitBaseUrl && typeof passed.baseUrl === "string"
-        ? passed.baseUrl.trim()
-        : "";
-    if (hasExplicitBaseUrl) {
-      options.baseUrl = baseUrlCandidate || runtime.baseUrlHint;
-    } else {
-      options.baseUrl = runtime.baseUrlHint;
-    }
-    if (!options.baseUrl) {
+      passed && typeof passed.baseUrl === "string" ? passed.baseUrl.trim() : "";
+    if (!baseUrlCandidate) {
       throw new Error("tauth.missing_base_url");
     }
+    options.baseUrl = baseUrlCandidate;
     var providedTenant = options.tenantId;
     if (providedTenant === undefined || providedTenant === null) {
       options.tenantId = runtime.tenantId || "";
@@ -413,6 +365,13 @@
     }
     runtime.tenantId = options.tenantId || "";
     return options;
+  }
+
+  function requireOptions() {
+    if (runtime.options) {
+      return runtime.options;
+    }
+    throw new Error("tauth.missing_base_url");
   }
 
   function currentTenantId() {
@@ -448,7 +407,7 @@
   }
 
   async function fetchCurrentProfile() {
-    var options = runtime.options || normalizeOptions({});
+    var options = requireOptions();
     try {
       var response = await fetch(
         joinUrl(options.baseUrl, options.meEndpoint),
@@ -484,7 +443,7 @@
   }
 
   async function attemptRefresh() {
-    var options = runtime.options || normalizeOptions({});
+    var options = requireOptions();
     try {
       var refreshResponse = await fetch(
         joinUrl(options.baseUrl, options.refreshEndpoint),
@@ -599,9 +558,10 @@
    * @returns {Promise<void>}
    */
   async function logout() {
+    var options = requireOptions();
     try {
       await fetch(
-        joinUrl(runtime.options.baseUrl, runtime.options.logoutEndpoint),
+        joinUrl(options.baseUrl, options.logoutEndpoint),
         {
           method: "POST",
           credentials: "include",

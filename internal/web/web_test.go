@@ -20,7 +20,7 @@ func TestServeEmbeddedStaticJS(t *testing.T) {
 
 	router := gin.New()
 	router.GET("/client.js", func(contextGin *gin.Context) {
-		ServeEmbeddedStaticJS(contextGin, webassets.FS, "auth-client.js")
+		ServeEmbeddedStaticJS(contextGin, webassets.FS, "tauth.js")
 	})
 
 	recorder := httptest.NewRecorder()
