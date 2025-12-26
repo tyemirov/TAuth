@@ -437,26 +437,32 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
+	router.GET("/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
 
-	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
-	validRequest.Host = "demo.localhost"
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, validRequest)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
+	paths := []string{"/auth-client.js", "/static/auth-client.js"}
+	for _, pathValue := range paths {
+		validRequest := httptest.NewRequest(http.MethodGet, pathValue, nil)
+		validRequest.Host = "demo.localhost"
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, validRequest)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected 200 for known host on %s, got %d", pathValue, recorder.Code)
+		}
 	}
 
-	unknownRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
-	unknownRequest.Host = "unknown.localhost"
-	unknownRecorder := httptest.NewRecorder()
-	router.ServeHTTP(unknownRecorder, unknownRequest)
-	if unknownRecorder.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unknown host, got %d", unknownRecorder.Code)
+	for _, pathValue := range paths {
+		unknownRequest := httptest.NewRequest(http.MethodGet, pathValue, nil)
+		unknownRequest.Host = "unknown.localhost"
+		unknownRecorder := httptest.NewRecorder()
+		router.ServeHTTP(unknownRecorder, unknownRequest)
+		if unknownRecorder.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for unknown host on %s, got %d", pathValue, unknownRecorder.Code)
+		}
 	}
 }
 
-func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
+func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
@@ -496,7 +502,7 @@ func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
 
 	makeRecorder := func(origin string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
@@ -515,8 +521,8 @@ func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
 	if resp := makeRecorder("http://localhost:4173"); resp.Code != http.StatusOK {
 		t.Fatalf("expected 200 for mpr origin, got %d", resp.Code)
 	}
-	if resp := makeRecorder(""); resp.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 when origin missing, got %d", resp.Code)
+	if resp := makeRecorder(""); resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 when origin missing, got %d", resp.Code)
 	}
 	if resp := makeRecorder("http://unknown.localhost"); resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for unknown origin, got %d", resp.Code)

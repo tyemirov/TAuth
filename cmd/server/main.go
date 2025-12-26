@@ -260,8 +260,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js", enableTenantHeaderOverride))
-	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js", enableTenantHeaderOverride))
+	router.GET("/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
+	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
+	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(hostGateMiddleware(tenantConfig, enableTenantHeaderOverride))
@@ -317,9 +318,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	return nil
 }
 
-func serveStaticJSHandler(config tenants.Config, asset string, allowHeaderOverride bool) gin.HandlerFunc {
+func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
 	return func(contextGin *gin.Context) {
-		if !hostAllowed(contextGin.Request, config, allowHeaderOverride) {
+		if !staticHostAllowed(contextGin.Request, config) {
 			contextGin.AbortWithStatus(http.StatusForbidden)
 			return
 		}
@@ -353,6 +354,34 @@ func hostAllowed(request *http.Request, config tenants.Config, allowHeaderOverri
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
 		return allowHeaderOverride
+	}
+	tenantID, ok := config.OriginOwner(origin)
+	if !ok {
+		return false
+	}
+	for _, owner := range owners {
+		if owner == tenantID {
+			return true
+		}
+	}
+	return false
+}
+
+func staticHostAllowed(request *http.Request, config tenants.Config) bool {
+	host, port := tenants.ExtractHostPort(request)
+	if host == "" {
+		return false
+	}
+	owners := config.MatchOwners(host, port)
+	if len(owners) == 0 {
+		return false
+	}
+	if len(owners) == 1 {
+		return true
+	}
+	origin := strings.TrimSpace(request.Header.Get("Origin"))
+	if origin == "" {
+		return true
 	}
 	tenantID, ok := config.OriginOwner(origin)
 	if !ok {
