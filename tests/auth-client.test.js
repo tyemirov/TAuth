@@ -323,6 +323,93 @@ test("auth client exposes endpoint map for core routes", async () => {
   }
 });
 
+test("auth client requests nonce via helper", async () => {
+  const profile = {
+    user_id: "nonce-user",
+    user_email: "nonce@example.com",
+    display: "Nonce User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 200, body: { nonce: "nonce-123" } },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    tenantId: "tenant-alpha",
+    onAuthenticated() {},
+    onUnauthenticated() {},
+  });
+
+  const nonceToken = await context.requestNonce();
+
+  assert.equal(nonceToken, "nonce-123");
+  assert.equal(fetch.calls.length, 2);
+  const nonceCall = fetch.calls[1];
+  assert.equal(nonceCall.url, "https://auth.example.com/auth/nonce");
+  assert.equal(nonceCall.method, "POST");
+  assertHeader(nonceCall, "Content-Type", "application/json");
+  assertHeader(nonceCall, "X-Requested-With", "XMLHttpRequest");
+  assertHeader(nonceCall, "X-TAuth-Tenant", "tenant-alpha");
+});
+
+test("auth client exchanges Google credential and updates profile", async () => {
+  const initialProfile = {
+    user_id: "initial-user",
+    user_email: "initial@example.com",
+    display: "Initial User",
+    roles: ["user"],
+  };
+  const exchangedProfile = {
+    user_id: "exchanged-user",
+    user_email: "exchanged@example.com",
+    display: "Exchanged User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: initialProfile },
+    { status: 200, body: exchangedProfile },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  const authenticatedProfiles = [];
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    onAuthenticated(profile) {
+      authenticatedProfiles.push(profile);
+    },
+    onUnauthenticated() {
+      throw new Error("should authenticate");
+    },
+  });
+
+  const responseProfile = await context.exchangeGoogleCredential({
+    credential: "google-token",
+    nonceToken: "nonce-456",
+  });
+
+  assert.deepEqual(responseProfile, exchangedProfile);
+  assert.deepEqual(context.getCurrentUser(), exchangedProfile);
+  assert.equal(authenticatedProfiles.length, 2);
+  assert.deepEqual(authenticatedProfiles[1], exchangedProfile);
+
+  assert.equal(fetch.calls.length, 2);
+  const exchangeCall = fetch.calls[1];
+  assert.equal(exchangeCall.url, "https://auth.example.com/auth/google");
+  assert.equal(exchangeCall.method, "POST");
+  assertHeader(exchangeCall, "Content-Type", "application/json");
+  assertHeader(exchangeCall, "X-Requested-With", "XMLHttpRequest");
+  assert.equal(
+    exchangeCall.body,
+    JSON.stringify({
+      google_id_token: "google-token",
+      nonce_token: "nonce-456",
+    }),
+  );
+});
+
 test("initAuthClient attaches tenant override header when configured", async () => {
   const profile = {
     user_id: "tenant-user",
