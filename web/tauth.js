@@ -42,6 +42,12 @@
    */
 
   /**
+   * @typedef {Object} GoogleCredentialExchange
+   * @property {string} credential
+   * @property {string} nonceToken
+   */
+
+  /**
    * @typedef {Object} PendingRequest
    * @property {(value: Response | PromiseLike<Response>) => void} resolve
    * @property {(reason?: unknown) => void} reject
@@ -145,6 +151,38 @@
     return baseUrl + path;
   }
 
+  /**
+   * @param {string} rawValue
+   * @param {string} errorCode
+   * @returns {string}
+   */
+  function requireNonEmptyString(rawValue, errorCode) {
+    var normalized = typeof rawValue === "string" ? rawValue.trim() : "";
+    if (!normalized) {
+      throw new Error(errorCode);
+    }
+    return normalized;
+  }
+
+  /**
+   * @param {GoogleCredentialExchange} input
+   * @returns {{ credential: string, nonceToken: string }}
+   */
+  function normalizeGoogleCredentialInput(input) {
+    if (!input || typeof input !== "object") {
+      throw new Error("tauth.missing_credential");
+    }
+    var credential = requireNonEmptyString(
+      input.credential,
+      "tauth.missing_credential",
+    );
+    var nonceToken = requireNonEmptyString(
+      input.nonceToken,
+      "tauth.missing_nonce_token",
+    );
+    return { credential: credential, nonceToken: nonceToken };
+  }
+
   var tenantHeaderName = "X-TAuth-Tenant";
   var broadcastChannelName = "auth";
   var broadcastEventRefreshed = "refreshed";
@@ -218,6 +256,72 @@
       refreshUrl: joinUrl(options.baseUrl, options.refreshEndpoint),
       logoutUrl: joinUrl(options.baseUrl, options.logoutEndpoint),
     };
+  }
+
+  /**
+   * @returns {Promise<string>}
+   */
+  async function requestNonce() {
+    var endpoints = getAuthEndpoints();
+    var response = await fetch(endpoints.nonceUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: withTenantHeader({
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("tauth.nonce_failed");
+    }
+    var payload = await response.json();
+    if (
+      !payload ||
+      typeof payload.nonce !== "string" ||
+      payload.nonce.trim() === ""
+    ) {
+      throw new Error("tauth.nonce_invalid");
+    }
+    return payload.nonce;
+  }
+
+  /**
+   * @param {GoogleCredentialExchange} input
+   * @returns {Promise<UserProfile>}
+   */
+  async function exchangeGoogleCredential(input) {
+    var endpoints = getAuthEndpoints();
+    var normalized = normalizeGoogleCredentialInput(input);
+    var response = await fetch(endpoints.googleUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: withTenantHeader({
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      }),
+      body: JSON.stringify({
+        google_id_token: normalized.credential,
+        nonce_token: normalized.nonceToken,
+      }),
+    });
+    var payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error("tauth.exchange_failed");
+    }
+    if (!response.ok) {
+      var errorCode =
+        payload && typeof payload.error === "string"
+          ? payload.error
+          : "tauth.exchange_failed";
+      throw new Error(errorCode);
+    }
+    if (!payload || typeof payload !== "object") {
+      throw new Error("tauth.exchange_invalid");
+    }
+    applyAuthenticatedProfile(payload);
+    return payload;
   }
 
   function ensureBroadcastChannel() {
@@ -578,6 +682,8 @@
     window["apiFetch"] = apiFetch;
     window["getCurrentUser"] = getCurrentUser;
     window["getAuthEndpoints"] = getAuthEndpoints;
+    window["requestNonce"] = requestNonce;
+    window["exchangeGoogleCredential"] = exchangeGoogleCredential;
     window["logout"] = logout;
     window["setAuthTenantId"] = setTenantId;
   }

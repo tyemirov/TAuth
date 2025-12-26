@@ -7,6 +7,7 @@
 - `/me` now relies on JWT claims, and refresh flows no longer clear cookies on validation failures.
 - `tauth.js` now requires an explicit base URL via `initAuthClient` and no longer infers it from the script origin.
 - Static browser helpers now live at `/tauth.js` and `/mpr-sites.js` to align with GitHub Pages hosting.
+- `tauth.js` now exposes nonce issuance and Google credential exchange helpers for client integrations.
 
 ### Bug Fixes 🐛
 - Fail fast when tenant context is missing in authenticated flows.
@@ -18,6 +19,7 @@
 - Added coverage for database-backed user/nonce stores, auth-client broadcast sync, and concurrent multi-tenant refresh with persistent storage.
 - Added regression coverage for duplicate refresh cookies and overlapping cookie-name validation.
 - Added regression coverage for cross-type cookie name collisions across tenants.
+- Added auth-client coverage for nonce and credential exchange helpers.
 
 ## [v0.9.0]
 
