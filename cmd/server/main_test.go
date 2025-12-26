@@ -437,28 +437,22 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
 	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js"))
 
-	paths := []string{"/auth-client.js", "/static/auth-client.js"}
-	for _, pathValue := range paths {
-		validRequest := httptest.NewRequest(http.MethodGet, pathValue, nil)
-		validRequest.Host = "demo.localhost"
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, validRequest)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("expected 200 for known host on %s, got %d", pathValue, recorder.Code)
-		}
+	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	validRequest.Host = "demo.localhost"
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, validRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
 	}
 
-	for _, pathValue := range paths {
-		unknownRequest := httptest.NewRequest(http.MethodGet, pathValue, nil)
-		unknownRequest.Host = "unknown.localhost"
-		unknownRecorder := httptest.NewRecorder()
-		router.ServeHTTP(unknownRecorder, unknownRequest)
-		if unknownRecorder.Code != http.StatusForbidden {
-			t.Fatalf("expected 403 for unknown host on %s, got %d", pathValue, unknownRecorder.Code)
-		}
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	unknownRequest.Host = "unknown.localhost"
+	unknownRecorder := httptest.NewRecorder()
+	router.ServeHTTP(unknownRecorder, unknownRequest)
+	if unknownRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unknown host, got %d", unknownRecorder.Code)
 	}
 }
 

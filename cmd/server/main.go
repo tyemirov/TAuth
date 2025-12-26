@@ -260,7 +260,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.GET("/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
 	router.GET("/static/auth-client.js", serveStaticJSHandler(tenantConfig, "auth-client.js"))
 	router.GET("/static/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
