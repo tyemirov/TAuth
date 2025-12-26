@@ -54,9 +54,9 @@ I will ensure the TAuth user store maps Google identities to the existing applic
 ### 5. Frontend integration
 I will replace the GAuss redirect login flow with the TAuth browser flow.
 
-- Load /static/auth-client.js from the TAuth host and initialize it on app startup.
+- Load /tauth.js from the TAuth host and initialize it on app startup.
 - Use the authenticated and unauthenticated callbacks to drive the UI state, replacing the GAuss login page and redirect flow.
-- Use `getAuthEndpoints()` to derive `/auth/nonce` and `/auth/google` URLs from the helper (the base URL defaults to the script origin unless overridden).
+- Use `getAuthEndpoints()` to derive `/auth/nonce` and `/auth/google` URLs from the helper (the base URL must be provided explicitly via `initAuthClient`).
 - Route all authenticated API calls through a fetch wrapper that can call /auth/refresh when a 401 response is returned.
 - Replace GAuss logout with /auth/logout so refresh tokens are revoked and cookies are cleared.
 

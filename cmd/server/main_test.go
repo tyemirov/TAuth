@@ -437,9 +437,9 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
+	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
 
-	validRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	validRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	validRequest.Host = "demo.localhost"
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, validRequest)
@@ -447,7 +447,7 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
 	}
 
-	unknownRequest := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	unknownRequest.Host = "unknown.localhost"
 	unknownRecorder := httptest.NewRecorder()
 	router.ServeHTTP(unknownRecorder, unknownRequest)
@@ -456,7 +456,7 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 	}
 }
 
-func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
+func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
@@ -496,10 +496,10 @@ func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.GET("/static/auth-client.js", serveStaticJSHandler(config, "auth-client.js", false))
+	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
 
 	makeRecorder := func(origin string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodGet, "/static/auth-client.js", nil)
+		request := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 		request.Host = "shared.localhost"
 		if origin != "" {
 			request.Header.Set("Origin", origin)
@@ -515,8 +515,8 @@ func TestStaticAuthClientRequiresOriginForAmbiguousHosts(t *testing.T) {
 	if resp := makeRecorder("http://localhost:4173"); resp.Code != http.StatusOK {
 		t.Fatalf("expected 200 for mpr origin, got %d", resp.Code)
 	}
-	if resp := makeRecorder(""); resp.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 when origin missing, got %d", resp.Code)
+	if resp := makeRecorder(""); resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 when origin missing, got %d", resp.Code)
 	}
 	if resp := makeRecorder("http://unknown.localhost"); resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for unknown origin, got %d", resp.Code)

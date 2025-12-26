@@ -13,7 +13,7 @@ TAuth sits between Google Identity Services (GIS) and your product UI:
 - Verifies Google ID tokens issued by a Google OAuth Web client.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
-- Exposes a small HTTP API and a browser helper (`/static/auth-client.js`) for zero-token-in-JavaScript sessions.
+- Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 
@@ -141,9 +141,9 @@ Your product should:
 
 ---
 
-## 4. Recommended integration: `auth-client.js`
+## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/static/auth-client.js`. It exports four globals:
+The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports four globals:
 
 - `initAuthClient(options)` – hydrates the current user and sets up refresh behaviour.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
@@ -154,20 +154,18 @@ For backend services written in Go, use the `pkg/sessionvalidator` package descr
 
 ### 4.1 Loading the helper
 
-On your product site, include the script from your TAuth origin:
+On your product site, include the script from wherever you host the asset:
 
 ```html
 <script
-  src="https://auth.example.com/static/auth-client.js"
+  src="https://tauth.mprlab.com/tauth.js"
   data-tenant-id="tenant-admin"
 ></script>
 ```
 
-If your UI and TAuth share a host (for example both under `https://app.example.com`), you can serve it directly from that origin instead.
-
 ### 4.2 Initialising on page load
 
-Call `initAuthClient` once during startup, after the script loads:
+Call `initAuthClient` once during startup, after the script loads. The `baseUrl` option is required and must point at your TAuth API origin:
 
 ```html
 <script>
@@ -284,7 +282,7 @@ The required sequence for custom clients is:
 
 > You must fetch a fresh nonce for every sign‑in attempt. TAuth invalidates a nonce as soon as it is used.
 
-When using `auth-client.js` or the mpr‑ui header component, this flow is handled internally; you only need to surface the Google button and configure your client ID.
+When using `tauth.js` or the mpr‑ui header component, this flow is handled internally; you only need to surface the Google button and configure your client ID.
 
 ---
 
@@ -352,7 +350,7 @@ Rotates the refresh token and mints a new access cookie.
 - **Request body**: empty.
 - **Response**: `204 No Content` on success. Sets new `app_session` and `app_refresh` cookies.
 
-After a successful refresh, call `/me` again or rely on `auth-client.js` to hydrate the profile.
+After a successful refresh, call `/me` again or rely on `tauth.js` to hydrate the profile.
 
 ### 6.5 `POST /auth/logout`
 
@@ -364,11 +362,11 @@ Revokes the refresh token and clears cookies.
 
 Clients should treat this as “signed out” regardless of prior state.
 
-### 6.6 `GET /static/auth-client.js`
+### 6.6 `GET /tauth.js`
 
 Serves the browser helper described in section 4.
 
-- Include it via `<script src="https://your-tauth-origin/static/auth-client.js"></script>`.
+- Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
 - Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `logout` on `window`.
 
 ### 6.7 `GET /demo`
@@ -512,7 +510,7 @@ Using the shared validator keeps your services aligned with TAuth’s JWT format
 
 Use this checklist when integrating:
 
-- **401 from `/me` but refresh works** – Session cookie expired; ensure your client either uses `auth-client.js` or calls `/auth/refresh` before retrying.
+- **401 from `/me` but refresh works** – Session cookie expired; ensure your client either uses `tauth.js` or calls `/auth/refresh` before retrying.
 - **401 from `/auth/refresh`** – Refresh cookie missing or revoked; treat as “signed out” and prompt the user to sign in again.
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).

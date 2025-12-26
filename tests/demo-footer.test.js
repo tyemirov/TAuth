@@ -26,7 +26,7 @@ test("demo integrates mpr-ui footer component declaratively", async () => {
     "Expected footer theme toggle to expose the public theme toggle input",
   );
   assert.ok(
-    html.includes('src="/static/mpr-sites.js"'),
+    html.includes('src="/mpr-sites.js"'),
     "Expected demo to load the shared sites script",
   );
   assert.ok(

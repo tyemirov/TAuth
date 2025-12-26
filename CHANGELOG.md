@@ -5,6 +5,8 @@
 ### Improvements ⚙️
 - Added shared database helper utilities plus persistent user + nonce stores when database storage is enabled.
 - `/me` now relies on JWT claims, and refresh flows no longer clear cookies on validation failures.
+- `tauth.js` now requires an explicit base URL via `initAuthClient` and no longer infers it from the script origin.
+- Static browser helpers now live at `/tauth.js` and `/mpr-sites.js` to align with GitHub Pages hosting.
 
 ### Bug Fixes 🐛
 - Fail fast when tenant context is missing in authenticated flows.

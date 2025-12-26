@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-TAuth is a single-origin authentication service that sits between Google Identity Services and your product UI. It verifies Google ID tokens, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/auth-client.js`.
+TAuth is a single-origin authentication service that sits between Google Identity Services and your product UI. It verifies Google ID tokens, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
 
 ```
 Browser ──(Google ID token)──> TAuth ──(verify)──> Google Identity Services
@@ -17,7 +17,7 @@ Browser <─(HttpOnly cookies)── TAuth ──(refresh token persistence)─�
 ├─ internal/
 │  ├─ authkit/                 # Domain logic: routes, JWT helpers, refresh stores
 │  └─ web/                     # Demo user store, CORS middleware, static file serving
-└─ web/                        # Embeddable auth-client.js + demo HTML
+└─ web/                        # Embeddable tauth.js + demo HTML
 ```
 
 All Go packages under `internal/` are private; only the CLI is exported.
@@ -33,7 +33,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
-| GET    | `/static/auth-client.js` | Serve the client helper                        | `200` JavaScript                            |
+| GET    | `/tauth.js` | Serve the client helper                        | `200` JavaScript                            |
 | GET    | `/demo`         | Static demo page (local development)                   | `200` HTML                                  |
 
 These endpoints are implemented only by the TAuth server. Consuming applications should call them, not host copies.
@@ -59,7 +59,7 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 
 ### 3.4 Browser helper handshake
 
-`web/auth-client.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
+`web/tauth.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
 
 ```js
 let pendingNonce = "";
@@ -108,7 +108,7 @@ Nonce handling rules:
 - Echo the same nonce back to `/auth/google` as `nonce_token`. Requests without a matching nonce fail with `auth.login.nonce_mismatch`.
 - Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`). TAuth accepts hashed or raw forms.
 - Fetch a fresh nonce for every sign-in attempt. Nonces are invalidated once consumed and cannot be reused.
-- The default helpers (`auth-client.js`, the `mpr-ui` header) already implement these invariants and emit events when authentication state changes.
+- The default helpers (`tauth.js`, the `mpr-ui` header) already implement these invariants and emit events when authentication state changes.
 
 ## 4. Components
 
@@ -136,10 +136,10 @@ Nonce handling rules:
 
 - `NewInMemoryUsers`: placeholder application user store (maps Google `sub` to a profile).
 - `PermissiveCORS`: development-only CORS middleware.
-- `ServeEmbeddedStaticJS`: serves `auth-client.js` from the embedded FS.
+- `ServeEmbeddedStaticJS`: serves `tauth.js` from the embedded FS.
 - `HandleWhoAmI`: returns profile data for `/api/me`.
 
-### 4.4 `web/auth-client.js`
+### 4.4 `web/tauth.js`
 
 - Initializes session state via `/me`.
 - Dispatches events on authentication changes.
@@ -259,7 +259,7 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 - Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
-- Serve browser code through `/static/auth-client.js` and avoid inline scripts to keep CSP-friendly deployments.
+- Serve browser code through `/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
 
 ## 8. Local Development Modes
 

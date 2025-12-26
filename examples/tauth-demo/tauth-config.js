@@ -10,7 +10,7 @@ const currentHostname = window.location.hostname || '';
 const resolvedBaseUrl = currentHostname.endsWith('.mprlab.com')
   ? PRODUCTION_TAUTH_BASE_URL
   : LOCAL_TAUTH_BASE_URL;
-const authClientUrl = `${resolvedBaseUrl.replace(/\/+$/, '')}/static/auth-client.js`;
+const authClientUrl = `${resolvedBaseUrl.replace(/\/+$/, '')}/tauth.js`;
 
 /**
  * Update `googleClientId` to your Google OAuth Web client ID.

@@ -67,6 +67,8 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-346] Duplicate refresh cookies can mask valid tokens and overlapping cookie scopes allow collisions across tenants. Try all refresh cookie candidates and reject overlapping cookie-name reuse during tenant config validation; add regression tests for both scenarios.
 - [x] [TA-347] Cross-type cookie name collisions (session vs refresh) on overlapping scopes can overwrite cookies. Reject cross-type cookie-name reuse during tenant config validation and add regression coverage.
 - [x] [TA-345] Enforce unique cookie names across overlapping tenant cookie scopes (shared hosts or cookie domains) to prevent refresh/session collisions. — Added cookie scope validation in tenant config loading and regression tests for shared host, domain-domain, and domain-host overlaps.
+- [x] [TA-348] Static auth-client.js requests on shared hosts fail when Origin is missing, blocking Safari/WebKit auth flows. — Relaxed static host gating to allow missing Origin for allowed hosts and refreshed server tests.
+- [x] [TA-349] auth-client.js should require an explicit API base URL instead of inferring it from the script origin; update tests and documentation. — Removed script-origin fallback, enforced explicit base URL hints, updated docs/changelog, and refreshed Node tests.
 
 ## Maintenance (410–499)
 
@@ -80,3 +82,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 ## Planning
 So not work on these, not ready
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test. — `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
+
+## Updates (350–399)
+
+- [x] [TA-350] Move the hosted helper to `/tauth.js` (and `/mpr-sites.js`), remove base URL hint fallbacks in favor of explicit `initAuthClient` configuration, update demos/docs/tests, and add GitHub Pages deployment for `web/`.
