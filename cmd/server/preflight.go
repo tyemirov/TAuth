@@ -15,7 +15,7 @@ func newPreflightCommand() *cobra.Command {
 		Short: "Validate configuration and emit a redacted effective-config report",
 		RunE:  runPreflight,
 	}
-	command.Flags().Bool(preflightOutputIncludeHostsFlag, false, "Include allowed_hosts in output (default redacts hostnames)")
+	command.Flags().Bool(preflightOutputIncludeHostsFlag, false, "Include allowed_hosts in output (default redacts origins)")
 	return command
 }
 

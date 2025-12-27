@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,106 +13,56 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestConfigMatchOwnersIncludesWildcardMatches(t *testing.T) {
-	document := FileDocument{
-		Tenants: []FileTenant{
-			{
-				ID:                "tenant-a",
-				DisplayName:       "Tenant A",
-				AllowedHosts:      []string{"shared.localhost"},
-				GoogleWebClientID: "client-a",
-				JWTSigningKey:     "signing-a",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_a",
-				RefreshCookieName: "app_refresh_a",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-			{
-				ID:                "tenant-b",
-				DisplayName:       "Tenant B",
-				AllowedHosts:      []string{"shared.localhost:8080"},
-				GoogleWebClientID: "client-b",
-				JWTSigningKey:     "signing-b",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_b",
-				RefreshCookieName: "app_refresh_b",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-
-	config, err := LoadConfigFromDocument(document)
-	if err != nil {
-		t.Fatalf("expected config to load: %v", err)
-	}
-
-	owners := config.MatchOwners("shared.localhost", "8080")
-	if len(owners) != 2 {
-		t.Fatalf("expected 2 owners, got %d", len(owners))
-	}
-	if owners[0] != "tenant-b" || owners[1] != "tenant-a" {
-		t.Fatalf("unexpected owners: %#v", owners)
-	}
-}
-
-func TestExtractHostNormalizesPortsAndIPv6(t *testing.T) {
+func TestHostPortFromOriginNormalizesPortsAndIPv6(t *testing.T) {
 	testCases := []struct {
-		name     string
-		request  *http.Request
-		expected string
+		name      string
+		origin    string
+		host      string
+		port      string
+		expectErr bool
 	}{
 		{
-			name:     "host_with_port",
-			request:  &http.Request{Host: "demo.example.com:8443"},
-			expected: "demo.example.com",
+			name:   "host_with_port",
+			origin: "https://demo.example.com:8443",
+			host:   "demo.example.com",
+			port:   "8443",
 		},
 		{
-			name:     "host_with_spaces",
-			request:  &http.Request{Host: "  demo.example.com  "},
-			expected: "demo.example.com",
+			name:   "host_without_port",
+			origin: "https://demo.example.com",
+			host:   "demo.example.com",
+			port:   "",
 		},
 		{
-			name:     "ipv6_host_with_port",
-			request:  &http.Request{Host: "[2001:db8::1]:8443"},
-			expected: "2001:db8::1",
+			name:   "ipv6_host_with_port",
+			origin: "https://[2001:db8::1]:8443",
+			host:   "2001:db8::1",
+			port:   "8443",
 		},
 		{
-			name: "url_host_when_host_header_missing",
-			request: &http.Request{
-				Host: "",
-				URL:  mustParseURL(t, "http://prod.example.com:8080/api"),
-			},
-			expected: "prod.example.com",
-		},
-		{
-			name:     "missing_host",
-			request:  &http.Request{Host: ""},
-			expected: "",
+			name:      "missing_scheme",
+			origin:    "demo.example.com",
+			expectErr: true,
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := ExtractHost(testCase.request); got != testCase.expected {
-				t.Fatalf("expected %q, got %q", testCase.expected, got)
+			hostValue, portValue, err := hostPortFromOrigin(testCase.origin)
+			if testCase.expectErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if hostValue != testCase.host || portValue != testCase.port {
+				t.Fatalf("expected host %q port %q, got %q %q", testCase.host, testCase.port, hostValue, portValue)
 			}
 		})
 	}
-}
-
-func mustParseURL(testContext *testing.T, raw string) *url.URL {
-	testContext.Helper()
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		testContext.Fatalf("parse url: %v", err)
-	}
-	return parsed
 }
 
 func TestYamlBoolUnmarshalYAMLSupportsTypes(t *testing.T) {
@@ -189,7 +138,7 @@ func TestTenantSigningKeyReturnsCopyAndHandlesEmptyKey(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"demo.localhost"},
+				AllowedHosts:      []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client",
 				JWTSigningKey:     "signing",
 				CookieDomain:      "",
@@ -223,88 +172,6 @@ func TestTenantSigningKeyReturnsCopyAndHandlesEmptyKey(t *testing.T) {
 	emptyTenant := Tenant{}
 	if emptyTenant.SigningKey() != nil {
 		t.Fatalf("expected nil signing key for empty tenant")
-	}
-}
-
-func TestConfigHostHelpersReportAmbiguity(t *testing.T) {
-	sharedHostDocument := FileDocument{
-		Tenants: []FileTenant{
-			{
-				ID:                "tenant-a",
-				DisplayName:       "Tenant A",
-				AllowedHosts:      []string{"shared.localhost"},
-				GoogleWebClientID: "client-a",
-				JWTSigningKey:     "signing-a",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_a",
-				RefreshCookieName: "app_refresh_a",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-			{
-				ID:                "tenant-b",
-				DisplayName:       "Tenant B",
-				AllowedHosts:      []string{"shared.localhost"},
-				GoogleWebClientID: "client-b",
-				JWTSigningKey:     "signing-b",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_b",
-				RefreshCookieName: "app_refresh_b",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-
-	sharedConfig, err := LoadConfigFromDocument(sharedHostDocument)
-	if err != nil {
-		t.Fatalf("expected config to load: %v", err)
-	}
-	if owner, ok := sharedConfig.HostOwner("shared.localhost"); !ok || owner == "" {
-		t.Fatalf("expected an owner")
-	}
-	if !sharedConfig.HostIsAmbiguous("shared.localhost") {
-		t.Fatalf("expected host to be ambiguous")
-	}
-	if !sharedConfig.HasAmbiguousHosts() {
-		t.Fatalf("expected config to have ambiguous hosts")
-	}
-}
-
-func TestConfigHostOwnerFallsBackWhenHostPortInvalid(t *testing.T) {
-	document := FileDocument{
-		Tenants: []FileTenant{
-			{
-				ID:                "tenant-a",
-				DisplayName:       "Tenant A",
-				AllowedHosts:      []string{"demo.localhost"},
-				GoogleWebClientID: "client-a",
-				JWTSigningKey:     "signing-a",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_a",
-				RefreshCookieName: "app_refresh_a",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-	config, err := LoadConfigFromDocument(document)
-	if err != nil {
-		t.Fatalf("expected config to load: %v", err)
-	}
-
-	if _, ok := config.HostOwner("[invalid-host"); ok {
-		t.Fatalf("expected invalid host to have no owner")
-	}
-
-	if config.HostIsAmbiguous("[invalid-host") {
-		t.Fatalf("expected invalid host to be non-ambiguous")
 	}
 }
 
@@ -370,35 +237,6 @@ func TestTenantFromContextReturnsFalseForMissingOrInvalidValues(t *testing.T) {
 	}
 }
 
-func TestHasAmbiguousHostsReturnsFalseWhenHostsUnique(t *testing.T) {
-	document := FileDocument{
-		Tenants: []FileTenant{
-			{
-				ID:                "demo",
-				DisplayName:       "Demo",
-				AllowedHosts:      []string{"demo.localhost"},
-				GoogleWebClientID: "demo-client",
-				JWTSigningKey:     "demo-key",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_demo",
-				RefreshCookieName: "app_refresh_demo",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-
-	config, err := LoadConfigFromDocument(document)
-	if err != nil {
-		t.Fatalf("expected config to load: %v", err)
-	}
-	if config.HasAmbiguousHosts() {
-		t.Fatalf("expected no ambiguous hosts")
-	}
-}
-
 func TestNormalizeOriginRejectsInvalidShapes(t *testing.T) {
 	testCases := []struct {
 		name  string
@@ -444,7 +282,7 @@ func TestTenantMiddlewareReturnsExpectedStatuses(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/probe", nil)
-	request.Host = "unknown.example.com"
+	request.Header.Set("Origin", "https://unknown.example.com")
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusTeapot {
 		t.Fatalf("expected teapot status for unknown tenant, got %d", recorder.Code)
@@ -458,7 +296,7 @@ func TestTenantMiddlewareReturnsExpectedStatuses(t *testing.T) {
 	})
 	uninitializedRecorder := httptest.NewRecorder()
 	uninitializedRequest := httptest.NewRequest(http.MethodGet, "/probe", nil)
-	uninitializedRequest.Host = "demo.example.com"
+	uninitializedRequest.Header.Set("Origin", "https://demo.example.com")
 	uninitializedRouter.ServeHTTP(uninitializedRecorder, uninitializedRequest)
 	if uninitializedRecorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for uninitialized resolver, got %d", uninitializedRecorder.Code)
@@ -479,20 +317,12 @@ func TestLoadConfigReturnsErrorWhenFileMissing(t *testing.T) {
 }
 
 func TestParseHostsRejectsDuplicateEntries(t *testing.T) {
-	_, _, _, err := parseHosts([]string{"demo.localhost", "Demo.Localhost"}, "demo")
+	_, _, err := parseHosts([]string{"https://demo.localhost", "https://Demo.Localhost"}, "demo")
 	if err == nil || !errors.Is(err, ErrInvalidTenantConfig) {
 		t.Fatalf("expected ErrInvalidTenantConfig, got %v", err)
 	}
 	if !strings.Contains(err.Error(), errorCodeDuplicateHost) {
 		t.Fatalf("expected duplicate host code, got %v", err)
-	}
-}
-
-func TestExtractHostPortHandlesBracketedHostWithoutPort(t *testing.T) {
-	request := &http.Request{Host: "[2001:db8::1]"}
-	host, port := ExtractHostPort(request)
-	if host != "2001:db8::1" || port != "" {
-		t.Fatalf("unexpected host/port: %q %q", host, port)
 	}
 }
 
@@ -513,7 +343,7 @@ func TestLoadConfigExpandsEnvironmentVariables(t *testing.T) {
 			{
 				ID:                "${TENANT_ID}",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"demo.localhost"},
+				AllowedHosts:      []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "",

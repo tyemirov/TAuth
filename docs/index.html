@@ -582,14 +582,14 @@ GET  /me</code></pre>
               <h2>Tenant config as a contract</h2>
               <p class="section-copy">
                 A single YAML file describes every tenant, cookie domain, and
-                TTL. The resolver maps requests to the correct tenant by host or
-                optional headers for shared origins.
+                TTL. The resolver maps requests to the correct tenant by origin
+                or optional headers for shared origins.
               </p>
             </div>
             <div class="code-card reveal delay-2">
               <pre><code>tenants:
   - id: "notes"
-    allowed_hosts: ["notes.localhost"]
+    allowed_hosts: ["https://notes.localhost"]
     google_web_client_id: "..."
     jwt_signing_key: "..."
     session_cookie_name: "app_session_notes"</code></pre>

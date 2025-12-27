@@ -23,11 +23,11 @@ const (
 	defaultTenantHeader      = "X-TAuth-Tenant"
 	contextKeyResolvedTenant = "tenants.resolved_tenant"
 
-	errorCodeMissingHost           = "tenantresolver.missing_host"
-	errorCodeUnknownHost           = "tenantresolver.unknown_host"
+	errorCodeMissingOrigin         = "tenantresolver.missing_origin"
+	errorCodeUnknownOrigin         = "tenantresolver.unknown_origin"
 	errorCodeUnknownTenantID       = "tenantresolver.unknown_tenant_id"
 	errorCodeInvalidConfig         = "tenantresolver.invalid_config"
-	errorCodeAmbiguousHost         = "tenantresolver.ambiguous_host"
+	errorCodeAmbiguousOrigin       = "tenantresolver.ambiguous_origin"
 	errorCodeMissingHeaderOverride = "tenantresolver.missing_tenant_header"
 )
 
@@ -71,21 +71,13 @@ func (resolver *Resolver) Resolve(request *http.Request) (Tenant, error) {
 		return Tenant{}, fmt.Errorf("%w: %s", ErrResolverUninitialized, errorCodeInvalidConfig)
 	}
 	if request == nil {
-		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingHost)
-	}
-	host, port := ExtractHostPort(request)
-	if host == "" {
-		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingHost)
-	}
-	owners := resolver.config.matchOwners(host, port)
-	if len(owners) == 0 {
-		return Tenant{}, fmt.Errorf("%w: %s host=%s", ErrTenantNotFound, errorCodeUnknownHost, host)
+		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingOrigin)
 	}
 
 	if resolver.headerOverrideEnabled {
 		override := strings.TrimSpace(request.Header.Get(resolver.headerOverrideName))
 		if override != "" {
-			tenant, err := resolver.resolveByHeaderOverride(override, host, port)
+			tenant, err := resolver.resolveByHeaderOverride(override)
 			if err != nil {
 				return Tenant{}, err
 			}
@@ -93,18 +85,14 @@ func (resolver *Resolver) Resolve(request *http.Request) (Tenant, error) {
 		}
 	}
 
-	if len(owners) > 1 {
-		originTenant, originErr := resolver.resolveByOrigin(request)
-		if originErr == nil {
-			return originTenant, nil
-		}
-		if resolver.headerOverrideEnabled {
-			return Tenant{}, fmt.Errorf("%w: %s host=%s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, host, resolver.headerOverrideName)
-		}
-		return Tenant{}, fmt.Errorf("%w: %s host=%s", ErrTenantNotFound, errorCodeAmbiguousHost, host)
+	originTenant, originErr := resolver.resolveByOrigin(request)
+	if originErr == nil {
+		return originTenant, nil
 	}
-
-	return resolver.resolveByID(string(owners[0]))
+	if resolver.headerOverrideEnabled && isAmbiguousOriginError(originErr) {
+		return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, resolver.headerOverrideName)
+	}
+	return Tenant{}, originErr
 }
 
 func (resolver *Resolver) resolveByID(rawID string) (Tenant, error) {
@@ -116,58 +104,20 @@ func (resolver *Resolver) resolveByID(rawID string) (Tenant, error) {
 	return tenant, nil
 }
 
-func (resolver *Resolver) resolveByHeaderOverride(value string, host string, port string) (Tenant, error) {
-	tenant, err := resolver.resolveByID(value)
+func (resolver *Resolver) resolveByHeaderOverride(value string) (Tenant, error) {
+	trimmedValue := strings.TrimSpace(value)
+	tenant, err := resolver.resolveByID(trimmedValue)
 	if err == nil {
-		if !resolver.config.HostBelongsToTenantWithPort(host, port, tenant.ID()) {
-			return Tenant{}, fmt.Errorf("%w: %s host=%s tenant=%s", ErrTenantNotFound, errorCodeUnknownHost, host, tenant.ID())
-		}
 		return tenant, nil
 	}
-	originTenant, originErr := resolver.resolveByOriginValue(value)
-	if originErr == nil {
-		if !resolver.config.HostBelongsToTenantWithPort(host, port, originTenant.ID()) {
-			return Tenant{}, fmt.Errorf("%w: %s host=%s tenant=%s", ErrTenantNotFound, errorCodeUnknownHost, host, originTenant.ID())
+	if strings.Contains(trimmedValue, "://") {
+		originTenant, originErr := resolver.resolveByOriginValue(trimmedValue)
+		if originErr == nil {
+			return originTenant, nil
 		}
-		return originTenant, nil
+		return Tenant{}, originErr
 	}
-	return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeUnknownTenantID, strings.TrimSpace(value))
-}
-
-// ExtractHost normalizes the host header (trim spaces, drop ports/brackets) for routing decisions.
-func ExtractHost(request *http.Request) string {
-	host, _ := ExtractHostPort(request)
-	return host
-}
-
-func ExtractHostPort(request *http.Request) (string, string) {
-	hostValue := request.Host
-	if hostValue == "" && request.URL != nil {
-		hostValue = request.URL.Host
-	}
-	if hostValue == "" {
-		return "", ""
-	}
-	host := strings.TrimSpace(hostValue)
-	if host == "" {
-		return "", ""
-	}
-	if strings.HasPrefix(host, "[") {
-		if closing := strings.Index(host, "]"); closing >= 0 {
-			rest := strings.TrimSpace(host[closing+1:])
-			value := strings.TrimSpace(host[:closing+1])
-			if strings.HasPrefix(rest, ":") {
-				return strings.Trim(value, "[]"), strings.TrimSpace(rest[1:])
-			}
-			return strings.Trim(value, "[]"), ""
-		}
-	}
-	if strings.Count(host, ":") == 1 {
-		if parts := strings.SplitN(host, ":", 2); len(parts) == 2 {
-			return normalizeHost(parts[0]), strings.TrimSpace(parts[1])
-		}
-	}
-	return normalizeHost(host), ""
+	return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeUnknownTenantID, trimmedValue)
 }
 
 // TenantMiddleware resolves tenants and injects them into gin.Context.
@@ -204,18 +154,29 @@ func TenantFromContext(context *gin.Context) (Tenant, bool) {
 	tenant, ok := value.(Tenant)
 	return tenant, ok
 }
+
 func (resolver *Resolver) resolveByOrigin(request *http.Request) (Tenant, error) {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
-		return Tenant{}, fmt.Errorf("origin missing")
+		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingOrigin)
 	}
 	return resolver.resolveByOriginValue(origin)
 }
 
 func (resolver *Resolver) resolveByOriginValue(value string) (Tenant, error) {
-	tenantID, exists := resolver.config.OriginOwner(value)
-	if !exists {
-		return Tenant{}, fmt.Errorf("%w: %s host=%s", ErrTenantNotFound, errorCodeUnknownHost, value)
+	owners := resolver.config.originOwners(value)
+	if len(owners) == 0 {
+		return Tenant{}, fmt.Errorf("%w: %s origin=%s", ErrTenantNotFound, errorCodeUnknownOrigin, value)
 	}
-	return resolver.resolveByID(string(tenantID))
+	if len(owners) > 1 {
+		return Tenant{}, fmt.Errorf("%w: %s origin=%s", ErrTenantNotFound, errorCodeAmbiguousOrigin, value)
+	}
+	return resolver.resolveByID(string(owners[0]))
+}
+
+func isAmbiguousOriginError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), errorCodeAmbiguousOrigin)
 }

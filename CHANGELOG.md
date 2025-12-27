@@ -20,6 +20,7 @@
 - Removed legacy auth-client server route.
 - Allowed static auth-client serving on shared hosts even when Origin headers are missing.
 - Enforced nonce requirement for Google Sign-In exchanges; mismatched nonces cause authentication failure.
+- Tenant resolution now keys off request origins only; host-based routing is removed and `allowed_hosts` must be schemeful origins.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

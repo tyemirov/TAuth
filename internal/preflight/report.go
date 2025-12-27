@@ -65,12 +65,12 @@ type tenantPayload struct {
 	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
 }
 
-// BuildRedactedReport builds a preflight report with redacted hostnames.
+// BuildRedactedReport builds a preflight report with redacted origins.
 func BuildRedactedReport(configPath string) ([]byte, error) {
 	return buildReport(configPath, preflight.RedactionModeRedacted)
 }
 
-// BuildFullReport builds a preflight report with full hostnames.
+// BuildFullReport builds a preflight report with full origins.
 func BuildFullReport(configPath string) ([]byte, error) {
 	return buildReport(configPath, preflight.RedactionModeFull)
 }

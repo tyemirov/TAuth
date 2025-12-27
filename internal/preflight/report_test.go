@@ -15,7 +15,7 @@ const (
 	testSessionCookieName = "app_session_demo"
 	testRefreshCookieName = "app_refresh_demo"
 	testSigningKey        = "demo-signing-key"
-	testAllowedHost       = "demo.localhost"
+	testAllowedHost       = "https://demo.localhost"
 )
 
 func writeConfigFile(testingHandle *testing.T, contents string) string {

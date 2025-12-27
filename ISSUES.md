@@ -70,6 +70,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-345] Enforce unique cookie names across overlapping tenant cookie scopes (shared hosts or cookie domains) to prevent refresh/session collisions. — Added cookie scope validation in tenant config loading and regression tests for shared host, domain-domain, and domain-host overlaps.
 - [x] [TA-348] Static auth-client.js requests on shared hosts fail when Origin is missing, blocking Safari/WebKit auth flows. — Relaxed static host gating to allow missing Origin for allowed hosts and refreshed server tests.
 - [x] [TA-349] auth-client.js should require an explicit API base URL instead of inferring it from the script origin; update tests and documentation. — Removed script-origin fallback, enforced explicit base URL hints, updated docs/changelog, and refreshed Node tests.
+- [x] [TA-351] Remove host-based tenant resolution and enforce origin-only routing. The tenant resolver should use only `Origin` (or `X-TAuth-Tenant`) and require schemeful origins in `allowed_hosts`; docs/examples/tests must match the origin-only contract. — Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 
 ## Maintenance (410–499)
 

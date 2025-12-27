@@ -18,7 +18,6 @@ import (
 type Config struct {
 	tenants           []Tenant
 	tenantIndex       map[TenantID]Tenant
-	hostToTenantIDs   map[hostKey][]TenantID
 	originToTenantIDs map[string][]TenantID
 }
 
@@ -36,11 +35,6 @@ type Tenant struct {
 	refreshTTL        time.Duration
 	nonceTTL          time.Duration
 	allowInsecureHTTP bool
-}
-
-type hostKey struct {
-	host string
-	port string
 }
 
 // TenantID identifies each tenant block.
@@ -65,6 +59,7 @@ const (
 	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
 	errorCodeInvalidID                  = "tenant.invalid_id"
 	errorCodeMissingHosts               = "tenant.missing_hosts"
+	errorCodeInvalidOrigin              = "tenant.invalid_origin"
 	errorCodeDuplicateHost              = "tenant.duplicate_host"
 	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
@@ -121,25 +116,21 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	}
 
 	tenantIndex := make(map[TenantID]Tenant)
-	hostToTenantIDs := make(map[hostKey][]TenantID)
 	originToTenantIDs := make(map[string][]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
 	cookieScopes := make([]tenantCookieScope, 0, len(document.Tenants))
 
 	for _, entry := range document.Tenants {
-		tenant, keys, origins, err := buildTenant(entry)
+		tenant, origins, err := buildTenant(entry)
 		if err != nil {
 			return Config{}, err
 		}
-		cookieScope, cookieScopeErr := buildTenantCookieScope(tenant, keys, origins)
+		cookieScope, cookieScopeErr := buildTenantCookieScope(tenant, origins)
 		if cookieScopeErr != nil {
 			return Config{}, cookieScopeErr
 		}
 		if _, exists := tenantIndex[tenant.id]; exists {
 			return Config{}, fmt.Errorf("%w: %s id=%s", ErrInvalidTenantConfig, errorCodeDuplicateTenantID, tenant.id)
-		}
-		for _, key := range keys {
-			hostToTenantIDs[key] = append(hostToTenantIDs[key], tenant.id)
 		}
 		for _, origin := range origins {
 			originToTenantIDs[origin] = append(originToTenantIDs[origin], tenant.id)
@@ -163,7 +154,6 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	return Config{
 		tenants:           orderedTenants,
 		tenantIndex:       tenantIndex,
-		hostToTenantIDs:   hostToTenantIDs,
 		originToTenantIDs: originToTenantIDs,
 	}, nil
 }
@@ -181,61 +171,6 @@ func (config Config) TenantByID(id TenantID) (Tenant, bool) {
 	return tenant, exists
 }
 
-// HostOwner exposes the tenant id that owns a hostname.
-func (config Config) HostOwner(host string) (TenantID, bool) {
-	normalizedHost, port, err := normalizeHostPort(host)
-	if err != nil {
-		normalizedHost = normalizeHost(host)
-		port = ""
-	}
-	owners := config.matchOwners(normalizedHost, port)
-	if len(owners) == 0 {
-		return "", false
-	}
-	return owners[0], true
-}
-
-// HostIsAmbiguous indicates whether multiple tenants share a host.
-func (config Config) HostIsAmbiguous(host string) bool {
-	normalizedHost, port, err := normalizeHostPort(host)
-	if err != nil {
-		normalizedHost = normalizeHost(host)
-		port = ""
-	}
-	return len(config.matchOwners(normalizedHost, port)) > 1
-}
-
-// HasAmbiguousHosts reports if any hostname is claimed by multiple tenants.
-func (config Config) HasAmbiguousHosts() bool {
-	for key := range config.hostToTenantIDs {
-		if len(config.matchOwners(key.host, key.port)) > 1 {
-			return true
-		}
-	}
-	return false
-}
-
-// HostBelongsToTenant reports whether the tenant declared ownership of host.
-func (config Config) HostBelongsToTenant(host string, id TenantID) bool {
-	return config.HostBelongsToTenantWithPort(host, "", id)
-}
-
-// HostBelongsToTenantWithPort checks host/port ownership.
-func (config Config) HostBelongsToTenantWithPort(host string, port string, id TenantID) bool {
-	owners := config.matchOwners(host, port)
-	for _, owner := range owners {
-		if owner == id {
-			return true
-		}
-	}
-	return false
-}
-
-// MatchOwners exposes tenant IDs that own the provided host/port combo.
-func (config Config) MatchOwners(host string, port string) []TenantID {
-	return config.matchOwners(host, port)
-}
-
 // OriginOwner resolves an origin URL to a tenant.
 func (config Config) OriginOwner(origin string) (TenantID, bool) {
 	owners := config.originOwners(origin)
@@ -243,6 +178,11 @@ func (config Config) OriginOwner(origin string) (TenantID, bool) {
 		return "", false
 	}
 	return owners[0], true
+}
+
+// OriginIsAmbiguous indicates whether multiple tenants share an origin.
+func (config Config) OriginIsAmbiguous(origin string) bool {
+	return len(config.originOwners(origin)) > 1
 }
 
 func (config Config) originOwners(origin string) []TenantID {
@@ -259,17 +199,6 @@ func (config Config) originOwners(origin string) []TenantID {
 	return copyOwners
 }
 
-func (config Config) matchOwners(host string, port string) []TenantID {
-	normalizedHost := normalizeHost(host)
-	key := hostKey{host: normalizedHost, port: strings.TrimSpace(port)}
-	owners := append([]TenantID{}, config.hostToTenantIDs[key]...)
-	if key.port != "" {
-		wildcardKey := hostKey{host: normalizedHost, port: ""}
-		owners = append(owners, config.hostToTenantIDs[wildcardKey]...)
-	}
-	return owners
-}
-
 // ID returns the tenant identifier.
 func (tenant Tenant) ID() TenantID {
 	return tenant.id
@@ -280,7 +209,7 @@ func (tenant Tenant) DisplayName() string {
 	return tenant.displayName
 }
 
-// Hosts returns the allowed hostnames for the tenant.
+// Hosts returns the allowed origins for the tenant.
 func (tenant Tenant) Hosts() []string {
 	hostsCopy := make([]string, len(tenant.hosts))
 	copy(hostsCopy, tenant.hosts)
@@ -337,33 +266,33 @@ func (tenant Tenant) AllowInsecureHTTP() bool {
 	return tenant.allowInsecureHTTP
 }
 
-func buildTenant(raw FileTenant) (Tenant, []hostKey, []string, error) {
+func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	tenantID, idErr := parseTenantID(raw.ID)
 	if idErr != nil {
-		return Tenant{}, nil, nil, idErr
+		return Tenant{}, nil, idErr
 	}
-	hosts, keys, origins, hostErr := parseHosts(raw.AllowedHosts, tenantID)
+	hosts, origins, hostErr := parseHosts(raw.AllowedHosts, tenantID)
 	if hostErr != nil {
-		return Tenant{}, nil, nil, hostErr
+		return Tenant{}, nil, hostErr
 	}
 	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
 	if googleWebClientID == "" {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
 	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidSessionTTL, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidSessionTTL, tenantID)
 	}
 	refreshTTL, refreshErr := parseDuration(raw.RefreshTTL)
 	if refreshErr != nil || refreshTTL <= 0 {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidRefreshTTL, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidRefreshTTL, tenantID)
 	}
 	nonceTTL := defaultNonceTTL
 	if strings.TrimSpace(raw.NonceTTL) != "" {
 		nonceDuration, nonceErr := parseDuration(raw.NonceTTL)
 		if nonceErr != nil || nonceDuration <= 0 {
-			return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidNonceTTL, tenantID)
+			return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidNonceTTL, tenantID)
 		}
 		nonceTTL = nonceDuration
 	}
@@ -375,16 +304,16 @@ func buildTenant(raw FileTenant) (Tenant, []hostKey, []string, error) {
 
 	signingKeyValue := strings.TrimSpace(raw.JWTSigningKey)
 	if signingKeyValue == "" {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingSigningKey, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingSigningKey, tenantID)
 	}
 	signingKey := []byte(signingKeyValue)
 	sessionCookieName := strings.TrimSpace(raw.SessionCookieName)
 	refreshCookieName := strings.TrimSpace(raw.RefreshCookieName)
 	if sessionCookieName == "" {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingSessionCookieName, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingSessionCookieName, tenantID)
 	}
 	if refreshCookieName == "" {
-		return Tenant{}, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingRefreshCookieName, tenantID)
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingRefreshCookieName, tenantID)
 	}
 
 	return Tenant{
@@ -400,7 +329,7 @@ func buildTenant(raw FileTenant) (Tenant, []hostKey, []string, error) {
 		refreshTTL:        refreshTTL,
 		nonceTTL:          nonceTTL,
 		allowInsecureHTTP: bool(raw.AllowInsecureHTTP),
-	}, keys, origins, nil
+	}, origins, nil
 }
 
 func parseTenantID(raw string) (TenantID, error) {
@@ -411,50 +340,30 @@ func parseTenantID(raw string) (TenantID, error) {
 	return TenantID(trimmed), nil
 }
 
-func parseHosts(hosts []string, tenantID TenantID) ([]string, []hostKey, []string, error) {
+func parseHosts(hosts []string, tenantID TenantID) ([]string, []string, error) {
 	if len(hosts) == 0 {
-		return nil, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingHosts, tenantID)
+		return nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingHosts, tenantID)
 	}
 	cleanHosts := make([]string, 0, len(hosts))
-	keys := make([]hostKey, 0, len(hosts))
-	origins := make([]string, 0)
-	seen := make(map[hostKey]struct{})
+	origins := make([]string, 0, len(hosts))
 	seenOrigins := make(map[string]struct{})
 	for _, host := range hosts {
-		if strings.Contains(host, "://") {
-			normalizedOrigin, err := normalizeOrigin(host)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingHosts, tenantID)
-			}
-			if _, exists := seenOrigins[normalizedOrigin]; exists {
-				return nil, nil, nil, fmt.Errorf("%w: %s tenant=%s host=%s", ErrInvalidTenantConfig, errorCodeDuplicateHost, tenantID, host)
-			}
-			seenOrigins[normalizedOrigin] = struct{}{}
-			cleanHosts = append(cleanHosts, normalizedOrigin)
-			origins = append(origins, normalizedOrigin)
-			continue
-		}
-		normalizedHost, port, err := normalizeHostPort(host)
+		normalizedOrigin, err := normalizeOrigin(host)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingHosts, tenantID)
+			return nil, nil, fmt.Errorf("%w: %s tenant=%s origin=%s", ErrInvalidTenantConfig, errorCodeInvalidOrigin, tenantID, host)
 		}
-		key := hostKey{host: normalizedHost, port: port}
-		if _, exists := seen[key]; exists {
-			return nil, nil, nil, fmt.Errorf("%w: %s tenant=%s host=%s", ErrInvalidTenantConfig, errorCodeDuplicateHost, tenantID, host)
+		if _, exists := seenOrigins[normalizedOrigin]; exists {
+			return nil, nil, fmt.Errorf("%w: %s tenant=%s host=%s", ErrInvalidTenantConfig, errorCodeDuplicateHost, tenantID, host)
 		}
-		seen[key] = struct{}{}
-		display := normalizedHost
-		if port != "" {
-			display = fmt.Sprintf("%s:%s", normalizedHost, port)
-		}
-		cleanHosts = append(cleanHosts, display)
-		keys = append(keys, key)
+		seenOrigins[normalizedOrigin] = struct{}{}
+		cleanHosts = append(cleanHosts, normalizedOrigin)
+		origins = append(origins, normalizedOrigin)
 	}
-	return cleanHosts, keys, origins, nil
+	return cleanHosts, origins, nil
 }
 
-func buildTenantCookieScope(tenant Tenant, hostKeys []hostKey, origins []string) (tenantCookieScope, error) {
-	hostnames, hostErr := extractTenantHostnames(tenant.id, hostKeys, origins)
+func buildTenantCookieScope(tenant Tenant, origins []string) (tenantCookieScope, error) {
+	hostnames, hostErr := extractTenantHostnames(tenant.id, origins)
 	if hostErr != nil {
 		return tenantCookieScope{}, hostErr
 	}
@@ -467,14 +376,8 @@ func buildTenantCookieScope(tenant Tenant, hostKeys []hostKey, origins []string)
 	}, nil
 }
 
-func extractTenantHostnames(tenantID TenantID, hostKeys []hostKey, origins []string) ([]string, error) {
+func extractTenantHostnames(tenantID TenantID, origins []string) ([]string, error) {
 	hostSet := make(map[string]struct{})
-	for _, key := range hostKeys {
-		hostValue := strings.TrimSpace(key.host)
-		if hostValue != "" {
-			hostSet[hostValue] = struct{}{}
-		}
-	}
 	for _, origin := range origins {
 		originHost, originErr := hostFromOrigin(origin)
 		if originErr != nil {
@@ -494,18 +397,30 @@ func extractTenantHostnames(tenantID TenantID, hostKeys []hostKey, origins []str
 }
 
 func hostFromOrigin(origin string) (string, error) {
-	parsed, parseErr := url.Parse(origin)
-	if parseErr != nil {
-		return "", parseErr
-	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("origin host missing")
-	}
-	hostValue, _, hostErr := normalizeHostPort(parsed.Host)
+	hostValue, _, hostErr := hostPortFromOrigin(origin)
 	if hostErr != nil {
 		return "", hostErr
 	}
 	return hostValue, nil
+}
+
+func hostPortFromOrigin(origin string) (string, string, error) {
+	normalizedOrigin, normalizeErr := normalizeOrigin(origin)
+	if normalizeErr != nil {
+		return "", "", normalizeErr
+	}
+	parsed, parseErr := url.Parse(normalizedOrigin)
+	if parseErr != nil {
+		return "", "", parseErr
+	}
+	if parsed.Host == "" {
+		return "", "", fmt.Errorf("origin host missing")
+	}
+	hostValue, portValue, hostErr := normalizeHostPort(parsed.Host)
+	if hostErr != nil {
+		return "", "", hostErr
+	}
+	return hostValue, portValue, nil
 }
 
 func validateCookieNameIsolation(cookieScopes []tenantCookieScope) error {
