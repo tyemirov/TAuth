@@ -108,7 +108,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 - [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
   Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
-- [ ] [TS-253] Unable to log into Google using examples/tauth-demo
+- [ ] [TA-253] Unable to log into Google using examples/tauth-demo
 JS Console
 ```
 Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:271:37
