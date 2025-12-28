@@ -142,12 +142,16 @@ Your product should:
 
 ## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports four globals:
+The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports eight globals:
 
 - `initAuthClient(options)` – hydrates the current user and sets up refresh behaviour.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
 - `getCurrentUser()` – returns the current profile object or `null`.
+- `getAuthEndpoints()` – returns the resolved URL map for `/me` and `/auth/*`.
+- `requestNonce()` – fetches a one-time nonce for Google Identity Services.
+- `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
 - `logout()` – revokes the refresh token and clears client state.
+- `setAuthTenantId(tenantId)` – sets the tenant override for subsequent requests.
 
 For backend services written in Go, use the `pkg/sessionvalidator` package described in section 6.8 to validate `app_session` cookies.
 

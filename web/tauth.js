@@ -274,7 +274,12 @@
     if (!response.ok) {
       throw new Error("tauth.nonce_failed");
     }
-    var payload = await response.json();
+    var payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error("tauth.nonce_invalid");
+    }
     if (
       !payload ||
       typeof payload.nonce !== "string" ||
