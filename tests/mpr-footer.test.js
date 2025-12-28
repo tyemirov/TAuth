@@ -1,16 +1,11 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const path = require("node:path");
-const fs = require("node:fs/promises");
+const { loadMprUiScript } = require("./support/mprUiCdn");
 
-const SCRIPT_PATH = path.join(
-  __dirname,
-  "..",
-  "tools",
-  "mpr-ui",
-  "mpr-ui.js",
-);
+const MPR_UI_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
 
 function createVmContext() {
   const hostElement = {
@@ -70,9 +65,16 @@ function createVmContext() {
 
 function createFooterHost() {
   let innerHTMLValue = "";
+  const hostAttributes = {};
   const footerAttributes = {};
+  const stickySpacer = {
+    style: {},
+    setAttribute() {},
+    removeAttribute() {},
+  };
   const footerRoot = {
     className: "",
+    classList: { add() {}, remove() {} },
     setAttribute(name, value) {
       footerAttributes[name] = String(value);
     },
@@ -84,6 +86,15 @@ function createFooterHost() {
     removeAttribute(name) {
       delete footerAttributes[name];
     },
+    getBoundingClientRect() {
+      return { height: 0 };
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
   };
   return {
     hostElement: {
@@ -93,9 +104,22 @@ function createFooterHost() {
       set innerHTML(value) {
         innerHTMLValue = value;
       },
+      setAttribute(name, value) {
+        hostAttributes[name] = String(value);
+      },
+      removeAttribute(name) {
+        delete hostAttributes[name];
+      },
       querySelector(selector) {
-        if (selector === 'footer[role="contentinfo"]') {
+        if (
+          selector === 'footer[role="contentinfo"]' ||
+          selector === '[data-mpr-footer="root"]' ||
+          selector === "footer.mpr-footer"
+        ) {
           return footerRoot;
+        }
+        if (selector === '[data-mpr-footer="sticky-spacer"]') {
+          return stickySpacer;
         }
         return null;
       },
@@ -105,7 +129,7 @@ function createFooterHost() {
 }
 
 test("mpr-ui exposes mountFooterDom helper", async () => {
-  const script = await fs.readFile(SCRIPT_PATH, "utf8");
+  const script = await loadMprUiScript(MPR_UI_CDN_URL);
   const { context } = createVmContext();
   vm.runInNewContext(script, context);
 
@@ -114,7 +138,9 @@ test("mpr-ui exposes mountFooterDom helper", async () => {
     "Expected MPRUI namespace after script evaluation",
   );
   const mountFooterDom =
-    context.window.MPRUI.__dom && context.window.MPRUI.__dom.mountFooterDom;
+    context.window.MPRUI &&
+    context.window.MPRUI.__dom &&
+    context.window.MPRUI.__dom.mountFooterDom;
   assert.equal(
     typeof mountFooterDom,
     "function",
@@ -122,19 +148,25 @@ test("mpr-ui exposes mountFooterDom helper", async () => {
   );
 
   const { hostElement, footerRoot } = createFooterHost();
-  const renderedRoot = mountFooterDom(hostElement, {
-    prefixText: "Built by",
-    links: [{ label: "Support", href: "mailto:support@mprlab.com" }],
+  const footerElement = mountFooterDom(hostElement, {
+    linksMenuEnabled: false,
+    themeToggle: { enabled: false },
+    privacyLinkHref: "#",
+    privacyLinkLabel: "Privacy • Terms",
   });
 
   assert.ok(
     hostElement.innerHTML && hostElement.innerHTML.length > 0,
     "Footer markup should be rendered into the host element",
   );
-  assert.equal(renderedRoot, footerRoot);
   assert.equal(
     footerRoot.getAttribute("data-mpr-footer-root"),
     "true",
     "Footer root should be marked for styling",
+  );
+  assert.equal(
+    footerElement,
+    footerRoot,
+    "mountFooterDom should return the footer root element",
   );
 });

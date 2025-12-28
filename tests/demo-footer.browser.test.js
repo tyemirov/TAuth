@@ -1,3 +1,4 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
@@ -80,7 +81,7 @@ if (!puppeteer) {
       };
     });
     assert.ok(footerState, "Expected footer root element to exist");
-    assert.equal(footerState.position, "sticky");
+    assert.equal(footerState.position, "fixed");
     assert.ok(
       Math.abs(footerState.width - footerState.viewportWidth) <= 2,
       "Expected footer to span the viewport width",
@@ -92,10 +93,15 @@ if (!puppeteer) {
 
     const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
     await page.click(toggleSelector);
-    await page.waitForSelector("#landing-footer .dropdown-menu.show", {
-      visible: true,
-      timeout: 5000,
-    });
+    await page.waitForFunction(
+      () => {
+        const menu = document.querySelector(
+          "#landing-footer [data-mpr-footer='menu']",
+        );
+        return menu && menu.classList.contains("mpr-footer__menu--open");
+      },
+      { timeout: 5000 },
+    );
     const ariaExpanded = await page.$eval(
       toggleSelector,
       (node) => node.getAttribute("aria-expanded"),
@@ -136,8 +142,8 @@ if (!puppeteer) {
     );
     assert.equal(ariaCollapsed, "false");
     const menuVisible = await page.$eval(
-      "#landing-footer .dropdown-menu",
-      (node) => node.classList.contains("show"),
+      "#landing-footer [data-mpr-footer='menu']",
+      (node) => node.classList.contains("mpr-footer__menu--open"),
     );
     assert.equal(menuVisible, false, "Expected dropdown menu to close");
 

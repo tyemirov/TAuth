@@ -106,6 +106,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-351] Remove host-based tenant resolution and enforce origin-only routing.
   The tenant resolver should use only `Origin` (or `X-TAuth-Tenant`) and require schemeful origins in `allowed_hosts`; docs/examples/tests must match the origin-only contract.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
+- [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
+  Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
 
 
 ## Maintenance (418–499)
@@ -131,8 +133,9 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Required valid `X-TAuth-Tenant` override when Origin is missing, added origin gate regression coverage, and noted the change in CHANGELOG.
 - [x] [TA-416] CRUCIAL: Align CORS allowlist with tenant origins (or explicit exception list) to avoid credentialed CORS for non-tenant origins; enforce via validation and document the policy.
   Added CORS allowlist validation against tenant origins/exception list, introduced exception config field, expanded server/preflight tests, and noted the policy in CHANGELOG.
-- [ ] [TA-417] Add frontend to CI.
+- [x] [TA-417] Add frontend to CI.
   add a trigger for the frontend changes to github workflow. run npm tests and linters when fronted files change
+  Added a frontend test workflow that runs `npm run verify` and `npm test` on frontend path changes.
 
 
 ## Planning
@@ -140,5 +143,4 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
   `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
-
 
