@@ -834,8 +834,8 @@ func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenan
 	return doc.Tenants
 }
 
-func TestOriginAllowedFallsBackToHeaderOverride(t *testing.T) {
-	t.Helper()
+func TestOriginAllowedRequiresOverrideWhenOriginMissing(testingHandle *testing.T) {
+	testingHandle.Helper()
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
@@ -866,17 +866,25 @@ func TestOriginAllowedFallsBackToHeaderOverride(t *testing.T) {
 	}
 	config, err := tenants.LoadConfigFromDocument(document)
 	if err != nil {
-		t.Fatalf("load tenant config: %v", err)
+		testingHandle.Fatalf("load tenant config: %v", err)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
 	request.Host = "shared.localhost"
 
 	if originAllowed(request, config, false) {
-		t.Fatalf("expected missing origin to be rejected when header override disabled")
+		testingHandle.Fatalf("expected missing origin to be rejected when header override disabled")
 	}
+	if originAllowed(request, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected without override header")
+	}
+	request.Header.Set(tenantHeaderName, "missing")
+	if originAllowed(request, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected with invalid override")
+	}
+	request.Header.Set(tenantHeaderName, "notes")
 	if !originAllowed(request, config, true) {
-		t.Fatalf("expected missing origin to pass when header override enabled")
+		testingHandle.Fatalf("expected missing origin to pass with valid override")
 	}
 }
 

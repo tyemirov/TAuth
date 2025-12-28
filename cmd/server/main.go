@@ -62,6 +62,7 @@ const (
 	defaultTenantID     = "default"
 	defaultAppJWTIssuer = appconfig.DefaultJWTIssuer
 	defaultCookieDomain = ""
+	tenantHeaderName    = "X-TAuth-Tenant"
 
 	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
 	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
@@ -340,7 +341,10 @@ func originGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.H
 func originAllowed(request *http.Request, config tenants.Config, allowHeaderOverride bool) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
-		return allowHeaderOverride
+		if !allowHeaderOverride {
+			return false
+		}
+		return headerOverrideAllowed(request, config)
 	}
 	if _, ok := config.OriginOwner(origin); !ok {
 		return false
@@ -349,6 +353,22 @@ func originAllowed(request *http.Request, config tenants.Config, allowHeaderOver
 		return false
 	}
 	return true
+}
+
+func headerOverrideAllowed(request *http.Request, config tenants.Config) bool {
+	override := strings.TrimSpace(request.Header.Get(tenantHeaderName))
+	if override == "" {
+		return false
+	}
+	if strings.Contains(override, "://") {
+		if config.OriginIsAmbiguous(override) {
+			return false
+		}
+		_, ok := config.OriginOwner(override)
+		return ok
+	}
+	_, ok := config.TenantByID(tenants.TenantID(override))
+	return ok
 }
 
 func staticOriginAllowed(request *http.Request, config tenants.Config) bool {

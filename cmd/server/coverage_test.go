@@ -56,7 +56,7 @@ func TestSameSiteResolverCoversCombinations(t *testing.T) {
 	}
 }
 
-func TestHostAllowedHandlesAmbiguity(t *testing.T) {
+func TestHostAllowedHandlesAmbiguity(testingHandle *testing.T) {
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
@@ -92,32 +92,40 @@ func TestHostAllowedHandlesAmbiguity(t *testing.T) {
 
 	config, err := tenants.LoadConfigFromDocument(document)
 	if err != nil {
-		t.Fatalf("expected tenants config to load: %v", err)
+		testingHandle.Fatalf("expected tenants config to load: %v", err)
 	}
 
 	missingOriginRequest := &http.Request{Header: make(http.Header)}
 	if originAllowed(missingOriginRequest, config, false) {
-		t.Fatalf("expected missing origin to be rejected")
+		testingHandle.Fatalf("expected missing origin to be rejected")
 	}
 
 	request := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
 	request.Header.Set("Origin", "http://alpha.localhost:8000")
 	if !originAllowed(request, config, false) {
-		t.Fatalf("expected alpha origin to be allowed")
+		testingHandle.Fatalf("expected alpha origin to be allowed")
 	}
 
 	requestUnknownOrigin := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
 	requestUnknownOrigin.Header.Set("Origin", "http://unknown.localhost:8000")
 	if originAllowed(requestUnknownOrigin, config, false) {
-		t.Fatalf("expected unknown origin to be rejected")
+		testingHandle.Fatalf("expected unknown origin to be rejected")
 	}
 
 	requestNoOrigin := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
 	if originAllowed(requestNoOrigin, config, false) {
-		t.Fatalf("expected missing origin to be rejected when override disabled")
+		testingHandle.Fatalf("expected missing origin to be rejected when override disabled")
 	}
+	if originAllowed(requestNoOrigin, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected without override header")
+	}
+	requestNoOrigin.Header.Set(tenantHeaderName, "missing")
+	if originAllowed(requestNoOrigin, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected with invalid override")
+	}
+	requestNoOrigin.Header.Set(tenantHeaderName, "alpha")
 	if !originAllowed(requestNoOrigin, config, true) {
-		t.Fatalf("expected missing origin to be allowed when override enabled")
+		testingHandle.Fatalf("expected missing origin to be allowed with valid override")
 	}
 }
 
