@@ -25,7 +25,7 @@
 - Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 - Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
-- Fetch demo configuration as JSON and load the mpr-ui bundle after config resolution so the demo header renders with the backend client ID.
+- Load the demo header after applying local demo config so the example boots without server-side demo endpoints.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

@@ -695,102 +695,6 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 	}
 }
 
-func TestDemoConfigUsesResolvedTenant(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	tenantDocument := `tenants:
-  - id: "alpha"
-    display_name: "Alpha"
-    allowed_hosts: ["https://alpha.localhost"]
-    google_web_client_id: "alpha-client"
-    jwt_signing_key: "alpha-key"
-    cookie_domain: ".example.com"
-    session_cookie_name: "app_session_alpha"
-    refresh_cookie_name: "app_refresh_alpha"
-    session_ttl: "10m"
-    refresh_ttl: "10m"
-    nonce_ttl: "5m"
-    allow_insecure_http: true
-
-  - id: "beta"
-    display_name: "Beta"
-    allowed_hosts: ["https://beta.localhost"]
-    google_web_client_id: "beta-client"
-    jwt_signing_key: "beta-key"
-    cookie_domain: ".example.com"
-    session_cookie_name: "app_session_beta"
-    refresh_cookie_name: "app_refresh_beta"
-    session_ttl: "10m"
-    refresh_ttl: "10m"
-    nonce_ttl: "5m"
-    allow_insecure_http: true
-`
-	restoreServe := withServeHTTPStub(func(server *http.Server) error {
-		req := httptest.NewRequest("GET", "/demo/config.js", nil)
-		req.Host = "beta.localhost"
-		req.Header.Set("Origin", "https://beta.localhost")
-		w := httptest.NewRecorder()
-		server.Handler.ServeHTTP(w, req)
-
-		if w.Code != 200 {
-			t.Errorf("expected 200, got %d", w.Code)
-		}
-		body := w.Body.String()
-		if !strings.Contains(body, "beta-client") {
-			t.Errorf("expected beta-client in response, got %s", body)
-		}
-		return http.ErrServerClosed
-	})
-	defer restoreServe()
-
-	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
-		return noopGoogleValidator{}, nil
-	})
-	defer restoreValidator()
-
-	cfg := sampleApplicationConfig()
-	cfg.Tenants = mustParseTenantsDocument(t, tenantDocument)
-	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
-
-	_ = runServer(command, nil)
-}
-
-func TestRunServerEndToEndDemoConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
-		return noopGoogleValidator{}, nil
-	})
-	defer restoreValidator()
-
-	restoreServe := withServeHTTPStub(func(server *http.Server) error {
-		req := httptest.NewRequest(http.MethodGet, "/demo/config.js", nil)
-		req.Host = "beta.localhost"
-		req.Header.Set("Origin", "https://beta.localhost")
-		recorder := httptest.NewRecorder()
-		server.Handler.ServeHTTP(recorder, req)
-		if recorder.Code != http.StatusOK {
-			return fmt.Errorf("expected 200 from /demo/config.js, got %d", recorder.Code)
-		}
-		if !strings.Contains(recorder.Body.String(), "beta-client.apps.googleusercontent.com") {
-			return fmt.Errorf("expected beta client in config")
-		}
-
-		_ = server.Shutdown(context.Background())
-		return http.ErrServerClosed
-	})
-	defer restoreServe()
-
-	cfg := sampleApplicationConfig()
-	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
-
-	if err := runServer(command, nil); err != nil {
-		t.Fatalf("expected server to run, got %v", err)
-	}
-}
-
 func withServeHTTPStub(stub func(server *http.Server) error) func() {
 	previous := serveHTTP
 	serveHTTP = stub
@@ -876,17 +780,6 @@ func writeConfigFileFromStruct(t *testing.T, cfg appconfig.ApplicationConfig) st
 		t.Fatalf("failed to write config: %v", err)
 	}
 	return path
-}
-
-func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenant {
-	t.Helper()
-	var doc tenants.FileDocument
-	decoder := yaml.NewDecoder(strings.NewReader(contents))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
-		t.Fatalf("failed to parse tenants document: %v", err)
-	}
-	return doc.Tenants
 }
 
 func TestOriginAllowedRequiresOverrideWhenOriginMissing(testingHandle *testing.T) {

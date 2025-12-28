@@ -136,6 +136,8 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-253] Demo header rendering fails when the mpr-ui bundle loads before the demo config.
   Added `/demo/config.json`, delayed the mpr-ui bundle load until config + tauth.js are ready, and added regression coverage for the demo bootstrap.
+- [x] [TA-253] TAuth should not expose demo-specific endpoints.
+  Removed demo config routes from the server and moved demo configuration into the example assets.
 
 ## Maintenance (418–499)
 
