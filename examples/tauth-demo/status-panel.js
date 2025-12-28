@@ -80,13 +80,30 @@ function renderSession(profile) {
   host.append(profileContainer, expiryParagraph, refreshParagraph);
 }
 
+function renderError(message) {
+  const host = document.querySelector(STATUS_HOST_SELECTOR);
+  if (!host) {
+    return;
+  }
+  host.replaceChildren();
+  const title = document.createElement('h3');
+  title.textContent = 'Sign-in error';
+  const details = document.createElement('p');
+  details.textContent = message;
+  host.append(title, details);
+}
+
 function initSessionPanel() {
   renderSession(typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null);
-  document.addEventListener('mpr-ui:auth:authenticated', (event) => {
+  document.addEventListener('tauth:auth:authenticated', (event) => {
     renderSession(event?.detail?.profile ?? null);
   });
-  document.addEventListener('mpr-ui:auth:unauthenticated', () => {
+  document.addEventListener('tauth:auth:unauthenticated', () => {
     renderSession(null);
+  });
+  document.addEventListener('tauth:auth:error', (event) => {
+    const code = event?.detail?.code;
+    renderError(code ? String(code) : 'Unable to complete authentication.');
   });
 }
 

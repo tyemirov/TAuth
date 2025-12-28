@@ -14,10 +14,6 @@
       href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
-    />
     <style>
       :root {
         --ink-100: #f3f8ff;
@@ -34,13 +30,6 @@
         --font-heading: "Space Mono", ui-monospace, SFMono-Regular, Menlo,
           Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         --font-body: "Sora", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-        --mpr-color-surface-primary: var(--surface);
-        --mpr-color-surface-elevated: var(--surface-strong);
-        --mpr-color-text-primary: var(--ink-100);
-        --mpr-color-text-muted: var(--ink-40);
-        --mpr-color-accent: var(--accent);
-        --mpr-color-border: var(--grid-line);
-        --mpr-shadow-elevated: var(--shadow);
       }
 
       * {
@@ -409,8 +398,42 @@
         gap: 12px;
       }
 
-      mpr-footer {
+      .site-footer {
         margin-top: 90px;
+        padding: 36px 24px 48px;
+        border-top: 1px solid var(--grid-line);
+        background: rgba(7, 9, 13, 0.85);
+      }
+
+      .site-footer__inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .site-footer__brand {
+        color: var(--ink-70);
+        font-size: 0.95rem;
+      }
+
+      .site-footer__links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+      }
+
+      .site-footer__links a {
+        color: var(--ink-70);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .site-footer__links a:hover {
+        color: var(--ink-100);
       }
 
       .reveal {
@@ -746,44 +769,16 @@ tauth.js: /tauth.js
         </section>
       </main>
 
-      <mpr-footer
-        links-collection='{
-          "style": "drop-up",
-          "text": "TAuth by Marco Polo Research Lab",
-          "links": [
-            { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth" },
-            { "label": "Docs", "url": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md" },
-            { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions" }
-          ]
-        }'
-        privacy-link-label="MIT License"
-        privacy-modal-content='
-      &lt;h1&gt;MIT License — ctx&lt;/h1&gt;
-      &lt;p&gt;&lt;strong&gt;Copyright (c) 2025&lt;/strong&gt;
-      Marco Polo Research Lab&lt;/p&gt;
-      &lt;p&gt;Permission is hereby granted, free of charge, to any person obtaining a copy
-      of this software and associated documentation files (the "Software"), to deal
-      in the Software without restriction, including without limitation the rights
-      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-      copies of the Software, and to permit persons to whom the Software is
-      furnished to do so, subject to the following conditions:&lt;/p&gt;
-      &lt;p&gt;The above copyright notice and this permission notice shall be
-      included in all copies or substantial portions of the Software.&lt;/p&gt;
-      &lt;p&gt;THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-      SOFTWARE.&lt;/p&gt;
-    '
-        sticky="false"
-      >
-      </mpr-footer>
+      <footer class="site-footer">
+        <div class="site-footer__inner">
+          <div class="site-footer__brand">TAuth by Marco Polo Research Lab</div>
+          <div class="site-footer__links">
+            <a href="https://github.com/tyemirov/TAuth">GitHub</a>
+            <a href="https://github.com/tyemirov/TAuth/blob/master/docs/usage.md">Docs</a>
+            <a href="https://github.com/tyemirov/TAuth/discussions">Community</a>
+          </div>
+        </div>
+      </footer>
     </div>
-    <script
-      defer
-      src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"
-    ></script>
   </body>
 </html>

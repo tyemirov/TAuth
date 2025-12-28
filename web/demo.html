@@ -17,11 +17,7 @@
             crossorigin="anonymous"
         />
         <script src="/tauth.js"></script>
-        <script src="/mpr-sites.js"></script>
-        <script
-            defer
-            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js"
-        ></script>
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
         <script
             defer
             src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
@@ -103,16 +99,16 @@
             }
 
             #landing-footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                width: 100%;
                 backdrop-filter: blur(16px);
                 box-shadow: 0 -24px 64px rgba(9, 22, 48, 0.18);
+                background: var(--bs-body-bg);
             }
 
-            #landing-footer,
-            #landing-footer .mpr-footer {
-                width: 100%;
-            }
-
-            #landing-footer .mpr-footer__inner {
+            #landing-footer .site-footer__inner {
                 max-width: 100%;
                 width: 100%;
                 margin: 0 auto;
@@ -125,10 +121,7 @@
                 top: 0;
                 z-index: 1200;
                 width: 100%;
-            }
-
-            #siteHeader header.mpr-header {
-                width: 100%;
+                background: var(--bs-body-bg);
             }
 
             body[data-bs-theme="dark"] #landing-footer {
@@ -143,7 +136,19 @@
     </head>
     <body class="landing-body bg-body text-body" data-bs-theme="light">
         <div class="d-flex flex-column min-vh-100">
-            <mpr-header id="siteHeader"></mpr-header>
+            <header id="siteHeader" class="border-bottom">
+                <div class="container-lg py-3 d-flex flex-wrap align-items-center gap-3">
+                    <div class="fw-semibold">TAuth Demo</div>
+                    <nav class="d-flex flex-wrap gap-3 ms-auto me-3" aria-label="Primary">
+                        <a class="link-secondary text-decoration-none fw-semibold" href="https://github.com/tyemirov/TAuth#readme" target="_blank" rel="noopener noreferrer">README</a>
+                        <a class="link-secondary text-decoration-none fw-semibold" href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">Architecture</a>
+                    </nav>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <div id="googleSignInContainer"></div>
+                        <button id="headerLogoutButton" class="btn btn-outline-primary px-4 d-none">Sign out</button>
+                    </div>
+                </div>
+            </header>
             <main class="flex-grow-1 py-5">
             <div class="container-lg">
                 <section class="text-center mb-5">
@@ -212,16 +217,28 @@
                 </div>
             </div>
             </main>
-            <mpr-footer id="landing-footer" class="mt-auto"></mpr-footer>
+            <footer id="landing-footer" class="mt-auto border-top py-3">
+                <div class="site-footer__inner">
+                    <div class="container-lg d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3">
+                        <div class="text-body-secondary small">Built by Marco Polo Research Lab</div>
+                        <div class="d-flex flex-wrap gap-3 small">
+                            <a class="link-secondary text-decoration-none" href="https://github.com/tyemirov/TAuth" target="_blank" rel="noopener noreferrer">GitHub</a>
+                            <a class="link-secondary text-decoration-none" href="https://github.com/tyemirov/TAuth/blob/master/docs/usage.md" target="_blank" rel="noopener noreferrer">Docs</a>
+                            <a class="link-secondary text-decoration-none" href="https://github.com/tyemirov/TAuth/discussions" target="_blank" rel="noopener noreferrer">Community</a>
+                        </div>
+                    </div>
+                </div>
+            </footer>
         </div>
         <script>
             window.addEventListener("load", function () {
                 const TAUTH_BASE_URL = window.location.origin;
                 const GOOGLE_CLIENT_ID = "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com";
-                const themePersistenceKey = "tauth-demo-theme";
 
                 const headerHost = document.getElementById("siteHeader");
                 const footerHost = document.getElementById("landing-footer");
+                const signInContainer = document.getElementById("googleSignInContainer");
+                const headerLogoutButton = document.getElementById("headerLogoutButton");
                 const noticeElement = document.getElementById("demoNotice");
                 const signedOutPanel = document.querySelector('[data-panel="signed-out"]');
                 const signedInPanel = document.querySelector('[data-panel="signed-in"]');
@@ -257,166 +274,12 @@
                     });
                 }
 
-                const themeTargets = ["document", "body"];
-                const themeModes = [
-                    { value: "light", dataset: { "bs-theme": "light" } },
-                    { value: "dark", dataset: { "bs-theme": "dark" } },
-                ];
-                const footerLinks = Array.isArray(window.MPR_SITES)
-                    ? window.MPR_SITES.map((siteEntry) => ({
-                          label: siteEntry.label,
-                          url: siteEntry.href,
-                      }))
-                    : [];
-                const persistedTheme = readPersistedTheme(themePersistenceKey);
-                syncBodyTheme(persistedTheme || "light");
-
-                function readPersistedTheme(storageKey) {
-                    if (!storageKey) {
-                        return "";
-                    }
-                    try {
-                        return window.localStorage.getItem(storageKey) || "";
-                    } catch (_error) {
-                        return "";
-                    }
-                }
-
-                function writePersistedTheme(storageKey, modeValue) {
-                    if (!storageKey || !modeValue) {
-                        return;
-                    }
-                    try {
-                        window.localStorage.setItem(storageKey, modeValue);
-                    } catch (_error) {
-                    }
-                }
-
                 function withEvent(eventLabel, payload) {
                     if (!eventLabel) {
                         return payload;
                     }
                     return { event: eventLabel, ...payload };
                 }
-
-                const baseThemeConfig = {
-                    targets: themeTargets,
-                    modes: themeModes,
-                };
-                const headerThemeConfig = persistedTheme
-                    ? { ...baseThemeConfig, initialMode: persistedTheme }
-                    : { ...baseThemeConfig };
-                const footerThemeConfig = {
-                    enabled: true,
-                    variant: "switch",
-                    wrapperClass: "mpr-footer__theme-toggle form-check form-switch m-0",
-                    inputClass: "mpr-footer__theme-checkbox form-check-input",
-                    inputId: "public-theme-toggle",
-                    ariaLabel: "Toggle theme",
-                    ...baseThemeConfig,
-                };
-                if (persistedTheme) {
-                    footerThemeConfig.initialMode = persistedTheme;
-                }
-
-                const headerNavLinks = [
-                    { label: "README", href: "https://github.com/tyemirov/TAuth#readme" },
-                    { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
-                ];
-                const authConfig = {
-                    baseUrl: TAUTH_BASE_URL,
-                    loginPath: "/auth/google",
-                    logoutPath: "/auth/logout",
-                    noncePath: "/auth/nonce",
-                    googleClientId: GOOGLE_CLIENT_ID,
-                };
-
-                function syncBodyTheme(nextMode) {
-                    const resolvedMode = typeof nextMode === "string" && nextMode ? nextMode : "light";
-                    document.body.setAttribute("data-bs-theme", resolvedMode);
-                }
-
-                if (headerHost) {
-                    headerHost.setAttribute("brand-label", "TAuth Demo");
-                    headerHost.setAttribute("brand-href", "/demo");
-                    headerHost.setAttribute("nav-links", JSON.stringify(headerNavLinks));
-                    headerHost.setAttribute("sign-in-label", "Sign in with Google");
-                    headerHost.setAttribute("site-id", GOOGLE_CLIENT_ID);
-                    headerHost.setAttribute("auth-config", JSON.stringify(authConfig));
-                    headerHost.setAttribute("theme-config", JSON.stringify(headerThemeConfig));
-                    if (persistedTheme) {
-                        headerHost.setAttribute("theme-mode", persistedTheme);
-                    }
-                    window.requestAnimationFrame(() => {
-                        applyExternalLinkAttributes(headerHost);
-                    });
-                }
-
-                if (footerHost) {
-                    footerHost.setAttribute(
-                        "base-class",
-                        "mpr-footer landing-footer border-top py-3",
-                    );
-                    footerHost.setAttribute(
-                        "inner-class",
-                        "mpr-footer__inner d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
-                    );
-                    footerHost.setAttribute(
-                        "wrapper-class",
-                        "mpr-footer__layout d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
-                    );
-                    footerHost.setAttribute(
-                        "brand-wrapper-class",
-                        "mpr-footer__brand d-inline-flex align-items-center gap-2 text-body-secondary small",
-                    );
-                    footerHost.setAttribute(
-                        "menu-wrapper-class",
-                        "mpr-footer__menu-wrapper dropup",
-                    );
-                    footerHost.setAttribute(
-                        "prefix-class",
-                        "mpr-footer__prefix text-body-secondary fw-semibold",
-                    );
-                    footerHost.setAttribute("prefix-text", "Built by");
-                    footerHost.setAttribute(
-                        "toggle-button-class",
-                        "mpr-footer__menu-button btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
-                    );
-                    footerHost.setAttribute("toggle-label", "Built by Marco Polo Research Lab");
-                    footerHost.setAttribute(
-                        "menu-class",
-                        "mpr-footer__menu dropdown-menu dropdown-menu-end shadow",
-                    );
-                    footerHost.setAttribute(
-                        "menu-item-class",
-                        "mpr-footer__menu-item dropdown-item",
-                    );
-                    footerHost.setAttribute(
-                        "privacy-link-class",
-                        "mpr-footer__privacy text-body-secondary text-decoration-none small",
-                    );
-                    footerHost.setAttribute("privacy-link-href", "https://mprlab.com/privacy");
-                    footerHost.setAttribute("privacy-link-label", "Privacy • Terms");
-                    footerHost.setAttribute("theme-config", JSON.stringify(footerThemeConfig));
-                    footerHost.setAttribute("links", JSON.stringify(footerLinks));
-                    if (persistedTheme) {
-                        footerHost.setAttribute("theme-mode", persistedTheme);
-                    }
-                    window.requestAnimationFrame(() => {
-                        applyExternalLinkAttributes(footerHost);
-                    });
-                }
-
-                document.addEventListener("mpr-ui:theme-change", (eventObject) => {
-                    const modeValue =
-                        eventObject && eventObject.detail && typeof eventObject.detail.mode === "string"
-                            ? eventObject.detail.mode
-                            : "";
-                    if (modeValue) {
-                        syncBodyTheme(modeValue);
-                        writePersistedTheme(themePersistenceKey, modeValue);
-                    }
-                });
 
                 function withBase(path) {
                     if (!path) {
@@ -451,6 +314,15 @@
                     }
                     noticeElement.textContent = message;
                     noticeElement.classList.remove("d-none");
+                }
+
+                function setHeaderAuthState(isAuthenticated) {
+                    if (signInContainer) {
+                        signInContainer.classList.toggle("d-none", isAuthenticated);
+                    }
+                    if (headerLogoutButton) {
+                        headerLogoutButton.classList.toggle("d-none", !isAuthenticated);
+                    }
                 }
 
                 function renderProfileSummary(profile) {
@@ -501,6 +373,7 @@
                     if (signedInPanel) {
                         signedInPanel.classList.add("d-none");
                     }
+                    setHeaderAuthState(false);
                     renderProfileSummary(null);
                 }
 
@@ -511,10 +384,71 @@
                     if (signedInPanel) {
                         signedInPanel.classList.remove("d-none");
                     }
+                    setHeaderAuthState(true);
                     renderProfileSummary(profile);
                 }
 
+                async function renderGoogleButton(eventLabel) {
+                    if (!signInContainer) {
+                        return;
+                    }
+                    if (!GOOGLE_CLIENT_ID) {
+                        showNotice("Set a valid Google client ID before signing in.");
+                        return;
+                    }
+                    if (!window.requestNonce || !window.exchangeGoogleCredential) {
+                        showNotice("Missing tauth.js helper functions.");
+                        return;
+                    }
+                    try {
+                        const nonceToken = await window.requestNonce();
+                        const googleIdentity =
+                            window.google && window.google.accounts && window.google.accounts.id
+                                ? window.google.accounts.id
+                                : null;
+                        if (!googleIdentity) {
+                            showNotice("Google Identity Services is not available.");
+                            return;
+                        }
+                        signInContainer.replaceChildren();
+                        googleIdentity.initialize({
+                            client_id: GOOGLE_CLIENT_ID,
+                            nonce: nonceToken,
+                            callback: async (response) => {
+                                if (!response || typeof response.credential !== "string") {
+                                    showNotice("Missing credential from Google.");
+                                    setOutput({ error: "google_credential_missing" });
+                                    return;
+                                }
+                                try {
+                                    await window.exchangeGoogleCredential({
+                                        credential: response.credential,
+                                        nonceToken,
+                                    });
+                                } catch (error) {
+                                    showNotice("Authentication error. Please retry.");
+                                    setOutput({ error: "credential_exchange_failed", detail: String(error) });
+                                }
+                            },
+                        });
+                        googleIdentity.renderButton(signInContainer, {
+                            theme: "outline",
+                            size: "large",
+                            shape: "pill",
+                        });
+                        googleIdentity.prompt();
+                        setOutput(withEvent(eventLabel, { state: "nonce_ready" }));
+                    } catch (error) {
+                        showNotice("Unable to request a nonce. Please retry.");
+                        setOutput({ error: "nonce_failed", detail: String(error) });
+                    }
+                }
+
                 async function refreshSession(eventLabel) {
+                    if (!window.initAuthClient) {
+                        showNotice("Missing tauth.js helper functions.");
+                        return;
+                    }
                     try {
                         await window.initAuthClient({
                             baseUrl: TAUTH_BASE_URL,
@@ -526,6 +460,7 @@
                             onUnauthenticated() {
                                 showSignedOut();
                                 setOutput(withEvent(eventLabel, { state: "signed_out" }));
+                                renderGoogleButton("nonce_ready");
                             },
                         });
                     } catch (error) {
@@ -566,35 +501,26 @@
                             }
                         });
                     }
+                    if (headerLogoutButton) {
+                        headerLogoutButton.addEventListener("click", async () => {
+                            clearNotice();
+                            try {
+                                await window.logout();
+                                showSignedOut();
+                                setOutput(withEvent("signed_out", { state: "signed_out" }));
+                            } catch (error) {
+                                showNotice("Unable to sign out. Please retry.");
+                                setOutput({ error: "logout_failed", detail: String(error) });
+                            }
+                        });
+                    }
                 }
 
                 if (headerHost) {
-                    headerHost.addEventListener("mpr-ui:auth:authenticated", (eventObject) => {
-                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
-                        clearNotice();
-                        if (detail.profile) {
-                            showSignedIn(detail.profile);
-                            setOutput(withEvent("signed_in", { state: "signed_in", profile: detail.profile }));
-                        } else {
-                            refreshSession("signed_in");
-                        }
-                        applyExternalLinkAttributes(headerHost);
-                    });
-                    headerHost.addEventListener("mpr-ui:auth:unauthenticated", () => {
-                        showSignedOut();
-                        setOutput(withEvent("signed_out", { state: "signed_out" }));
-                        applyExternalLinkAttributes(headerHost);
-                    });
-                    headerHost.addEventListener("mpr-ui:auth:error", (eventObject) => {
-                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
-                        showNotice("Authentication error. Please try again.");
-                        setOutput({ error: detail.code || "mpr-ui.auth.error", detail });
-                    });
-                    headerHost.addEventListener("mpr-ui:header:error", (eventObject) => {
-                        const detail = eventObject && eventObject.detail ? eventObject.detail : {};
-                        showNotice("Google prompt failed. Please retry.");
-                        setOutput({ error: detail.code || "mpr-ui.header.error", detail });
-                    });
+                    applyExternalLinkAttributes(headerHost);
+                }
+                if (footerHost) {
+                    applyExternalLinkAttributes(footerHost);
                 }
 
                 bindUiHandlers();

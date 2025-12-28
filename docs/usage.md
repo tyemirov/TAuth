@@ -372,18 +372,12 @@ Serves the browser helper described in section 4.
 - Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
 - Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `logout` on `window`.
 
-### 6.7 `GET /demo`
-
-Optional demo page shipped with the repository. Intended for local development only.
-
----
-
-## 6.8 Validating sessions from other Go services
+## 6.7 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
 If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
 
-### 6.8.1 Basic validator setup
+### 6.7.1 Basic validator setup
 
 Add the module to your Go service and construct a validator at startup:
 
@@ -412,7 +406,7 @@ The configuration mirrors your TAuth deployment:
 
 The constructor validates configuration up front and returns a typed error if required fields are missing.
 
-### 6.8.2 Gin middleware integration
+### 6.7.2 Gin middleware integration
 
 For Gin-based services, use the built-in middleware to protect routes and attach claims to the context:
 

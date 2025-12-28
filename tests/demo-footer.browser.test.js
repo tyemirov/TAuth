@@ -2,9 +2,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
-const { interceptMprUiRequest } = require("./support/interceptMprUi");
-const { delay } = require("./support/delay");
-const { MPR_SITES } = require("../web/mpr-sites.js");
 
 let puppeteer = null;
 try {
@@ -37,12 +34,6 @@ if (!puppeteer) {
     t.after(() => browser.close());
 
     const page = await browser.newPage();
-    const removeIntercept = await interceptMprUiRequest(
-      page,
-      server.mprUiSource,
-    );
-    t.after(() => removeIntercept());
-
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
     await page.waitForSelector("#landing-footer", {
@@ -56,18 +47,9 @@ if (!puppeteer) {
     );
     assert.match(footerText, /Built by/i);
     assert.match(footerText, /Marco Polo Research Lab/);
-    assert.match(footerText, /Privacy • Terms/);
-
-    const displayValue = await page.$eval("#landing-footer", (node) => {
-      const style = window.getComputedStyle(node);
-      return style ? style.display : "";
-    });
-    assert.notEqual(displayValue, "none");
 
     const footerState = await page.evaluate(() => {
-      const footerRoot = document.querySelector(
-        "#landing-footer footer[role='contentinfo']",
-      );
+      const footerRoot = document.querySelector("#landing-footer");
       if (!footerRoot) {
         return null;
       }
@@ -91,145 +73,18 @@ if (!puppeteer) {
       "Expected footer to align with the viewport edge",
     );
 
-    const toggleSelector = "#landing-footer [data-mpr-footer='toggle-button']";
-    await page.click(toggleSelector);
-    await page.waitForFunction(
-      () => {
-        const menu = document.querySelector(
-          "#landing-footer [data-mpr-footer='menu']",
-        );
-        return menu && menu.classList.contains("mpr-footer__menu--open");
-      },
-      { timeout: 5000 },
-    );
-    const ariaExpanded = await page.$eval(
-      toggleSelector,
-      (node) => node.getAttribute("aria-expanded"),
-    );
-    assert.equal(ariaExpanded, "true");
-
     const linkStates = await page.$$eval(
-      "#landing-footer [data-mpr-footer='menu-link']",
+      "#landing-footer a",
       (nodes) =>
         nodes.map((node) => ({
-          href: node.getAttribute("href"),
           target: node.getAttribute("target"),
           rel: node.getAttribute("rel") || "",
         })),
     );
-    assert.equal(
-      linkStates.length,
-      MPR_SITES.length,
-      "Expected footer menu to render all site catalog entries",
-    );
-    const renderedHrefs = linkStates.map((state) => state.href);
-    const expectedHrefs = MPR_SITES.map((link) => link.href);
-    assert.deepEqual(
-      renderedHrefs,
-      expectedHrefs,
-      "Expected footer menu to render canonical site URLs in order",
-    );
+    assert.ok(linkStates.length > 0, "Expected footer links to be present");
     linkStates.forEach((state) => {
-      assert.equal(state.target, "_blank", "Expected footer external link to open in a new tab");
-      assert.ok(/\bnoopener\b/.test(state.rel), "Expected footer external link to include noopener");
+      assert.equal(state.target, "_blank", "Expected footer link to open in a new tab");
+      assert.ok(/\bnoopener\b/.test(state.rel), "Expected footer link to include noopener");
     });
-
-    await page.click(toggleSelector);
-    await delay(100);
-    const ariaCollapsed = await page.$eval(
-      toggleSelector,
-      (node) => node.getAttribute("aria-expanded"),
-    );
-    assert.equal(ariaCollapsed, "false");
-    const menuVisible = await page.$eval(
-      "#landing-footer [data-mpr-footer='menu']",
-      (node) => node.classList.contains("mpr-footer__menu--open"),
-    );
-    assert.equal(menuVisible, false, "Expected dropdown menu to close");
-
-    const themeToggleSelector = "#public-theme-toggle";
-    const initialTheme = await page.evaluate(() =>
-      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
-        ? window.MPRUI.getThemeMode()
-        : null,
-    );
-    await page.click(themeToggleSelector);
-    await delay(150);
-    const toggledTheme = await page.evaluate(() =>
-      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
-        ? window.MPRUI.getThemeMode()
-        : null,
-    );
-    assert.notEqual(
-      toggledTheme,
-      initialTheme,
-      "Expected theme toggle to switch the active mode",
-    );
-    const docThemeAttribute = await page.evaluate(() =>
-      document.documentElement.getAttribute("data-mpr-theme"),
-    );
-    assert.equal(
-      docThemeAttribute,
-      toggledTheme,
-      "Expected document theme attribute to match active mode",
-    );
-    const bodyThemeAttribute = await page.evaluate(() =>
-      document.body.getAttribute("data-bs-theme"),
-    );
-    assert.equal(
-      bodyThemeAttribute,
-      toggledTheme,
-      "Expected body Bootstrap theme attribute to mirror the active mode",
-    );
-
-    await page.reload({ waitUntil: "networkidle0" });
-    await page.waitForSelector(themeToggleSelector, { visible: true, timeout: 5000 });
-    await page.waitForFunction(
-      (expected) =>
-        window.MPRUI &&
-        typeof window.MPRUI.getThemeMode === "function" &&
-        window.MPRUI.getThemeMode() === expected,
-      { timeout: 5000 },
-      toggledTheme,
-    );
-    const reloadedTheme = await page.evaluate(() =>
-      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
-        ? window.MPRUI.getThemeMode()
-        : null,
-    );
-    assert.equal(
-      reloadedTheme,
-      toggledTheme,
-      "Expected theme mode to persist after reloading the page",
-    );
-    const reloadedDocTheme = await page.evaluate(() =>
-      document.documentElement.getAttribute("data-mpr-theme"),
-    );
-    assert.equal(
-      reloadedDocTheme,
-      toggledTheme,
-      "Expected document attribute to persist the restored theme mode",
-    );
-    const reloadedBodyTheme = await page.evaluate(() =>
-      document.body.getAttribute("data-bs-theme"),
-    );
-    assert.equal(
-      reloadedBodyTheme,
-      toggledTheme,
-      "Expected body Bootstrap theme attribute to persist after reload",
-    );
-
-    await page.click(themeToggleSelector);
-    await delay(150);
-    const finalTheme = await page.evaluate(() =>
-      window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
-        ? window.MPRUI.getThemeMode()
-        : null,
-    );
-    assert.equal(
-      finalTheme,
-      initialTheme,
-      "Expected second toggle to restore the original theme mode",
-    );
   });
 }

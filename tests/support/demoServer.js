@@ -4,17 +4,10 @@
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { loadMprUiScript } = require("./mprUiCdn");
-
-const MPR_UI_CDN_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
-
 async function startDemoServer() {
-  const [demoHtml, authClientSource, sitesSource, mprUiSource] = await Promise.all([
+  const [demoHtml, authClientSource] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "..", "web", "demo.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "..", "web", "mpr-sites.js"), "utf8"),
-    loadMprUiScript(MPR_UI_CDN_URL),
   ]);
 
   const server = http.createServer((request, response) => {
@@ -29,12 +22,6 @@ async function startDemoServer() {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(authClientSource);
-      return;
-    }
-    if (method === "GET" && url === "/mpr-sites.js") {
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      response.end(sitesSource);
       return;
     }
     if (method === "GET" && url === "/me") {
@@ -82,7 +69,6 @@ async function startDemoServer() {
 
   return {
     baseUrl,
-    mprUiSource,
     close() {
       return new Promise((resolve, reject) => {
         server.close((error) => {

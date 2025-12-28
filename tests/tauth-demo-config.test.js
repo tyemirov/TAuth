@@ -25,9 +25,15 @@ const DEMO_LOCAL_CONFIG_PATH = pathModule.join(
   "tauth-demo",
   "demo-config.js",
 );
-const MPR_UI_SCRIPT_PATTERN = /<script[^>]+mpr-ui\.js/;
+const DEMO_AUTH_UI_PATH = pathModule.join(
+  __dirname,
+  "..",
+  "examples",
+  "tauth-demo",
+  "auth-ui.js",
+);
 
-test("tauth demo loads mpr-ui via config bootstrap", async () => {
+test("tauth demo loads local config and auth bootstrap scripts", async () => {
   const html = await fileSystem.readFile(DEMO_INDEX_PATH, "utf8");
   assert.ok(
     html.includes('<script defer src="./demo-config.js"></script>'),
@@ -38,14 +44,12 @@ test("tauth demo loads mpr-ui via config bootstrap", async () => {
     "Expected demo to load tauth-config.js",
   );
   assert.ok(
-    html.includes(
-      'href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"',
-    ),
-    "Expected demo to load mpr-ui styles from CDN",
+    html.includes('<script defer src="./auth-ui.js"></script>'),
+    "Expected demo to load the auth UI bootstrap script",
   );
   assert.ok(
-    !MPR_UI_SCRIPT_PATTERN.test(html),
-    "Expected demo to inject the mpr-ui bundle after config",
+    html.includes('https://accounts.google.com/gsi/client'),
+    "Expected demo to load the Google Identity Services script",
   );
 
   const configSource = await fileSystem.readFile(DEMO_CONFIG_PATH, "utf8");
@@ -54,12 +58,18 @@ test("tauth demo loads mpr-ui via config bootstrap", async () => {
     "Expected demo config to read the local demo config",
   );
   assert.ok(
-    configSource.includes("mpr-ui@latest/mpr-ui.js"),
-    "Expected demo config to inject the mpr-ui bundle from CDN",
-  );
-  assert.ok(
     configSource.includes("data-tenant-id"),
     "Expected demo config to set the tenant id for tauth.js",
+  );
+  assert.ok(
+    configSource.includes("__TAUTH_AUTH_CLIENT_READY__"),
+    "Expected demo config to expose an auth client readiness handle",
+  );
+
+  const authUiSource = await fileSystem.readFile(DEMO_AUTH_UI_PATH, "utf8");
+  assert.ok(
+    authUiSource.includes("__TAUTH_AUTH_CLIENT_READY__"),
+    "Expected demo auth UI to wait for the auth client readiness handle",
   );
 
   const localConfigSource = await fileSystem.readFile(

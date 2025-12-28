@@ -2,7 +2,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
-const { interceptMprUiRequest } = require("./support/interceptMprUi");
 const { delay } = require("./support/delay");
 
 let puppeteer = null;
@@ -36,19 +35,9 @@ if (!puppeteer) {
     t.after(() => browser.close());
 
     const page = await browser.newPage();
-    const removeIntercept = await interceptMprUiRequest(
-      page,
-      server.mprUiSource,
-    );
-    t.after(() => removeIntercept());
-
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
     await page.waitForSelector("#siteHeader", {
-      visible: true,
-      timeout: 5000,
-    });
-    await page.waitForSelector("header.mpr-header", {
       visible: true,
       timeout: 5000,
     });
@@ -77,7 +66,7 @@ if (!puppeteer) {
       "expected header to span the viewport width",
     );
 
-    const navLinkStates = await page.$$eval("header.mpr-header nav a", (nodes) =>
+    const navLinkStates = await page.$$eval("#siteHeader nav a", (nodes) =>
       nodes.map((node) => ({
         target: node.getAttribute("target"),
         rel: node.getAttribute("rel") || "",

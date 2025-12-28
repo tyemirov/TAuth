@@ -25,7 +25,8 @@
 - Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 - Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
-- Load the demo header after applying local demo config so the example boots without server-side demo endpoints.
+- Removed UI framework dependencies from demos/docs; the demo now boots tauth.js + GIS directly from local config.
+- Ensured the tauth demo waits for tauth.js to load before rendering GIS and restored base typography for the header UI.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.
@@ -40,6 +41,7 @@
 - Documented the explicit base URL requirement for `tauth.js` initialization.
 - Updated issue tracker with new features and bug fixes related to auth client renaming and API changes.
 - Enhanced usage guides and examples to reflect new deployment and integration workflows.
+- Removed stale `/demo` endpoint documentation; demos now live solely in repository assets.
 
 ## [v0.9.0]
 
@@ -52,7 +54,7 @@
 - Migrated preflight package to reusable `github.com/tyemirov/utils/preflight`; enhanced Viper adapter to support YAML + env bindings.
 - Auth client now auto-detects base URL and exposes `getAuthEndpoints()`; sessionvalidator loader supports tenant config from `config.yaml`.
 - Updated Dockerfile to add `/web` volume for web assets; updated dependencies and module namespace.
-- Added GitHub Pages landing page with dark neon theme, presentation layout, mpr-ui footer integration, and removed palette suggestions.
+- Added GitHub Pages landing page with dark neon theme, presentation layout, and a refreshed footer.
 - Increased test coverage to 95%, adding sandbox-safe integration tests and expanded coverage on multiple modules.
 
 ### Bug Fixes 🐛
@@ -89,7 +91,7 @@
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
 - TA-110: Added a GitHub Pages landing page at `docs/index.html` with the new presentation layout and CTAs.
-- TA-111: Swapped the landing page footer to the mpr-ui `<mpr-footer>` custom element.
+- TA-111: Swapped the landing page footer to a custom component.
 - TA-112: Removed the palette suggestions section from the landing page.
 
 ### Improvements ⚙️
@@ -136,7 +138,7 @@
 - TA-334: Reconfigured the Docker image to run as root, pre-create `/data`, and declare the data volume so SQLite-backed refresh stores can write without permission errors when running under Docker Compose.
 - TA-330: Replaced the refresh token store’s SQLite dialector with the CGO-free `github.com/glebarez/sqlite`, refreshed tests to enforce the driver selection, and documented the change so Docker images run without enabling CGO.
 - TA-200: Introduced GORM-backed refresh token store supporting Postgres and SQLite, added mandatory `--database_url` / `APP_DATABASE_URL`, removed pgx-specific store and legacy compatibility, updated docs, and added SQLite lifecycle tests.
-- TA-100: Delivered the reusable mpr-ui auth header, surfaced `avatar_url` across login and `/me` payloads, refreshed demo rendering, and documented dataset/event contracts for downstream consumers.
+- TA-100: Delivered a reusable auth header, surfaced `avatar_url` across login and `/me` payloads, refreshed demo rendering, and documented dataset/event contracts for downstream consumers.
 - TA-101: Published `pkg/sessionvalidator` with smart constructor, token/request helpers, and Gin middleware; refactored server middleware to reuse it and added focused unit tests plus docs.
 - TA-201: Added `LoadServerConfig` smart constructor invoked from Cobra `PreRunE`, validating TTLs, cookie names, and required identifiers before the server boots with structured `config.*` errors.
 - TA-202: Introduced injectable Google token validator and clock providers, updated auth routes to reuse the singleton, and wrapped JWT mint failures with stable error codes for observability.
@@ -144,8 +146,8 @@
 - TA-204: Wired zap logger and metrics recorder into auth routes, logging warnings/errors with stable codes and incrementing counters across login, refresh, and logout flows.
 - TA-205: Added TLS-backed end-to-end Go tests covering `/auth/google → /auth/refresh → /auth/logout`, tampered sessions, and revoked-token scenarios to raise integration coverage.
 - TA-206: Delivered Puppeteer Core coverage that verifies `auth-client.js` login/refresh/logout event dispatch using a mocked backend; gated on `CHROMIUM_PATH` for local runs.
-- TA-207: Adopted the mpr-ui footer component in the demo, exposed `renderFooter`/`mprFooter` helpers, and hydrated the footer using the CDN-hosted library.
-- TA-208: Enforced nonce issuance/validation for Google Sign-In via `/auth/nonce`, injected the issued nonce into Google Identity Services initializers (mpr-ui bundles + demo), refreshed docs/examples, expanded Node coverage for nonce provisioning/failure paths, and dropped the bundled `mpr-ui.js` in favour of the CDN-hosted build.
+- TA-207: Adopted a shared footer component in the demo, exposed helper hooks, and hydrated the footer using the CDN-hosted library.
+- TA-208: Enforced nonce issuance/validation for Google Sign-In via `/auth/nonce`, injected the issued nonce into Google Identity Services initializers, refreshed docs/examples, expanded Node coverage for nonce provisioning/failure paths, and dropped the bundled UI helper in favour of the CDN-hosted build.
 - TA-210: Reauthored the demo page with LoopAware’s footer contract, reused the Bootstrap 5.3 + Icons stack and public theme script, mirrored the product catalogue, and strengthened Node/browser tests around theme persistence and dropup ARIA semantics.
 - TA-300: Improved CLI configuration errors to enumerate missing keys, ensuring absent tenant `jwt_signing_key` values are reported precisely.
 - TA-301: Reworked `/api/me` to source claims from the session context, return persisted profiles with expiry metadata, surface `ErrUserProfileNotFound`, and emit zap warnings for anomalies.

@@ -138,6 +138,10 @@ Analyze the issue and deploy the fix
   Added `/demo/config.json`, delayed the mpr-ui bundle load until config + tauth.js are ready, and added regression coverage for the demo bootstrap.
 - [x] [TA-253] TAuth should not expose demo-specific endpoints.
   Removed demo config routes from the server and moved demo configuration into the example assets.
+- [x] [TA-253] TAuth should not depend on mpr-ui.
+  Removed mpr-ui assets/tests/docs wiring and switched demos to plain tauth.js + Google Identity Services wiring.
+- [x] [TA-253] Demo bootstrap now waits for tauth.js readiness before wiring GIS; docs no longer describe a `/demo` endpoint.
+  Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
 
 ## Maintenance (418–499)
 

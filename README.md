@@ -190,7 +190,7 @@ Successful exchanges populate `/me` with a rich profile:
 }
 ```
 
-Use the new `avatar_url` field to render signed-in UI chrome (e.g. the shared mpr-ui header component).
+Use the new `avatar_url` field to render signed-in UI chrome in your frontend.
 
 ---
 

@@ -4,17 +4,13 @@
 
 const PRODUCTION_TAUTH_BASE_URL = 'https://tauth.mprlab.com';
 const LOCAL_TAUTH_BASE_URL = 'http://localhost:8082';
-const DEMO_TENANT_ID = 'mpr-sites';
 const AUTH_CLIENT_SCRIPT_ATTRIBUTE = 'data-tauth-auth-client';
-const MPR_UI_SCRIPT_ATTRIBUTE = 'data-mpr-ui-bundle';
-const MPR_UI_BUNDLE_URL =
-  'https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js';
-const DEMO_HEADER_ID = 'demo-header';
+const AUTH_CLIENT_READY_HANDLE = '__TAUTH_AUTH_CLIENT_READY__';
+const DEFAULT_TENANT_ID = 'mpr-sites';
 const FALLBACK_GOOGLE_CLIENT_ID = '';
 const DEMO_CONFIG_WARNING =
-  'mpr-ui demo: set a valid Google OAuth Web client ID in examples/tauth-demo/demo-config.js.';
-const INIT_FAILURE_WARNING =
-  'tauth demo: unable to initialize the authentication scripts.';
+  'tauth demo: set a valid Google OAuth Web client ID in examples/tauth-demo/demo-config.js.';
+const INIT_FAILURE_WARNING = 'tauth demo: unable to initialize tauth.js.';
 
 function normalizeGoogleClientId(candidateId) {
   if (typeof candidateId !== 'string') {
@@ -22,6 +18,14 @@ function normalizeGoogleClientId(candidateId) {
   }
   const trimmed = candidateId.trim();
   return trimmed ? trimmed : FALLBACK_GOOGLE_CLIENT_ID;
+}
+
+function normalizeTenantId(candidateId) {
+  if (typeof candidateId !== 'string') {
+    return DEFAULT_TENANT_ID;
+  }
+  const trimmed = candidateId.trim();
+  return trimmed ? trimmed : DEFAULT_TENANT_ID;
 }
 
 function resolveBaseUrl(candidateConfig) {
@@ -46,25 +50,8 @@ function resolveDemoConfig(candidateConfig) {
   return Object.freeze({
     baseUrl: resolveBaseUrl(incoming),
     googleClientId: normalizeGoogleClientId(incoming.googleClientId),
+    tenantId: normalizeTenantId(incoming.tenantId),
   });
-}
-
-function applyDemoConfig(config, warnOnMissingClientId) {
-  const headerElement = document.getElementById(DEMO_HEADER_ID);
-  if (!headerElement) {
-    return;
-  }
-  if (config.baseUrl) {
-    headerElement.setAttribute('base-url', String(config.baseUrl));
-  }
-  if (config.googleClientId) {
-    headerElement.setAttribute('site-id', String(config.googleClientId));
-    return;
-  }
-  if (warnOnMissingClientId) {
-    // eslint-disable-next-line no-console
-    console.warn(DEMO_CONFIG_WARNING);
-  }
 }
 
 function updateDemoConfig(nextConfig, options) {
@@ -74,7 +61,10 @@ function updateDemoConfig(nextConfig, options) {
     options && typeof options.warnOnMissingClientId === 'boolean'
       ? options.warnOnMissingClientId
       : false;
-  applyDemoConfig(resolvedConfig, shouldWarnOnMissing);
+  if (shouldWarnOnMissing && !resolvedConfig.googleClientId) {
+    // eslint-disable-next-line no-console
+    console.warn(DEMO_CONFIG_WARNING);
+  }
   return resolvedConfig;
 }
 
@@ -111,11 +101,16 @@ function initDemoConfig() {
   const resolvedConfig = updateDemoConfig(window.__TAUTH_DEMO_CONFIG, {
     warnOnMissingClientId: true,
   });
+  if (!resolvedConfig.googleClientId) {
+    // eslint-disable-next-line no-console
+    console.warn(DEMO_CONFIG_WARNING);
+  }
   const authClientUrl = `${resolvedConfig.baseUrl}/tauth.js`;
-  loadScriptOnce(authClientUrl, AUTH_CLIENT_SCRIPT_ATTRIBUTE, {
-    'data-tenant-id': DEMO_TENANT_ID,
-  })
-    .then(() => loadScriptOnce(MPR_UI_BUNDLE_URL, MPR_UI_SCRIPT_ATTRIBUTE))
+  const authClientPromise = loadScriptOnce(authClientUrl, AUTH_CLIENT_SCRIPT_ATTRIBUTE, {
+    'data-tenant-id': resolvedConfig.tenantId,
+  });
+  window[AUTH_CLIENT_READY_HANDLE] = authClientPromise;
+  authClientPromise
     .catch((error) => {
       // eslint-disable-next-line no-console
       console.warn(INIT_FAILURE_WARNING, error);
