@@ -16,12 +16,11 @@
             integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
             crossorigin="anonymous"
         />
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
         <script src="/tauth.js"></script>
         <script src="/mpr-sites.js"></script>
         <script
             defer
-            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js"
+            src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js"
         ></script>
         <script
             defer
@@ -140,46 +139,11 @@
                 min-width: 220px;
             }
 
-            .mpr-header__button.is-disabled {
-                opacity: 0.6;
-                pointer-events: none;
-            }
-
-            .google-signin-host {
-                display: inline-flex;
-                align-items: center;
-            }
-
-            .google-signin-host.is-disabled {
-                opacity: 0.6;
-                pointer-events: none;
-            }
-
-            .mpr-header__avatar {
-                width: 32px;
-                height: 32px;
-                border-radius: 999px;
-                background: rgba(59, 130, 246, 0.12);
-                color: #1d4ed8;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                font-weight: 600;
-                font-size: 0.8rem;
-                overflow: hidden;
-            }
-
-            .mpr-header__avatar img {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-            }
-
         </style>
     </head>
     <body class="landing-body bg-body text-body" data-bs-theme="light">
         <div class="d-flex flex-column min-vh-100">
-            <header id="siteHeader"></header>
+            <mpr-header id="siteHeader"></mpr-header>
             <main class="flex-grow-1 py-5">
             <div class="container-lg">
                 <section class="text-center mb-5">
@@ -248,14 +212,13 @@
                 </div>
             </div>
             </main>
-            <footer id="landing-footer" class="mt-auto"></footer>
+            <mpr-footer id="landing-footer" class="mt-auto"></mpr-footer>
         </div>
         <script>
             window.addEventListener("load", function () {
                 const TAUTH_BASE_URL = window.location.origin;
                 const GOOGLE_CLIENT_ID = "991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com";
-                const MAX_GIS_WAIT_MS = 5000;
-                const RETRY_ATTEMPTS = 2;
+                const themePersistenceKey = "tauth-demo-theme";
 
                 const headerHost = document.getElementById("siteHeader");
                 const footerHost = document.getElementById("landing-footer");
@@ -294,7 +257,6 @@
                     });
                 }
 
-                const themePersistenceKey = "tauth-demo-theme";
                 const themeTargets = ["document", "body"];
                 const themeModes = [
                     { value: "light", dataset: { "bs-theme": "light" } },
@@ -307,6 +269,7 @@
                       }))
                     : [];
                 const persistedTheme = readPersistedTheme(themePersistenceKey);
+                syncBodyTheme(persistedTheme || "light");
 
                 function readPersistedTheme(storageKey) {
                     if (!storageKey) {
@@ -329,153 +292,131 @@
                     }
                 }
 
+                function withEvent(eventLabel, payload) {
+                    if (!eventLabel) {
+                        return payload;
+                    }
+                    return { event: eventLabel, ...payload };
+                }
+
+                const baseThemeConfig = {
+                    targets: themeTargets,
+                    modes: themeModes,
+                };
+                const headerThemeConfig = persistedTheme
+                    ? { ...baseThemeConfig, initialMode: persistedTheme }
+                    : { ...baseThemeConfig };
+                const footerThemeConfig = {
+                    enabled: true,
+                    variant: "switch",
+                    wrapperClass: "mpr-footer__theme-toggle form-check form-switch m-0",
+                    inputClass: "mpr-footer__theme-checkbox form-check-input",
+                    inputId: "public-theme-toggle",
+                    ariaLabel: "Toggle theme",
+                    ...baseThemeConfig,
+                };
+                if (persistedTheme) {
+                    footerThemeConfig.initialMode = persistedTheme;
+                }
+
+                const headerNavLinks = [
+                    { label: "README", href: "https://github.com/tyemirov/TAuth#readme" },
+                    { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
+                ];
+                const authConfig = {
+                    baseUrl: TAUTH_BASE_URL,
+                    loginPath: "/auth/google",
+                    logoutPath: "/auth/logout",
+                    noncePath: "/auth/nonce",
+                    googleClientId: GOOGLE_CLIENT_ID,
+                };
+
                 function syncBodyTheme(nextMode) {
                     const resolvedMode = typeof nextMode === "string" && nextMode ? nextMode : "light";
                     document.body.setAttribute("data-bs-theme", resolvedMode);
                 }
 
-                let headerRoot = null;
-                let headerSignInButton = null;
-                let headerGoogleHost = null;
-                let headerProfileContainer = null;
-                let headerProfileLabel = null;
-                let headerProfileName = null;
-                let headerProfileAvatar = null;
-                let headerSignOutButton = null;
-                let isAuthenticated = false;
-
                 if (headerHost) {
-                    if (window.MPRUI && typeof window.MPRUI.configureTheme === "function") {
-                        window.MPRUI.configureTheme({
-                            targets: themeTargets,
-                            modes: themeModes,
-                        });
+                    headerHost.setAttribute("brand-label", "TAuth Demo");
+                    headerHost.setAttribute("brand-href", "/demo");
+                    headerHost.setAttribute("nav-links", JSON.stringify(headerNavLinks));
+                    headerHost.setAttribute("sign-in-label", "Sign in with Google");
+                    headerHost.setAttribute("site-id", GOOGLE_CLIENT_ID);
+                    headerHost.setAttribute("auth-config", JSON.stringify(authConfig));
+                    headerHost.setAttribute("theme-config", JSON.stringify(headerThemeConfig));
+                    if (persistedTheme) {
+                        headerHost.setAttribute("theme-mode", persistedTheme);
                     }
-                    if (persistedTheme && window.MPRUI && typeof window.MPRUI.setThemeMode === "function") {
-                        window.MPRUI.setThemeMode(persistedTheme);
-                    }
-                    const hasThemePersistence =
-                        window.MPRUI && typeof window.MPRUI.configureThemePersistence === "function";
-                    if (hasThemePersistence) {
-                        window.MPRUI.configureThemePersistence({
-                            enabled: true,
-                            storageKey: themePersistenceKey,
-                        });
-                    } else if (window.MPRUI && typeof window.MPRUI.onThemeChange === "function") {
-                        window.MPRUI.onThemeChange((detail) => {
-                            const modeValue = detail && typeof detail.mode === "string" ? detail.mode : "";
-                            if (modeValue) {
-                                syncBodyTheme(modeValue);
-                                writePersistedTheme(themePersistenceKey, modeValue);
-                            }
-                        });
-                    }
-                    if (window.MPRUI && typeof window.MPRUI.getThemeMode === "function") {
-                        syncBodyTheme(window.MPRUI.getThemeMode());
-                    } else {
-                        syncBodyTheme(document.documentElement.getAttribute("data-bs-theme") || "light");
-                    }
-                    document.addEventListener("mpr-ui:theme-change", (eventObject) => {
-                        const modeValue =
-                            eventObject && eventObject.detail && typeof eventObject.detail.mode === "string"
-                                ? eventObject.detail.mode
-                                : window.MPRUI && typeof window.MPRUI.getThemeMode === "function"
-                                  ? window.MPRUI.getThemeMode()
-                                  : null;
-                        if (modeValue) {
-                            syncBodyTheme(modeValue);
-                            if (!hasThemePersistence) {
-                                writePersistedTheme(themePersistenceKey, modeValue);
-                            }
-                        }
-                    });
-                    MPRUI.renderSiteHeader(headerHost, {
-                        layout: "sticky",
-                        brand: {
-                            label: "TAuth Demo",
-                            href: "/demo",
-                        },
-                        navLinks: [
-                            { label: "README", href: "https://github.com/tyemirov/TAuth#readme" },
-                            { label: "Architecture", href: "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md" },
-                        ],
-                        signInLabel: "Sign in with Google",
-                        themeToggle: {
-                            targets: themeTargets,
-                            modes: themeModes,
-                            persistence: {
-                                enabled: true,
-                                storageKey: themePersistenceKey,
-                            },
-                        },
-                        auth: {
-                            baseUrl: TAUTH_BASE_URL,
-                            loginPath: "/auth/google",
-                            logoutPath: "/auth/logout",
-                            noncePath: "/auth/nonce",
-                            googleClientId: GOOGLE_CLIENT_ID,
-                        },
-                    });
-                    headerRoot = headerHost.querySelector("header.mpr-header");
-                    headerSignInButton = headerHost.querySelector('[data-mpr-header="sign-in-button"]');
-                    headerProfileContainer = headerHost.querySelector('[data-mpr-header="profile"]');
-                    headerProfileLabel = headerHost.querySelector('[data-mpr-header="profile-label"]');
-                    headerProfileName = headerHost.querySelector('[data-mpr-header="profile-name"]');
-                    headerSignOutButton = headerHost.querySelector('[data-mpr-header="sign-out-button"]');
-                    if (headerSignInButton) {
-                        headerGoogleHost = document.createElement("div");
-                        headerGoogleHost.id = "googleHeaderButton";
-                        headerGoogleHost.className = "google-signin-host";
-                        headerSignInButton.insertAdjacentElement("afterend", headerGoogleHost);
-                        headerSignInButton.classList.add("d-none");
-                        headerSignInButton.setAttribute("aria-hidden", "true");
-                    }
-                    if (headerProfileContainer && headerSignOutButton) {
-                        headerProfileAvatar = document.createElement("span");
-                        headerProfileAvatar.className = "mpr-header__avatar me-2";
-                        headerProfileContainer.insertBefore(headerProfileAvatar, headerSignOutButton);
-                    }
-                    applyExternalLinkAttributes(headerHost);
-                    headerHost.addEventListener("mpr-ui:auth:authenticated", function () {
-                        applyExternalLinkAttributes(headerHost);
-                    });
-                    headerHost.addEventListener("mpr-ui:auth:unauthenticated", function () {
+                    window.requestAnimationFrame(() => {
                         applyExternalLinkAttributes(headerHost);
                     });
                 }
 
                 if (footerHost) {
-                    MPRUI.renderFooter(footerHost, {
-                        baseClass: "mpr-footer landing-footer border-top py-3",
-                        innerClass: "mpr-footer__inner d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
-                        brandWrapperClass: "mpr-footer__brand d-inline-flex align-items-center gap-2 text-body-secondary small",
-                        menuWrapperClass: "mpr-footer__menu-wrapper dropup",
-                        prefixClass: "mpr-footer__prefix text-body-secondary fw-semibold",
-                        prefixText: "Built by",
-                        toggleButtonClass: "mpr-footer__menu-button btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
-                        toggleLabel: "Marco Polo Research Lab",
-                        menuClass: "mpr-footer__menu dropdown-menu dropdown-menu-end shadow",
-                        menuItemClass: "mpr-footer__menu-item dropdown-item",
-                        privacyLinkClass: "mpr-footer__privacy text-body-secondary text-decoration-none small",
-                        privacyLinkHref: "https://mprlab.com/privacy",
-                        privacyLinkLabel: "Privacy • Terms",
-                        themeToggle: {
-                            enabled: true,
-                            wrapperClass: "mpr-footer__theme-toggle form-check form-switch m-0",
-                            inputClass: "mpr-footer__theme-checkbox form-check-input",
-                            inputId: "public-theme-toggle",
-                            ariaLabel: "Toggle theme",
-                            targets: themeTargets,
-                            modes: themeModes,
-                            persistence: {
-                                enabled: true,
-                                storageKey: themePersistenceKey,
-                            },
-                        },
-                        links: footerLinks,
+                    footerHost.setAttribute(
+                        "base-class",
+                        "mpr-footer landing-footer border-top py-3",
+                    );
+                    footerHost.setAttribute(
+                        "inner-class",
+                        "mpr-footer__inner d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
+                    );
+                    footerHost.setAttribute(
+                        "wrapper-class",
+                        "mpr-footer__layout d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 w-100",
+                    );
+                    footerHost.setAttribute(
+                        "brand-wrapper-class",
+                        "mpr-footer__brand d-inline-flex align-items-center gap-2 text-body-secondary small",
+                    );
+                    footerHost.setAttribute(
+                        "menu-wrapper-class",
+                        "mpr-footer__menu-wrapper dropup",
+                    );
+                    footerHost.setAttribute(
+                        "prefix-class",
+                        "mpr-footer__prefix text-body-secondary fw-semibold",
+                    );
+                    footerHost.setAttribute("prefix-text", "Built by");
+                    footerHost.setAttribute(
+                        "toggle-button-class",
+                        "mpr-footer__menu-button btn btn-link dropdown-toggle text-decoration-none px-0 fw-semibold text-body-secondary",
+                    );
+                    footerHost.setAttribute("toggle-label", "Built by Marco Polo Research Lab");
+                    footerHost.setAttribute(
+                        "menu-class",
+                        "mpr-footer__menu dropdown-menu dropdown-menu-end shadow",
+                    );
+                    footerHost.setAttribute(
+                        "menu-item-class",
+                        "mpr-footer__menu-item dropdown-item",
+                    );
+                    footerHost.setAttribute(
+                        "privacy-link-class",
+                        "mpr-footer__privacy text-body-secondary text-decoration-none small",
+                    );
+                    footerHost.setAttribute("privacy-link-href", "https://mprlab.com/privacy");
+                    footerHost.setAttribute("privacy-link-label", "Privacy • Terms");
+                    footerHost.setAttribute("theme-config", JSON.stringify(footerThemeConfig));
+                    footerHost.setAttribute("links", JSON.stringify(footerLinks));
+                    if (persistedTheme) {
+                        footerHost.setAttribute("theme-mode", persistedTheme);
+                    }
+                    window.requestAnimationFrame(() => {
+                        applyExternalLinkAttributes(footerHost);
                     });
-                    applyExternalLinkAttributes(footerHost);
                 }
+
+                document.addEventListener("mpr-ui:theme-change", (eventObject) => {
+                    const modeValue =
+                        eventObject && eventObject.detail && typeof eventObject.detail.mode === "string"
+                            ? eventObject.detail.mode
+                            : "";
+                    if (modeValue) {
+                        syncBodyTheme(modeValue);
+                        writePersistedTheme(themePersistenceKey, modeValue);
+                    }
+                });
 
                 function withBase(path) {
                     if (!path) {
@@ -511,112 +452,6 @@
                     noticeElement.textContent = message;
                     noticeElement.classList.remove("d-none");
                 }
-
-                function enableSignInButton(isEnabled) {
-                    if (headerGoogleHost) {
-                        headerGoogleHost.classList.toggle("is-disabled", !isEnabled);
-                    }
-                }
-
-                function toggleGoogleButton(isVisible) {
-                    if (headerGoogleHost) {
-                        headerGoogleHost.classList.toggle("d-none", !isVisible);
-                    }
-                }
-
-                function updateHeaderProfile(profile) {
-                    if (!headerRoot) {
-                        return;
-                    }
-                    if (!profile) {
-                        headerRoot.classList.remove("mpr-header--authenticated");
-                        if (headerProfileName) {
-                            headerProfileName.textContent = "";
-                        }
-                        if (headerProfileAvatar) {
-                            headerProfileAvatar.innerHTML = "";
-                        }
-                        return;
-                    }
-                    headerRoot.classList.add("mpr-header--authenticated");
-                    if (headerProfileLabel) {
-                        headerProfileLabel.textContent = "Signed in as";
-                    }
-                    const displayName =
-                        profile.display ||
-                        profile.display_name ||
-                        profile.user_email ||
-                        profile.user_id ||
-                        "Authenticated user";
-                    if (headerProfileName) {
-                        headerProfileName.textContent = displayName;
-                    }
-                    if (headerProfileAvatar) {
-                        headerProfileAvatar.innerHTML = "";
-                        if (profile.avatar_url) {
-                            const image = document.createElement("img");
-                            image.src = profile.avatar_url;
-                            image.alt = `${displayName} avatar`;
-                            headerProfileAvatar.appendChild(image);
-                        } else {
-                            const initials = displayName
-                                .split(" ")
-                                .map((word) => word.charAt(0))
-                                .join("")
-                                .slice(0, 2)
-                                .toUpperCase() || "?";
-                            headerProfileAvatar.textContent = initials;
-                        }
-                    }
-                }
-
-                async function fetchWithRetry(url, options) {
-                    let attempt = 0;
-                    let lastError;
-                    while (attempt <= RETRY_ATTEMPTS) {
-                        try {
-                            const response = await fetch(withBase(url), {
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...(options && options.headers) },
-                                ...options,
-                            });
-                            return {
-                                ok: response.ok,
-                                status: response.status,
-                                json: await response.json().catch(() => ({})),
-                            };
-                        } catch (error) {
-                            lastError = error;
-                            attempt += 1;
-                        }
-                    }
-                    throw lastError || new Error("network_error");
-                }
-
-                let googleReadyResolve;
-                let googleReadyReject;
-                const googleReadyPromise = new Promise((resolve, reject) => {
-                    googleReadyResolve = resolve;
-                    googleReadyReject = reject;
-                });
-
-                const googleReadyTimeout = setTimeout(() => {
-                    googleReadyReject(new Error("google_identity_services_timeout"));
-                }, MAX_GIS_WAIT_MS);
-
-                (function waitForGIS() {
-                    const accounts = window.google && window.google.accounts && window.google.accounts.id;
-                    if (accounts) {
-                        clearTimeout(googleReadyTimeout);
-                        googleReadyResolve(accounts);
-                        return;
-                    }
-                    window.requestAnimationFrame(waitForGIS);
-                })();
-
-                googleReadyPromise.catch(() => {
-                    showNotice("Google Identity Services failed to load. Check content blockers or network settings.");
-                });
 
                 function renderProfileSummary(profile) {
                     const target = document.getElementById("profileSummary");
@@ -667,10 +502,6 @@
                         signedInPanel.classList.add("d-none");
                     }
                     renderProfileSummary(null);
-                    updateHeaderProfile(null);
-                    isAuthenticated = false;
-                    enableSignInButton(false);
-                    toggleGoogleButton(true);
                 }
 
                 function showSignedIn(profile) {
@@ -681,56 +512,6 @@
                         signedInPanel.classList.remove("d-none");
                     }
                     renderProfileSummary(profile);
-                    updateHeaderProfile(profile);
-                    isAuthenticated = true;
-                    enableSignInButton(false);
-                    toggleGoogleButton(false);
-                }
-
-                let activeNonceToken = "";
-
-                async function prepareGoogleSignIn() {
-                    enableSignInButton(false);
-                    try {
-                        const accounts = await googleReadyPromise;
-                        const nonceResponse = await fetchWithRetry("/auth/nonce", {
-                            method: "POST",
-                            body: "{}",
-                        });
-                        if (!nonceResponse.ok || !nonceResponse.json || !nonceResponse.json.nonce) {
-                            throw new Error("nonce request failed");
-                        }
-                        activeNonceToken = String(nonceResponse.json.nonce);
-                        accounts.initialize({
-                            client_id: GOOGLE_CLIENT_ID,
-                            callback: handleGoogleCredential,
-                            nonce: activeNonceToken,
-                            ux_mode: "popup",
-                        });
-                        if (headerGoogleHost) {
-                            headerGoogleHost.innerHTML = "";
-                            accounts.renderButton(headerGoogleHost, {
-                                theme: "outline",
-                                size: "large",
-                                text: "signin_with",
-                                shape: "rectangular",
-                                logo_alignment: "left",
-                            });
-                        }
-                        if (isAuthenticated) {
-                            toggleGoogleButton(false);
-                            enableSignInButton(false);
-                        } else {
-                            toggleGoogleButton(true);
-                            enableSignInButton(true);
-                        }
-                    } catch (error) {
-                        showNotice("Unable to prepare Google Sign-In. Please retry.");
-                        setOutput({ error: "prepare_google_failed", detail: String(error) });
-                        activeNonceToken = "";
-                        toggleGoogleButton(true);
-                        enableSignInButton(false);
-                    }
                 }
 
                 async function refreshSession(eventLabel) {
@@ -740,62 +521,17 @@
                             onAuthenticated(profile) {
                                 clearNotice();
                                 showSignedIn(profile);
-                                setOutput(eventLabel ? { event: eventLabel, profile } : { state: "signed_in", profile });
+                                setOutput(withEvent(eventLabel, { state: "signed_in", profile }));
                             },
                             onUnauthenticated() {
                                 showSignedOut();
-                                setOutput({ state: "signed_out" });
-                                prepareGoogleSignIn().catch(() => {});
+                                setOutput(withEvent(eventLabel, { state: "signed_out" }));
                             },
                         });
                     } catch (error) {
                         showSignedOut();
                         showNotice("Unable to hydrate the session. Please sign in again.");
                         setOutput({ error: "auth_client_init_failed", detail: String(error) });
-                        prepareGoogleSignIn().catch(() => {});
-                    }
-                }
-
-                async function handleGoogleCredential(responseObject) {
-                    try {
-                        if (!responseObject || !responseObject.credential) {
-                            showNotice("Google did not return a credential. Please try again.");
-                            setOutput({ error: "missing_google_credential", payload: responseObject });
-                            activeNonceToken = "";
-                            await prepareGoogleSignIn();
-                            return;
-                        }
-                        if (!activeNonceToken) {
-                            showNotice("Sign-in nonce expired. Preparing a new attempt.");
-                            activeNonceToken = "";
-                            await prepareGoogleSignIn();
-                            return;
-                        }
-                        const exchange = await fetchWithRetry("/auth/google", {
-                            method: "POST",
-                            body: JSON.stringify({
-                                google_id_token: responseObject.credential,
-                                nonce_token: activeNonceToken,
-                            }),
-                        });
-                        if (!exchange.ok) {
-                            showNotice("Authentication failed. Check the log for details.");
-                            setOutput({
-                                error: "auth_google_failed",
-                                status: exchange.status,
-                                body: exchange.json,
-                            });
-                            activeNonceToken = "";
-                            await prepareGoogleSignIn();
-                            return;
-                        }
-                        activeNonceToken = "";
-                        await refreshSession("signed_in");
-                    } catch (error) {
-                        showNotice("Unexpected error during Google Sign-In.");
-                        setOutput({ error: "google_credential_exception", detail: String(error) });
-                        activeNonceToken = "";
-                        prepareGoogleSignIn().catch(() => {});
                     }
                 }
 
@@ -822,51 +558,46 @@
                             clearNotice();
                             try {
                                 await window.logout();
+                                showSignedOut();
+                                setOutput(withEvent("signed_out", { state: "signed_out" }));
                             } catch (error) {
                                 showNotice("Unable to sign out. Please retry.");
                                 setOutput({ error: "logout_failed", detail: String(error) });
-                                prepareGoogleSignIn().catch(() => {});
                             }
                         });
                     }
                 }
 
                 if (headerHost) {
-                    headerHost.addEventListener("mpr-ui:header:signout-click", () => {
-                        clearNotice();
-                        window.logout().catch((error) => {
-                            showNotice("Unable to sign out. Please retry.");
-                            setOutput({ error: "logout_failed", detail: String(error) });
-                        });
-                    });
                     headerHost.addEventListener("mpr-ui:auth:authenticated", (eventObject) => {
                         const detail = eventObject && eventObject.detail ? eventObject.detail : {};
+                        clearNotice();
                         if (detail.profile) {
                             showSignedIn(detail.profile);
+                            setOutput(withEvent("signed_in", { state: "signed_in", profile: detail.profile }));
                         } else {
                             refreshSession("signed_in");
                         }
+                        applyExternalLinkAttributes(headerHost);
                     });
                     headerHost.addEventListener("mpr-ui:auth:unauthenticated", () => {
                         showSignedOut();
-                        prepareGoogleSignIn().catch(() => {});
+                        setOutput(withEvent("signed_out", { state: "signed_out" }));
+                        applyExternalLinkAttributes(headerHost);
                     });
                     headerHost.addEventListener("mpr-ui:auth:error", (eventObject) => {
                         const detail = eventObject && eventObject.detail ? eventObject.detail : {};
                         showNotice("Authentication error. Please try again.");
                         setOutput({ error: detail.code || "mpr-ui.auth.error", detail });
-                        prepareGoogleSignIn().catch(() => {});
                     });
                     headerHost.addEventListener("mpr-ui:header:error", (eventObject) => {
                         const detail = eventObject && eventObject.detail ? eventObject.detail : {};
                         showNotice("Google prompt failed. Please retry.");
                         setOutput({ error: detail.code || "mpr-ui.header.error", detail });
-                        prepareGoogleSignIn().catch(() => {});
                     });
                 }
 
                 bindUiHandlers();
-                prepareGoogleSignIn().catch(() => {});
                 refreshSession("hydrated");
             });
         </script>

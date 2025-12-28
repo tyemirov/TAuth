@@ -104,3 +104,6 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
 
 ## 2025-12-25
 - Renamed `web/auth-client.js` to `web/tauth.js`, served it at `/tauth.js` (plus `/mpr-sites.js`), removed base URL hint plumbing, refreshed docs/examples/tests, added GitHub Pages deploy for `web/`, and ran `npm run verify`, `npm test`, `go fmt ./...`, `go vet ./...`, `go test ./...`.
+
+## 2025-12-28
+- Migrated the demo and browser tests to mpr-ui@3.1.0 custom elements, refreshed footer copy/theme persistence wiring, updated CDN stubs/test expectations, and ran `npm test`.

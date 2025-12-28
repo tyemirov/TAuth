@@ -7,7 +7,7 @@ const path = require("node:path");
 const { loadMprUiScript } = require("./mprUiCdn");
 
 const MPR_UI_CDN_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js";
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
 
 async function startDemoServer() {
   const [demoHtml, authClientSource, sitesSource, mprUiSource] = await Promise.all([

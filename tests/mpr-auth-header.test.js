@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const { loadMprUiScript } = require("./support/mprUiCdn");
 
 const MPR_UI_CDN_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js";
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
 const TEST_GOOGLE_CLIENT_ID = "test-client-id";
 
 async function createCdnFetchStub() {
@@ -336,11 +336,15 @@ test("mpr-ui header handles credential exchange and logout", async () => {
       id: {
         promptCalls: 0,
         initializeCalls: [],
+        renderButtonCalls: [],
         prompt() {
           googleStub.accounts.id.promptCalls += 1;
         },
         initialize(options) {
           googleStub.accounts.id.initializeCalls.push(options);
+        },
+        renderButton(element, options) {
+          googleStub.accounts.id.renderButtonCalls.push({ element, options });
         },
       },
     },
@@ -366,8 +370,11 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   await flushAsyncTasks();
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
-  assert.equal(googleStub.accounts.id.initializeCalls.length, 1);
-  const googleInitConfig = googleStub.accounts.id.initializeCalls[0];
+  assert.equal(googleStub.accounts.id.initializeCalls.length, 2);
+  const googleInitConfig =
+    googleStub.accounts.id.initializeCalls[
+      googleStub.accounts.id.initializeCalls.length - 1
+    ];
   assert.equal(googleInitConfig.client_id, TEST_GOOGLE_CLIENT_ID);
   assert.equal(googleInitConfig.nonce, "nonce-123");
   assert.equal(controller.state.status, "unauthenticated");
@@ -439,11 +446,15 @@ test("mpr-ui header surfaces error when nonce issuance fails", async () => {
       id: {
         promptCalls: 0,
         initializeCalls: [],
+        renderButtonCalls: [],
         prompt() {
           googleStub.accounts.id.promptCalls += 1;
         },
         initialize(options) {
           googleStub.accounts.id.initializeCalls.push(options);
+        },
+        renderButton(element, options) {
+          googleStub.accounts.id.renderButtonCalls.push({ element, options });
         },
       },
     },
@@ -485,6 +496,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
   const googleStub = {
     accounts: {
       id: {
+        renderButton() {},
         prompt() {},
       },
     },
