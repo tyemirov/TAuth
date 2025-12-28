@@ -31,6 +31,7 @@
 - Added regression tests for refresh cookie duplication, overlapping cookie scopes, and cross-type cookie collisions.
 - Added regression coverage for tenant configuration validation related to cookie name collisions.
 - Added auth-client tests for nonce and credential exchange helpers.
+- Added a GitHub Actions workflow that runs frontend tests and type checks on frontend changes.
 
 ### Docs 📚
 - Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.

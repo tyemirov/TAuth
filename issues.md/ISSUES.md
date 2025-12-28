@@ -133,8 +133,9 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Required valid `X-TAuth-Tenant` override when Origin is missing, added origin gate regression coverage, and noted the change in CHANGELOG.
 - [x] [TA-416] CRUCIAL: Align CORS allowlist with tenant origins (or explicit exception list) to avoid credentialed CORS for non-tenant origins; enforce via validation and document the policy.
   Added CORS allowlist validation against tenant origins/exception list, introduced exception config field, expanded server/preflight tests, and noted the policy in CHANGELOG.
-- [ ] [TA-417] Add frontend to CI.
+- [x] [TA-417] Add frontend to CI.
   add a trigger for the frontend changes to github workflow. run npm tests and linters when fronted files change
+  Added a frontend test workflow that runs `npm run verify` and `npm test` on frontend path changes.
 
 
 ## Planning

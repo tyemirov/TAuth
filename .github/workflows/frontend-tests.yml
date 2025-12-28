@@ -1,0 +1,47 @@
+name: Frontend Tests
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "web/**"
+      - "docs/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - ".github/workflows/frontend-tests.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "web/**"
+      - "docs/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - ".github/workflows/frontend-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run typecheck
+        run: npm run verify
+
+      - name: Run tests
+        run: npm test
