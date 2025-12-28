@@ -108,7 +108,30 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 - [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
   Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
-
+- [ ] [TS-253] Unable to log into Google using examples/tauth-demo
+JS Console
+```
+Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:271:37
+Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:272:336
+Feature Policy: Skipping unsupported feature name “identity-credentials-get”. mpr-ui.js:2103:22
+Loading failed for the <script> with source “http://localhost:8082/tauth.js”. localhost:8000:1:1
+Content-Security-Policy warnings 5
+[GSI_LOGGER]: The given origin is not allowed for the given client ID. m=credential_button_library:75:89
+Opening multiple popups was blocked due to lack of user activation. client:83:240
+Storage access automatically granted for origin “https://accounts.google.com” on “http://localhost:8000”.
+```
+Backend log
+```
+Attaching to mpr-frontend-1, tauth-1
+tauth-1  | {"level":"info","ts":1766959084.2432458,"caller":"server/main.go:182","msg":"using persistent refresh token store","driver":"sqlite"}
+tauth-1  | {"level":"info","ts":1766959084.2435384,"caller":"server/main.go:291","msg":"listening","addr":":8082"}
+mpr-frontend-1  | Serving HTTP on 0.0.0.0 port 8000 (http://localhost:8000/) ...
+tauth-1         | {"level":"info","ts":1766959087.029027,"caller":"server/main.go:353","msg":"http","method":"GET","path":"/tauth.js","status":404,"ip":"192.168.65.1","elapsed":0.00114603}
+tauth-1         | {"level":"info","ts":1766959087.0502923,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000038473}
+tauth-1         | {"level":"info","ts":1766959094.2427735,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000038485}
+tauth-1         | {"level":"info","ts":1766959094.253639,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000017546}
+```
+Analyze the issue and deploy the fix
 
 ## Maintenance (418–499)
 
