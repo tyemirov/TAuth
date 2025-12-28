@@ -286,6 +286,36 @@ func TestServeDemoConfig(t *testing.T) {
 	}
 }
 
+func TestServeDemoConfigJSON(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/demo/config.json", func(contextGin *gin.Context) {
+		ServeDemoConfigJSON(contextGin, DemoConfig{
+			GoogleClientID: "client-456",
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/demo/config.json", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 for demo config json, got %d", recorder.Code)
+	}
+	var payload DemoConfig
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode demo config json: %v", err)
+	}
+	if payload.GoogleClientID != "client-456" {
+		t.Fatalf("unexpected client id in payload: %q", payload.GoogleClientID)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("unexpected content type header: %q", contentType)
+	}
+}
+
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()

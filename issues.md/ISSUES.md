@@ -134,6 +134,9 @@ tauth-1         | {"level":"info","ts":1766959094.253639,"caller":"server/main.g
 Resolved: aligned demo tenant allowed_hosts with the frontend origin ports and synced the demo Google client ID from `/demo/config.js` so the header uses the backend-configured client ID.
 Analyze the issue and deploy the fix
 
+- [x] [TA-253] Demo header rendering fails when the mpr-ui bundle loads before the demo config.
+  Added `/demo/config.json`, delayed the mpr-ui bundle load until config + tauth.js are ready, and added regression coverage for the demo bootstrap.
+
 ## Maintenance (418–499)
 
 - [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image.

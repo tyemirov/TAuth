@@ -25,6 +25,7 @@
 - Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 - Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
+- Fetch demo configuration as JSON and load the mpr-ui bundle after config resolution so the demo header renders with the backend client ID.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.
@@ -32,6 +33,7 @@
 - Added regression coverage for tenant configuration validation related to cookie name collisions.
 - Added auth-client tests for nonce and credential exchange helpers.
 - Added a GitHub Actions workflow that runs frontend tests and type checks on frontend changes.
+- Added regression coverage for the tauth demo config bootstrap sequencing.
 
 ### Docs 📚
 - Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.

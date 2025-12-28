@@ -260,14 +260,22 @@ func runServer(command *cobra.Command, arguments []string) error {
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
+	resolveDemoConfig := func(contextGin *gin.Context) web.DemoConfig {
 		clientID := defaultTenantConfig.GoogleWebClientID
 		if tenant, ok := tenants.TenantFromContext(contextGin); ok {
 			clientID = tenant.GoogleWebClientID()
 		}
-		web.ServeDemoConfig(contextGin, web.DemoConfig{
+		return web.DemoConfig{
 			GoogleClientID: clientID,
-		})
+		}
+	}
+
+	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
+		web.ServeDemoConfig(contextGin, resolveDemoConfig(contextGin))
+	})
+
+	tenantRouter.GET("/demo/config.json", func(contextGin *gin.Context) {
+		web.ServeDemoConfigJSON(contextGin, resolveDemoConfig(contextGin))
 	})
 
 	tenantRouter.GET("/demo", func(contextGin *gin.Context) {
