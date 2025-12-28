@@ -1,15 +1,20 @@
+// @ts-check
 "use strict";
 
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { loadMprUiScript } = require("./mprUiCdn");
+
+const MPR_UI_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js";
 
 async function startDemoServer() {
   const [demoHtml, authClientSource, sitesSource, mprUiSource] = await Promise.all([
     fs.readFile(path.join(__dirname, "..", "..", "web", "demo.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "mpr-sites.js"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "..", "tools", "mpr-ui", "mpr-ui.js"), "utf8"),
+    loadMprUiScript(MPR_UI_CDN_URL),
   ]);
 
   const server = http.createServer((request, response) => {

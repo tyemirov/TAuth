@@ -1,16 +1,11 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const path = require("node:path");
-const fs = require("node:fs/promises");
+const { loadMprUiScript } = require("./support/mprUiCdn");
 
-const SCRIPT_PATH = path.join(
-  __dirname,
-  "..",
-  "tools",
-  "mpr-ui",
-  "mpr-ui.js",
-);
+const MPR_UI_CDN_URL =
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js";
 
 function createVmContext() {
   const hostElement = {
@@ -73,6 +68,7 @@ function createFooterHost() {
   const footerAttributes = {};
   const footerRoot = {
     className: "",
+    classList: { add() {}, remove() {} },
     setAttribute(name, value) {
       footerAttributes[name] = String(value);
     },
@@ -83,6 +79,12 @@ function createFooterHost() {
     },
     removeAttribute(name) {
       delete footerAttributes[name];
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
     },
   };
   return {
@@ -104,8 +106,8 @@ function createFooterHost() {
   };
 }
 
-test("mpr-ui exposes mountFooterDom helper", async () => {
-  const script = await fs.readFile(SCRIPT_PATH, "utf8");
+test("mpr-ui exposes renderFooter helper", async () => {
+  const script = await loadMprUiScript(MPR_UI_CDN_URL);
   const { context } = createVmContext();
   vm.runInNewContext(script, context);
 
@@ -113,16 +115,15 @@ test("mpr-ui exposes mountFooterDom helper", async () => {
     context.window.MPRUI,
     "Expected MPRUI namespace after script evaluation",
   );
-  const mountFooterDom =
-    context.window.MPRUI.__dom && context.window.MPRUI.__dom.mountFooterDom;
+  const renderFooter = context.window.MPRUI && context.window.MPRUI.renderFooter;
   assert.equal(
-    typeof mountFooterDom,
+    typeof renderFooter,
     "function",
-    "mountFooterDom helper should be defined",
+    "renderFooter helper should be defined",
   );
 
   const { hostElement, footerRoot } = createFooterHost();
-  const renderedRoot = mountFooterDom(hostElement, {
+  const controller = renderFooter(hostElement, {
     prefixText: "Built by",
     links: [{ label: "Support", href: "mailto:support@mprlab.com" }],
   });
@@ -131,10 +132,19 @@ test("mpr-ui exposes mountFooterDom helper", async () => {
     hostElement.innerHTML && hostElement.innerHTML.length > 0,
     "Footer markup should be rendered into the host element",
   );
-  assert.equal(renderedRoot, footerRoot);
   assert.equal(
     footerRoot.getAttribute("data-mpr-footer-root"),
     "true",
     "Footer root should be marked for styling",
+  );
+  assert.equal(
+    typeof controller.update,
+    "function",
+    "renderFooter should return a controller with update",
+  );
+  assert.equal(
+    typeof controller.destroy,
+    "function",
+    "renderFooter should return a controller with destroy",
   );
 });
