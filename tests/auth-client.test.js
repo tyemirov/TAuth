@@ -355,6 +355,58 @@ test("auth client requests nonce via helper", async () => {
   assertHeader(nonceCall, "X-TAuth-Tenant", "tenant-alpha");
 });
 
+test("auth client nonce helper rejects non-200 responses", async () => {
+  const profile = {
+    user_id: "nonce-error-user",
+    user_email: "nonce-error@example.com",
+    display: "Nonce Error",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 500, body: { error: "server_error" } },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+  });
+
+  await assert.rejects(
+    context.requestNonce(),
+    /tauth\.nonce_failed/,
+  );
+});
+
+test("auth client nonce helper rejects invalid JSON payloads", async () => {
+  const profile = {
+    user_id: "nonce-invalid-user",
+    user_email: "nonce-invalid@example.com",
+    display: "Nonce Invalid",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        throw new Error("invalid_json");
+      },
+    }),
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+  });
+
+  await assert.rejects(
+    context.requestNonce(),
+    /tauth\.nonce_invalid/,
+  );
+});
+
 test("auth client exchanges Google credential and updates profile", async () => {
   const initialProfile = {
     user_id: "initial-user",
@@ -407,6 +459,64 @@ test("auth client exchanges Google credential and updates profile", async () => 
       google_id_token: "google-token",
       nonce_token: "nonce-456",
     }),
+  );
+});
+
+test("auth client exchange helper surfaces server error codes", async () => {
+  const profile = {
+    user_id: "exchange-error-user",
+    user_email: "exchange-error@example.com",
+    display: "Exchange Error",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 401, body: { error: "auth.login.invalid_nonce" } },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+  });
+
+  await assert.rejects(
+    context.exchangeGoogleCredential({
+      credential: "google-token",
+      nonceToken: "nonce-456",
+    }),
+    /auth\.login\.invalid_nonce/,
+  );
+});
+
+test("auth client exchange helper rejects invalid JSON payloads", async () => {
+  const profile = {
+    user_id: "exchange-invalid-user",
+    user_email: "exchange-invalid@example.com",
+    display: "Exchange Invalid",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        throw new Error("invalid_json");
+      },
+    }),
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+  });
+
+  await assert.rejects(
+    context.exchangeGoogleCredential({
+      credential: "google-token",
+      nonceToken: "nonce-456",
+    }),
+    /tauth\.exchange_failed/,
   );
 });
 
