@@ -108,7 +108,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 - [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
   Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
-- [ ] [TA-253] Unable to log into Google using examples/tauth-demo
+- [x] [TA-253] Unable to log into Google using examples/tauth-demo
 JS Console
 ```
 Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:271:37
@@ -131,6 +131,7 @@ tauth-1         | {"level":"info","ts":1766959087.0502923,"caller":"server/main.
 tauth-1         | {"level":"info","ts":1766959094.2427735,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000038485}
 tauth-1         | {"level":"info","ts":1766959094.253639,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000017546}
 ```
+Resolved: aligned demo tenant allowed_hosts with the frontend origin ports and synced the demo Google client ID from `/demo/config.js` so the header uses the backend-configured client ID.
 Analyze the issue and deploy the fix
 
 ## Maintenance (418–499)
@@ -166,4 +167,3 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
   `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
-

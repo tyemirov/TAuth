@@ -6,23 +6,51 @@ const PRODUCTION_TAUTH_BASE_URL = 'https://tauth.mprlab.com';
 const LOCAL_TAUTH_BASE_URL = 'http://localhost:8082';
 const DEMO_TENANT_ID = 'mpr-sites';
 const AUTH_CLIENT_SCRIPT_ATTRIBUTE = 'data-tauth-auth-client';
+const DEMO_CONFIG_SCRIPT_ATTRIBUTE = 'data-tauth-demo-config';
+const DEMO_CONFIG_EVENT_NAME = 'tauth-demo:config';
+const FALLBACK_GOOGLE_CLIENT_ID = '';
 const currentHostname = window.location.hostname || '';
 const resolvedBaseUrl = currentHostname.endsWith('.mprlab.com')
   ? PRODUCTION_TAUTH_BASE_URL
   : LOCAL_TAUTH_BASE_URL;
 const authClientUrl = `${resolvedBaseUrl.replace(/\/+$/, '')}/tauth.js`;
 
-/**
- * Update `googleClientId` to your Google OAuth Web client ID.
- * Keep it in sync with `APP_GOOGLE_WEB_CLIENT_ID` in `.env.tauth`
- * so the frontend and TAuth share the same configuration.
- * The default `baseUrl` targets tauth.mprlab.com on hosted deployments and falls back to the
- * docker-compose container URL for local demos.
- */
-window.TAUTH_DEMO_CONFIG = Object.freeze({
-  googleClientId: '991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com',
-  baseUrl: resolvedBaseUrl,
-});
+function normalizeGoogleClientId(candidateId) {
+  if (typeof candidateId !== 'string') {
+    return FALLBACK_GOOGLE_CLIENT_ID;
+  }
+  const trimmed = candidateId.trim();
+  return trimmed ? trimmed : FALLBACK_GOOGLE_CLIENT_ID;
+}
+
+function updateDemoConfig(nextConfig) {
+  const incoming =
+    nextConfig && typeof nextConfig === 'object' ? nextConfig : {};
+  const resolvedConfig = Object.freeze({
+    baseUrl: resolvedBaseUrl,
+    googleClientId: normalizeGoogleClientId(incoming.googleClientId),
+  });
+  window.TAUTH_DEMO_CONFIG = resolvedConfig;
+  document.dispatchEvent(
+    new CustomEvent(DEMO_CONFIG_EVENT_NAME, { detail: resolvedConfig })
+  );
+}
+
+// Merge backend demo config into the local base URL so the UI stays aligned with TAuth.
+updateDemoConfig(window.__TAUTH_DEMO_CONFIG);
+
+const demoConfigUrl = `${resolvedBaseUrl.replace(/\/+$/, '')}/demo/config.js`;
+if (!document.querySelector(`script[${DEMO_CONFIG_SCRIPT_ATTRIBUTE}]`)) {
+  const demoConfigScript = document.createElement('script');
+  demoConfigScript.defer = true;
+  demoConfigScript.src = demoConfigUrl;
+  demoConfigScript.crossOrigin = 'anonymous';
+  demoConfigScript.setAttribute(DEMO_CONFIG_SCRIPT_ATTRIBUTE, 'true');
+  demoConfigScript.addEventListener('load', () => {
+    updateDemoConfig(window.__TAUTH_DEMO_CONFIG);
+  });
+  document.head.appendChild(demoConfigScript);
+}
 
 if (!document.querySelector(`script[${AUTH_CLIENT_SCRIPT_ATTRIBUTE}]`)) {
   const authClientScript = document.createElement('script');

@@ -11,8 +11,8 @@ tenants:
   - id: "mpr-sites"
     display_name: "MPR Sites"
     allowed_hosts:
-      - "http://localhost"
-      - "http://127.0.0.1"
+      - "http://localhost:8000"
+      - "http://127.0.0.1:8000"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID}"
     jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY}"
     cookie_domain: ""
