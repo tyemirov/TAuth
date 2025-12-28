@@ -1,3 +1,4 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { startDemoServer } = require("./support/demoServer");
@@ -43,18 +44,22 @@ if (!puppeteer) {
 
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
+    await page.waitForSelector("#siteHeader", {
+      visible: true,
+      timeout: 5000,
+    });
     await page.waitForSelector("header.mpr-header", {
       visible: true,
       timeout: 5000,
     });
 
     const headerState = await page.evaluate(() => {
-      const header = document.querySelector("header.mpr-header");
-      if (!header) {
+      const headerHost = document.querySelector("#siteHeader");
+      if (!headerHost) {
         return null;
       }
-      const rect = header.getBoundingClientRect();
-      const style = window.getComputedStyle(header);
+      const rect = headerHost.getBoundingClientRect();
+      const style = window.getComputedStyle(headerHost);
       return {
         position: style.position,
         topStyle: style.top,
@@ -91,11 +96,11 @@ if (!puppeteer) {
     await delay(120);
 
     const topAfterScroll = await page.evaluate(() => {
-      const header = document.querySelector("header.mpr-header");
-      if (!header) {
+      const headerHost = document.querySelector("#siteHeader");
+      if (!headerHost) {
         return null;
       }
-      return header.getBoundingClientRect().top;
+      return headerHost.getBoundingClientRect().top;
     });
 
     assert.notEqual(topAfterScroll, null);

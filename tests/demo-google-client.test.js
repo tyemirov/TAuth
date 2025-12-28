@@ -1,3 +1,4 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -8,20 +9,24 @@ test("demo renders mpr-ui header/footer with GIS popup wiring", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
     html.includes(
-      'src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js"',
+      'src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js"',
     ),
     "Expected demo to load the mpr-ui bundle via CDN",
   );
   assert.ok(
-    html.includes("MPRUI.renderSiteHeader") && html.includes("auth: {"),
-    "Expected demo to configure the mpr-ui site header with auth options",
+    html.includes('<mpr-header id="siteHeader"></mpr-header>'),
+    "Expected demo to declare the mpr-ui header element",
   );
   assert.ok(
     html.includes("const GOOGLE_CLIENT_ID"),
     "Expected demo to define the canonical Google client ID",
   );
   assert.ok(
-    html.includes("googleHeaderButton"),
-    "Expected demo to allocate a header container for the Google-rendered button",
+    html.includes('headerHost.setAttribute("auth-config"'),
+    "Expected demo to configure the mpr-ui header auth settings",
+  );
+  assert.ok(
+    html.includes('headerHost.setAttribute("site-id"'),
+    "Expected demo to set the Google client ID on the mpr-ui header",
   );
 });

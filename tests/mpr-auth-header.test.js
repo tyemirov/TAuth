@@ -1,34 +1,18 @@
+// @ts-check
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const path = require("node:path");
-const fs = require("node:fs/promises");
+const { loadMprUiScript } = require("./support/mprUiCdn");
 
 const MPR_UI_CDN_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@main/auth-header.js";
-const LOCAL_ASSET_PATH = path.join(
-  __dirname,
-  "..",
-  "tools",
-  "mpr-ui",
-  "mpr-ui.js",
-);
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
 const TEST_GOOGLE_CLIENT_ID = "test-client-id";
 
-let cachedLocalAssetPromise = null;
-
-async function loadLocalAsset() {
-  if (!cachedLocalAssetPromise) {
-    cachedLocalAssetPromise = fs.readFile(LOCAL_ASSET_PATH, "utf8");
-  }
-  return cachedLocalAssetPromise;
-}
-
 async function createCdnFetchStub() {
-  const scriptSource = await loadLocalAsset();
-  return async (url) => {
-    if (url !== MPR_UI_CDN_URL) {
-      throw new Error(`unexpected CDN request to ${url}`);
+  const scriptSource = await loadMprUiScript(MPR_UI_CDN_URL);
+  return async (requestUrl) => {
+    if (requestUrl !== MPR_UI_CDN_URL) {
+      throw new Error(`unexpected CDN request to ${requestUrl}`);
     }
     return {
       ok: true,
@@ -172,36 +156,20 @@ class StubCustomEvent {
 
 async function loadAuthHeader(options = {}) {
   const resolvedOptions = options || {};
-  const defaultScriptPath = LOCAL_ASSET_PATH;
-
-  let source = null;
-  if (resolvedOptions.useLocalAsset !== false) {
-    const scriptPath = resolvedOptions.scriptPath || defaultScriptPath;
-    try {
-      source = await fs.readFile(scriptPath, "utf8");
-    } catch (error) {
-      if (!error || error.code !== "ENOENT") {
-        throw error;
-      }
-    }
+  const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
+  if (typeof cdnFetch !== "function") {
+    throw new Error("fetch API required to load mpr-ui auth header from CDN");
   }
-
-  if (source === null) {
-    const cdnFetch = resolvedOptions.cdnFetch || globalThis.fetch;
-    if (typeof cdnFetch !== "function") {
-      throw new Error("fetch API required to load mpr-ui auth header from CDN");
-    }
-    const response = await cdnFetch(MPR_UI_CDN_URL);
-    if (!response || typeof response.text !== "function") {
-      throw new Error("invalid response when loading mpr-ui auth header");
-    }
-    if (response.ok === false) {
-      throw new Error(
-        `failed to load mpr-ui auth header from CDN (status ${response.status})`,
-      );
-    }
-    source = await response.text();
+  const response = await cdnFetch(MPR_UI_CDN_URL);
+  if (!response || typeof response.text !== "function") {
+    throw new Error("invalid response when loading mpr-ui auth header");
   }
+  if (response.ok === false) {
+    throw new Error(
+      `failed to load mpr-ui auth header from CDN (status ${response.status})`,
+    );
+  }
+  const source = await response.text();
 
   const rootElement = resolvedOptions.rootElement || new StubElement("div");
   const events = [];
@@ -368,11 +336,15 @@ test("mpr-ui header handles credential exchange and logout", async () => {
       id: {
         promptCalls: 0,
         initializeCalls: [],
+        renderButtonCalls: [],
         prompt() {
           googleStub.accounts.id.promptCalls += 1;
         },
         initialize(options) {
           googleStub.accounts.id.initializeCalls.push(options);
+        },
+        renderButton(element, options) {
+          googleStub.accounts.id.renderButtonCalls.push({ element, options });
         },
       },
     },
@@ -398,11 +370,11 @@ test("mpr-ui header handles credential exchange and logout", async () => {
   await flushAsyncTasks();
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://auth.example.com/auth/nonce");
-  const googleInitConfig = context.__googleInitConfig;
-  assert.ok(
-    googleInitConfig,
-    "Expected __googleInitConfig to be populated with Google initialize metadata",
-  );
+  assert.equal(googleStub.accounts.id.initializeCalls.length, 2);
+  const googleInitConfig =
+    googleStub.accounts.id.initializeCalls[
+      googleStub.accounts.id.initializeCalls.length - 1
+    ];
   assert.equal(googleInitConfig.client_id, TEST_GOOGLE_CLIENT_ID);
   assert.equal(googleInitConfig.nonce, "nonce-123");
   assert.equal(controller.state.status, "unauthenticated");
@@ -474,11 +446,15 @@ test("mpr-ui header surfaces error when nonce issuance fails", async () => {
       id: {
         promptCalls: 0,
         initializeCalls: [],
+        renderButtonCalls: [],
         prompt() {
           googleStub.accounts.id.promptCalls += 1;
         },
         initialize(options) {
           googleStub.accounts.id.initializeCalls.push(options);
+        },
+        renderButton(element, options) {
+          googleStub.accounts.id.renderButtonCalls.push({ element, options });
         },
       },
     },
@@ -520,6 +496,7 @@ test("mpr-ui header surfaces error when credential missing", async () => {
   const googleStub = {
     accounts: {
       id: {
+        renderButton() {},
         prompt() {},
       },
     },

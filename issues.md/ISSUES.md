@@ -106,43 +106,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 - [x] [TA-351] Remove host-based tenant resolution and enforce origin-only routing.
   The tenant resolver should use only `Origin` (or `X-TAuth-Tenant`) and require schemeful origins in `allowed_hosts`; docs/examples/tests must match the origin-only contract.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
-- [ ] [TA-352] The demo under examples.tauth-demo doesnt work. Investigate the causes
-```
-12:18:42 tyemirov@Vadyms-MacBook-Pro:~/Development/tyemirov/TAuth/examples/tauth-demo - [maintenance/TA-417-add-frontend-to-ci] $ docker compose up --remove-orphans
-[+] Running 1/1
- ✔ mpr-frontend Pulled                                                                                                                                                                                     0.8s 
-[+] Running 3/3
- ✔ Network tauth-demo_default           Created                                                                                                                                                            0.1s 
- ✔ Container tauth-demo-tauth-1         Created                                                                                                                                                            0.1s 
- ✔ Container tauth-demo-mpr-frontend-1  Created                                                                                                                                                            0.1s 
-Attaching to mpr-frontend-1, tauth-1
-tauth-1  | {"level":"info","ts":1766953180.7391493,"caller":"server/main.go:182","msg":"using persistent refresh token store","driver":"sqlite"}
-tauth-1  | {"level":"info","ts":1766953180.7435856,"caller":"server/main.go:291","msg":"listening","addr":":8082"}
-mpr-frontend-1  | Serving HTTP on 0.0.0.0 port 8000 (http://localhost:8000/) ...
-mpr-frontend-1  | 192.168.65.1 - - [28/Dec/2025 20:19:45] "GET / HTTP/1.1" 200 6825
-mpr-frontend-1  | 192.168.65.1 - - [28/Dec/2025 20:19:45] "GET /tauth-config.js HTTP/1.1" 200 1474
-mpr-frontend-1  | 192.168.65.1 - - [28/Dec/2025 20:19:45] "GET /tauth-config-apply.js HTTP/1.1" 200 815
-mpr-frontend-1  | 192.168.65.1 - - [28/Dec/2025 20:19:45] "GET /status-panel.js HTTP/1.1" 200 3682
-tauth-1         | {"level":"info","ts":1766953185.7771282,"caller":"server/main.go:353","msg":"http","method":"GET","path":"/tauth.js","status":404,"ip":"192.168.65.1","elapsed":0.002465311}
-tauth-1         | {"level":"info","ts":1766953185.7972162,"caller":"server/main.go:353","msg":"http","method":"OPTIONS","path":"/auth/nonce","status":204,"ip":"192.168.65.1","elapsed":0.000010896}
-tauth-1         | {"level":"info","ts":1766953185.8024528,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000093783}
-mpr-frontend-1  | 192.168.65.1 - - [28/Dec/2025 20:19:45] "GET /favicon.ico HTTP/1.1" 404 19
-tauth-1         | {"level":"info","ts":1766953196.8443425,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000013868}
-tauth-1         | {"level":"info","ts":1766953196.8512075,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000011157}
-```
-![alt text](image.png)
-
-JS Console in a browser
-```
-Loading failed for the <script> with source “http://localhost:8082/tauth.js”. localhost:8000:1:1
-Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:270:37
-Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:271:336
-Feature Policy: Skipping unsupported feature name “identity-credentials-get”. mpr-ui.js:2103:22
-Content-Security-Policy warnings 5
-[GSI_LOGGER]: The given origin is not allowed for the given client ID. m=credential_button_library:75:89
-Opening multiple popups was blocked due to lack of user activation. client:83:240
-Storage access automatically granted for origin “https://accounts.google.com” on “http://localhost:8000”.
-```
+- [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
+  Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
 
 
 ## Maintenance (418–499)

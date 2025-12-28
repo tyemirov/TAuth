@@ -1,20 +1,20 @@
+// @ts-check
 "use strict";
 
 const MPR_UI_CDN_PREFIX =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@0.0.5/mpr-ui.js";
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.1.0/mpr-ui.js";
 
 async function interceptMprUiRequest(page, scriptBody) {
   if (!page || typeof page.setRequestInterception !== "function") {
     throw new Error("interceptMprUiRequest requires a Puppeteer page instance");
   }
-  const hasLegacyHelpers =
-    typeof scriptBody === "string" && scriptBody.includes("renderSiteHeader");
+  const hasScriptBody = typeof scriptBody === "string" && scriptBody.length > 0;
   await page.setRequestInterception(true);
   async function handleRequest(request) {
     try {
       const url = request.url();
       if (url === MPR_UI_CDN_PREFIX || url.startsWith(MPR_UI_CDN_PREFIX + "?")) {
-        if (!hasLegacyHelpers) {
+        if (!hasScriptBody) {
           await request.continue();
           return;
         }
