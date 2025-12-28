@@ -67,6 +67,8 @@ const (
 	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
 	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
 	configCodeMissingTenants          = appconfig.ErrorCodeMissingTenants
+	configCodeInvalidCORSOrigin       = appconfig.ErrorCodeInvalidCORSOrigin
+	configCodeCORSOriginNotAllowed    = appconfig.ErrorCodeCORSOriginNotAllowed
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"
 	configCodeGoogleValidatorInit     = "config.google_validator_init"
 )
@@ -120,19 +122,6 @@ func configError(code, message string) error {
 	return fmt.Errorf("%s: %s", code, message)
 }
 
-func expandCommaSeparatedEntries(entries []string) []string {
-	expanded := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		for _, chunk := range strings.Split(entry, ",") {
-			value := strings.TrimSpace(chunk)
-			if value != "" {
-				expanded = append(expanded, value)
-			}
-		}
-	}
-	return expanded
-}
-
 func runServer(command *cobra.Command, arguments []string) error {
 	logger, loggerErr := zap.NewProduction()
 	if loggerErr != nil {
@@ -168,7 +157,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 	listenAddr := appConfig.Server.ListenAddr
 	databaseURL := strings.TrimSpace(appConfig.Server.DatabaseURL)
 	enableCORS := bool(appConfig.Server.EnableCORS)
-	corsAllowedOrigins := expandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	enableTenantHeaderOverride := bool(appConfig.Server.EnableTenantHeaderOverride)
 
 	var userStore authkit.UserStore
@@ -198,6 +186,10 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if loadErr != nil {
 		return loadErr
 	}
+	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
+		return corsErr
+	}
+	corsAllowedOrigins := appconfig.ExpandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	sameSiteResolver := authkit.NewSameSiteResolver(enableCORS)
 	registry, registryErr := authkit.BuildTenantRegistry(baseServerConfig, tenantConfig, sameSiteResolver)
 	if registryErr != nil {

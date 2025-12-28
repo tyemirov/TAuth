@@ -33,6 +33,8 @@ server:
   cors_allowed_origins:
     - "https://one.example"
     - "https://two.example"
+  cors_allowed_origin_exceptions:
+    - "https://accounts.google.com"
   enable_tenant_header_override: "true"
 
 tenants:
@@ -62,6 +64,9 @@ tenants:
 	}
 	if !config.Server.EnableCORS || len(config.Server.CORSAllowedOrigins) != 2 {
 		testingHandle.Fatalf("expected CORS origins to be parsed")
+	}
+	if len(config.Server.CORSAllowedOriginExceptions) != 1 {
+		testingHandle.Fatalf("expected CORS origin exceptions to be parsed")
 	}
 	if !config.Server.EnableTenantHeaderOverride {
 		testingHandle.Fatalf("expected header override to be enabled")

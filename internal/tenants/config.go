@@ -618,6 +618,11 @@ func normalizeOrigin(origin string) (string, error) {
 	return fmt.Sprintf("%s://%s", scheme, host), nil
 }
 
+// NormalizeOrigin returns the canonical origin string or an error for invalid origins.
+func NormalizeOrigin(origin string) (string, error) {
+	return normalizeOrigin(origin)
+}
+
 func parseDuration(raw string) (time.Duration, error) {
 	return time.ParseDuration(strings.TrimSpace(raw))
 }

@@ -149,13 +149,68 @@ func TestRunServerSuccess(t *testing.T) {
 	cfg := sampleApplicationConfig()
 	cfg.Server.DatabaseURL = "sqlite://file::memory:?cache=shared"
 	cfg.Server.EnableCORS = true
-	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
+	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
+	}
+}
+
+func TestRunServerRejectsCORSOriginsOutsideTenants(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	cfg := sampleApplicationConfig()
+	cfg.Server.EnableCORS = true
+	cfg.Server.CORSAllowedOrigins = []string{"https://external.example.com"}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+
+	runErr := runServer(command, nil)
+	if runErr == nil {
+		testingHandle.Fatalf("expected CORS allowlist validation error")
+	}
+	if !strings.Contains(runErr.Error(), configCodeCORSOriginNotAllowed) {
+		testingHandle.Fatalf("expected CORS allowlist error code, got %v", runErr)
+	}
+}
+
+func TestRunServerAllowsCORSExceptionOrigins(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	cfg := sampleApplicationConfig()
+	cfg.Server.EnableCORS = true
+	cfg.Server.CORSAllowedOrigins = []string{"https://accounts.google.com"}
+	cfg.Server.CORSAllowedOriginExceptions = []string{"https://accounts.google.com"}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+
+	if err := runServer(command, nil); err != nil {
+		testingHandle.Fatalf("expected CORS exception to be allowed, got %v", err)
 	}
 }
 
@@ -208,7 +263,7 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	defer restoreValidator()
 
 	cfg := sampleApplicationConfig()
-	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
+	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
@@ -632,7 +687,7 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 		tc := testCase
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := expandCommaSeparatedEntries(tc.input)
+			result := appconfig.ExpandCommaSeparatedEntries(tc.input)
 			if !reflect.DeepEqual(result, tc.expected) {
 				t.Fatalf("expected %v, got %v", tc.expected, result)
 			}

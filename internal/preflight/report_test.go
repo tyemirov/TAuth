@@ -35,6 +35,8 @@ server:
   enable_cors: true
   cors_allowed_origins:
     - "https://accounts.google.com"
+  cors_allowed_origin_exceptions:
+    - "https://accounts.google.com"
   enable_tenant_header_override: true
 
 tenants:
@@ -70,9 +72,10 @@ type testEffectiveConfigPayload struct {
 }
 
 type testServerPayload struct {
-	EnableCORS                 bool     `json:"enable_cors"`
-	CORSAllowedOrigins         []string `json:"cors_allowed_origins"`
-	EnableTenantHeaderOverride bool     `json:"enable_tenant_header_override"`
+	EnableCORS                  bool     `json:"enable_cors"`
+	CORSAllowedOrigins          []string `json:"cors_allowed_origins"`
+	CORSAllowedOriginExceptions []string `json:"cors_allowed_origin_exceptions"`
+	EnableTenantHeaderOverride  bool     `json:"enable_tenant_header_override"`
 }
 
 type testTenantPayload struct {
