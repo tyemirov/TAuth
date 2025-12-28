@@ -48,6 +48,47 @@ func TestResolverHeaderOverride(t *testing.T) {
 	}
 }
 
+func TestResolverHeaderOverrideMatchesOrigin(testingHandle *testing.T) {
+	config := loadTestConfig(testingHandle)
+	resolver, err := NewResolver(config, WithHeaderOverride(""))
+	if err != nil {
+		testingHandle.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://tauth-api.localhost/api", nil)
+	request.Header.Set("Origin", "https://demo.example.com")
+	request.Header.Set(defaultTenantHeader, "demo")
+
+	tenant, resolveErr := resolver.Resolve(request)
+	if resolveErr != nil {
+		testingHandle.Fatalf("expected resolve success: %v", resolveErr)
+	}
+	if tenant.ID() != "demo" {
+		testingHandle.Fatalf("expected demo tenant via override, got %s", tenant.ID())
+	}
+}
+
+func TestResolverHeaderOverrideRejectsMismatchedOrigin(testingHandle *testing.T) {
+	config := loadTestConfig(testingHandle)
+	resolver, err := NewResolver(config, WithHeaderOverride(""))
+	if err != nil {
+		testingHandle.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://tauth-api.localhost/api", nil)
+	request.Header.Set("Origin", "https://demo.example.com")
+	request.Header.Set(defaultTenantHeader, "prod")
+
+	_, resolveErr := resolver.Resolve(request)
+	if resolveErr == nil {
+		testingHandle.Fatalf("expected resolve error for mismatched header override")
+	}
+	if !errors.Is(resolveErr, ErrTenantNotFound) {
+		testingHandle.Fatalf("expected ErrTenantNotFound, got %v", resolveErr)
+	}
+	if !strings.Contains(resolveErr.Error(), errorCodeOverrideMismatch) {
+		testingHandle.Fatalf("expected override mismatch error, got %v", resolveErr)
+	}
+}
+
 func TestResolverUnknownOrigin(t *testing.T) {
 	config := loadTestConfig(t)
 	resolver, err := NewResolver(config)
@@ -176,22 +217,25 @@ func TestResolverRequiresHeaderWhenOriginHostShared(t *testing.T) {
 	}
 }
 
-func TestResolverOverrideIgnoresUnknownOrigin(t *testing.T) {
-	config := loadTestConfig(t)
+func TestResolverOverrideRejectsUnknownOrigin(testingHandle *testing.T) {
+	config := loadTestConfig(testingHandle)
 	resolver, err := NewResolver(config, WithHeaderOverride(""))
 	if err != nil {
-		t.Fatalf("resolver creation failed: %v", err)
+		testingHandle.Fatalf("resolver creation failed: %v", err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "http://tauth-api.localhost/api", nil)
 	request.Header.Set("Origin", "http://unknown.localhost")
 	request.Header.Set(defaultTenantHeader, "demo")
 
-	tenant, resolveErr := resolver.Resolve(request)
-	if resolveErr != nil {
-		t.Fatalf("expected resolve success, got %v", resolveErr)
+	_, resolveErr := resolver.Resolve(request)
+	if resolveErr == nil {
+		testingHandle.Fatalf("expected resolve error for unknown origin")
 	}
-	if tenant.ID() != "demo" {
-		t.Fatalf("expected demo tenant, got %s", tenant.ID())
+	if !errors.Is(resolveErr, ErrTenantNotFound) {
+		testingHandle.Fatalf("expected ErrTenantNotFound, got %v", resolveErr)
+	}
+	if !strings.Contains(resolveErr.Error(), errorCodeUnknownOrigin) {
+		testingHandle.Fatalf("expected unknown origin error, got %v", resolveErr)
 	}
 }
 
@@ -299,6 +343,22 @@ func TestResolverRejectsMissingOrUnknownOrigin(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsMissingOriginWithoutOverride(testingHandle *testing.T) {
+	config := loadConfigWithOrigins(testingHandle)
+	resolver, err := NewResolver(config, WithHeaderOverride(""))
+	if err != nil {
+		testingHandle.Fatalf("resolver creation failed: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://shared.localhost/auth/nonce", nil)
+
+	_, resolveErr := resolver.Resolve(request)
+	if resolveErr == nil {
+		testingHandle.Fatalf("expected resolve to fail without origin and override")
+	}
+	if !strings.Contains(resolveErr.Error(), errorCodeMissingHeaderOverride) {
+		testingHandle.Fatalf("expected missing header override error, got %v", resolveErr)
+	}
+}
 func TestResolverOriginOnlyRouting(testingHandle *testing.T) {
 	config := loadConfigWithOriginOnlyHosts(testingHandle)
 	resolver, err := NewResolver(config)

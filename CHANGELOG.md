@@ -21,6 +21,7 @@
 - Allowed static auth-client serving on shared hosts even when Origin headers are missing.
 - Enforced nonce requirement for Google Sign-In exchanges; mismatched nonces cause authentication failure.
 - Tenant resolution now keys off request origins only; host-based routing is removed and `allowed_hosts` must be schemeful origins.
+- Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

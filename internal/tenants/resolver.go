@@ -29,6 +29,7 @@ const (
 	errorCodeInvalidConfig         = "tenantresolver.invalid_config"
 	errorCodeAmbiguousOrigin       = "tenantresolver.ambiguous_origin"
 	errorCodeMissingHeaderOverride = "tenantresolver.missing_tenant_header"
+	errorCodeOverrideMismatch      = "tenantresolver.override_mismatch"
 )
 
 // ErrResolverUninitialized indicates tenants were not provided.
@@ -71,28 +72,56 @@ func (resolver *Resolver) Resolve(request *http.Request) (Tenant, error) {
 		return Tenant{}, fmt.Errorf("%w: %s", ErrResolverUninitialized, errorCodeInvalidConfig)
 	}
 	if request == nil {
+		if resolver.headerOverrideEnabled {
+			return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, resolver.headerOverrideName)
+		}
 		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingOrigin)
 	}
 
+	override := ""
 	if resolver.headerOverrideEnabled {
-		override := strings.TrimSpace(request.Header.Get(resolver.headerOverrideName))
-		if override != "" {
-			tenant, err := resolver.resolveByHeaderOverride(override)
-			if err != nil {
-				return Tenant{}, err
+		override = strings.TrimSpace(request.Header.Get(resolver.headerOverrideName))
+	}
+	origin := strings.TrimSpace(request.Header.Get("Origin"))
+	if origin == "" {
+		if !resolver.headerOverrideEnabled {
+			return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingOrigin)
+		}
+		if override == "" {
+			return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, resolver.headerOverrideName)
+		}
+		return resolver.resolveByHeaderOverride(override)
+	}
+
+	originTenant, originErr := resolver.resolveByOriginValue(origin)
+	if originErr != nil {
+		if resolver.headerOverrideEnabled && isAmbiguousOriginError(originErr) {
+			if override == "" {
+				return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, resolver.headerOverrideName)
 			}
-			return tenant, nil
+			overrideTenant, overrideErr := resolver.resolveByHeaderOverride(override)
+			if overrideErr != nil {
+				return Tenant{}, overrideErr
+			}
+			if !resolver.originAllowsTenant(origin, overrideTenant.ID()) {
+				return Tenant{}, fmt.Errorf("%w: %s origin=%s header=%s", ErrTenantNotFound, errorCodeOverrideMismatch, origin, resolver.headerOverrideName)
+			}
+			return overrideTenant, nil
+		}
+		return Tenant{}, originErr
+	}
+
+	if override != "" {
+		overrideTenant, overrideErr := resolver.resolveByHeaderOverride(override)
+		if overrideErr != nil {
+			return Tenant{}, overrideErr
+		}
+		if overrideTenant.ID() != originTenant.ID() {
+			return Tenant{}, fmt.Errorf("%w: %s origin=%s header=%s", ErrTenantNotFound, errorCodeOverrideMismatch, origin, resolver.headerOverrideName)
 		}
 	}
 
-	originTenant, originErr := resolver.resolveByOrigin(request)
-	if originErr == nil {
-		return originTenant, nil
-	}
-	if resolver.headerOverrideEnabled && isAmbiguousOriginError(originErr) {
-		return Tenant{}, fmt.Errorf("%w: %s header=%s", ErrTenantNotFound, errorCodeMissingHeaderOverride, resolver.headerOverrideName)
-	}
-	return Tenant{}, originErr
+	return originTenant, nil
 }
 
 func (resolver *Resolver) resolveByID(rawID string) (Tenant, error) {
@@ -155,14 +184,6 @@ func TenantFromContext(context *gin.Context) (Tenant, bool) {
 	return tenant, ok
 }
 
-func (resolver *Resolver) resolveByOrigin(request *http.Request) (Tenant, error) {
-	origin := strings.TrimSpace(request.Header.Get("Origin"))
-	if origin == "" {
-		return Tenant{}, fmt.Errorf("%w: %s", ErrTenantNotFound, errorCodeMissingOrigin)
-	}
-	return resolver.resolveByOriginValue(origin)
-}
-
 func (resolver *Resolver) resolveByOriginValue(value string) (Tenant, error) {
 	owners := resolver.config.originOwners(value)
 	if len(owners) == 0 {
@@ -179,4 +200,14 @@ func isAmbiguousOriginError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), errorCodeAmbiguousOrigin)
+}
+
+func (resolver *Resolver) originAllowsTenant(origin string, tenantID TenantID) bool {
+	owners := resolver.config.originOwners(origin)
+	for _, ownerID := range owners {
+		if ownerID == tenantID {
+			return true
+		}
+	}
+	return false
 }
