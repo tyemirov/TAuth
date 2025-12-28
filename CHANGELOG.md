@@ -6,6 +6,7 @@
 - `tauth.js` exposes nonce issuance and Google credential exchange helpers for client integrations.
 - Require explicit base URL in `initAuthClient`; remove script-origin inference in the auth client.
 - Added GitHub Pages deployment workflow for the `web/` directory.
+- Rebuilt the docs landing page with a new neon layout, deep dive sections, palette suggestions, and GitHub/Docs/Community footer links.
 
 ### Improvements ⚙️
 - Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` and `/mpr-sites.js` for better GitHub Pages compatibility.
@@ -20,6 +21,10 @@
 - Removed legacy auth-client server route.
 - Allowed static auth-client serving on shared hosts even when Origin headers are missing.
 - Enforced nonce requirement for Google Sign-In exchanges; mismatched nonces cause authentication failure.
+- Tenant resolution now keys off request origins only; host-based routing is removed and `allowed_hosts` must be schemeful origins.
+- Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
+- Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
+- Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

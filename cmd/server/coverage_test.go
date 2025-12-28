@@ -56,13 +56,13 @@ func TestSameSiteResolverCoversCombinations(t *testing.T) {
 	}
 }
 
-func TestHostAllowedHandlesAmbiguity(t *testing.T) {
+func TestHostAllowedHandlesAmbiguity(testingHandle *testing.T) {
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"shared.localhost", "http://alpha.localhost:8000"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://alpha.localhost:8000"},
 				GoogleWebClientID: "alpha-client",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      "",
@@ -76,7 +76,7 @@ func TestHostAllowedHandlesAmbiguity(t *testing.T) {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"shared.localhost", "http://beta.localhost:8000"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://beta.localhost:8000"},
 				GoogleWebClientID: "beta-client",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "",
@@ -92,32 +92,40 @@ func TestHostAllowedHandlesAmbiguity(t *testing.T) {
 
 	config, err := tenants.LoadConfigFromDocument(document)
 	if err != nil {
-		t.Fatalf("expected tenants config to load: %v", err)
+		testingHandle.Fatalf("expected tenants config to load: %v", err)
 	}
 
-	missingHost := &http.Request{Host: ""}
-	if hostAllowed(missingHost, config, false) {
-		t.Fatalf("expected missing host to be rejected")
+	missingOriginRequest := &http.Request{Header: make(http.Header)}
+	if originAllowed(missingOriginRequest, config, false) {
+		testingHandle.Fatalf("expected missing origin to be rejected")
 	}
 
 	request := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
 	request.Header.Set("Origin", "http://alpha.localhost:8000")
-	if !hostAllowed(request, config, false) {
-		t.Fatalf("expected alpha origin to be allowed")
+	if !originAllowed(request, config, false) {
+		testingHandle.Fatalf("expected alpha origin to be allowed")
 	}
 
 	requestUnknownOrigin := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
 	requestUnknownOrigin.Header.Set("Origin", "http://unknown.localhost:8000")
-	if hostAllowed(requestUnknownOrigin, config, false) {
-		t.Fatalf("expected unknown origin to be rejected")
+	if originAllowed(requestUnknownOrigin, config, false) {
+		testingHandle.Fatalf("expected unknown origin to be rejected")
 	}
 
 	requestNoOrigin := &http.Request{Host: "shared.localhost", Header: make(http.Header)}
-	if hostAllowed(requestNoOrigin, config, false) {
-		t.Fatalf("expected shared host without origin to be rejected when override disabled")
+	if originAllowed(requestNoOrigin, config, false) {
+		testingHandle.Fatalf("expected missing origin to be rejected when override disabled")
 	}
-	if !hostAllowed(requestNoOrigin, config, true) {
-		t.Fatalf("expected shared host without origin to be allowed when override enabled")
+	if originAllowed(requestNoOrigin, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected without override header")
+	}
+	requestNoOrigin.Header.Set(tenantHeaderName, "missing")
+	if originAllowed(requestNoOrigin, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected with invalid override")
+	}
+	requestNoOrigin.Header.Set(tenantHeaderName, "alpha")
+	if !originAllowed(requestNoOrigin, config, true) {
+		testingHandle.Fatalf("expected missing origin to be allowed with valid override")
 	}
 }
 
@@ -135,7 +143,7 @@ server:
 
 tenants:
   - id: "demo"
-    allowed_hosts: ["demo.localhost"]
+    allowed_hosts: ["https://demo.localhost"]
     google_web_client_id: "demo-client"
     jwt_signing_key: "demo-key"
     cookie_domain: ""

@@ -22,7 +22,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-110] Add a GitHub Pages landing page under `docs/index.html` with a dark neon theme, hero CTA + code snippet, feature cards, deep-dive sections, docs links, and palette suggestions. — Added `docs/index.html` with the requested structure, copy, and palette guidance for GitHub Pages hosting.
 - [x] [TA-111] Integrate the mpr-ui footer component into the GitHub Pages landing page. — Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
 
-- [ ] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
+- [x] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
   Style it visually and structurally.
   Follow these principles:
   • Hero section with bold product tagline, subheading, primary CTA, and screenshot/code example
@@ -43,7 +43,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
  
   Light/dark palette suggestions
   Keep everything production-grade and concise.
-  Use GitHub as a hosting solution (an index.html file under docs/)
+  Use GitHub as a hosting solution (an index.html file under docs/) — Rebuilt docs landing layout, copy, and neon styling with palette suggestions, updated footer links, and added a Puppeteer regression test for the new sections.
 
 ## Improvements (212–299)
 
@@ -70,6 +70,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-345] Enforce unique cookie names across overlapping tenant cookie scopes (shared hosts or cookie domains) to prevent refresh/session collisions. — Added cookie scope validation in tenant config loading and regression tests for shared host, domain-domain, and domain-host overlaps.
 - [x] [TA-348] Static auth-client.js requests on shared hosts fail when Origin is missing, blocking Safari/WebKit auth flows. — Relaxed static host gating to allow missing Origin for allowed hosts and refreshed server tests.
 - [x] [TA-349] auth-client.js should require an explicit API base URL instead of inferring it from the script origin; update tests and documentation. — Removed script-origin fallback, enforced explicit base URL hints, updated docs/changelog, and refreshed Node tests.
+- [x] [TA-351] Remove host-based tenant resolution and enforce origin-only routing. The tenant resolver should use only `Origin` (or `X-TAuth-Tenant`) and require schemeful origins in `allowed_hosts`; docs/examples/tests must match the origin-only contract. — Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 
 ## Maintenance (410–499)
 
@@ -79,6 +80,9 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-412] Replace local utils replaces with remote module usage so only `github.com/tyemirov/utils/preflight` is required. — Removed the local replace, pinned the utils module version, and updated documentation references.
 - [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image. — Added `/web` as a Docker volume and copied the web assets into the image.
 - [x] [TA-413] Update the demo TAuth base URL to prefer `https://tauth.mprlab.com` on hosted domains, dynamically load `auth-client.js`, and remove the hardcoded localhost script tag so hosted deployments stay aligned.
+- [x] [TA-414] CRUCIAL: Constrain `X-TAuth-Tenant` overrides so they cannot bypass origin routing. Require overrides to match the resolved origin tenant (when Origin is present) and require an explicit override when Origin is missing. — Matched overrides to origin owners, required header when Origin is missing, added resolver regression tests, and ran go test ./..., go vet, staticcheck, ineffassign.
+- [x] [TA-415] CRUCIAL: Tighten origin gating for non-browser clients. Missing Origin should be rejected unless a validated override is supplied; update docs/tests to make the requirement explicit. — Required valid `X-TAuth-Tenant` override when Origin is missing, added origin gate regression coverage, and noted the change in CHANGELOG.
+- [x] [TA-416] CRUCIAL: Align CORS allowlist with tenant origins (or explicit exception list) to avoid credentialed CORS for non-tenant origins; enforce via validation and document the policy. — Added CORS allowlist validation against tenant origins/exception list, introduced exception config field, expanded server/preflight tests, and noted the policy in CHANGELOG.
 
 ## Planning
 So not work on these, not ready

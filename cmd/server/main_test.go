@@ -149,13 +149,68 @@ func TestRunServerSuccess(t *testing.T) {
 	cfg := sampleApplicationConfig()
 	cfg.Server.DatabaseURL = "sqlite://file::memory:?cache=shared"
 	cfg.Server.EnableCORS = true
-	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
+	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
+	}
+}
+
+func TestRunServerRejectsCORSOriginsOutsideTenants(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	cfg := sampleApplicationConfig()
+	cfg.Server.EnableCORS = true
+	cfg.Server.CORSAllowedOrigins = []string{"https://external.example.com"}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+
+	runErr := runServer(command, nil)
+	if runErr == nil {
+		testingHandle.Fatalf("expected CORS allowlist validation error")
+	}
+	if !strings.Contains(runErr.Error(), configCodeCORSOriginNotAllowed) {
+		testingHandle.Fatalf("expected CORS allowlist error code, got %v", runErr)
+	}
+}
+
+func TestRunServerAllowsCORSExceptionOrigins(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	cfg := sampleApplicationConfig()
+	cfg.Server.EnableCORS = true
+	cfg.Server.CORSAllowedOrigins = []string{"https://accounts.google.com"}
+	cfg.Server.CORSAllowedOriginExceptions = []string{"https://accounts.google.com"}
+
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+
+	if err := runServer(command, nil); err != nil {
+		testingHandle.Fatalf("expected CORS exception to be allowed, got %v", err)
 	}
 }
 
@@ -208,7 +263,7 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	defer restoreValidator()
 
 	cfg := sampleApplicationConfig()
-	cfg.Server.CORSAllowedOrigins = []string{"http://localhost"}
+	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
 	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
@@ -278,7 +333,7 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 	tenantDocument := `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    allowed_hosts: ["alpha.localhost"]
+    allowed_hosts: ["https://alpha.localhost"]
     google_web_client_id: "alpha-client.apps.googleusercontent.com"
     jwt_signing_key: "alpha-tenant-key"
     cookie_domain: ".example.com"
@@ -291,7 +346,7 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 
   - id: "beta"
     display_name: "Beta"
-    allowed_hosts: ["beta.localhost"]
+    allowed_hosts: ["https://beta.localhost"]
     google_web_client_id: "beta-client.apps.googleusercontent.com"
     jwt_signing_key: "beta-tenant-key"
     cookie_domain: "beta.localhost"
@@ -366,7 +421,7 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"alpha.localhost"},
+				AllowedHosts:      []string{"https://alpha.localhost"},
 				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      "",
@@ -379,7 +434,7 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"beta.localhost"},
+				AllowedHosts:      []string{"https://beta.localhost"},
 				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "",
@@ -411,14 +466,14 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 	}
 }
 
-func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
+func TestStaticAuthClientRequiresKnownOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"demo.localhost"},
+				AllowedHosts:      []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "",
@@ -441,29 +496,31 @@ func TestStaticAuthClientRequiresKnownHost(t *testing.T) {
 
 	validRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	validRequest.Host = "demo.localhost"
+	validRequest.Header.Set("Origin", "https://demo.localhost")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, validRequest)
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200 for known host, got %d", recorder.Code)
+		t.Fatalf("expected 200 for known origin, got %d", recorder.Code)
 	}
 
 	unknownRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
 	unknownRequest.Host = "unknown.localhost"
+	unknownRequest.Header.Set("Origin", "https://unknown.localhost")
 	unknownRecorder := httptest.NewRecorder()
 	router.ServeHTTP(unknownRecorder, unknownRequest)
 	if unknownRecorder.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unknown host, got %d", unknownRecorder.Code)
+		t.Fatalf("expected 403 for unknown origin, got %d", unknownRecorder.Code)
 	}
 }
 
-func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
+func TestStaticAuthClientAllowsMissingOriginForSharedOrigins(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -477,7 +534,7 @@ func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",
@@ -523,14 +580,14 @@ func TestStaticAuthClientAllowsMissingOriginForAmbiguousHosts(t *testing.T) {
 	}
 }
 
-func TestHostGateMiddlewareRequiresOriginForAmbiguousHosts(t *testing.T) {
+func TestOriginGateMiddlewareRequiresOriginForSharedOrigins(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -543,7 +600,7 @@ func TestHostGateMiddlewareRequiresOriginForAmbiguousHosts(t *testing.T) {
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",
@@ -561,7 +618,7 @@ func TestHostGateMiddlewareRequiresOriginForAmbiguousHosts(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.Use(hostGateMiddleware(config, false))
+	router.Use(originGateMiddleware(config, false))
 	router.GET("/ping", func(context *gin.Context) {
 		context.Status(http.StatusNoContent)
 	})
@@ -630,7 +687,7 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 		tc := testCase
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := expandCommaSeparatedEntries(tc.input)
+			result := appconfig.ExpandCommaSeparatedEntries(tc.input)
 			if !reflect.DeepEqual(result, tc.expected) {
 				t.Fatalf("expected %v, got %v", tc.expected, result)
 			}
@@ -644,7 +701,7 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	tenantDocument := `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    allowed_hosts: ["alpha.localhost"]
+    allowed_hosts: ["https://alpha.localhost"]
     google_web_client_id: "alpha-client"
     jwt_signing_key: "alpha-key"
     cookie_domain: ".example.com"
@@ -657,7 +714,7 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 
   - id: "beta"
     display_name: "Beta"
-    allowed_hosts: ["beta.localhost"]
+    allowed_hosts: ["https://beta.localhost"]
     google_web_client_id: "beta-client"
     jwt_signing_key: "beta-key"
     cookie_domain: ".example.com"
@@ -671,6 +728,7 @@ func TestDemoConfigUsesResolvedTenant(t *testing.T) {
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		req := httptest.NewRequest("GET", "/demo/config.js", nil)
 		req.Host = "beta.localhost"
+		req.Header.Set("Origin", "https://beta.localhost")
 		w := httptest.NewRecorder()
 		server.Handler.ServeHTTP(w, req)
 
@@ -709,6 +767,7 @@ func TestRunServerEndToEndDemoConfig(t *testing.T) {
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
 		req := httptest.NewRequest(http.MethodGet, "/demo/config.js", nil)
 		req.Host = "beta.localhost"
+		req.Header.Set("Origin", "https://beta.localhost")
 		recorder := httptest.NewRecorder()
 		server.Handler.ServeHTTP(recorder, req)
 		if recorder.Code != http.StatusOK {
@@ -777,7 +836,7 @@ func sampleApplicationConfig() appconfig.ApplicationConfig {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"alpha.localhost"},
+				AllowedHosts:      []string{"https://alpha.localhost"},
 				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      ".example.com",
@@ -791,7 +850,7 @@ func sampleApplicationConfig() appconfig.ApplicationConfig {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"beta.localhost"},
+				AllowedHosts:      []string{"https://beta.localhost"},
 				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "beta.localhost",
@@ -830,14 +889,14 @@ func mustParseTenantsDocument(t *testing.T, contents string) []tenants.FileTenan
 	return doc.Tenants
 }
 
-func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
-	t.Helper()
+func TestOriginAllowedRequiresOverrideWhenOriginMissing(testingHandle *testing.T) {
+	testingHandle.Helper()
 	document := tenants.FileDocument{
 		Tenants: []tenants.FileTenant{
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:8000"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -849,7 +908,7 @@ func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"shared.localhost", "http://localhost:4173"},
+				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",
@@ -862,17 +921,25 @@ func TestHostAllowedFallsBackToHeaderOverride(t *testing.T) {
 	}
 	config, err := tenants.LoadConfigFromDocument(document)
 	if err != nil {
-		t.Fatalf("load tenant config: %v", err)
+		testingHandle.Fatalf("load tenant config: %v", err)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
 	request.Host = "shared.localhost"
 
-	if hostAllowed(request, config, false) {
-		t.Fatalf("expected ambiguous host without origin to be rejected when header override disabled")
+	if originAllowed(request, config, false) {
+		testingHandle.Fatalf("expected missing origin to be rejected when header override disabled")
 	}
-	if !hostAllowed(request, config, true) {
-		t.Fatalf("expected ambiguous host without origin to pass when header override enabled")
+	if originAllowed(request, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected without override header")
+	}
+	request.Header.Set(tenantHeaderName, "missing")
+	if originAllowed(request, config, true) {
+		testingHandle.Fatalf("expected missing origin to be rejected with invalid override")
+	}
+	request.Header.Set(tenantHeaderName, "notes")
+	if !originAllowed(request, config, true) {
+		testingHandle.Fatalf("expected missing origin to pass with valid override")
 	}
 }
 

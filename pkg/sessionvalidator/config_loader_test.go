@@ -35,7 +35,7 @@ server:
 tenants:
   - id: "%s"
     display_name: "Demo"
-    allowed_hosts: ["demo.localhost"]
+    allowed_hosts: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "%s"
     cookie_domain: "demo.localhost"

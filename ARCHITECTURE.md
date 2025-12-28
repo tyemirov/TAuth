@@ -145,7 +145,7 @@ Nonce handling rules:
 - Dispatches events on authentication changes.
 - Attempts silent refresh on 401 using `/auth/refresh`.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
-- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share a host in development. When you omit `tenantId`, the helper now falls back to the current page origin so header overrides remain accurate even when browsers omit `Origin` on certain requests.
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper now falls back to the current page origin so header overrides remain accurate even when browsers omit `Origin` on certain requests.
 - Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
@@ -190,14 +190,14 @@ Configuration is loaded from a single YAML file (`config.yaml` by default, overr
 
 ### 5.1 Multi-tenant configuration file
 
-Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, hostnames, Google Web client, and cookie/scheduling knobs:
+Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, Google Web client, and cookie/scheduling knobs:
 
 ```yaml
 tenants:
   - id: "demo"
     display_name: "Demo tenant"
     allowed_hosts:
-      - "demo.localhost"
+      - "https://demo.localhost"
       - "https://app.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "demo-signing-key"
@@ -212,20 +212,20 @@ Validation rules baked into the loader:
 
 - IDs use lowercase letters/digits/underscores/hyphens; duplicates are rejected.
 - `display_name` is required so operators can identify tenants in logs.
-- Hosts are normalized to lowercase and deduplicated within each tenant definition. When multiple tenants share the same host (e.g. several localhost apps on different ports), the loader marks that host as ambiguous and the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
+- Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `google_web_client_id` must be present for every tenant. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - Before decoding, the loader expands environment variables (`$VAR` / `${VAR}`) inside the YAML so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values.
 
 Tenant resolution & runtime:
 
-- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Hostnames are matched case-insensitively, and unknown hosts are rejected with a 404 response before hitting auth routes. When multiple tenants intentionally share the same host (for example during localhost demos), include each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) in `allowed_hosts`; the resolver will use the request’s `Origin` header to disambiguate automatically.
-- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when multiple tenants share a single host. The override now accepts either tenant IDs or frontend origins, and the resolver still validates that the HTTP `Host` header matches the tenant definition before honoring the hint. Leave it disabled in production where hostnames stay unique.
+- `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Origins are matched case-insensitively, and unknown origins are rejected with a 404 response before hitting auth routes. When multiple tenants intentionally share the same origin, enable the header override and send `X-TAuth-Tenant` to disambiguate.
+- Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when requests lack `Origin` headers or when multiple tenants share a single origin. The override accepts either tenant IDs or frontend origins. Leave it disabled in production where origins stay unique.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
-- Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of hostnames.
-- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper falls back to the page origin so shared-host setups work without extra wiring.
+- Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of origins.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper falls back to the page origin so shared-origin setups work without extra wiring.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
-- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on hostnames, but when multiple tenants share the same host (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
+- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
 ## 6. Persistence Model
 

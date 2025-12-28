@@ -62,10 +62,13 @@ const (
 	defaultTenantID     = "default"
 	defaultAppJWTIssuer = appconfig.DefaultJWTIssuer
 	defaultCookieDomain = ""
+	tenantHeaderName    = "X-TAuth-Tenant"
 
 	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
 	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
 	configCodeMissingTenants          = appconfig.ErrorCodeMissingTenants
+	configCodeInvalidCORSOrigin       = appconfig.ErrorCodeInvalidCORSOrigin
+	configCodeCORSOriginNotAllowed    = appconfig.ErrorCodeCORSOriginNotAllowed
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"
 	configCodeGoogleValidatorInit     = "config.google_validator_init"
 )
@@ -119,19 +122,6 @@ func configError(code, message string) error {
 	return fmt.Errorf("%s: %s", code, message)
 }
 
-func expandCommaSeparatedEntries(entries []string) []string {
-	expanded := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		for _, chunk := range strings.Split(entry, ",") {
-			value := strings.TrimSpace(chunk)
-			if value != "" {
-				expanded = append(expanded, value)
-			}
-		}
-	}
-	return expanded
-}
-
 func runServer(command *cobra.Command, arguments []string) error {
 	logger, loggerErr := zap.NewProduction()
 	if loggerErr != nil {
@@ -167,7 +157,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 	listenAddr := appConfig.Server.ListenAddr
 	databaseURL := strings.TrimSpace(appConfig.Server.DatabaseURL)
 	enableCORS := bool(appConfig.Server.EnableCORS)
-	corsAllowedOrigins := expandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	enableTenantHeaderOverride := bool(appConfig.Server.EnableTenantHeaderOverride)
 
 	var userStore authkit.UserStore
@@ -197,6 +186,10 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if loadErr != nil {
 		return loadErr
 	}
+	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
+		return corsErr
+	}
+	corsAllowedOrigins := appconfig.ExpandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	sameSiteResolver := authkit.NewSameSiteResolver(enableCORS)
 	registry, registryErr := authkit.BuildTenantRegistry(baseServerConfig, tenantConfig, sameSiteResolver)
 	if registryErr != nil {
@@ -264,7 +257,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	router.GET("/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
 	tenantRouter := router.Group("/")
-	tenantRouter.Use(hostGateMiddleware(tenantConfig, enableTenantHeaderOverride))
+	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
 
 	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
@@ -319,7 +312,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
 	return func(contextGin *gin.Context) {
-		if !staticHostAllowed(contextGin.Request, config) {
+		if !staticOriginAllowed(contextGin.Request, config) {
 			contextGin.AbortWithStatus(http.StatusForbidden)
 			return
 		}
@@ -327,9 +320,9 @@ func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
 	}
 }
 
-func hostGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.HandlerFunc {
+func originGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.HandlerFunc {
 	return func(context *gin.Context) {
-		if !hostAllowed(context.Request, config, allowHeaderOverride) {
+		if !originAllowed(context.Request, config, allowHeaderOverride) {
 			context.AbortWithStatus(http.StatusForbidden)
 			return
 		}
@@ -337,61 +330,46 @@ func hostGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.Han
 	}
 }
 
-func hostAllowed(request *http.Request, config tenants.Config, allowHeaderOverride bool) bool {
-	host, port := tenants.ExtractHostPort(request)
-	if host == "" {
-		return false
-	}
-	owners := config.MatchOwners(host, port)
-	if len(owners) == 0 {
-		return false
-	}
-	if len(owners) == 1 {
-		return true
-	}
-
+func originAllowed(request *http.Request, config tenants.Config, allowHeaderOverride bool) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
-		return allowHeaderOverride
+		if !allowHeaderOverride {
+			return false
+		}
+		return headerOverrideAllowed(request, config)
 	}
-	tenantID, ok := config.OriginOwner(origin)
-	if !ok {
+	if _, ok := config.OriginOwner(origin); !ok {
 		return false
 	}
-	for _, owner := range owners {
-		if owner == tenantID {
-			return true
-		}
+	if !allowHeaderOverride && config.OriginIsAmbiguous(origin) {
+		return false
 	}
-	return false
+	return true
 }
 
-func staticHostAllowed(request *http.Request, config tenants.Config) bool {
-	host, port := tenants.ExtractHostPort(request)
-	if host == "" {
+func headerOverrideAllowed(request *http.Request, config tenants.Config) bool {
+	override := strings.TrimSpace(request.Header.Get(tenantHeaderName))
+	if override == "" {
 		return false
 	}
-	owners := config.MatchOwners(host, port)
-	if len(owners) == 0 {
-		return false
+	if strings.Contains(override, "://") {
+		if config.OriginIsAmbiguous(override) {
+			return false
+		}
+		_, ok := config.OriginOwner(override)
+		return ok
 	}
-	if len(owners) == 1 {
-		return true
-	}
+	_, ok := config.TenantByID(tenants.TenantID(override))
+	return ok
+}
+
+func staticOriginAllowed(request *http.Request, config tenants.Config) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
 		return true
 	}
-	tenantID, ok := config.OriginOwner(origin)
-	if !ok {
-		return false
-	}
-	for _, owner := range owners {
-		if owner == tenantID {
-			return true
-		}
-	}
-	return false
+	_, ok := config.OriginOwner(origin)
+	return ok
 }
 
 func zapLoggerMiddleware(logger *zap.Logger) gin.HandlerFunc {

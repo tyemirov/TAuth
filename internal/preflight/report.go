@@ -22,6 +22,7 @@ const (
 	endpointContractVersion    = "tauth.http.v1"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
+	errorCodeValidateCORS      = "preflight.validate_cors"
 	errorCodeBuildRegistry     = "preflight.build_registry"
 	errorCodeRefreshStoreCheck = "preflight.refresh_store"
 	errorCodeBuildServiceInfo  = "preflight.build_service_info"
@@ -40,9 +41,10 @@ type effectiveConfigPayload struct {
 }
 
 type serverPayload struct {
-	EnableCORS                 bool     `json:"enable_cors"`
-	CORSAllowedOrigins         []string `json:"cors_allowed_origins"`
-	EnableTenantHeaderOverride bool     `json:"enable_tenant_header_override"`
+	EnableCORS                  bool     `json:"enable_cors"`
+	CORSAllowedOrigins          []string `json:"cors_allowed_origins"`
+	CORSAllowedOriginExceptions []string `json:"cors_allowed_origin_exceptions"`
+	EnableTenantHeaderOverride  bool     `json:"enable_tenant_header_override"`
 }
 
 type tenantPayload struct {
@@ -65,12 +67,12 @@ type tenantPayload struct {
 	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
 }
 
-// BuildRedactedReport builds a preflight report with redacted hostnames.
+// BuildRedactedReport builds a preflight report with redacted origins.
 func BuildRedactedReport(configPath string) ([]byte, error) {
 	return buildReport(configPath, preflight.RedactionModeRedacted)
 }
 
-// BuildFullReport builds a preflight report with full hostnames.
+// BuildFullReport builds a preflight report with full origins.
 func BuildFullReport(configPath string) ([]byte, error) {
 	return buildReport(configPath, preflight.RedactionModeFull)
 }
@@ -83,6 +85,9 @@ func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error
 	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
 	if tenantErr != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeLoadTenants, tenantErr)
+	}
+	if corsErr := appconfig.ValidateCORSAllowlist(config.Server, tenantConfig); corsErr != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeValidateCORS, corsErr)
 	}
 	registry, registryErr := buildTenantRegistry(config, tenantConfig)
 	if registryErr != nil {
@@ -132,9 +137,10 @@ type configReporter struct {
 func (reporter configReporter) Build(mode preflight.RedactionMode) (json.RawMessage, error) {
 	payload := effectiveConfigPayload{
 		Server: serverPayload{
-			EnableCORS:                 bool(reporter.config.Server.EnableCORS),
-			CORSAllowedOrigins:         append([]string(nil), reporter.config.Server.CORSAllowedOrigins...),
-			EnableTenantHeaderOverride: bool(reporter.config.Server.EnableTenantHeaderOverride),
+			EnableCORS:                  bool(reporter.config.Server.EnableCORS),
+			CORSAllowedOrigins:          append([]string(nil), reporter.config.Server.CORSAllowedOrigins...),
+			CORSAllowedOriginExceptions: append([]string(nil), reporter.config.Server.CORSAllowedOriginExceptions...),
+			EnableTenantHeaderOverride:  bool(reporter.config.Server.EnableTenantHeaderOverride),
 		},
 		Tenants: buildTenantPayloads(reporter.tenantConfig, reporter.registry, mode),
 	}

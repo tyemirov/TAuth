@@ -15,7 +15,7 @@ const (
 	testSessionCookieName = "app_session_demo"
 	testRefreshCookieName = "app_refresh_demo"
 	testSigningKey        = "demo-signing-key"
-	testAllowedHost       = "demo.localhost"
+	testAllowedHost       = "https://demo.localhost"
 )
 
 func writeConfigFile(testingHandle *testing.T, contents string) string {
@@ -34,6 +34,8 @@ server:
   database_url: "{{DB_URL}}"
   enable_cors: true
   cors_allowed_origins:
+    - "https://accounts.google.com"
+  cors_allowed_origin_exceptions:
     - "https://accounts.google.com"
   enable_tenant_header_override: true
 
@@ -70,9 +72,10 @@ type testEffectiveConfigPayload struct {
 }
 
 type testServerPayload struct {
-	EnableCORS                 bool     `json:"enable_cors"`
-	CORSAllowedOrigins         []string `json:"cors_allowed_origins"`
-	EnableTenantHeaderOverride bool     `json:"enable_tenant_header_override"`
+	EnableCORS                  bool     `json:"enable_cors"`
+	CORSAllowedOrigins          []string `json:"cors_allowed_origins"`
+	CORSAllowedOriginExceptions []string `json:"cors_allowed_origin_exceptions"`
+	EnableTenantHeaderOverride  bool     `json:"enable_tenant_header_override"`
 }
 
 type testTenantPayload struct {

@@ -33,12 +33,14 @@ server:
   cors_allowed_origins:
     - "https://one.example"
     - "https://two.example"
+  cors_allowed_origin_exceptions:
+    - "https://accounts.google.com"
   enable_tenant_header_override: "true"
 
 tenants:
   - id: "demo"
     display_name: "Demo"
-    allowed_hosts: ["demo.localhost"]
+    allowed_hosts: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "demo-tenant-key"
     cookie_domain: "demo.localhost"
@@ -63,6 +65,9 @@ tenants:
 	if !config.Server.EnableCORS || len(config.Server.CORSAllowedOrigins) != 2 {
 		testingHandle.Fatalf("expected CORS origins to be parsed")
 	}
+	if len(config.Server.CORSAllowedOriginExceptions) != 1 {
+		testingHandle.Fatalf("expected CORS origin exceptions to be parsed")
+	}
 	if !config.Server.EnableTenantHeaderOverride {
 		testingHandle.Fatalf("expected header override to be enabled")
 	}
@@ -78,7 +83,7 @@ server:
 
 tenants:
   - id: "demo"
-    allowed_hosts: ["demo.localhost"]
+    allowed_hosts: ["https://demo.localhost"]
     google_web_client_id: "demo-client"
     jwt_signing_key: "demo-tenant-key"
     cookie_domain: "demo.localhost"

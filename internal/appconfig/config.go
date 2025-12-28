@@ -19,6 +19,12 @@ const ErrorCodeInvalidConfigFile = "config.invalid_config_file"
 // ErrorCodeMissingTenants is returned when no tenants are defined.
 const ErrorCodeMissingTenants = "config.missing_tenants"
 
+// ErrorCodeInvalidCORSOrigin is returned when a CORS origin is malformed.
+const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
+
+// ErrorCodeCORSOriginNotAllowed is returned when a CORS origin is not allowed.
+const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
+
 // ConfigSchemaVersion identifies the config.yaml schema version.
 const ConfigSchemaVersion = "tauth.config.v1"
 
@@ -36,11 +42,12 @@ type ApplicationConfig struct {
 
 // ServerSettings describe server-level configuration settings.
 type ServerSettings struct {
-	ListenAddr                 string   `yaml:"listen_addr"`
-	DatabaseURL                string   `yaml:"database_url"`
-	EnableCORS                 YamlBool `yaml:"enable_cors"`
-	CORSAllowedOrigins         []string `yaml:"cors_allowed_origins"`
-	EnableTenantHeaderOverride YamlBool `yaml:"enable_tenant_header_override"`
+	ListenAddr                  string   `yaml:"listen_addr"`
+	DatabaseURL                 string   `yaml:"database_url"`
+	EnableCORS                  YamlBool `yaml:"enable_cors"`
+	CORSAllowedOrigins          []string `yaml:"cors_allowed_origins"`
+	CORSAllowedOriginExceptions []string `yaml:"cors_allowed_origin_exceptions"`
+	EnableTenantHeaderOverride  YamlBool `yaml:"enable_tenant_header_override"`
 }
 
 // YamlBool supports bool or string YAML values.

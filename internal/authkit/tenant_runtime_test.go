@@ -63,7 +63,7 @@ func TestResolveTenantIDUsesResolvedTenantFromContext(t *testing.T) {
 			{
 				ID:                "context-tenant",
 				DisplayName:       "Context Tenant",
-				AllowedHosts:      []string{"context.localhost"},
+				AllowedHosts:      []string{"https://context.localhost"},
 				GoogleWebClientID: "client-id",
 				JWTSigningKey:     "signing-key",
 				CookieDomain:      "",
@@ -101,7 +101,7 @@ func TestResolveTenantIDUsesResolvedTenantFromContext(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/resolved", nil)
-	request.Host = "context.localhost"
+	request.Header.Set("Origin", "https://context.localhost")
 	router.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {

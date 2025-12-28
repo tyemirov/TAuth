@@ -12,7 +12,7 @@ tenants:
   - id: "notes"
     display_name: "Gravity Notes"
     allowed_hosts:
-      - "localhost"
+      - "http://localhost"
       - "http://localhost:8000"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
     jwt_signing_key: "${TAUTH_NOTES_JWT_SIGNING_KEY}"
@@ -27,7 +27,7 @@ tenants:
   - id: "mpr-sites"
     display_name: "MPR Sites"
     allowed_hosts:
-      - "localhost"
+      - "http://localhost"
       - "http://localhost:4173"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"
     jwt_signing_key: "${TAUTH_MPR_JWT_SIGNING_KEY}"

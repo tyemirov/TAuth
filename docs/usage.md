@@ -48,7 +48,7 @@ Key notes:
 - **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains. Leave the field blank to emit host-only cookies during `localhost` development (browsers reject `Domain=localhost`).
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
 - **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
-- **Shared hosts**: If two tenants intentionally share the same host (typical for localhost demos), add each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `allowed_hosts`. TAuth inspects the request `Origin` header to resolve the tenant automatically. You can still enable `enable_tenant_header_override` and send `X-TAuth-Tenant` when you want to override the origin mapping manually.
+- **Shared origins**: If two tenants intentionally share the same origin (typical for localhost demos), add each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `allowed_hosts`. TAuth inspects the request `Origin` header to resolve the tenant automatically. You can still enable `enable_tenant_header_override` and send `X-TAuth-Tenant` when you want to override the origin mapping manually.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
@@ -71,7 +71,6 @@ tenants:
   - id: "prod"
     display_name: "Production Tenant"
     allowed_hosts:
-      - "auth.example.com"
       - "https://app.example.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
@@ -173,7 +172,7 @@ Call `initAuthClient` once during startup, after the script loads. The `baseUrl`
   setAuthTenantId("tenant-admin");
   initAuthClient({
     baseUrl: "https://auth.example.com",
-    tenantId: "demo", // optional override for shared-host dev setups
+    tenantId: "demo", // optional override for shared-origin dev setups
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -233,7 +232,7 @@ The helper:
 
 ### 4.5 Selecting a tenant explicitly
 
-Most deployments rely on hostnames to resolve tenants. When multiple tenants intentionally share the same host (for example, several apps pointing at `localhost:8080`), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls with either your explicit `tenantId` or, when omitted, the current page origin so shared-host setups continue to function even if certain requests omit `Origin`. You can still pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
+Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls with either your explicit `tenantId` or, when omitted, the current page origin so shared-origin setups continue to function even if certain requests omit `Origin`. You can still pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
 
 ```js
 initAuthClient({
@@ -244,7 +243,7 @@ initAuthClient({
 });
 ```
 
-The helper automatically attaches `X-TAuth-Tenant: team-blue` (or the current page origin when no ID is supplied) to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate hosts when possible). The override never bypasses host validation — TAuth still checks that the HTTP `Host` header appears in *some* tenant definition and rejects requests from unlisted hosts even if the header is present.
+The helper automatically attaches `X-TAuth-Tenant: team-blue` (or the current page origin when no ID is supplied) to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected.
 
 ---
 
@@ -255,7 +254,7 @@ TAuth assumes a GIS **Web** client using the popup flow. A nonce protects each s
 ### 5.1 Configure GIS
 
 1. Create (or reuse) a Google OAuth Web client.
-2. Add all product origins (for example `https://app.example.com`) and the TAuth origin (for example `https://auth.example.com`) to **Authorized JavaScript origins**.
+2. Add all product origins (for example `https://app.example.com`) to **Authorized JavaScript origins**.
 3. Load the GIS script:
 
    ```html
@@ -522,4 +521,4 @@ Use this checklist when integrating:
   - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
-- When multiple tenants share the same host, list each frontend origin under `allowed_hosts` so TAuth can resolve the tenant from the `Origin` header. You can still override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper automatically sends `X-TAuth-Tenant` whenever you opt into an explicit override, and now falls back to the page origin when no tenant ID is provided.
+- When multiple tenants share the same origin, list each frontend origin under `allowed_hosts` so TAuth can resolve the tenant from the `Origin` header. You can still override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper automatically sends `X-TAuth-Tenant` whenever you opt into an explicit override, and now falls back to the page origin when no tenant ID is provided.
