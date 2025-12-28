@@ -6,6 +6,7 @@
 - `tauth.js` exposes nonce issuance and Google credential exchange helpers for client integrations.
 - Require explicit base URL in `initAuthClient`; remove script-origin inference in the auth client.
 - Added GitHub Pages deployment workflow for the `web/` directory.
+- Rebuilt the docs landing page with a new neon layout, deep dive sections, palette suggestions, and GitHub/Docs/Community footer links.
 
 ### Improvements ⚙️
 - Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` and `/mpr-sites.js` for better GitHub Pages compatibility.

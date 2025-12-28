@@ -22,7 +22,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
 - [x] [TA-110] Add a GitHub Pages landing page under `docs/index.html` with a dark neon theme, hero CTA + code snippet, feature cards, deep-dive sections, docs links, and palette suggestions. — Added `docs/index.html` with the requested structure, copy, and palette guidance for GitHub Pages hosting.
 - [x] [TA-111] Integrate the mpr-ui footer component into the GitHub Pages landing page. — Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
 
-- [ ] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
+- [x] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth
   Style it visually and structurally.
   Follow these principles:
   • Hero section with bold product tagline, subheading, primary CTA, and screenshot/code example
@@ -43,7 +43,7 @@ Core endpoints are /auth/nonce, /auth/google, /auth/refresh, /auth/logout, and /
  
   Light/dark palette suggestions
   Keep everything production-grade and concise.
-  Use GitHub as a hosting solution (an index.html file under docs/)
+  Use GitHub as a hosting solution (an index.html file under docs/) — Rebuilt docs landing layout, copy, and neon styling with palette suggestions, updated footer links, and added a Puppeteer regression test for the new sections.
 
 ## Improvements (212–299)
 
