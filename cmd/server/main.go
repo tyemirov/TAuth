@@ -253,7 +253,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	router.GET("/tauth.js", serveStaticJSHandler(tenantConfig, "tauth.js"))
-	router.GET("/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))

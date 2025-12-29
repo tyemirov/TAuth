@@ -37,13 +37,13 @@ if (!puppeteer) {
     const page = await browser.newPage();
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
-    await page.waitForSelector("#siteHeader", {
+    await page.waitForSelector("#demo-header", {
       visible: true,
       timeout: 5000,
     });
 
     const headerState = await page.evaluate(() => {
-      const headerHost = document.querySelector("#siteHeader");
+      const headerHost = document.querySelector("#demo-header");
       if (!headerHost) {
         return null;
       }
@@ -66,7 +66,7 @@ if (!puppeteer) {
       "expected header to span the viewport width",
     );
 
-    const navLinkStates = await page.$$eval("#siteHeader nav a", (nodes) =>
+    const navLinkStates = await page.$$eval("#demo-header nav a", (nodes) =>
       nodes.map((node) => ({
         target: node.getAttribute("target"),
         rel: node.getAttribute("rel") || "",
@@ -85,7 +85,7 @@ if (!puppeteer) {
     await delay(120);
 
     const topAfterScroll = await page.evaluate(() => {
-      const headerHost = document.querySelector("#siteHeader");
+      const headerHost = document.querySelector("#demo-header");
       if (!headerHost) {
         return null;
       }

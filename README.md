@@ -93,25 +93,18 @@ Host the binary behind TLS (or terminate TLS at your load balancer) so responses
 
 ### Run the demo with Docker Compose (local quick-start)
 
-We ship a compose example under `examples/docker-compose` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the repository’s `web/` directory on port `8000`.
+We ship a compose example under `examples/tauth-demo` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the demo assets on port `8000`. The TAuth service itself serves only API endpoints plus `/tauth.js`.
 
-1. `cd examples/docker-compose`
-2. Copy and edit the environment template:
-
-   ```bash
-   cp .env.tauth.example .env.tauth
-   # set the per-tenant TAUTH_GOOGLE_WEB_CLIENT_ID*/TAUTH_*_JWT_SIGNING_KEY values
-   ```
-
-3. Copy the config template and replace the placeholder Google OAuth Web client ID with one that covers `http://localhost:8000` and `http://localhost:8080` (or keep the environment variable reference if you prefer):
+1. `cd examples/tauth-demo`
+2. Update the environment file with your Google OAuth client ID and signing key:
 
    ```bash
-   cp config.yaml.example config.yaml
-   $EDITOR config.yaml
+   $EDITOR .env.tauth
    ```
 
+3. Review `config.yaml` to ensure the tenant origins and ports match your local setup.
 4. Build and start the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8080` via CORS).
+5. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8082` via CORS).
 
 The sample config now defines **two tenants** so you can exercise origin-based routing without touching `/etc/hosts`. Thanks to RFC 6761, any `*.localhost` name automatically resolves to `127.0.0.1`, so both tenants work out of the box:
 
@@ -162,7 +155,7 @@ The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes t
    <div id="googleSignIn"></div>
    ```
 
-3. **Fetch and attach a nonce before prompting Google.** Use `POST /auth/nonce`, call `google.accounts.id.initialize({ nonce, client_id, ux_mode: "popup" })`, and render the button programmatically (see `prepareGoogleSignIn` above or `web/demo.html`).
+3. **Fetch and attach a nonce before prompting Google.** Use `POST /auth/nonce`, call `google.accounts.id.initialize({ nonce, client_id, ux_mode: "popup" })`, and render the button programmatically (see `prepareGoogleSignIn` above or `examples/tauth-demo/index.html`).
 4. **Exchange the credential without redirecting.** When GIS invokes your callback, post `{ google_id_token, nonce_token }` to `https://tauth.mprlab.com/auth/google` (or your hosted base URL) with `credentials: "include"` so TAuth can mint cookies.
 
 ### Quick verification checklist
@@ -173,7 +166,7 @@ The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes t
 - Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
 - Call `/api/me` and verify it returns the signed-in profile.
 
-> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/docker-compose/config.yaml.example`. Replace it with your own value before sharing the stack beyond local testing.
+> **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/tauth-demo/.env.tauth`. Replace it with your own value before sharing the stack beyond local testing.
 
 ### Example `/me` payload
 

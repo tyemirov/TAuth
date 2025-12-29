@@ -4,12 +4,18 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const DEMO_HTML_PATH = path.join(__dirname, "..", "web", "demo.html");
+const DEMO_HTML_PATH = path.join(
+  __dirname,
+  "..",
+  "examples",
+  "tauth-demo",
+  "index.html",
+);
 
 test("demo renders the static footer content", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes('id="landing-footer"'),
+    html.includes('id="page-footer"'),
     "Expected demo to declare the footer element",
   );
   assert.ok(

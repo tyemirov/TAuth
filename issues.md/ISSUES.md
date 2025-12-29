@@ -142,6 +142,8 @@ Analyze the issue and deploy the fix
   Removed mpr-ui assets/tests/docs wiring and switched demos to plain tauth.js + Google Identity Services wiring.
 - [x] [TA-253] Demo bootstrap now waits for tauth.js readiness before wiring GIS; docs no longer describe a `/demo` endpoint.
   Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
+- [x] [TA-353] Serve only the API endpoints and `/tauth.js` from TAuth; remove demo assets and site catalog helpers.
+  Dropped `/mpr-sites.js`, removed `web/demo.html`, moved demo browser tests to the `examples/tauth-demo` page, and documented that demos are hosted separately.
 
 ## Maintenance (418–499)
 

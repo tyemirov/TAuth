@@ -17,7 +17,7 @@ Browser <─(HttpOnly cookies)── TAuth ──(refresh token persistence)─�
 ├─ internal/
 │  ├─ authkit/                 # Domain logic: routes, JWT helpers, refresh stores
 │  └─ web/                     # Demo user store, CORS middleware, static file serving
-└─ web/                        # Embeddable tauth.js + demo HTML
+└─ web/                        # Embeddable tauth.js helper
 ```
 
 All Go packages under `internal/` are private; only the CLI is exported.
@@ -36,6 +36,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | GET    | `/tauth.js` | Serve the client helper                        | `200` JavaScript                            |
 
 These endpoints are implemented only by the TAuth server. Consuming applications should call them, not host copies.
+TAuth serves no other static assets; demo pages live in the repository under `examples/` and are hosted separately for local development.
 
 ### 3.2 Cookies
 

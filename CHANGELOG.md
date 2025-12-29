@@ -9,13 +9,14 @@
 - Rebuilt the docs landing page with a new neon layout, deep dive sections, palette suggestions, and GitHub/Docs/Community footer links.
 
 ### Improvements ⚙️
-- Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` and `/mpr-sites.js` for better GitHub Pages compatibility.
+- Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` for better GitHub Pages compatibility.
 - Static browser helpers no longer infer the API host from the script origin.
 - Updated docs, examples, and tests to reflect the rename and new base URL requirements.
 - Improved shared database helpers and persistent stores for users and nonces with database storage enabled.
 - `/me` endpoint now uses JWT claims and better handles refresh flow failures.
 - Added test coverage for auth-client nonce and credential exchange helpers.
 - Relaxed origin checks for static auth-client serving on shared hosts to support Safari/WebKit.
+- Removed the legacy `/mpr-sites.js` asset and demo HTML from service assets so only `/tauth.js` ships with the API.
 
 ### Bug Fixes 🐛
 - Removed legacy auth-client server route.
