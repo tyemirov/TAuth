@@ -145,6 +145,14 @@ function assertHeader(call, headerName, expectedValue) {
   );
 }
 
+function assertMissingHeader(call, headerName) {
+  assert.equal(
+    call.headers && call.headers[headerName],
+    undefined,
+    `expected ${headerName} header to be omitted`,
+  );
+}
+
 test("auth client authenticates when /me succeeds", async () => {
   const profile = {
     user_id: "user-123",
@@ -173,7 +181,7 @@ test("auth client authenticates when /me succeeds", async () => {
   assert.equal(unauthenticatedCount, 0);
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assert.deepEqual(events, []);
 });
 
@@ -208,9 +216,9 @@ test("auth client attempts refresh before authenticating", async () => {
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
   assert.equal(fetch.calls[2].url, "https://example.com/me");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
-  assertHeader(fetch.calls[2], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[2], "X-Client");
   assert.deepEqual(events, ["refreshed"]);
 });
 
@@ -240,9 +248,50 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.equal(fetch.calls.length, 2);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
+});
+
+test("auth client clears cached profile when session refresh fails", async () => {
+  const profile = {
+    user_id: "cached-user",
+    user_email: "cached@example.com",
+    display: "Cached User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  let unauthenticatedCount = 0;
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.deepEqual(context.getCurrentUser(), profile);
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(fetch.calls.length, 3);
+  assert.equal(fetch.calls[1].url, "https://example.com/me");
+  assert.equal(fetch.calls[2].url, "https://example.com/auth/refresh");
 });
 
 test("auth client sends tenant header derived from location origin when unset", async () => {
@@ -688,6 +737,55 @@ test("auth client syncs profile on refreshed broadcast", async () => {
   assert.equal(authenticatedProfiles.length, 2);
   assert.deepEqual(authenticatedProfiles[1], refreshedProfile);
   assert.equal(fetch.calls.length, 2);
+});
+
+test("auth client clears state when peer refresh lacks a profile", async () => {
+  const fetchResponses = [
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ];
+  const fetchCalls = [];
+  let dispatchBroadcast = function () {};
+  let callCount = 0;
+  const fetch = async (requestUrl, options = {}) => {
+    callCount += 1;
+    fetchCalls.push({
+      url: requestUrl,
+      method: options.method || "GET",
+      headers: options.headers || {},
+      credentials: options.credentials,
+    });
+    const response = fetchResponses[callCount - 1];
+    if (!response) {
+      throw new Error("unexpected fetch call in test");
+    }
+    if (callCount === 2) {
+      setTimeout(function () {
+        dispatchBroadcast("refreshed");
+      }, 0);
+    }
+    return createResponse(response.status, response.body);
+  };
+  const context = await loadAuthClient(fetch);
+  dispatchBroadcast = function (message) {
+    context.__dispatchBroadcast(message);
+  };
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {
+      throw new Error("should not authenticate with missing profile");
+    },
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(fetchCalls.length, 3);
 });
 
 test("auth client clears state on logged_out broadcast", async () => {

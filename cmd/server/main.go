@@ -204,7 +204,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 		return resolverErr
 	}
 
-	defaultTenantConfig := registry.DefaultConfig()
 	var nonceStore authkit.NonceStore
 	if databaseURL != "" {
 		persistentNonceStore, nonceStoreErr := authkit.NewDatabaseNonceStoreWithTTLResolver(shutdownContext, databaseURL, func(tenantID string) time.Duration {
@@ -254,25 +253,10 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	router.GET("/tauth.js", serveStaticJSHandler(tenantConfig, "tauth.js"))
-	router.GET("/mpr-sites.js", serveStaticJSHandler(tenantConfig, "mpr-sites.js"))
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
-
-	tenantRouter.GET("/demo/config.js", func(contextGin *gin.Context) {
-		clientID := defaultTenantConfig.GoogleWebClientID
-		if tenant, ok := tenants.TenantFromContext(contextGin); ok {
-			clientID = tenant.GoogleWebClientID()
-		}
-		web.ServeDemoConfig(contextGin, web.DemoConfig{
-			GoogleClientID: clientID,
-		})
-	})
-
-	tenantRouter.GET("/demo", func(contextGin *gin.Context) {
-		contextGin.File("web/demo.html")
-	})
 
 	authkit.MountAuthRoutes(tenantRouter, registry, userStore, refreshStore, nonceStore)
 

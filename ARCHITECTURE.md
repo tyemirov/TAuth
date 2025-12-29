@@ -17,7 +17,7 @@ Browser <─(HttpOnly cookies)── TAuth ──(refresh token persistence)─�
 ├─ internal/
 │  ├─ authkit/                 # Domain logic: routes, JWT helpers, refresh stores
 │  └─ web/                     # Demo user store, CORS middleware, static file serving
-└─ web/                        # Embeddable tauth.js + demo HTML
+└─ web/                        # Embeddable tauth.js helper
 ```
 
 All Go packages under `internal/` are private; only the CLI is exported.
@@ -34,9 +34,9 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
 | GET    | `/tauth.js` | Serve the client helper                        | `200` JavaScript                            |
-| GET    | `/demo`         | Static demo page (local development)                   | `200` HTML                                  |
 
 These endpoints are implemented only by the TAuth server. Consuming applications should call them, not host copies.
+TAuth serves no other static assets; demo pages live in the repository under `examples/` and are hosted separately for local development.
 
 ### 3.2 Cookies
 
@@ -108,7 +108,7 @@ Nonce handling rules:
 - Echo the same nonce back to `/auth/google` as `nonce_token`. Requests without a matching nonce fail with `auth.login.nonce_mismatch`.
 - Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`). TAuth accepts hashed or raw forms.
 - Fetch a fresh nonce for every sign-in attempt. Nonces are invalidated once consumed and cannot be reused.
-- The default helpers (`tauth.js`, the `mpr-ui` header) already implement these invariants and emit events when authentication state changes.
+- The default helper (`tauth.js`) already implements these invariants; custom UIs should mirror the same flow when wiring auth state.
 
 ## 4. Components
 

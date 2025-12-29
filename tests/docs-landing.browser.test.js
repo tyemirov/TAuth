@@ -49,12 +49,9 @@ if (!puppeteer) {
     const featureCount = await page.$$eval(".feature-card", (nodes) => nodes.length);
     assert.ok(featureCount >= 3, "Expected at least three feature cards");
 
-    const footerLinksValue = await page.$eval(
-      "mpr-footer",
-      (node) => node.getAttribute("links-collection") || "",
+    const footerLabels = await page.$$eval(".site-footer__links a", (nodes) =>
+      nodes.map((node) => node.textContent || ""),
     );
-    const footerLinks = JSON.parse(footerLinksValue);
-    const footerLabels = footerLinks.links.map((link) => link.label);
     assert.deepEqual(footerLabels, ["GitHub", "Docs", "Community"]);
   });
 }

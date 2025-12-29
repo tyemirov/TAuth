@@ -256,36 +256,6 @@ func TestHandleWhoAmIInvalidClaimsType(t *testing.T) {
 	}
 }
 
-func TestServeDemoConfig(t *testing.T) {
-	t.Parallel()
-	gin.SetMode(gin.TestMode)
-
-	router := gin.New()
-	router.GET("/demo/config.js", func(contextGin *gin.Context) {
-		ServeDemoConfig(contextGin, DemoConfig{
-			GoogleClientID: "client-123",
-		})
-	})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/demo/config.js", nil)
-	router.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200 for demo config, got %d", recorder.Code)
-	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "client-123") {
-		t.Fatalf("expected client id in payload: %q", body)
-	}
-	if !strings.Contains(body, "__TAUTH_DEMO_CONFIG") {
-		t.Fatalf("expected global assignment in payload: %q", body)
-	}
-	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/javascript; charset=utf-8" {
-		t.Fatalf("unexpected content type header: %q", contentType)
-	}
-}
-
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()

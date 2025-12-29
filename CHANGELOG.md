@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Bug Fixes 🐛
+- Ensure `initAuthClient` clears stale auth state when a peer refresh broadcast arrives without a profile, with regression coverage.
+
+### Testing 🧪
+- Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
+
 ## [v0.9.5]
 
 ### Features ✨
@@ -9,13 +17,14 @@
 - Rebuilt the docs landing page with a new neon layout, deep dive sections, palette suggestions, and GitHub/Docs/Community footer links.
 
 ### Improvements ⚙️
-- Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` and `/mpr-sites.js` for better GitHub Pages compatibility.
+- Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` for better GitHub Pages compatibility.
 - Static browser helpers no longer infer the API host from the script origin.
 - Updated docs, examples, and tests to reflect the rename and new base URL requirements.
 - Improved shared database helpers and persistent stores for users and nonces with database storage enabled.
 - `/me` endpoint now uses JWT claims and better handles refresh flow failures.
 - Added test coverage for auth-client nonce and credential exchange helpers.
 - Relaxed origin checks for static auth-client serving on shared hosts to support Safari/WebKit.
+- Removed the legacy `/mpr-sites.js` asset and demo HTML from service assets so only `/tauth.js` ships with the API.
 
 ### Bug Fixes 🐛
 - Removed legacy auth-client server route.
@@ -25,6 +34,15 @@
 - Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 - Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
+- Removed UI framework assets from the server package; the demo now loads mpr-ui from the CDN while TAuth serves only `/tauth.js`.
+- Removed UI-specific headers from `tauth.js` so the helper remains frontend-agnostic.
+- Removed forced `crossorigin` on demo script loaders and set a default demo client ID so the mpr-ui header renders in local demo runs.
+- Ensured the tauth demo loads tauth.js before the mpr-ui bundle and GIS so header auth wiring stays consistent.
+- Aligned the demo CORS allowlist with the Docker Compose frontend port (8080) so preflight OPTIONS requests succeed.
+- Restored the demo baseline styling (font + margins) using mpr-ui tokens so the page matches the expected mpr-ui look.
+- Cleared stale auth-client profiles when session bootstrap fails so mpr-ui logout reliably resets state.
+- Added a cache-busting query string for local demo tauth.js loads so updated bundles are picked up during development.
+- Aligned tools/mpr-ui docs and demo wiring with `/tauth.js`, and updated the mpr-ui auth header to prefer tauth.js helpers with a base-url fallback.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.
@@ -32,12 +50,17 @@
 - Added regression coverage for tenant configuration validation related to cookie name collisions.
 - Added auth-client tests for nonce and credential exchange helpers.
 - Added a GitHub Actions workflow that runs frontend tests and type checks on frontend changes.
+- Added regression coverage for the tauth demo config bootstrap sequencing.
+- Added regression coverage for demo CORS and tenant origin configuration.
+- Added regression coverage for clearing cached profiles when refresh fails.
+- Added regression coverage for the demo tauth.js cache-busting loader.
 
 ### Docs 📚
 - Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.
 - Documented the explicit base URL requirement for `tauth.js` initialization.
 - Updated issue tracker with new features and bug fixes related to auth client renaming and API changes.
 - Enhanced usage guides and examples to reflect new deployment and integration workflows.
+- Removed stale `/demo` endpoint documentation; demos now live solely in repository assets.
 
 ## [v0.9.0]
 
@@ -50,7 +73,7 @@
 - Migrated preflight package to reusable `github.com/tyemirov/utils/preflight`; enhanced Viper adapter to support YAML + env bindings.
 - Auth client now auto-detects base URL and exposes `getAuthEndpoints()`; sessionvalidator loader supports tenant config from `config.yaml`.
 - Updated Dockerfile to add `/web` volume for web assets; updated dependencies and module namespace.
-- Added GitHub Pages landing page with dark neon theme, presentation layout, mpr-ui footer integration, and removed palette suggestions.
+- Added GitHub Pages landing page with dark neon theme, presentation layout, and a refreshed footer.
 - Increased test coverage to 95%, adding sandbox-safe integration tests and expanded coverage on multiple modules.
 
 ### Bug Fixes 🐛
@@ -87,7 +110,7 @@
 ### Docs 📚
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
 - TA-110: Added a GitHub Pages landing page at `docs/index.html` with the new presentation layout and CTAs.
-- TA-111: Swapped the landing page footer to the mpr-ui `<mpr-footer>` custom element.
+- TA-111: Swapped the landing page footer to a custom component.
 - TA-112: Removed the palette suggestions section from the landing page.
 
 ### Improvements ⚙️
@@ -134,7 +157,7 @@
 - TA-334: Reconfigured the Docker image to run as root, pre-create `/data`, and declare the data volume so SQLite-backed refresh stores can write without permission errors when running under Docker Compose.
 - TA-330: Replaced the refresh token store’s SQLite dialector with the CGO-free `github.com/glebarez/sqlite`, refreshed tests to enforce the driver selection, and documented the change so Docker images run without enabling CGO.
 - TA-200: Introduced GORM-backed refresh token store supporting Postgres and SQLite, added mandatory `--database_url` / `APP_DATABASE_URL`, removed pgx-specific store and legacy compatibility, updated docs, and added SQLite lifecycle tests.
-- TA-100: Delivered the reusable mpr-ui auth header, surfaced `avatar_url` across login and `/me` payloads, refreshed demo rendering, and documented dataset/event contracts for downstream consumers.
+- TA-100: Delivered a reusable auth header, surfaced `avatar_url` across login and `/me` payloads, refreshed demo rendering, and documented dataset/event contracts for downstream consumers.
 - TA-101: Published `pkg/sessionvalidator` with smart constructor, token/request helpers, and Gin middleware; refactored server middleware to reuse it and added focused unit tests plus docs.
 - TA-201: Added `LoadServerConfig` smart constructor invoked from Cobra `PreRunE`, validating TTLs, cookie names, and required identifiers before the server boots with structured `config.*` errors.
 - TA-202: Introduced injectable Google token validator and clock providers, updated auth routes to reuse the singleton, and wrapped JWT mint failures with stable error codes for observability.
@@ -142,8 +165,8 @@
 - TA-204: Wired zap logger and metrics recorder into auth routes, logging warnings/errors with stable codes and incrementing counters across login, refresh, and logout flows.
 - TA-205: Added TLS-backed end-to-end Go tests covering `/auth/google → /auth/refresh → /auth/logout`, tampered sessions, and revoked-token scenarios to raise integration coverage.
 - TA-206: Delivered Puppeteer Core coverage that verifies `auth-client.js` login/refresh/logout event dispatch using a mocked backend; gated on `CHROMIUM_PATH` for local runs.
-- TA-207: Adopted the mpr-ui footer component in the demo, exposed `renderFooter`/`mprFooter` helpers, and hydrated the footer using the CDN-hosted library.
-- TA-208: Enforced nonce issuance/validation for Google Sign-In via `/auth/nonce`, injected the issued nonce into Google Identity Services initializers (mpr-ui bundles + demo), refreshed docs/examples, expanded Node coverage for nonce provisioning/failure paths, and dropped the bundled `mpr-ui.js` in favour of the CDN-hosted build.
+- TA-207: Adopted a shared footer component in the demo, exposed helper hooks, and hydrated the footer using the CDN-hosted library.
+- TA-208: Enforced nonce issuance/validation for Google Sign-In via `/auth/nonce`, injected the issued nonce into Google Identity Services initializers, refreshed docs/examples, expanded Node coverage for nonce provisioning/failure paths, and dropped the bundled UI helper in favour of the CDN-hosted build.
 - TA-210: Reauthored the demo page with LoopAware’s footer contract, reused the Bootstrap 5.3 + Icons stack and public theme script, mirrored the product catalogue, and strengthened Node/browser tests around theme persistence and dropup ARIA semantics.
 - TA-300: Improved CLI configuration errors to enumerate missing keys, ensuring absent tenant `jwt_signing_key` values are reported precisely.
 - TA-301: Reworked `/api/me` to source claims from the session context, return persisted profiles with expiry metadata, surface `ErrUserProfileNotFound`, and emit zap warnings for anomalies.

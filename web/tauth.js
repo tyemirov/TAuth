@@ -1,5 +1,4 @@
 // @ts-check
-/* @mprlab/auth-client */
 (function () {
   /**
    * @typedef {Record<string, unknown>} UserProfile
@@ -523,7 +522,7 @@
         {
           method: "GET",
           credentials: "include",
-          headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
+          headers: withTenantHeader(),
         },
       );
       if (!response.ok) {
@@ -572,16 +571,19 @@
     }
   }
 
+  /**
+   * @returns {Promise<{ received: boolean, profile: UserProfile | null }>}
+   */
   async function waitForPeerRefresh() {
     var received = await waitForBroadcast(
       broadcastEventRefreshed,
       broadcastWaitTimeoutMs,
     );
     if (!received) {
-      return false;
+      return { received: false, profile: null };
     }
-    await syncProfileFromServer();
-    return true;
+    var profile = await syncProfileFromServer();
+    return { received: true, profile: profile };
   }
 
   /**
@@ -605,11 +607,8 @@
           return;
         }
       }
-      var peerRecovered = await waitForPeerRefresh();
-      if (peerRecovered) {
-        return;
-      }
-      if (runtime.userProfile) {
+      var peerResult = await waitForPeerRefresh();
+      if (peerResult.profile) {
         return;
       }
       applyUnauthenticated();
@@ -626,10 +625,7 @@
   async function apiFetch(inputUrl, initOptions) {
     var merged = Object.assign({}, initOptions || {});
     merged.credentials = "include";
-    merged.headers = Object.assign(
-      { "X-Client": "mprlab-ui" },
-      merged.headers || {},
-    );
+    merged.headers = Object.assign({}, merged.headers || {});
     ensureBroadcastListener();
     var execute = function () {
       return fetch(inputUrl, merged);
@@ -650,8 +646,8 @@
         flushPendingRequests(null);
         return retryResponse;
       }
-      var peerRecovered = await waitForPeerRefresh();
-      if (peerRecovered) {
+      var peerResult = await waitForPeerRefresh();
+      if (peerResult.received) {
         var recoveredResponse = await execute();
         flushPendingRequests(null);
         return recoveredResponse;

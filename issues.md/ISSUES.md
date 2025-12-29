@@ -59,6 +59,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Added helper functions + tests for nonce and credential exchange with tenant headers.
 - [x] [TA-340] Collapse CLI/env configuration into a single YAML file.
   Replaced the Viper-based flag/env matrix with `config.yaml`, added a dedicated loader (`--config` / `TAUTH_CONFIG_FILE`), updated Compose examples, docs, and tests to consume the unified file, and exposed `tenants.LoadConfigFromDocument` for embedding.
+- [x] [TA-354] Style demos exclusively with mpr-ui components loaded from the CDN.
+  Rebuilt `examples/tauth-demo/index.html` with semantic markup + mpr-ui elements, adjusted demo scripts to load the bundle after `tauth.js`, and updated demo tests to match the new component structure.
 
 
 ## BugFixes (352–399)
@@ -108,7 +110,7 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
 - [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
   Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
-- [ ] [TA-253] Unable to log into Google using examples/tauth-demo
+- [x] [TA-253] Unable to log into Google using examples/tauth-demo
 JS Console
 ```
 Feature Policy: Skipping unsupported feature name “identity-credentials-get”. client:271:37
@@ -131,7 +133,31 @@ tauth-1         | {"level":"info","ts":1766959087.0502923,"caller":"server/main.
 tauth-1         | {"level":"info","ts":1766959094.2427735,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000038485}
 tauth-1         | {"level":"info","ts":1766959094.253639,"caller":"server/main.go:353","msg":"http","method":"POST","path":"/auth/nonce","status":403,"ip":"192.168.65.1","elapsed":0.000017546}
 ```
+Resolved: aligned demo tenant allowed_hosts with the frontend origin ports and synced the demo Google client ID from `/demo/config.js` so the header uses the backend-configured client ID.
 Analyze the issue and deploy the fix
+
+- [x] [TA-253] Demo header rendering fails when the mpr-ui bundle loads before the demo config.
+  Added `/demo/config.json`, delayed the mpr-ui bundle load until config + tauth.js are ready, and added regression coverage for the demo bootstrap.
+- [x] [TA-253] TAuth should not expose demo-specific endpoints.
+  Removed demo config routes from the server and moved demo configuration into the example assets.
+- [x] [TA-253] TAuth should not depend on mpr-ui.
+  Removed mpr-ui assets/tests/docs wiring and switched demos to plain tauth.js + Google Identity Services wiring.
+- [x] [TA-253] Demo bootstrap now waits for tauth.js readiness before wiring GIS; docs no longer describe a `/demo` endpoint.
+  Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
+- [x] [TA-353] Serve only the API endpoints and `/tauth.js` from TAuth; remove demo assets and site catalog helpers.
+  Dropped `/mpr-sites.js`, removed `web/demo.html`, moved demo browser tests to the `examples/tauth-demo` page, and documented that demos are hosted separately.
+- [x] [TA-355] Remove UI-specific markers from tauth.js.
+  Dropped the `X-Client` header and any mpr-ui identifiers so the helper stays UI-agnostic.
+- [x] [TA-356] Demo header failed to render when GIS/tauth.js scripts were blocked.
+  Added a default demo Google client ID and removed the forced `crossorigin` attribute so mpr-ui and GIS load without CORS errors.
+- [x] [TA-357] Demo CORS allowlist excluded the ghttp port used by the Docker Compose demo.
+  Aligned the demo tenant `allowed_hosts` and CORS env origins to port 8080, and added regression coverage for the demo config files.
+- [x] [TA-358] Demo base styling did not apply, leaving default margins and serif fonts.
+  Added a local demo stylesheet using mpr-ui tokens to set the page baseline (font, margin, background) and styled the status panel using semantic selectors.
+- [x] [TA-359] mpr-ui logout left stale session state in tauth.js.
+  Removed the cached-profile fallback so `initAuthClient` clears stale sessions after logout, and added regression coverage for the refresh-fail bootstrap path.
+- [x] [TA-360] Demo cached an outdated tauth.js bundle, preventing logout state updates.
+  Added a cache-busting query string for local demo tauth.js loads and regression coverage for the demo loader script.
 
 ## Maintenance (418–499)
 
@@ -159,7 +185,9 @@ Analyze the issue and deploy the fix
 - [x] [TA-417] Add frontend to CI.
   add a trigger for the frontend changes to github workflow. run npm tests and linters when fronted files change
   Added a frontend test workflow that runs `npm run verify` and `npm test` on frontend path changes.
-
+- [x] [TA-418] Update the mpr-ui docs/demo/code in tools/mpr-ui/ to align with tauth.js
+  Updated docs and demo HTML to load `/tauth.js` (no `crossorigin`), documented base-url requirements, and taught the mpr-ui auth header to prefer `tauth.js` helpers (nonce/exchange/logout) while falling back
+  to direct fetches; `initAuthClient` now receives the page origin when `base-url` is omitted.
 
 ## Planning
 *do not implement yet*
@@ -167,3 +195,8 @@ Analyze the issue and deploy the fix
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
   `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
 
+- [x] [TA-418] Clear stale auth state when a peer refresh broadcast arrives without a profile.
+  `initAuthClient` now treats peer refreshes that fail to load `/me` as unauthenticated, and regression coverage reproduces the broadcast-without-profile case.
+
+- [x] [TA-418] Add a browser integration test to cover demo sign-out.
+  Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.

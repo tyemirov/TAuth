@@ -26,7 +26,7 @@ Once TAuth is running for a given registrable domain, any app on that domain (or
 The `tauth` binary lives under `cmd/server` in this repository. You can:
 
 - Build it directly with Go (e.g. `go build ./cmd/server`), or
-- Use the provided Docker setup in `examples/docker-compose` for a local stack.
+ - Use the provided Docker setup in `examples/tauth-demo` for a local stack.
 
 The binary reads configuration exclusively from a YAML file (default `config.yaml`). Use `tauth --config=/path/to/config.yaml` or export `TAUTH_CONFIG_FILE` to point at a different file; no other environment variables or CLI flags are required.
 
@@ -92,13 +92,11 @@ When migrating an existing tenant that expects the legacy cookie names (`app_ses
 
 For a full local stack (TAuth + demo UI) without installing Go:
 
-1. `cd examples/docker-compose`
-2. Copy the environment template: `cp .env.tauth.example .env.tauth`
-3. Copy the config template: `cp config.yaml.example config.yaml`
-4. Edit `.env.tauth` (set `TAUTH_CONFIG_FILE=/config/config.yaml` and the per-tenant `TAUTH_GOOGLE_WEB_CLIENT_ID*` / `TAUTH_*_JWT_SIGNING_KEY` values).
-5. Edit `config.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8080` (or keep the environment variable references from step 4).
-6. Start the stack: `docker compose up --build`
-7. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8080`.
+1. `cd examples/tauth-demo`
+2. Edit `.env.tauth` (set `TAUTH_CONFIG_FILE=/config/config.yaml` and the per-tenant `TAUTH_GOOGLE_WEB_CLIENT_ID` / `TAUTH_JWT_SIGNING_KEY` values).
+3. Review `config.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8082` (or keep the environment variable references from step 2).
+4. Start the stack: `docker compose up --build`
+5. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8082`.
 
 Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
 
@@ -370,20 +368,15 @@ Clients should treat this as “signed out” regardless of prior state.
 Serves the browser helper described in section 4.
 
 - Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
-- Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `logout` on `window`.
+- Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `getAuthEndpoints`, `requestNonce`, `exchangeGoogleCredential`, `logout`, and `setAuthTenantId` on `window`.
+- The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
 
-### 6.7 `GET /demo`
-
-Optional demo page shipped with the repository. Intended for local development only.
-
----
-
-## 6.8 Validating sessions from other Go services
+## 6.7 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
 If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
 
-### 6.8.1 Basic validator setup
+### 6.7.1 Basic validator setup
 
 Add the module to your Go service and construct a validator at startup:
 
@@ -412,7 +405,7 @@ The configuration mirrors your TAuth deployment:
 
 The constructor validates configuration up front and returns a typed error if required fields are missing.
 
-### 6.8.2 Gin middleware integration
+### 6.7.2 Gin middleware integration
 
 For Gin-based services, use the built-in middleware to protect routes and attach claims to the context:
 

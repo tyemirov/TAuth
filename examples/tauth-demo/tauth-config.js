@@ -4,32 +4,189 @@
 
 const PRODUCTION_TAUTH_BASE_URL = 'https://tauth.mprlab.com';
 const LOCAL_TAUTH_BASE_URL = 'http://localhost:8082';
-const DEMO_TENANT_ID = 'mpr-sites';
+const AUTH_CLIENT_FILENAME = 'tauth.js';
+const AUTH_CLIENT_CACHE_BUSTER_PARAM = 'v';
+const LOCALHOST_URL_PREFIXES = Object.freeze([
+  'http://localhost',
+  'http://127.0.0.1',
+  'https://localhost',
+  'https://127.0.0.1',
+]);
 const AUTH_CLIENT_SCRIPT_ATTRIBUTE = 'data-tauth-auth-client';
-const currentHostname = window.location.hostname || '';
-const resolvedBaseUrl = currentHostname.endsWith('.mprlab.com')
-  ? PRODUCTION_TAUTH_BASE_URL
-  : LOCAL_TAUTH_BASE_URL;
-const authClientUrl = `${resolvedBaseUrl.replace(/\/+$/, '')}/tauth.js`;
+const MPR_UI_SCRIPT_ATTRIBUTE = 'data-mpr-ui-bundle';
+const GIS_SCRIPT_ATTRIBUTE = 'data-gis-client';
+const AUTH_CLIENT_READY_HANDLE = '__TAUTH_AUTH_CLIENT_READY__';
+const DEFAULT_TENANT_ID = 'mpr-sites';
+const FALLBACK_GOOGLE_CLIENT_ID = '';
+const MPR_UI_SCRIPT_URL =
+  'https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js';
+const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
+const DEMO_HEADER_ID = 'demo-header';
+const DEMO_CONFIG_WARNING =
+  'tauth demo: set a valid Google OAuth Web client ID in examples/tauth-demo/demo-config.js.';
+const INIT_FAILURE_WARNING = 'tauth demo: unable to initialize tauth.js.';
 
-/**
- * Update `googleClientId` to your Google OAuth Web client ID.
- * Keep it in sync with `APP_GOOGLE_WEB_CLIENT_ID` in `.env.tauth`
- * so the frontend and TAuth share the same configuration.
- * The default `baseUrl` targets tauth.mprlab.com on hosted deployments and falls back to the
- * docker-compose container URL for local demos.
- */
-window.TAUTH_DEMO_CONFIG = Object.freeze({
-  googleClientId: '991677581607-r0dj8q6irjagipali0jpca7nfp8sfj9r.apps.googleusercontent.com',
-  baseUrl: resolvedBaseUrl,
-});
-
-if (!document.querySelector(`script[${AUTH_CLIENT_SCRIPT_ATTRIBUTE}]`)) {
-  const authClientScript = document.createElement('script');
-  authClientScript.defer = true;
-  authClientScript.src = authClientUrl;
-  authClientScript.crossOrigin = 'anonymous';
-  authClientScript.setAttribute(AUTH_CLIENT_SCRIPT_ATTRIBUTE, 'true');
-  authClientScript.setAttribute('data-tenant-id', DEMO_TENANT_ID);
-  document.head.appendChild(authClientScript);
+function normalizeGoogleClientId(candidateId) {
+  if (typeof candidateId !== 'string') {
+    return FALLBACK_GOOGLE_CLIENT_ID;
+  }
+  const trimmed = candidateId.trim();
+  return trimmed ? trimmed : FALLBACK_GOOGLE_CLIENT_ID;
 }
+
+function normalizeTenantId(candidateId) {
+  if (typeof candidateId !== 'string') {
+    return DEFAULT_TENANT_ID;
+  }
+  const trimmed = candidateId.trim();
+  return trimmed ? trimmed : DEFAULT_TENANT_ID;
+}
+
+function resolveBaseUrl(candidateConfig) {
+  const incoming =
+    candidateConfig && typeof candidateConfig === 'object' ? candidateConfig : {};
+  if (typeof incoming.baseUrl === 'string') {
+    const trimmed = incoming.baseUrl.trim();
+    if (trimmed) {
+      return trimmed.replace(/\/+$/, '');
+    }
+  }
+  const currentHostname = window.location.hostname || '';
+  const resolvedBaseUrl = currentHostname.endsWith('.mprlab.com')
+    ? PRODUCTION_TAUTH_BASE_URL
+    : LOCAL_TAUTH_BASE_URL;
+  return resolvedBaseUrl.replace(/\/+$/, '');
+}
+
+function resolveDemoConfig(candidateConfig) {
+  const incoming =
+    candidateConfig && typeof candidateConfig === 'object' ? candidateConfig : {};
+  return Object.freeze({
+    baseUrl: resolveBaseUrl(incoming),
+    googleClientId: normalizeGoogleClientId(incoming.googleClientId),
+    tenantId: normalizeTenantId(incoming.tenantId),
+  });
+}
+
+function updateDemoConfig(nextConfig, options) {
+  const resolvedConfig = resolveDemoConfig(nextConfig);
+  window.TAUTH_DEMO_CONFIG = resolvedConfig;
+  const shouldWarnOnMissing =
+    options && typeof options.warnOnMissingClientId === 'boolean'
+      ? options.warnOnMissingClientId
+      : false;
+  if (shouldWarnOnMissing && !resolvedConfig.googleClientId) {
+    // eslint-disable-next-line no-console
+    console.warn(DEMO_CONFIG_WARNING);
+  }
+  return resolvedConfig;
+}
+
+function createScriptLoadError(scriptUrl) {
+  return new Error(`tauth-demo.script_load_failed: ${scriptUrl}`);
+}
+
+function loadScriptOnce(scriptUrl, attributeName, attributeValues) {
+  const existingScript = document.querySelector(`script[${attributeName}]`);
+  if (existingScript) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const scriptElement = document.createElement('script');
+    scriptElement.defer = true;
+    scriptElement.src = scriptUrl;
+    scriptElement.setAttribute(attributeName, 'true');
+    if (attributeValues && typeof attributeValues === 'object') {
+      Object.entries(attributeValues).forEach(([attributeKey, attributeValue]) => {
+        scriptElement.setAttribute(attributeKey, String(attributeValue));
+      });
+    }
+    scriptElement.addEventListener('load', () => resolve());
+    scriptElement.addEventListener('error', () =>
+      reject(createScriptLoadError(scriptUrl))
+    );
+    const head = document.head || document.documentElement;
+    head.appendChild(scriptElement);
+  });
+}
+
+function shouldBypassAuthClientCache(baseUrl) {
+  if (typeof baseUrl !== 'string') {
+    return false;
+  }
+  const trimmedBaseUrl = baseUrl.trim();
+  if (!trimmedBaseUrl) {
+    return false;
+  }
+  return LOCALHOST_URL_PREFIXES.some((prefix) =>
+    trimmedBaseUrl.startsWith(prefix)
+  );
+}
+
+function buildAuthClientUrl(baseUrl) {
+  const normalizedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+  const trimmedBaseUrl = normalizedBaseUrl.replace(/\/+$/, '');
+  const authClientUrl = `${trimmedBaseUrl}/${AUTH_CLIENT_FILENAME}`;
+  if (!shouldBypassAuthClientCache(trimmedBaseUrl)) {
+    return authClientUrl;
+  }
+  return `${authClientUrl}?${AUTH_CLIENT_CACHE_BUSTER_PARAM}=${Date.now()}`;
+}
+
+function applyHeaderConfig(config) {
+  const header = document.getElementById(DEMO_HEADER_ID);
+  if (!header) {
+    return;
+  }
+  if (config.googleClientId) {
+    header.setAttribute('site-id', config.googleClientId);
+  }
+  if (config.baseUrl) {
+    header.setAttribute('base-url', config.baseUrl);
+  }
+}
+
+function loadMprUiBundle() {
+  return loadScriptOnce(MPR_UI_SCRIPT_URL, MPR_UI_SCRIPT_ATTRIBUTE, {
+    id: 'mpr-ui-bundle',
+  });
+}
+
+function loadGisClient() {
+  return loadScriptOnce(GIS_SCRIPT_URL, GIS_SCRIPT_ATTRIBUTE, {
+    async: 'true',
+  });
+}
+
+function loadUiDependencies() {
+  return loadMprUiBundle().then(() => loadGisClient());
+}
+
+function initDemoConfig() {
+  const resolvedConfig = updateDemoConfig(window.__TAUTH_DEMO_CONFIG, {
+    warnOnMissingClientId: true,
+  });
+  applyHeaderConfig(resolvedConfig);
+  if (!resolvedConfig.googleClientId) {
+    // eslint-disable-next-line no-console
+    console.warn(DEMO_CONFIG_WARNING);
+  }
+  const authClientUrl = buildAuthClientUrl(resolvedConfig.baseUrl);
+  const authClientPromise = loadScriptOnce(authClientUrl, AUTH_CLIENT_SCRIPT_ATTRIBUTE, {
+    'data-tenant-id': resolvedConfig.tenantId,
+  });
+  window[AUTH_CLIENT_READY_HANDLE] = authClientPromise;
+  authClientPromise
+    .catch((error) => {
+      // eslint-disable-next-line no-console
+      console.warn(INIT_FAILURE_WARNING, error);
+    });
+  authClientPromise
+    .finally(() => loadUiDependencies())
+    .catch((error) => {
+      // eslint-disable-next-line no-console
+      console.warn(INIT_FAILURE_WARNING, error);
+    });
+}
+
+initDemoConfig();
