@@ -59,6 +59,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Added helper functions + tests for nonce and credential exchange with tenant headers.
 - [x] [TA-340] Collapse CLI/env configuration into a single YAML file.
   Replaced the Viper-based flag/env matrix with `config.yaml`, added a dedicated loader (`--config` / `TAUTH_CONFIG_FILE`), updated Compose examples, docs, and tests to consume the unified file, and exposed `tenants.LoadConfigFromDocument` for embedding.
+- [x] [TA-354] Style demos exclusively with mpr-ui components loaded from the CDN.
+  Rebuilt `examples/tauth-demo/index.html` with semantic markup + mpr-ui elements, adjusted demo scripts to load the bundle after `tauth.js`, and updated demo tests to match the new component structure.
 
 
 ## BugFixes (352–399)

@@ -36,49 +36,27 @@ if (!puppeteer) {
     const page = await browser.newPage();
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
-    await page.waitForSelector("#page-footer", {
+    await page.waitForSelector("mpr-footer", {
       visible: true,
       timeout: 5000,
     });
 
-    const footerText = await page.$eval(
-      "#page-footer",
-      (node) => node.textContent || "",
-    );
-    assert.match(footerText, /Built by/i);
-    assert.match(footerText, /Marco Polo Research Lab/);
-
     const footerState = await page.evaluate(() => {
-      const footerRoot = document.querySelector("#page-footer");
+      const footerRoot = document.querySelector("mpr-footer");
       if (!footerRoot) {
         return null;
       }
-      const rect = footerRoot.getBoundingClientRect();
-      const style = window.getComputedStyle(footerRoot);
       return {
-        width: rect.width,
-        viewportWidth: window.innerWidth,
-        right: rect.right,
+        prefixText: footerRoot.getAttribute("prefix-text"),
+        links: footerRoot.getAttribute("links"),
+        sticky: footerRoot.getAttribute("sticky"),
       };
     });
     assert.ok(footerState, "Expected footer root element to exist");
-    assert.ok(
-      Math.abs(footerState.width - footerState.viewportWidth) <= 2,
-      "Expected footer to span the viewport width",
-    );
-    assert.ok(
-      footerState.right <= footerState.viewportWidth + 1,
-      "Expected footer to align with the viewport edge",
-    );
+    assert.match(footerState.prefixText || "", /Built by/i);
+    assert.match(footerState.prefixText || "", /Marco Polo Research Lab/);
+    assert.ok(footerState.links, "Expected footer links to be configured");
+    assert.equal(footerState.sticky, "true", "Expected footer to opt into sticky layout");
 
-    const linkStates = await page.$$eval(
-      "#page-footer a",
-      (nodes) =>
-        nodes.map((node) => ({
-          target: node.getAttribute("target"),
-          rel: node.getAttribute("rel") || "",
-        })),
-    );
-    assert.ok(linkStates.length > 0, "Expected footer links to be present");
   });
 }

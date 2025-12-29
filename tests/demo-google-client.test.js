@@ -11,20 +11,26 @@ const DEMO_HTML_PATH = path.join(
   "tauth-demo",
   "index.html",
 );
-test("demo renders GIS sign-in wiring for tauth.js", async () => {
+test("demo renders mpr-ui header wiring for tauth.js", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes(
-      'src="https://accounts.google.com/gsi/client"',
-    ),
-    "Expected demo to load the Google Identity Services script",
+    html.includes("mpr-ui.css"),
+    "Expected demo to load the mpr-ui stylesheet",
   );
   assert.ok(
-    html.includes('id="google-signin-container"'),
-    "Expected demo to declare the Google sign-in container",
+    html.includes("<mpr-header"),
+    "Expected demo to declare the mpr-ui header element",
   );
   assert.ok(
-    html.includes('id="signout-button"'),
-    "Expected demo to declare the header sign-out button",
+    html.includes('login-path="/auth/google"'),
+    "Expected demo to declare the login endpoint on the header",
+  );
+  assert.ok(
+    html.includes('nonce-path="/auth/nonce"'),
+    "Expected demo to declare the nonce endpoint on the header",
+  );
+  assert.ok(
+    html.includes('logout-path="/auth/logout"'),
+    "Expected demo to declare the logout endpoint on the header",
   );
 });

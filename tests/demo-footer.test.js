@@ -15,8 +15,8 @@ const DEMO_HTML_PATH = path.join(
 test("demo renders the static footer content", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes('id="page-footer"'),
-    "Expected demo to declare the footer element",
+    html.includes("<mpr-footer"),
+    "Expected demo to declare the mpr-ui footer element",
   );
   assert.ok(
     html.includes("Built by Marco Polo Research Lab"),

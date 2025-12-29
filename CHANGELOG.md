@@ -26,8 +26,8 @@
 - Require `X-TAuth-Tenant` overrides to match request origins and require explicit overrides when Origin is missing.
 - Reject missing Origin at the origin gate unless a valid `X-TAuth-Tenant` override is supplied.
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
-- Removed UI framework dependencies from demos/docs; the demo now boots tauth.js + GIS directly from local config.
-- Ensured the tauth demo waits for tauth.js to load before rendering GIS and restored base typography for the header UI.
+- Removed UI framework assets from the server package; the demo now loads mpr-ui from the CDN while TAuth serves only `/tauth.js`.
+- Ensured the tauth demo loads tauth.js before the mpr-ui bundle and GIS so header auth wiring stays consistent.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

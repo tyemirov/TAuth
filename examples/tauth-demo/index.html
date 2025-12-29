@@ -4,272 +4,94 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TAuth Demo (Docker Compose)</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
+    />
     <script defer src="./demo-config.js"></script>
     <script defer src="./tauth-config.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <style>
-      :root {
-        --card-background: rgba(255, 255, 255, 0.9);
-        --card-border: rgba(0, 0, 0, 0.1);
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        font-family: "Helvetica Neue", Arial, sans-serif;
-        color: #0f172a;
-        background: #f8fafc;
-        line-height: 1.6;
-      }
-      body.theme-dark {
-        --card-background: rgba(18, 21, 23, 0.8);
-        --card-border: rgba(255, 255, 255, 0.2);
-        color: #f8fafc;
-        background: #0b1120;
-      }
-      main {
-        max-width: 960px;
-        margin: 0 auto;
-        padding: 2rem 1.5rem 3rem;
-      }
-      .demo-header {
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-        background: #ffffff;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
-      }
-      body.theme-dark .demo-header {
-        background: rgba(15, 23, 42, 0.96);
-        border-bottom-color: rgba(255, 255, 255, 0.12);
-        box-shadow: 0 18px 32px rgba(8, 11, 20, 0.6);
-      }
-      .demo-header__inner {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 0.9rem 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
-        flex-wrap: wrap;
-      }
-      .demo-header__brand {
-        font-weight: 700;
-        font-size: 1rem;
-        letter-spacing: 0.02em;
-      }
-      .demo-header__brand a {
-        color: inherit;
-        text-decoration: none;
-      }
-      .demo-header__nav {
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-      .demo-header__nav a {
-        color: inherit;
-        text-decoration: none;
-        font-weight: 600;
-      }
-      .demo-header__nav a:hover {
-        text-decoration: underline;
-      }
-      .demo-header__actions {
-        margin-left: auto;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-      }
-      #google-signin-container {
-        display: flex;
-        align-items: center;
-        min-height: 40px;
-      }
-      .demo-signout-button {
-        border: 0;
-        border-radius: 999px;
-        padding: 0.55rem 1.25rem;
-        background: #0c67ff;
-        color: #fff;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .demo-signout-button:hover {
-        background: #0842a8;
-      }
-      body[data-auth-state='unauthenticated'] .demo-signout-button,
-      body[data-auth-state='loading'] .demo-signout-button {
-        display: none;
-      }
-      body[data-auth-state='authenticated'] #google-signin-container {
-        display: none;
-      }
-      .demo-section {
-        margin-top: 2rem;
-      }
-      .session-card {
-        border: 1px solid var(--card-border);
-        border-radius: 0.75rem;
-        padding: 1.25rem;
-        background: var(--card-background);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-      }
-      .session-card__profile {
-        display: flex;
-        gap: 1rem;
-        align-items: center;
-      }
-      .session-card__profile ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-      }
-      .session-card__profile li + li {
-        margin-top: 0.25rem;
-      }
-      .session-card__avatar {
-        width: 56px;
-        height: 56px;
-        border-radius: 999px;
-        object-fit: cover;
-      }
-      .session-card__expires {
-        margin-top: 1rem;
-        font-size: 0.95rem;
-        color: var(--mpr-color-text-muted, #555);
-      }
-      .demo-footer {
-        margin-top: 3rem;
-        padding: 2rem 1.5rem;
-        border-top: 1px solid rgba(0, 0, 0, 0.08);
-      }
-      body.theme-dark .demo-footer {
-        border-top-color: rgba(255, 255, 255, 0.16);
-      }
-      .demo-footer__inner {
-        max-width: 960px;
-        margin: 0 auto;
-        display: flex;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 1rem;
-        font-size: 0.95rem;
-      }
-      .demo-footer__links a {
-        color: inherit;
-        text-decoration: none;
-        margin-right: 1rem;
-      }
-      .demo-footer__links a:hover {
-        text-decoration: underline;
-      }
-      ol {
-        padding-left: 1.25rem;
-      }
-      ol li + li {
-        margin-top: 0.5rem;
-      }
-    </style>
   </head>
-  <body class="theme-light" data-demo-palette="default" data-auth-state="loading">
-    <header class="demo-header" id="demo-header">
-      <div class="demo-header__inner">
-        <div class="demo-header__brand">
-          <a href="https://mprlab.com/">Marco Polo Research Lab</a>
-        </div>
-        <nav class="demo-header__nav" aria-label="Demo navigation">
-          <a
-            href="https://github.com/tyemirov/TAuth/blob/master/docs/usage.md"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Docs
-          </a>
-          <a
-            href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Architecture
-          </a>
-        </nav>
-        <div class="demo-header__actions">
-          <div id="google-signin-container" aria-live="polite"></div>
-          <button
-            type="button"
-            class="demo-signout-button"
-            id="signout-button"
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
-    </header>
+  <body>
+    <mpr-header
+      id="demo-header"
+      brand-label="Marco Polo Research Lab"
+      brand-href="https://mprlab.com/"
+      nav-links='[
+        { "label": "Docs", "href": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank" },
+        { "label": "Architecture", "href": "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md", "target": "_blank" }
+      ]'
+      login-path="/auth/google"
+      logout-path="/auth/logout"
+      nonce-path="/auth/nonce"
+      settings="true"
+      settings-label="Settings"
+      sticky="true"
+    ></mpr-header>
+
     <main>
-      <h1>Docker Compose demo</h1>
-      <p>
-        This page connects a plain HTML header to a local TAuth service running
-        under Docker Compose. Sign in with Google, observe the authenticated
-        profile state, and use the sign-out control to clear your session.
-      </p>
+      <mpr-band category="platform">
+        <section aria-labelledby="demo-title">
+          <h1 id="demo-title">Docker Compose demo</h1>
+          <p>
+            This page connects the <code>mpr-header</code> web component to a
+            local TAuth service running under Docker Compose. Sign in with
+            Google, observe the authenticated profile state, and use the header
+            sign-out control to clear your session.
+          </p>
+        </section>
 
-      <section aria-labelledby="profile-status-title" class="demo-section">
-        <h2 id="profile-status-title">Current session</h2>
-        <p>
-          Google sign-in requests are exchanged with
-          <code>http://localhost:8082</code>. The helper script provided by TAuth
-          monitors <code>/me</code> and <code>/auth/refresh</code> to keep a
-          valid browser session without storing tokens in localStorage.
-        </p>
-        <div
-          class="session-card"
-          data-demo-auth-status
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <p>Awaiting connection to the TAuth service…</p>
-        </div>
-      </section>
+        <section aria-labelledby="profile-status-title">
+          <h2 id="profile-status-title">Current session</h2>
+          <p>
+            Google sign-in requests are exchanged with
+            <code>http://localhost:8082</code>. The helper script provided by
+            TAuth monitors <code>/me</code> and <code>/auth/refresh</code> to
+            keep a valid browser session without storing tokens in localStorage.
+          </p>
+          <div data-demo-auth-status aria-live="polite" aria-atomic="true">
+            <p>Awaiting connection to the TAuth service…</p>
+          </div>
+        </section>
 
-      <section aria-labelledby="instructions-title" class="demo-section">
-        <h2 id="instructions-title">How it works</h2>
-        <ol>
-          <li>The frontend is served by the gHTTP container on port 8000.</li>
-          <li>
-            TAuth listens on port 8082, issuing HttpOnly session cookies scoped
-            to <code>localhost</code>.
-          </li>
-          <li>
-          The demo requests <code>/auth/nonce</code> before rendering the Google
-          button and exchanges the returned credential via
-          <code>/auth/google</code>.
-          </li>
-          <li>
-            The embedded <code>tauth.js</code> helper refreshes sessions by
-            calling <code>/auth/refresh</code> whenever a request returns 401.
-          </li>
-          <li>
-            Clicking <strong>Sign out</strong> invokes <code>/auth/logout</code>
-            and resets the profile snapshot below.
-          </li>
-        </ol>
-      </section>
+        <section aria-labelledby="instructions-title">
+          <h2 id="instructions-title">How it works</h2>
+          <ol>
+            <li>The frontend is served by the gHTTP container on port 8000.</li>
+            <li>
+              TAuth listens on port 8082, issuing HttpOnly session cookies scoped
+              to <code>localhost</code>.
+            </li>
+            <li>
+              The header component requests <code>/auth/nonce</code> before
+              rendering the Google button and exchanges the returned credential
+              via <code>/auth/google</code>.
+            </li>
+            <li>
+              The embedded <code>tauth.js</code> helper refreshes sessions by
+              calling <code>/auth/refresh</code> whenever a request returns 401.
+            </li>
+            <li>
+              Clicking <strong>Sign out</strong> invokes
+              <code>/auth/logout</code> and resets the profile snapshot below.
+            </li>
+          </ol>
+        </section>
+      </mpr-band>
     </main>
 
-    <footer class="demo-footer" id="page-footer">
-      <div class="demo-footer__inner">
-        <div>Built by Marco Polo Research Lab</div>
-        <div class="demo-footer__links">
-          <a href="#privacy">Privacy &amp; Terms</a>
-          <a href="https://github.com/tyemirov/TAuth">GitHub</a>
-        </div>
-      </div>
-    </footer>
-    <script defer src="./auth-ui.js"></script>
+    <mpr-footer
+      id="page-footer"
+      prefix-text="Built by Marco Polo Research Lab"
+      privacy-link-label="Privacy &amp; Terms"
+      privacy-link-href="#privacy"
+      toggle-label="Resources"
+      links='[
+        { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth", "target": "_blank", "rel": "noopener noreferrer" },
+        { "label": "Docs", "url": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank", "rel": "noopener noreferrer" },
+        { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions", "target": "_blank", "rel": "noopener noreferrer" }
+      ]'
+      sticky="true"
+    ></mpr-footer>
     <script defer src="./status-panel.js"></script>
   </body>
 </html>

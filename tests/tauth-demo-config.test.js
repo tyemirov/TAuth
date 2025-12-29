@@ -25,15 +25,8 @@ const DEMO_LOCAL_CONFIG_PATH = pathModule.join(
   "tauth-demo",
   "demo-config.js",
 );
-const DEMO_AUTH_UI_PATH = pathModule.join(
-  __dirname,
-  "..",
-  "examples",
-  "tauth-demo",
-  "auth-ui.js",
-);
 
-test("tauth demo loads local config and auth bootstrap scripts", async () => {
+test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
   const html = await fileSystem.readFile(DEMO_INDEX_PATH, "utf8");
   assert.ok(
     html.includes('<script defer src="./demo-config.js"></script>'),
@@ -44,12 +37,16 @@ test("tauth demo loads local config and auth bootstrap scripts", async () => {
     "Expected demo to load tauth-config.js",
   );
   assert.ok(
-    html.includes('<script defer src="./auth-ui.js"></script>'),
-    "Expected demo to load the auth UI bootstrap script",
+    html.includes("mpr-ui.css"),
+    "Expected demo to load mpr-ui CSS",
   );
   assert.ok(
-    html.includes('https://accounts.google.com/gsi/client'),
-    "Expected demo to load the Google Identity Services script",
+    html.includes("<mpr-header"),
+    "Expected demo to render the mpr-ui header element",
+  );
+  assert.ok(
+    html.includes("<mpr-footer"),
+    "Expected demo to render the mpr-ui footer element",
   );
 
   const configSource = await fileSystem.readFile(DEMO_CONFIG_PATH, "utf8");
@@ -65,11 +62,13 @@ test("tauth demo loads local config and auth bootstrap scripts", async () => {
     configSource.includes("__TAUTH_AUTH_CLIENT_READY__"),
     "Expected demo config to expose an auth client readiness handle",
   );
-
-  const authUiSource = await fileSystem.readFile(DEMO_AUTH_UI_PATH, "utf8");
   assert.ok(
-    authUiSource.includes("__TAUTH_AUTH_CLIENT_READY__"),
-    "Expected demo auth UI to wait for the auth client readiness handle",
+    configSource.includes("mpr-ui@latest/mpr-ui.js"),
+    "Expected demo config to load the mpr-ui bundle from the CDN",
+  );
+  assert.ok(
+    configSource.includes("accounts.google.com/gsi/client"),
+    "Expected demo config to load the Google Identity Services script",
   );
 
   const localConfigSource = await fileSystem.readFile(

@@ -12,14 +12,14 @@ const DEMO_HTML_PATH = path.join(
   "index.html",
 );
 
-test("demo exposes data-theme aware styling for layout panels", async () => {
+test("demo uses mpr-ui layout components for styling", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes("body.theme-dark"),
-    "Expected demo to declare dark-theme selectors on the body element",
+    html.includes("<mpr-band"),
+    "Expected demo to render the mpr-ui band component",
   );
   assert.ok(
-    html.includes("body.theme-dark .demo-header"),
-    "Expected demo to style key components when the dark theme is active",
+    html.includes("<mpr-header"),
+    "Expected demo to render the mpr-ui header component",
   );
 });

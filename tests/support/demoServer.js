@@ -11,14 +11,12 @@ async function startDemoServer() {
     authClientSource,
     demoConfigSource,
     authConfigSource,
-    authUiSource,
     statusPanelSource,
   ] = await Promise.all([
     fs.readFile(path.join(demoRoot, "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "demo-config.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "tauth-config.js"), "utf8"),
-    fs.readFile(path.join(demoRoot, "auth-ui.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "status-panel.js"), "utf8"),
   ]);
 
@@ -46,12 +44,6 @@ async function startDemoServer() {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(authConfigSource);
-      return;
-    }
-    if (method === "GET" && url === "/auth-ui.js") {
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      response.end(authUiSource);
       return;
     }
     if (method === "GET" && url === "/status-panel.js") {

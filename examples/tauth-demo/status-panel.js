@@ -33,32 +33,39 @@ function renderSession(profile) {
     host.append(title, details);
     return;
   }
-  const profileContainer = document.createElement('div');
-  profileContainer.classList.add('session-card__profile');
+  const title = document.createElement('h3');
+  title.textContent = 'Signed in';
+  const summary = document.createElement('p');
+  summary.textContent = `Session active for ${profile.display || 'Unknown user'}.`;
+  const details = document.createElement('dl');
+  const nameLabel = document.createElement('dt');
+  nameLabel.textContent = 'Name';
+  const nameValue = document.createElement('dd');
+  nameValue.textContent = profile.display || 'Unknown';
+  const emailLabel = document.createElement('dt');
+  emailLabel.textContent = 'Email';
+  const emailValue = document.createElement('dd');
+  emailValue.textContent = profile.user_email || 'Hidden';
+  const roleLabelElement = document.createElement('dt');
+  roleLabelElement.textContent = 'Roles';
+  const roleValue = document.createElement('dd');
+  roleValue.textContent = roleLabel;
+  details.append(
+    nameLabel,
+    nameValue,
+    emailLabel,
+    emailValue,
+    roleLabelElement,
+    roleValue
+  );
   if (profile.avatar_url) {
     const avatar = document.createElement('img');
-    avatar.classList.add('session-card__avatar');
     avatar.src = profile.avatar_url;
     avatar.alt = profile.display || 'Avatar';
-    profileContainer.append(avatar);
+    avatar.loading = 'lazy';
+    host.append(avatar);
   }
-  const list = document.createElement('ul');
-  const nameItem = document.createElement('li');
-  const nameLabel = document.createElement('strong');
-  nameLabel.textContent = 'Name:';
-  nameItem.append(nameLabel, document.createTextNode(` ${profile.display || 'Unknown'}`));
-  const emailItem = document.createElement('li');
-  const emailLabel = document.createElement('strong');
-  emailLabel.textContent = 'Email:';
-  emailItem.append(emailLabel, document.createTextNode(` ${profile.user_email || 'Hidden'}`));
-  const roleItem = document.createElement('li');
-  const roleLabelElement = document.createElement('strong');
-  roleLabelElement.textContent = 'Roles:';
-  roleItem.append(roleLabelElement, document.createTextNode(` ${roleLabel}`));
-  list.append(nameItem, emailItem, roleItem);
-  profileContainer.append(list);
   const expiryParagraph = document.createElement('p');
-  expiryParagraph.classList.add('session-card__expires');
   if (profile.expires) {
     const readableExpires = new Date(profile.expires).toLocaleString();
     const timeElement = document.createElement('time');
@@ -74,10 +81,9 @@ function renderSession(profile) {
       'Session cookie expiry unavailable (auto-refresh will keep you signed in until you sign out).';
   }
   const refreshParagraph = document.createElement('p');
-  refreshParagraph.classList.add('session-card__expires');
   refreshParagraph.textContent =
     'The refresh token keeps renewing this session in the background until you click Sign out or stop the stack.';
-  host.append(profileContainer, expiryParagraph, refreshParagraph);
+  host.append(title, summary, details, expiryParagraph, refreshParagraph);
 }
 
 function renderError(message) {
@@ -95,13 +101,13 @@ function renderError(message) {
 
 function initSessionPanel() {
   renderSession(typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null);
-  document.addEventListener('tauth:auth:authenticated', (event) => {
+  document.addEventListener('mpr-ui:auth:authenticated', (event) => {
     renderSession(event?.detail?.profile ?? null);
   });
-  document.addEventListener('tauth:auth:unauthenticated', () => {
+  document.addEventListener('mpr-ui:auth:unauthenticated', () => {
     renderSession(null);
   });
-  document.addEventListener('tauth:auth:error', (event) => {
+  document.addEventListener('mpr-ui:auth:error', (event) => {
     const code = event?.detail?.code;
     renderError(code ? String(code) : 'Unable to complete authentication.');
   });
