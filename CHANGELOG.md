@@ -34,6 +34,7 @@
 - Restored the demo baseline styling (font + margins) using mpr-ui tokens so the page matches the expected mpr-ui look.
 - Cleared stale auth-client profiles when session bootstrap fails so mpr-ui logout reliably resets state.
 - Added a cache-busting query string for local demo tauth.js loads so updated bundles are picked up during development.
+- Aligned tools/mpr-ui docs and demo wiring with `/tauth.js`, and updated the mpr-ui auth header to prefer tauth.js helpers with a base-url fallback.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.
