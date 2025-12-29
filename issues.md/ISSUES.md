@@ -148,6 +148,8 @@ Analyze the issue and deploy the fix
   Dropped `/mpr-sites.js`, removed `web/demo.html`, moved demo browser tests to the `examples/tauth-demo` page, and documented that demos are hosted separately.
 - [x] [TA-355] Remove UI-specific markers from tauth.js.
   Dropped the `X-Client` header and any mpr-ui identifiers so the helper stays UI-agnostic.
+- [x] [TA-356] Demo header failed to render when GIS/tauth.js scripts were blocked.
+  Added a default demo Google client ID and removed the forced `crossorigin` attribute so mpr-ui and GIS load without CORS errors.
 
 ## Maintenance (418–499)
 

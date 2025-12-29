@@ -87,7 +87,6 @@ function loadScriptOnce(scriptUrl, attributeName, attributeValues) {
     const scriptElement = document.createElement('script');
     scriptElement.defer = true;
     scriptElement.src = scriptUrl;
-    scriptElement.crossOrigin = 'anonymous';
     scriptElement.setAttribute(attributeName, 'true');
     if (attributeValues && typeof attributeValues === 'object') {
       Object.entries(attributeValues).forEach(([attributeKey, attributeValue]) => {

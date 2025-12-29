@@ -28,6 +28,7 @@
 - Enforce CORS allowlists to match tenant origins unless explicitly permitted via `cors_allowed_origin_exceptions`.
 - Removed UI framework assets from the server package; the demo now loads mpr-ui from the CDN while TAuth serves only `/tauth.js`.
 - Removed UI-specific headers from `tauth.js` so the helper remains frontend-agnostic.
+- Removed forced `crossorigin` on demo script loaders and set a default demo client ID so the mpr-ui header renders in local demo runs.
 - Ensured the tauth demo loads tauth.js before the mpr-ui bundle and GIS so header auth wiring stays consistent.
 
 ### Testing 🧪
