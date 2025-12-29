@@ -154,6 +154,8 @@ Analyze the issue and deploy the fix
   Aligned the demo tenant `allowed_hosts` and CORS env origins to port 8080, and added regression coverage for the demo config files.
 - [x] [TA-358] Demo base styling did not apply, leaving default margins and serif fonts.
   Added a local demo stylesheet using mpr-ui tokens to set the page baseline (font, margin, background) and styled the status panel using semantic selectors.
+- [x] [TA-359] mpr-ui logout left stale session state in tauth.js.
+  Removed the cached-profile fallback so `initAuthClient` clears stale sessions after logout, and added regression coverage for the refresh-fail bootstrap path.
 
 ## Maintenance (418–499)
 

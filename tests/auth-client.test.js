@@ -253,6 +253,47 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.deepEqual(events, []);
 });
 
+test("auth client clears cached profile when session refresh fails", async () => {
+  const profile = {
+    user_id: "cached-user",
+    user_email: "cached@example.com",
+    display: "Cached User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ]);
+  const context = await loadAuthClient(fetch, []);
+
+  let unauthenticatedCount = 0;
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.deepEqual(context.getCurrentUser(), profile);
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(fetch.calls.length, 3);
+  assert.equal(fetch.calls[1].url, "https://example.com/me");
+  assert.equal(fetch.calls[2].url, "https://example.com/auth/refresh");
+});
+
 test("auth client sends tenant header derived from location origin when unset", async () => {
   const fetch = createFetchWithQueue([
     { status: 401, body: {} },

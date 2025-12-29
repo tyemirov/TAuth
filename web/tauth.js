@@ -608,9 +608,6 @@
       if (peerRecovered) {
         return;
       }
-      if (runtime.userProfile) {
-        return;
-      }
       applyUnauthenticated();
     } catch (initializationError) {
       applyUnauthenticated();
