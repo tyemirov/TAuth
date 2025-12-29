@@ -100,6 +100,14 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
     configSource.includes("accounts.google.com/gsi/client"),
     "Expected demo config to load the Google Identity Services script",
   );
+  assert.ok(
+    configSource.includes("AUTH_CLIENT_CACHE_BUSTER_PARAM"),
+    "Expected demo config to define an auth-client cache buster",
+  );
+  assert.ok(
+    configSource.includes("Date.now"),
+    "Expected demo config to include a cache-busting timestamp",
+  );
 
   const localConfigSource = await fileSystem.readFile(
     DEMO_LOCAL_CONFIG_PATH,

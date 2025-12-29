@@ -4,6 +4,14 @@
 
 const PRODUCTION_TAUTH_BASE_URL = 'https://tauth.mprlab.com';
 const LOCAL_TAUTH_BASE_URL = 'http://localhost:8082';
+const AUTH_CLIENT_FILENAME = 'tauth.js';
+const AUTH_CLIENT_CACHE_BUSTER_PARAM = 'v';
+const LOCALHOST_URL_PREFIXES = Object.freeze([
+  'http://localhost',
+  'http://127.0.0.1',
+  'https://localhost',
+  'https://127.0.0.1',
+]);
 const AUTH_CLIENT_SCRIPT_ATTRIBUTE = 'data-tauth-auth-client';
 const MPR_UI_SCRIPT_ATTRIBUTE = 'data-mpr-ui-bundle';
 const GIS_SCRIPT_ATTRIBUTE = 'data-gis-client';
@@ -102,6 +110,29 @@ function loadScriptOnce(scriptUrl, attributeName, attributeValues) {
   });
 }
 
+function shouldBypassAuthClientCache(baseUrl) {
+  if (typeof baseUrl !== 'string') {
+    return false;
+  }
+  const trimmedBaseUrl = baseUrl.trim();
+  if (!trimmedBaseUrl) {
+    return false;
+  }
+  return LOCALHOST_URL_PREFIXES.some((prefix) =>
+    trimmedBaseUrl.startsWith(prefix)
+  );
+}
+
+function buildAuthClientUrl(baseUrl) {
+  const normalizedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+  const trimmedBaseUrl = normalizedBaseUrl.replace(/\/+$/, '');
+  const authClientUrl = `${trimmedBaseUrl}/${AUTH_CLIENT_FILENAME}`;
+  if (!shouldBypassAuthClientCache(trimmedBaseUrl)) {
+    return authClientUrl;
+  }
+  return `${authClientUrl}?${AUTH_CLIENT_CACHE_BUSTER_PARAM}=${Date.now()}`;
+}
+
 function applyHeaderConfig(config) {
   const header = document.getElementById(DEMO_HEADER_ID);
   if (!header) {
@@ -140,7 +171,7 @@ function initDemoConfig() {
     // eslint-disable-next-line no-console
     console.warn(DEMO_CONFIG_WARNING);
   }
-  const authClientUrl = `${resolvedConfig.baseUrl}/tauth.js`;
+  const authClientUrl = buildAuthClientUrl(resolvedConfig.baseUrl);
   const authClientPromise = loadScriptOnce(authClientUrl, AUTH_CLIENT_SCRIPT_ATTRIBUTE, {
     'data-tenant-id': resolvedConfig.tenantId,
   });

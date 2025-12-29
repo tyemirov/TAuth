@@ -156,6 +156,8 @@ Analyze the issue and deploy the fix
   Added a local demo stylesheet using mpr-ui tokens to set the page baseline (font, margin, background) and styled the status panel using semantic selectors.
 - [x] [TA-359] mpr-ui logout left stale session state in tauth.js.
   Removed the cached-profile fallback so `initAuthClient` clears stale sessions after logout, and added regression coverage for the refresh-fail bootstrap path.
+- [x] [TA-360] Demo cached an outdated tauth.js bundle, preventing logout state updates.
+  Added a cache-busting query string for local demo tauth.js loads and regression coverage for the demo loader script.
 
 ## Maintenance (418–499)
 
