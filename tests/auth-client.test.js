@@ -739,6 +739,55 @@ test("auth client syncs profile on refreshed broadcast", async () => {
   assert.equal(fetch.calls.length, 2);
 });
 
+test("auth client clears state when peer refresh lacks a profile", async () => {
+  const fetchResponses = [
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ];
+  const fetchCalls = [];
+  let dispatchBroadcast = function () {};
+  let callCount = 0;
+  const fetch = async (requestUrl, options = {}) => {
+    callCount += 1;
+    fetchCalls.push({
+      url: requestUrl,
+      method: options.method || "GET",
+      headers: options.headers || {},
+      credentials: options.credentials,
+    });
+    const response = fetchResponses[callCount - 1];
+    if (!response) {
+      throw new Error("unexpected fetch call in test");
+    }
+    if (callCount === 2) {
+      setTimeout(function () {
+        dispatchBroadcast("refreshed");
+      }, 0);
+    }
+    return createResponse(response.status, response.body);
+  };
+  const context = await loadAuthClient(fetch);
+  dispatchBroadcast = function (message) {
+    context.__dispatchBroadcast(message);
+  };
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {
+      throw new Error("should not authenticate with missing profile");
+    },
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(fetchCalls.length, 3);
+});
+
 test("auth client clears state on logged_out broadcast", async () => {
   const profile = {
     user_id: "logout-user",

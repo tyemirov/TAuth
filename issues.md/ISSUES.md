@@ -185,19 +185,18 @@ Analyze the issue and deploy the fix
 - [x] [TA-417] Add frontend to CI.
   add a trigger for the frontend changes to github workflow. run npm tests and linters when fronted files change
   Added a frontend test workflow that runs `npm run verify` and `npm test` on frontend path changes.
-- [ ] [TA-418] Update the mpr-ui docs/demo/code in tools/mpr-ui/ to align with tauth.js
-  - Docs still reference the old helper path: tools/mpr-ui/README.md, tools/mpr-ui/docs/integration-guide.md, and tools/mpr-ui/docs/demo-index-auth.md all point at /static/auth-client.js. TAuth now serves /
-    tauth.js only, so these are stale.
-  - Demo HTML still uses auth-client.js + crossorigin: tools/mpr-ui/demo/tauth-demo.html loads http://localhost:8080/static/auth-client.js with crossorigin="anonymous". That no longer exists; it should be /
-    tauth.js and should not force crossorigin (we already removed that in the TAuth demo).
-  - base-url expectation is out of date: tools/mpr-ui/docs/demo-index-auth.md says base-url is optional when same-origin, but tauth.js now requires an explicit baseUrl for initAuthClient. In tools/mpr-ui/mpr-
-    ui.js, baseUrl defaults to "", then gets passed into initAuthClient, which will throw. Either docs must require base-url, or mpr-ui should default baseUrl to window.location.origin before calling
-    initAuthClient.
-  - New helper APIs aren’t used: tauth.js now exposes getAuthEndpoints, requestNonce, exchangeGoogleCredential, and logout, but tools/mpr-ui/mpr-ui.js still does direct fetch for /auth/nonce, /auth/google,
-    and /auth/logout. That bypasses tenant-header handling and error normalization. For multi-tenant/override cases this is a real mismatch.
+- [x] [TA-418] Update the mpr-ui docs/demo/code in tools/mpr-ui/ to align with tauth.js
+  Updated docs and demo HTML to load `/tauth.js` (no `crossorigin`), documented base-url requirements, and taught the mpr-ui auth header to prefer `tauth.js` helpers (nonce/exchange/logout) while falling back
+  to direct fetches; `initAuthClient` now receives the page origin when `base-url` is omitted.
 
 ## Planning
 *do not implement yet*
 
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
   `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
+
+- [x] [TA-418] Clear stale auth state when a peer refresh broadcast arrives without a profile.
+  `initAuthClient` now treats peer refreshes that fail to load `/me` as unauthenticated, and regression coverage reproduces the broadcast-without-profile case.
+
+- [x] [TA-418] Add a browser integration test to cover demo sign-out.
+  Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.
