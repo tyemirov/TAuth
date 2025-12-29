@@ -152,6 +152,8 @@ Analyze the issue and deploy the fix
   Added a default demo Google client ID and removed the forced `crossorigin` attribute so mpr-ui and GIS load without CORS errors.
 - [x] [TA-357] Demo CORS allowlist excluded the ghttp port used by the Docker Compose demo.
   Aligned the demo tenant `allowed_hosts` and CORS env origins to port 8080, and added regression coverage for the demo config files.
+- [x] [TA-358] Demo base styling did not apply, leaving default margins and serif fonts.
+  Added a local demo stylesheet using mpr-ui tokens to set the page baseline (font, margin, background) and styled the status panel using semantic selectors.
 
 ## Maintenance (418–499)
 

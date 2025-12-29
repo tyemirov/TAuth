@@ -31,6 +31,7 @@
 - Removed forced `crossorigin` on demo script loaders and set a default demo client ID so the mpr-ui header renders in local demo runs.
 - Ensured the tauth demo loads tauth.js before the mpr-ui bundle and GIS so header auth wiring stays consistent.
 - Aligned the demo CORS allowlist with the Docker Compose frontend port (8080) so preflight OPTIONS requests succeed.
+- Restored the demo baseline styling (font + margins) using mpr-ui tokens so the page matches the expected mpr-ui look.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.

@@ -67,6 +67,10 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
     "Expected demo to load mpr-ui CSS",
   );
   assert.ok(
+    html.includes('rel="stylesheet" href="./demo.css"'),
+    "Expected demo to load the local demo.css stylesheet",
+  );
+  assert.ok(
     html.includes("<mpr-header"),
     "Expected demo to render the mpr-ui header element",
   );
