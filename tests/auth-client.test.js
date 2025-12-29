@@ -145,6 +145,14 @@ function assertHeader(call, headerName, expectedValue) {
   );
 }
 
+function assertMissingHeader(call, headerName) {
+  assert.equal(
+    call.headers && call.headers[headerName],
+    undefined,
+    `expected ${headerName} header to be omitted`,
+  );
+}
+
 test("auth client authenticates when /me succeeds", async () => {
   const profile = {
     user_id: "user-123",
@@ -173,7 +181,7 @@ test("auth client authenticates when /me succeeds", async () => {
   assert.equal(unauthenticatedCount, 0);
   assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assert.deepEqual(events, []);
 });
 
@@ -208,9 +216,9 @@ test("auth client attempts refresh before authenticating", async () => {
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
   assert.equal(fetch.calls[2].url, "https://example.com/me");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
-  assertHeader(fetch.calls[2], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[2], "X-Client");
   assert.deepEqual(events, ["refreshed"]);
 });
 
@@ -240,7 +248,7 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
   assert.equal(fetch.calls.length, 2);
   assert.equal(fetch.calls[0].url, "https://example.com/me");
   assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
-  assertHeader(fetch.calls[0], "X-Client", "mprlab-ui");
+  assertMissingHeader(fetch.calls[0], "X-Client");
   assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
 });

@@ -146,6 +146,8 @@ Analyze the issue and deploy the fix
   Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
 - [x] [TA-353] Serve only the API endpoints and `/tauth.js` from TAuth; remove demo assets and site catalog helpers.
   Dropped `/mpr-sites.js`, removed `web/demo.html`, moved demo browser tests to the `examples/tauth-demo` page, and documented that demos are hosted separately.
+- [x] [TA-355] Remove UI-specific markers from tauth.js.
+  Dropped the `X-Client` header and any mpr-ui identifiers so the helper stays UI-agnostic.
 
 ## Maintenance (418–499)
 

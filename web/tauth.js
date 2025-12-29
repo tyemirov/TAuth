@@ -1,5 +1,4 @@
 // @ts-check
-/* @mprlab/auth-client */
 (function () {
   /**
    * @typedef {Record<string, unknown>} UserProfile
@@ -523,7 +522,7 @@
         {
           method: "GET",
           credentials: "include",
-          headers: withTenantHeader({ "X-Client": "mprlab-ui" }),
+          headers: withTenantHeader(),
         },
       );
       if (!response.ok) {
@@ -626,10 +625,7 @@
   async function apiFetch(inputUrl, initOptions) {
     var merged = Object.assign({}, initOptions || {});
     merged.credentials = "include";
-    merged.headers = Object.assign(
-      { "X-Client": "mprlab-ui" },
-      merged.headers || {},
-    );
+    merged.headers = Object.assign({}, merged.headers || {});
     ensureBroadcastListener();
     var execute = function () {
       return fetch(inputUrl, merged);
