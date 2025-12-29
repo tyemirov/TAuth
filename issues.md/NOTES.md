@@ -110,3 +110,6 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
 
 ## 2025-12-28
 - Updated `web/tauth.js` to clear auth state when a peer refresh broadcast yields no profile, added regression coverage in `tests/auth-client.test.js`, and ran `node --test tests/auth-client.test.js`.
+
+## 2025-12-28
+- Adjusted the `waitForPeerRefresh` JSDoc return type to satisfy `tsc --noEmit` after the peer refresh fix.

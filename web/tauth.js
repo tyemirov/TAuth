@@ -572,7 +572,7 @@
   }
 
   /**
-   * @returns {{ received: boolean, profile: UserProfile | null }}
+   * @returns {Promise<{ received: boolean, profile: UserProfile | null }>}
    */
   async function waitForPeerRefresh() {
     var received = await waitForBroadcast(
