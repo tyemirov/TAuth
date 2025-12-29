@@ -197,3 +197,6 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-418] Clear stale auth state when a peer refresh broadcast arrives without a profile.
   `initAuthClient` now treats peer refreshes that fail to load `/me` as unauthenticated, and regression coverage reproduces the broadcast-without-profile case.
+
+- [x] [TA-418] Add a browser integration test to cover demo sign-out.
+  Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.

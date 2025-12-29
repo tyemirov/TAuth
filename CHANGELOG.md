@@ -5,6 +5,9 @@
 ### Bug Fixes 🐛
 - Ensure `initAuthClient` clears stale auth state when a peer refresh broadcast arrives without a profile, with regression coverage.
 
+### Testing 🧪
+- Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
+
 ## [v0.9.5]
 
 ### Features ✨
