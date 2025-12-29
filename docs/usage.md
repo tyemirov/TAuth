@@ -40,6 +40,7 @@ The binary reads configuration exclusively from a YAML file (default `config.yam
 | `database_url` | Refresh store DSN | `sqlite:///data/tauth.db` |
 | `enable_cors` | Enable CORS for cross-origin UIs | `true` / `false` |
 | `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
+| `cors_allowed_origin_exceptions` | Allowed non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/local only) | `true` / `false` |
 | `tenants` | Array of tenant entries (see README §5.1 for schema) | `[...]` |
 
@@ -47,7 +48,7 @@ Key notes:
 
 - **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains. Leave the field blank to emit host-only cookies during `localhost` development (browsers reject `Domain=localhost`).
 - **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
-- **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. Google Identity Services performs its nonce/login exchange from the `https://accounts.google.com` origin, so *always* include that origin alongside your UI hosts.
+- **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. If you include non-tenant origins (for example `https://accounts.google.com`), also list them under `cors_allowed_origin_exceptions` so validation permits them.
 - **Shared origins**: If two tenants intentionally share the same origin (typical for localhost demos), add each frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `allowed_hosts`. TAuth inspects the request `Origin` header to resolve the tenant automatically. You can still enable `enable_tenant_header_override` and send `X-TAuth-Tenant` when you want to override the origin mapping manually.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
@@ -64,6 +65,8 @@ server:
   enable_cors: true
   cors_allowed_origins:
     - "https://app.example.com"
+    - "https://accounts.google.com"
+  cors_allowed_origin_exceptions:
     - "https://accounts.google.com"
   enable_tenant_header_override: false
 
