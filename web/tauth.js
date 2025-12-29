@@ -571,16 +571,19 @@
     }
   }
 
+  /**
+   * @returns {{ received: boolean, profile: UserProfile | null }}
+   */
   async function waitForPeerRefresh() {
     var received = await waitForBroadcast(
       broadcastEventRefreshed,
       broadcastWaitTimeoutMs,
     );
     if (!received) {
-      return false;
+      return { received: false, profile: null };
     }
-    await syncProfileFromServer();
-    return true;
+    var profile = await syncProfileFromServer();
+    return { received: true, profile: profile };
   }
 
   /**
@@ -604,8 +607,8 @@
           return;
         }
       }
-      var peerRecovered = await waitForPeerRefresh();
-      if (peerRecovered) {
+      var peerResult = await waitForPeerRefresh();
+      if (peerResult.profile) {
         return;
       }
       applyUnauthenticated();
@@ -643,8 +646,8 @@
         flushPendingRequests(null);
         return retryResponse;
       }
-      var peerRecovered = await waitForPeerRefresh();
-      if (peerRecovered) {
+      var peerResult = await waitForPeerRefresh();
+      if (peerResult.received) {
         var recoveredResponse = await execute();
         flushPendingRequests(null);
         return recoveredResponse;

@@ -194,3 +194,6 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
   `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
+
+- [x] [TA-418] Clear stale auth state when a peer refresh broadcast arrives without a profile.
+  `initAuthClient` now treats peer refreshes that fail to load `/me` as unauthenticated, and regression coverage reproduces the broadcast-without-profile case.

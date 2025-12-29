@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Bug Fixes 🐛
+- Ensure `initAuthClient` clears stale auth state when a peer refresh broadcast arrives without a profile, with regression coverage.
+
 ## [v0.9.5]
 
 ### Features ✨
