@@ -150,6 +150,8 @@ Analyze the issue and deploy the fix
   Dropped the `X-Client` header and any mpr-ui identifiers so the helper stays UI-agnostic.
 - [x] [TA-356] Demo header failed to render when GIS/tauth.js scripts were blocked.
   Added a default demo Google client ID and removed the forced `crossorigin` attribute so mpr-ui and GIS load without CORS errors.
+- [x] [TA-357] Demo CORS allowlist excluded the ghttp port used by the Docker Compose demo.
+  Aligned the demo tenant `allowed_hosts` and CORS env origins to port 8080, and added regression coverage for the demo config files.
 
 ## Maintenance (418–499)
 

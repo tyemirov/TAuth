@@ -30,6 +30,7 @@
 - Removed UI-specific headers from `tauth.js` so the helper remains frontend-agnostic.
 - Removed forced `crossorigin` on demo script loaders and set a default demo client ID so the mpr-ui header renders in local demo runs.
 - Ensured the tauth demo loads tauth.js before the mpr-ui bundle and GIS so header auth wiring stays consistent.
+- Aligned the demo CORS allowlist with the Docker Compose frontend port (8080) so preflight OPTIONS requests succeed.
 
 ### Testing 🧪
 - Added coverage for database-backed user/nonce stores.
@@ -38,6 +39,7 @@
 - Added auth-client tests for nonce and credential exchange helpers.
 - Added a GitHub Actions workflow that runs frontend tests and type checks on frontend changes.
 - Added regression coverage for the tauth demo config bootstrap sequencing.
+- Added regression coverage for demo CORS and tenant origin configuration.
 
 ### Docs 📚
 - Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.
