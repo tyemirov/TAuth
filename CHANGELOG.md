@@ -8,6 +8,9 @@
 ### Testing 🧪
 - Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
 
+### Docs 📚
+- Documented `cors_allowed_origin_exceptions` usage (including GIS) and updated example configs to match validation rules.
+
 ## [v0.9.5]
 
 ### Features ✨

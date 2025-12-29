@@ -64,6 +64,8 @@ server:
   cors_allowed_origins:
     - "https://gravity.mprlab.com"
     - "https://accounts.google.com"
+  cors_allowed_origin_exceptions:
+    - "https://accounts.google.com"
   enable_tenant_header_override: false
 
 tenants:
@@ -87,7 +89,7 @@ Before deploying, run `tauth preflight --config=config.yaml` to validate the con
 
 > SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 
-When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`.
+When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`. If you include non-tenant origins (for example `https://accounts.google.com`), mirror them in `cors_allowed_origin_exceptions` so config validation permits them.
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com` because both live under `.mprlab.com`.
 
