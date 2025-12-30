@@ -1,15 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.6]
 
 ### Bug Fixes 🐛
-- Ensure `initAuthClient` clears stale auth state when a peer refresh broadcast arrives without a profile, with regression coverage.
+- Clear stale auth state in `initAuthClient` after an empty peer refresh broadcast, preventing stale profile retention.
 
 ### Testing 🧪
-- Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
+- Added browser integration test covering the demo sign-out flow to verify header reset after logout.
+- Introduced a GitHub Actions workflow to run frontend tests and type checks on frontend changes.
 
 ### Docs 📚
-- Documented `cors_allowed_origin_exceptions` usage (including GIS) and updated example configs to match validation rules.
+- Documented `cors_allowed_origin_exceptions` for non-tenant CORS origins including Google Identity Services.
+- Updated example configs to align with stricter validation around tenant origin rules.
 
 ## [v0.9.5]
 
