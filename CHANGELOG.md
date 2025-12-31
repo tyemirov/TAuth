@@ -10,6 +10,7 @@
 ### Testing 🧪
 - Added browser integration test covering the demo sign-out flow to verify header reset after logout.
 - Introduced a GitHub Actions workflow to run frontend tests and type checks on frontend changes.
+- Moved demo-related tests onto fixtures so demo asset changes do not affect test scaffolding.
 
 ### Docs 📚
 - Documented `cors_allowed_origin_exceptions` for non-tenant CORS origins including Google Identity Services.
