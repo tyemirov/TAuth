@@ -213,3 +213,5 @@ Analyze the issue and deploy the fix
   Added self-contained fixtures and pointed demo/browser tests at them so demo changes no longer affect test scaffolding.
 - [x] [TA-423] Restore demo header auth attributes so the Google sign-in button renders.
   Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
+- [x] [TA-424] Surface demo auth/header errors and rename the demo entrypoint to app.js.
+  Switched the demo script to `app.js` and added error handling for `mpr-ui:auth:error`/`mpr-ui:header:error` plus header attribute checks.

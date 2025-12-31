@@ -2,6 +2,11 @@
 'use strict';
 
 const STATUS_HOST_SELECTOR = '[data-demo-auth-status]';
+const HEADER_HOST_SELECTOR = 'mpr-header#demo-header';
+const HEADER_ERROR_MESSAGES = Object.freeze({
+  'missing-site-id': 'Missing Google client ID (site-id).',
+  'missing-tauth-tenant-id': 'Missing TAuth tenant id (tauth-tenant-id).',
+});
 
 /**
  * @typedef {object} AuthProfile
@@ -99,18 +104,68 @@ function renderError(message) {
   host.append(title, details);
 }
 
+/**
+ * @param {unknown} code
+ * @param {unknown} message
+ * @returns {string}
+ */
+function formatErrorMessage(code, message) {
+  const normalizedCode = typeof code === 'string' ? code.trim() : '';
+  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+  if (normalizedMessage) {
+    return normalizedMessage;
+  }
+  if (normalizedCode && HEADER_ERROR_MESSAGES[normalizedCode]) {
+    return HEADER_ERROR_MESSAGES[normalizedCode];
+  }
+  if (normalizedCode) {
+    return `Sign-in error: ${normalizedCode}`;
+  }
+  return 'Unable to complete authentication.';
+}
+
+/**
+ * @returns {string}
+ */
+function readHeaderErrorMessage() {
+  const headerElement = document.querySelector(HEADER_HOST_SELECTOR);
+  if (!headerElement) {
+    return '';
+  }
+  const headerError = headerElement.getAttribute('data-mpr-google-error');
+  return headerError ? formatErrorMessage(headerError, '') : '';
+}
+
 function initSessionPanel() {
-  renderSession(typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null);
+  const currentProfile =
+    typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null;
+  if (currentProfile) {
+    renderSession(currentProfile);
+  } else {
+    const headerError = readHeaderErrorMessage();
+    if (headerError) {
+      renderError(headerError);
+    } else {
+      renderSession(null);
+    }
+  }
   document.addEventListener('mpr-ui:auth:authenticated', (event) => {
     renderSession(event?.detail?.profile ?? null);
   });
   document.addEventListener('mpr-ui:auth:unauthenticated', () => {
+    const headerError = readHeaderErrorMessage();
+    if (headerError) {
+      renderError(headerError);
+      return;
+    }
     renderSession(null);
   });
-  document.addEventListener('mpr-ui:auth:error', (event) => {
-    const code = event?.detail?.code;
-    renderError(code ? String(code) : 'Unable to complete authentication.');
-  });
+  const handleErrorEvent = (event) => {
+    const detail = event?.detail;
+    renderError(formatErrorMessage(detail?.code, detail?.message));
+  };
+  document.addEventListener('mpr-ui:auth:error', handleErrorEvent);
+  document.addEventListener('mpr-ui:header:error', handleErrorEvent);
 }
 
 if (document.readyState === 'loading') {
