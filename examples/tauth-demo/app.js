@@ -3,9 +3,17 @@
 
 const STATUS_HOST_SELECTOR = '[data-demo-auth-status]';
 const HEADER_HOST_SELECTOR = 'mpr-header#demo-header';
+const GOOGLE_SIGNIN_SELECTOR = '[data-mpr-header="google-signin"]';
 const HEADER_ERROR_MESSAGES = Object.freeze({
-  'missing-site-id': 'Missing Google client ID (site-id).',
+  'missing-site-id': 'Missing Google client ID (google-site-id).',
   'missing-tauth-tenant-id': 'Missing TAuth tenant id (tauth-tenant-id).',
+  'mpr-ui.google_site_id_required': 'Missing Google client ID (google-site-id).',
+  'mpr-ui.header.google_site_id_missing': 'Missing Google client ID (google-site-id).',
+  'mpr-ui.tenant_id_required': 'Missing TAuth tenant id (tauth-tenant-id).',
+  'mpr-ui.header.google_error': 'Google Sign-In failed to render.',
+  'mpr-ui.header.google_unavailable': 'Google Sign-In is unavailable.',
+  'mpr-ui.header.google_render_failed': 'Google Sign-In failed to render.',
+  'mpr-ui.header.google_script_failed': 'Google Sign-In script failed to load.',
 });
 
 /**
@@ -125,6 +133,43 @@ function formatErrorMessage(code, message) {
 }
 
 /**
+ * @param {Element | null} headerElement
+ * @returns {string}
+ */
+function readGoogleSigninError(headerElement) {
+  if (!headerElement || typeof headerElement.querySelector !== 'function') {
+    return '';
+  }
+  const googleSigninElement = headerElement.querySelector(GOOGLE_SIGNIN_SELECTOR);
+  if (!googleSigninElement) {
+    return '';
+  }
+  const errorCode = googleSigninElement.getAttribute('data-mpr-google-error');
+  return errorCode ? formatErrorMessage(errorCode, '') : '';
+}
+
+/**
+ * @param {Element | null} headerElement
+ * @returns {string}
+ */
+function readMissingHeaderConfig(headerElement) {
+  if (!headerElement || typeof headerElement.getAttribute !== 'function') {
+    return '';
+  }
+  const siteId =
+    headerElement.getAttribute('google-site-id') ||
+    headerElement.getAttribute('site-id');
+  if (!siteId) {
+    return formatErrorMessage('missing-site-id', '');
+  }
+  const tenantId = headerElement.getAttribute('tauth-tenant-id');
+  if (!tenantId) {
+    return formatErrorMessage('missing-tauth-tenant-id', '');
+  }
+  return '';
+}
+
+/**
  * @returns {string}
  */
 function readHeaderErrorMessage() {
@@ -132,8 +177,11 @@ function readHeaderErrorMessage() {
   if (!headerElement) {
     return '';
   }
-  const headerError = headerElement.getAttribute('data-mpr-google-error');
-  return headerError ? formatErrorMessage(headerError, '') : '';
+  const googleSigninError = readGoogleSigninError(headerElement);
+  if (googleSigninError) {
+    return googleSigninError;
+  }
+  return readMissingHeaderConfig(headerElement);
 }
 
 function initSessionPanel() {
