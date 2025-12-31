@@ -9,23 +9,24 @@
       href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
     />
     <link rel="stylesheet" href="./demo.css" />
-    <script defer src="./demo-config.js"></script>
-    <script defer src="./tauth-config.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://tauth.mprlab.com/tauth.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"></script>
   </head>
   <body data-mpr-theme="dark">
     <mpr-header
       id="demo-header"
-      tauth-tenant-id="demo"
       brand-label="Marco Polo Research Lab"
       brand-href="https://mprlab.com/"
       nav-links='[
         { "label": "Docs", "href": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank" },
         { "label": "Architecture", "href": "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md", "target": "_blank" }
       ]'
-      login-path="/auth/google"
-      logout-path="/auth/logout"
-      nonce-path="/auth/nonce"
-      settings="true"
+      tauth-tenant-id="demo"
+      tauth-url="http://computercat.tyemirov.net:8082"
+      tauth-login-path="/auth/google"
+      tauth-logout-path="/auth/logout"
+      tauth-nonce-path="/auth/nonce"
       sticky="true"
     ></mpr-header>
 
