@@ -572,6 +572,33 @@ func TestBuildTenantErrors(t *testing.T) {
 	}
 }
 
+func TestInvalidOriginErrorIncludesExpectation(t *testing.T) {
+	invalidTenant := FileTenant{
+		ID:                "demo",
+		DisplayName:       "Demo",
+		AllowedHosts:      []string{"demo.localhost"},
+		GoogleWebClientID: "client",
+		JWTSigningKey:     "key",
+		CookieDomain:      "demo.localhost",
+		SessionCookieName: "app_session_demo",
+		RefreshCookieName: "app_refresh_demo",
+		SessionTTL:        "15m",
+		RefreshTTL:        "720h",
+		NonceTTL:          "5m",
+	}
+
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{invalidTenant}})
+	if loadErr == nil {
+		t.Fatalf("expected config error")
+	}
+	if !strings.Contains(loadErr.Error(), originReasonMissingScheme) {
+		t.Fatalf("expected invalid origin error to mention %q, got %v", originReasonMissingScheme, loadErr)
+	}
+	if !strings.Contains(loadErr.Error(), originExpectation) {
+		t.Fatalf("expected invalid origin error to mention %q, got %v", originExpectation, loadErr)
+	}
+}
+
 func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	t.Setenv("TENANT_COOKIE_DOMAIN", ".example.com")
 	tempDir := t.TempDir()

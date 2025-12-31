@@ -202,3 +202,8 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-418] Add a browser integration test to cover demo sign-out.
   Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.
+
+## BugFixes (420–429)
+
+- [x] [TA-420] Clarify tenant origin validation failures with expected format and specific reasons.
+  Enriched `tenant.invalid_origin` errors with a concise expectation string and reason details (missing scheme, missing host, invalid scheme, or path/query/fragment).

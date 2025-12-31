@@ -4,6 +4,7 @@
 
 ### Bug Fixes 🐛
 - Clear stale auth state in `initAuthClient` after an empty peer refresh broadcast, preventing stale profile retention.
+- Enriched tenant origin validation errors with the expected format and specific failure reasons.
 
 ### Testing 🧪
 - Added browser integration test covering the demo sign-out flow to verify header reset after logout.
