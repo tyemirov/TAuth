@@ -4,7 +4,7 @@
 const AUTH_CLIENT_CACHE_BUSTER_PARAM = "tauth_cache_buster";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const MPR_UI_SCRIPT_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js";
+  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.js";
 const DEFAULT_DEMO_CONFIG = Object.freeze({
   baseUrl: "http://localhost:8082",
   googleClientId:
@@ -59,8 +59,8 @@ function applyHeaderConfig(config) {
   if (!headerElement) {
     return;
   }
-  headerElement.setAttribute("base-url", config.baseUrl);
-  headerElement.setAttribute("site-id", config.googleClientId);
+  headerElement.setAttribute("tauth-url", config.baseUrl);
+  headerElement.setAttribute("google-site-id", config.googleClientId);
   headerElement.setAttribute("tauth-tenant-id", config.tenantId);
   ensureHeaderRoot(headerElement);
 }

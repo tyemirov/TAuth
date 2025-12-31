@@ -6,12 +6,12 @@
     <title>TAuth Demo</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
+      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.css"
     />
     <link rel="stylesheet" href="./demo.css" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://tauth.mprlab.com/tauth.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.js"></script>
   </head>
   <body data-mpr-theme="dark">
     <mpr-header
@@ -22,7 +22,7 @@
         { "label": "Docs", "href": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank" },
         { "label": "Architecture", "href": "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md", "target": "_blank" }
       ]'
-      site-id="212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com"
+      google-site-id="212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com"
       tauth-tenant-id="demo"
       tauth-url="http://computercat.tyemirov.net:8082"
       tauth-login-path="/auth/google"
@@ -47,7 +47,7 @@
           <h2 id="profile-status-title">Current session</h2>
           <p>
             Google sign-in requests are exchanged with
-            <code>http://localhost:8082</code>. The helper script provided by
+            <code>https://computercat.tyemirov.net:8082</code>. The helper script provided by
             TAuth monitors <code>/me</code> and <code>/auth/refresh</code> to
             keep a valid browser session without storing tokens in localStorage.
           </p>
@@ -59,10 +59,13 @@
         <section aria-labelledby="instructions-title">
           <h2 id="instructions-title">How it works</h2>
           <ol>
-            <li>The frontend is served by the gHTTP container on port 8080.</li>
+            <li>
+              The frontend is served over
+              <code>https://computercat.tyemirov.net:8081</code>.
+            </li>
             <li>
               TAuth listens on port 8082, issuing HttpOnly session cookies scoped
-              to <code>localhost</code>.
+              to <code>computercat.tyemirov.net</code>.
             </li>
             <li>
               The header component requests <code>/auth/nonce</code> before
@@ -101,6 +104,6 @@
       ]'
       sticky="true"
     ></mpr-footer>
-    <script defer src="./status-panel.js"></script>
+    <script defer src="./app.js"></script>
   </body>
 </html>
