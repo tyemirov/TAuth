@@ -207,3 +207,17 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-420] Clarify tenant origin validation failures with expected format and specific reasons.
   Enriched `tenant.invalid_origin` errors with a concise expectation string and reason details (missing scheme, missing host, invalid scheme, or path/query/fragment).
+- [x] [TA-421] Restore tauth demo bootstrap assets and align demo origins with documented ports.
+  Reintroduced `demo-config.js`/`tauth-config.js`, wired the demo HTML to load them, and realigned demo config/env/compose origins with `http://localhost:8080` to satisfy the JS test suite.
+- [x] [TA-422] Decouple demo-related tests from the example demo assets.
+  Added self-contained fixtures and pointed demo/browser tests at them so demo changes no longer affect test scaffolding.
+- [x] [TA-423] Restore demo header auth attributes so the Google sign-in button renders.
+  Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
+- [x] [TA-424] Surface demo auth/header errors and rename the demo entrypoint to app.js.
+  Switched the demo script to `app.js` and added error handling for `mpr-ui:auth:error`/`mpr-ui:header:error` plus header attribute checks.
+- [x] [TA-425] Serve the demo frontend over HTTPS using the computercat TLS certificates.
+  Mounted the host certs into the ghttp container and updated the demo to reference the HTTPS frontend origin.
+
+- [x] [TA-426] Pin demo mpr-ui assets to v3.3.0 and surface Google sign-in errors so google-site-id attributes are honored.
+- [x] [TA-427] Track the demo env fixture so tests can validate CORS origins.
+  Added the missing `.env.tauth.example` fixture under `tests/fixtures/tauth-demo` and unignored it for git so CI can read it.

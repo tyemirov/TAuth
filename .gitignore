@@ -13,6 +13,7 @@ tools/
 # Managed by gix gitignore workflow
 .env.*
 !examples/tauth-demo/.env.tauth.example
+!tests/fixtures/tauth-demo/.env.tauth.example
 .DS_Store
 qodana.yaml
 .idea/
