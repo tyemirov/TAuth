@@ -13,8 +13,8 @@ tenants:
   - id: ${TAUTH_TENANT_ID_1}
     display_name: "TAuth Demo"
     allowed_hosts:
-      - "${TAUTH_CORS_ORIGIN_1}"
-      - "${TAUTH_CORS_ORIGIN_2}"
+      - "http://localhost:8080"
+      - "http://127.0.0.1:8080"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID}"
     jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY}"
     cookie_domain: ""

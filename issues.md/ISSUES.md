@@ -207,3 +207,5 @@ Analyze the issue and deploy the fix
 
 - [x] [TA-420] Clarify tenant origin validation failures with expected format and specific reasons.
   Enriched `tenant.invalid_origin` errors with a concise expectation string and reason details (missing scheme, missing host, invalid scheme, or path/query/fragment).
+- [x] [TA-421] Restore tauth demo bootstrap assets and align demo origins with documented ports.
+  Reintroduced `demo-config.js`/`tauth-config.js`, wired the demo HTML to load them, and realigned demo config/env/compose origins with `http://localhost:8080` to satisfy the JS test suite.
