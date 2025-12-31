@@ -23,17 +23,12 @@ services:
       [
         "--directory",
         "/app/demo",
-        "--tls-cert",
-        "/certs/computercat-cert.pem",
-        "--tls-key",
-        "/certs/computercat-key.pem",
         "8081",
       ]
     ports:
       - "8081:8081"
     volumes:
       - ./:/app/demo
-      - /media/share/Drive/exchange/certs/computercat:/certs:ro
     restart: unless-stopped
 
 volumes:
