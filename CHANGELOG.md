@@ -6,6 +6,7 @@
 - Clear stale auth state in `initAuthClient` after an empty peer refresh broadcast, preventing stale profile retention.
 - Enriched tenant origin validation errors with the expected format and specific failure reasons.
 - Restored the tauth demo bootstrap scripts and aligned demo origins with the documented 8080 frontend ports.
+- Restored mpr-ui header auth attributes in the demo so the Google sign-in button renders.
 
 ### Testing 🧪
 - Added browser integration test covering the demo sign-out flow to verify header reset after logout.

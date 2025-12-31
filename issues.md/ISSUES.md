@@ -211,3 +211,5 @@ Analyze the issue and deploy the fix
   Reintroduced `demo-config.js`/`tauth-config.js`, wired the demo HTML to load them, and realigned demo config/env/compose origins with `http://localhost:8080` to satisfy the JS test suite.
 - [x] [TA-422] Decouple demo-related tests from the example demo assets.
   Added self-contained fixtures and pointed demo/browser tests at them so demo changes no longer affect test scaffolding.
+- [x] [TA-423] Restore demo header auth attributes so the Google sign-in button renders.
+  Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
