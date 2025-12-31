@@ -72,6 +72,14 @@ const (
 	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
 	errorCodeDuplicateCookieNameCross   = "tenant.duplicate_cookie_name_cross_type"
 	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
+	originSchemeHTTP                    = "http"
+	originSchemeHTTPS                   = "https"
+	originExpectation                   = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
+	originReasonMissingScheme           = "missing scheme"
+	originReasonUnsupportedScheme       = "unsupported scheme"
+	originReasonMissingHost             = "missing host"
+	originReasonUnexpectedPath          = "origin must not include path, query, or fragment"
+	originReasonInvalidURL              = "invalid url"
 )
 
 const (
@@ -350,7 +358,7 @@ func parseHosts(hosts []string, tenantID TenantID) ([]string, []string, error) {
 	for _, host := range hosts {
 		normalizedOrigin, err := normalizeOrigin(host)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %s tenant=%s origin=%s", ErrInvalidTenantConfig, errorCodeInvalidOrigin, tenantID, host)
+			return nil, nil, fmt.Errorf("%w: %s tenant=%s origin=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidOrigin, tenantID, host, err)
 		}
 		if _, exists := seenOrigins[normalizedOrigin]; exists {
 			return nil, nil, fmt.Errorf("%w: %s tenant=%s host=%s", ErrInvalidTenantConfig, errorCodeDuplicateHost, tenantID, host)
@@ -602,20 +610,30 @@ func normalizeHostPort(host string) (string, string, error) {
 }
 
 func normalizeOrigin(origin string) (string, error) {
-	trimmed := strings.TrimSpace(origin)
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return "", err
+	trimmedOrigin := strings.TrimSpace(origin)
+	parsedURL, parseErr := url.Parse(trimmedOrigin)
+	if parseErr != nil {
+		return "", fmt.Errorf("%s: %w (%s)", originReasonInvalidURL, parseErr, originExpectation)
 	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return "", fmt.Errorf("invalid origin")
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme == "" {
+		return "", originError(originReasonMissingScheme)
 	}
-	if parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("invalid origin")
+	if scheme != originSchemeHTTP && scheme != originSchemeHTTPS {
+		return "", originError(fmt.Sprintf("%s: %s", originReasonUnsupportedScheme, scheme))
 	}
-	host := strings.ToLower(parsed.Host)
+	if parsedURL.Host == "" {
+		return "", originError(originReasonMissingHost)
+	}
+	if parsedURL.Path != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		return "", originError(originReasonUnexpectedPath)
+	}
+	host := strings.ToLower(parsedURL.Host)
 	return fmt.Sprintf("%s://%s", scheme, host), nil
+}
+
+func originError(reason string) error {
+	return fmt.Errorf("%s (%s)", reason, originExpectation)
 }
 
 // NormalizeOrigin returns the canonical origin string or an error for invalid origins.

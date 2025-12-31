@@ -6,15 +6,13 @@ const pathModule = require("node:path");
 
 const DEMO_CONFIG_PATH = pathModule.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "tauth-demo",
   "config.yaml",
 );
 const DEMO_ENV_TEMPLATE_PATH = pathModule.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "tauth-demo",
   ".env.tauth.example",
 );

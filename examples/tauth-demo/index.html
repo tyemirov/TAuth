@@ -3,14 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TAuth Demo (Docker Compose)</title>
+    <title>TAuth Demo</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@latest/mpr-ui.css"
+      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.css"
     />
     <link rel="stylesheet" href="./demo.css" />
-    <script defer src="./demo-config.js"></script>
-    <script defer src="./tauth-config.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://tauth.mprlab.com/tauth.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.js"></script>
   </head>
   <body data-mpr-theme="dark">
     <mpr-header
@@ -21,11 +22,12 @@
         { "label": "Docs", "href": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank" },
         { "label": "Architecture", "href": "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md", "target": "_blank" }
       ]'
-      login-path="/auth/google"
-      logout-path="/auth/logout"
-      nonce-path="/auth/nonce"
-      settings="true"
-      settings-label="Settings"
+      google-site-id="212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com"
+      tauth-tenant-id="demo"
+      tauth-url="http://computercat.tyemirov.net:8082"
+      tauth-login-path="/auth/google"
+      tauth-logout-path="/auth/logout"
+      tauth-nonce-path="/auth/nonce"
       sticky="true"
     ></mpr-header>
 
@@ -45,7 +47,7 @@
           <h2 id="profile-status-title">Current session</h2>
           <p>
             Google sign-in requests are exchanged with
-            <code>http://localhost:8082</code>. The helper script provided by
+            <code>https://computercat.tyemirov.net:8082</code>. The helper script provided by
             TAuth monitors <code>/me</code> and <code>/auth/refresh</code> to
             keep a valid browser session without storing tokens in localStorage.
           </p>
@@ -57,10 +59,13 @@
         <section aria-labelledby="instructions-title">
           <h2 id="instructions-title">How it works</h2>
           <ol>
-            <li>The frontend is served by the gHTTP container on port 8000.</li>
+            <li>
+              The frontend is served over
+              <code>https://computercat.tyemirov.net:8081</code>.
+            </li>
             <li>
               TAuth listens on port 8082, issuing HttpOnly session cookies scoped
-              to <code>localhost</code>.
+              to <code>computercat.tyemirov.net</code>.
             </li>
             <li>
               The header component requests <code>/auth/nonce</code> before
@@ -85,14 +90,20 @@
       prefix-text="Built by Marco Polo Research Lab"
       privacy-link-label="Privacy &amp; Terms"
       privacy-link-href="#privacy"
-      toggle-label="Resources"
       links='[
-        { "label": "GitHub", "url": "https://github.com/tyemirov/TAuth", "target": "_blank", "rel": "noopener noreferrer" },
-        { "label": "Docs", "url": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank", "rel": "noopener noreferrer" },
-        { "label": "Community", "url": "https://github.com/tyemirov/TAuth/discussions", "target": "_blank", "rel": "noopener noreferrer" }
+        { "label": "Marco Polo Research Lab", "url": "https://mprlab.com" },
+        { "label": "Gravity Notes", "url": "https://gravity.mprlab.com" },
+        { "label": "LoopAware", "url": "https://loopaware.mprlab.com" },
+        { "label": "Allergy Wheel", "url": "https://allergy.mprlab.com" },
+        { "label": "Social Threader", "url": "https://threader.mprlab.com" },
+        { "label": "RSVP", "url": "https://rsvp.mprlab.com" },
+        { "label": "Countdown Calendar", "url": "https://countdown.mprlab.com" },
+        { "label": "LLM Crossword", "url": "https://llm-crossword.mprlab.com" },
+        { "label": "Prompt Bubbles", "url": "https://prompts.mprlab.com" },
+        { "label": "Wallpapers", "url": "https://wallpapers.mprlab.com" }
       ]'
       sticky="true"
     ></mpr-footer>
-    <script defer src="./status-panel.js"></script>
+    <script defer src="./app.js"></script>
   </body>
 </html>
