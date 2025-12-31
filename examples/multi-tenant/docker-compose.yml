@@ -24,7 +24,7 @@ services:
     working_dir: /srv/gravity/frontend
     command: ["--directory", "/srv/gravity/frontend", "8000"]
     volumes:
-      -  ../../../../MarcoPoloResearchLab/gravity/:/srv/gravity:ro
+      -  ../../tools/gravity/:/srv/gravity:ro
     ports:
       - "8000:8000"
     restart: unless-stopped
