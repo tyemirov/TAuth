@@ -215,3 +215,9 @@ Analyze the issue and deploy the fix
   Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
 - [x] [TA-424] Surface demo auth/header errors and rename the demo entrypoint to app.js.
   Switched the demo script to `app.js` and added error handling for `mpr-ui:auth:error`/`mpr-ui:header:error` plus header attribute checks.
+- [x] [TA-425] Serve the demo frontend over HTTPS using the computercat TLS certificates.
+  Mounted the host certs into the ghttp container and updated the demo to reference the HTTPS frontend origin.
+
+- [x] [TA-426] Pin demo mpr-ui assets to v3.3.0 and surface Google sign-in errors so google-site-id attributes are honored.
+- [x] [TA-427] Track the demo env fixture so tests can validate CORS origins.
+  Added the missing `.env.tauth.example` fixture under `tests/fixtures/tauth-demo` and unignored it for git so CI can read it.

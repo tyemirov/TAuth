@@ -77,7 +77,7 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
     "Expected demo config to expose an auth client readiness handle",
   );
   assert.ok(
-    configSource.includes("mpr-ui@latest/mpr-ui.js"),
+    configSource.includes("mpr-ui@3.3.0/mpr-ui.js"),
     "Expected demo config to load the mpr-ui bundle from the CDN",
   );
   assert.ok(
