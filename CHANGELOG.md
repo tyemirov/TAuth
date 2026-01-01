@@ -1,5 +1,42 @@
 # Changelog
 
+## [v0.9.7]
+
+### Features ✨
+
+- Decoupled demo test fixtures and moved tenant origin validation to edge.
+- Restored demo bootstrap assets and improved demo hosting to use computercat.mprlab.com and port 8081.
+- Added tenant ID to the example env sample for better demo configuration.
+- Implemented enhanced demo frontend app supporting Google sign-in and session status display.
+
+### Improvements ⚙️
+
+- Updated demo to pin mpr-ui assets to v3.3.0 to ensure Google site ID attributes are honored.
+- Aligned demo origins with documented 8080 frontend ports and clarified tenant origin validation error messages.
+- Switched demo server to use HTTPS with mounted TLS certificates and surfaced auth errors in the demo app.
+- Updated mpr-header to use an updated DSL with TAuth and restored header auth attributes in demo.
+- Changed demo compose file to mount required 3rd party tools and use computercat host.
+
+### Bug Fixes 🐛
+
+- Fixed demo environment fixture tracking issues.
+- Restored Google sign-in on HTTPS demo ensuring functional sign-in button rendering.
+- Cleared stale auth state after empty peer refresh broadcasts to avoid stale profile retention.
+- Improved error surfacing for authentication and header issues within demo.
+- Fixed configuration and origin validation rules for multi-tenant setup.
+
+### Testing 🧪
+
+- Added browser integration test covering demo sign-out flow verifying header reset after logout.
+- Introduced GitHub Actions workflow for frontend tests and type checking on frontend changes.
+- Moved demo-related tests to fixtures to isolate asset changes from test scaffolding.
+
+### Docs 📚
+
+- Documented `cors_allowed_origin_exceptions` for non-tenant CORS origins including Google Identity Services.
+- Updated example configs to align with stricter tenant origin validation rules.
+- Improved issue tracker documentation with relevant features and bug fixes related to demo and tenant handling.
+
 ## [v0.9.6]
 
 ### Bug Fixes 🐛
