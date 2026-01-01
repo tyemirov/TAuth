@@ -14,6 +14,7 @@
 
 ### Docs 📚
 - Documented `cors_allowed_origin_exceptions` usage (including GIS) and updated example configs to match validation rules.
+- Clarified sessionvalidator guidance to omit issuer configuration.
 
 ## [v0.9.5]
 
