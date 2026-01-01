@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.9.8]
+
+### Features ✨
+- Introduced `SessionValidatorIssuer` guidance and moved session validation to edge.
+- Added default `SessionValidatorIssuer` to simplify client configuration.
+- Introduced `tenant_origins` schema replacing `allowed_hosts` for tenant origin configuration.
+
+### Improvements ⚙️
+- Renamed tenant origin config from `allowed_hosts` to `tenant_origins` and aligned validation and preflight outputs.
+- Defaulted session validator issuer to `tauth` when omitted.
+- Updated example configs and documentation to reflect `tenant_origins` usage and validation.
+
+### Bug Fixes 🐛
+- Fixed configuration and origin validation rules for multi-tenant setups.
+- Improved error handling for authentication and header issues in the demo.
+
+### Testing 🧪
+- Added browser integration tests covering demo sign-out and header reset flows.
+- Updated demo-related tests to use fixtures, reducing impact of asset changes.
+
+### Docs 📚
+- Documented `cors_allowed_origin_exceptions` usage including Google Identity Services.
+- Clarified documentation and examples to align with tenant origin validation and session validator defaults.
+
 ## [v0.9.7]
 
 ### Features ✨
