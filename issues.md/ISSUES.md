@@ -160,6 +160,8 @@ Analyze the issue and deploy the fix
   Removed the cached-profile fallback so `initAuthClient` clears stale sessions after logout, and added regression coverage for the refresh-fail bootstrap path.
 - [x] [TA-360] Demo cached an outdated tauth.js bundle, preventing logout state updates.
   Added a cache-busting query string for local demo tauth.js loads and regression coverage for the demo loader script.
+- [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
+  `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
 
 ## Maintenance (418–499)
 
@@ -190,22 +192,32 @@ Analyze the issue and deploy the fix
 - [x] [TA-418] Update the mpr-ui docs/demo/code in tools/mpr-ui/ to align with tauth.js
   Updated docs and demo HTML to load `/tauth.js` (no `crossorigin`), documented base-url requirements, and taught the mpr-ui auth header to prefer `tauth.js` helpers (nonce/exchange/logout) while falling back
   to direct fetches; `initAuthClient` now receives the page origin when `base-url` is omitted.
+- [x] [TA-428] Rename tenant configuration  to  and align preflight output and flags.
+  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use  and .
+- [x] [TA-428] Correction: Rename tenant configuration `allowed_hosts` to `tenant_origins` and align preflight output and flags.
+  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use `tenant_origins` and `tenant_origin_hashes`.
 
-## Planning
-*do not implement yet*
+- [x] [TA-420] Clarify tenant origin validation failures with expected format and specific reasons.
+  Enriched `tenant.invalid_origin` errors with a concise expectation string and reason details (missing scheme, missing host, invalid scheme, or path/query/fragment).
+- [x] [TA-421] Restore tauth demo bootstrap assets and align demo origins with documented ports.
+  Reintroduced `demo-config.js`/`tauth-config.js`, wired the demo HTML to load them, and realigned demo config/env/compose origins with `http://localhost:8080` to satisfy the JS test suite.
+- [x] [TA-422] Decouple demo-related tests from the example demo assets.
+  Added self-contained fixtures and pointed demo/browser tests at them so demo changes no longer affect test scaffolding.
+- [x] [TA-423] Restore demo header auth attributes so the Google sign-in button renders.
+  Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
+- [x] [TA-424] Surface demo auth/header errors and rename the demo entrypoint to app.js.
+  Switched the demo script to `app.js` and added error handling for `mpr-ui:auth:error`/`mpr-ui:header:error` plus header attribute checks.
+- [x] [TA-425] Serve the demo frontend over HTTPS using the computercat TLS certificates.
+  Mounted the host certs into the ghttp container and updated the demo to reference the HTTPS frontend origin.
 
-- [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
-  `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
-
+- [x] [TA-426] Pin demo mpr-ui assets to v3.3.0 and surface Google sign-in errors so google-site-id attributes are honored.
+- [x] [TA-427] Track the demo env fixture so tests can validate CORS origins.
+  Added the missing `.env.tauth.example` fixture under `tests/fixtures/tauth-demo` and unignored it for git so CI can read it.
 - [x] [TA-418] Clear stale auth state when a peer refresh broadcast arrives without a profile.
   `initAuthClient` now treats peer refreshes that fail to load `/me` as unauthenticated, and regression coverage reproduces the broadcast-without-profile case.
 
 - [x] [TA-418] Add a browser integration test to cover demo sign-out.
   Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.
 
-## Improvements (641–)
-
-- [x] [TA-428] Rename tenant configuration  to  and align preflight output and flags.
-  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use  and .
-- [x] [TA-428] Correction: Rename tenant configuration `allowed_hosts` to `tenant_origins` and align preflight output and flags.
-  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use `tenant_origins` and `tenant_origin_hashes`.
+## Planning
+*do not implement yet*

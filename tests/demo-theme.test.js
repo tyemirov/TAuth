@@ -6,8 +6,7 @@ const path = require("node:path");
 
 const DEMO_HTML_PATH = path.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "tauth-demo",
   "index.html",
 );

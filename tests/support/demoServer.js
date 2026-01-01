@@ -5,19 +5,21 @@ const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 async function startDemoServer() {
-  const demoRoot = path.join(__dirname, "..", "..", "examples", "tauth-demo");
+  const demoRoot = path.join(__dirname, "..", "fixtures", "tauth-demo");
   const [
     demoHtml,
     authClientSource,
     demoConfigSource,
     authConfigSource,
     statusPanelSource,
+    demoStyles,
   ] = await Promise.all([
     fs.readFile(path.join(demoRoot, "index.html"), "utf8"),
     fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "demo-config.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "tauth-config.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "status-panel.js"), "utf8"),
+    fs.readFile(path.join(demoRoot, "demo.css"), "utf8"),
   ]);
 
   const demoProfile = Object.freeze({
@@ -65,6 +67,12 @@ async function startDemoServer() {
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/javascript; charset=utf-8");
       response.end(statusPanelSource);
+      return;
+    }
+    if (method === "GET" && requestPath === "/demo.css") {
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "text/css; charset=utf-8");
+      response.end(demoStyles);
       return;
     }
     if (method === "GET" && requestPath === "/me") {
