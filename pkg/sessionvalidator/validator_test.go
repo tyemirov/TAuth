@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tyemirov/tauth/internal/appconfig"
 )
 
 type fixedClock struct {
@@ -55,9 +56,9 @@ func TestNewValidatorRequiresSigningKey(t *testing.T) {
 func TestNewValidatorRequiresIssuer(t *testing.T) {
 	t.Parallel()
 
-	_, err := New(Config{SigningKey: []byte("secret")})
+	_, err := New(Config{SigningKey: []byte("secret"), Issuer: " "})
 	if err == nil || !errors.Is(err, ErrMissingIssuer) {
-		t.Fatalf("expected missing issuer error, got %v", err)
+		t.Fatalf("expected missing issuer error for whitespace, got %v", err)
 	}
 }
 
@@ -66,10 +67,12 @@ func TestNewValidatorDefaults(t *testing.T) {
 
 	validator, err := New(Config{
 		SigningKey: []byte("secret"),
-		Issuer:     "issuer",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if validator.issuer != appconfig.DefaultJWTIssuer {
+		t.Fatalf("expected default issuer %s, got %s", appconfig.DefaultJWTIssuer, validator.issuer)
 	}
 	if validator.cookieName != DefaultCookieName {
 		t.Fatalf("expected default cookie name, got %s", validator.cookieName)

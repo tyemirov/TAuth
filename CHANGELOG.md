@@ -27,6 +27,7 @@
 
 ### Improvements ⚙️
 - Renamed tenant origin configuration from `allowed_hosts` to `tenant_origins` and aligned preflight output and flags.
+- Default session validator issuer to `tauth` when omitted so clients do not need to configure it explicitly.
 
 ### Testing 🧪
 
@@ -59,9 +60,8 @@
 - Moved demo-related tests onto fixtures so demo asset changes do not affect test scaffolding.
 
 ### Docs 📚
-
-- Documented `cors_allowed_origin_exceptions` for non-tenant CORS origins including Google Identity Services.
-- Updated example configs to align with stricter validation around tenant origin rules.
+- Documented `cors_allowed_origin_exceptions` usage (including GIS) and updated example configs to match validation rules.
+- Clarified sessionvalidator guidance to omit issuer configuration.
 
 ## [v0.9.5]
 

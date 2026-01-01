@@ -219,5 +219,9 @@ Analyze the issue and deploy the fix
 - [x] [TA-418] Add a browser integration test to cover demo sign-out.
   Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.
 
-## Planning
-*do not implement yet*
+- [x] [TA-428] Rename tenant configuration  to  and align preflight output and flags.
+  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use  and .
+- [x] [TA-428] Correction: Rename tenant configuration `allowed_hosts` to `tenant_origins` and align preflight output and flags.
+  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use `tenant_origins` and `tenant_origin_hashes`.
+- [x] [TA-429] Default session validator issuer to `tauth` when omitted.
+  Updated `pkg/sessionvalidator` to fall back to the shared default issuer and refreshed validator tests.
