@@ -12,7 +12,7 @@ server:
 tenants:
   - id: ${TAUTH_TENANT_ID_1}
     display_name: "TAuth Demo"
-    allowed_hosts:
+    tenant_origins:
       - "${TAUTH_CORS_ORIGIN_1}"
       - "${TAUTH_CORS_ORIGIN_2}"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID}"

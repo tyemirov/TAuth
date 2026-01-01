@@ -13,8 +13,7 @@ server:
 tenants:
   - id: "notes"
     display_name: "Gravity Notes"
-    allowed_hosts:
-      - "http://localhost"
+    tenant_origins:
       - "http://localhost:8000"
       - "http://127.0.0.1:8000"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
@@ -29,8 +28,7 @@ tenants:
 
   - id: "mpr-sites"
     display_name: "MPR Sites"
-    allowed_hosts:
-      - "http://localhost"
+    tenant_origins:
       - "http://localhost:4173"
       - "http://127.0.0.1:4173"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"

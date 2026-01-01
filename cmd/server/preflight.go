@@ -7,7 +7,7 @@ import (
 	"github.com/tyemirov/tauth/internal/preflight"
 )
 
-const preflightOutputIncludeHostsFlag = "include-hosts"
+const preflightOutputIncludeOriginsFlag = "include-origins"
 
 func newPreflightCommand() *cobra.Command {
 	command := &cobra.Command{
@@ -15,7 +15,7 @@ func newPreflightCommand() *cobra.Command {
 		Short: "Validate configuration and emit a redacted effective-config report",
 		RunE:  runPreflight,
 	}
-	command.Flags().Bool(preflightOutputIncludeHostsFlag, false, "Include allowed_hosts in output (default redacts origins)")
+	command.Flags().Bool(preflightOutputIncludeOriginsFlag, false, "Include tenant_origins in output (default redacts origins)")
 	return command
 }
 
@@ -24,13 +24,13 @@ func runPreflight(command *cobra.Command, arguments []string) error {
 	if pathErr != nil {
 		return pathErr
 	}
-	includeHosts, includeErr := command.Flags().GetBool(preflightOutputIncludeHostsFlag)
+	includeOrigins, includeErr := command.Flags().GetBool(preflightOutputIncludeOriginsFlag)
 	if includeErr != nil {
 		return includeErr
 	}
 	var reportBytes []byte
 	var reportErr error
-	if includeHosts {
+	if includeOrigins {
 		reportBytes, reportErr = preflight.BuildFullReport(configPath)
 	} else {
 		reportBytes, reportErr = preflight.BuildRedactedReport(configPath)

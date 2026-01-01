@@ -27,7 +27,7 @@ cat > tenants.yaml <<'YAML'
 tenants:
   - id: "prod"
     display_name: "Production tenant"
-    allowed_hosts:
+    tenant_origins:
       - "https://gravity.mprlab.com"
       - "https://pinguin.mprlab.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
@@ -46,7 +46,7 @@ Each entry defines:
 
 - `id` – stable identifier used inside JWTs and storage (lowercase letters/numbers/underscores/hyphens).
 - `display_name` – friendly label surfaced in logs and the demo UI.
-- `allowed_hosts` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header (or the `X-TAuth-Tenant` override) to select a tenant, so do not list the TAuth API hostname here.
+- `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header (or the `X-TAuth-Tenant` override) to select a tenant, so do not list the TAuth API hostname here.
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
@@ -71,7 +71,7 @@ server:
 tenants:
   - id: "gravity"
     display_name: "Gravity"
-    allowed_hosts: ["https://gravity.mprlab.com"]
+    tenant_origins: ["https://gravity.mprlab.com"]
     google_web_client_id: "gravity-client.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-gravity-signing-key"
     cookie_domain: ".mprlab.com"
@@ -85,7 +85,7 @@ tauth --config=config.yaml
 # or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
 ```
 
-Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys and allowed hosts are reported as fingerprints only so validators can compare without seeing secrets).
+Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys and tenant origins are reported as fingerprints only so validators can compare without seeing secrets).
 
 > SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
 
@@ -111,11 +111,11 @@ We ship a compose example under `examples/tauth-demo` that builds TAuth from the
 The sample config now defines **two tenants** so you can exercise origin-based routing without touching `/etc/hosts`. Thanks to RFC 6761, any `*.localhost` name automatically resolves to `127.0.0.1`, so both tenants work out of the box:
 
 - `notes` – resolve via `http://localhost:8082` (or the Gravity UI at `http://localhost:8000`). This matches the default Gravity config and is the tenant you’ve already used.
-- `mpr-sites` – the `mpr-frontend` container serves `examples/tauth-demo/index.html` on `http://localhost:8001`. Its browser origin (`http://localhost:4173`) lives under `allowed_hosts`, so TAuth can derive the tenant from the request `Origin` header without extra UI wiring.
+- `mpr-sites` – the `mpr-frontend` container serves `examples/tauth-demo/index.html` on `http://localhost:8001`. Its browser origin (`http://localhost:4173`) lives under `tenant_origins`, so TAuth can derive the tenant from the request `Origin` header without extra UI wiring.
 
 This setup lets you verify header overrides, cookie isolation, and resolver behavior locally before promoting changes to production.
 
-When two tenants share `localhost`, list each frontend origin (for example `http://localhost:8000` for Gravity and `http://localhost:4173` for the MPR demo) under `allowed_hosts`. TAuth inspects the `Origin` header and resolves the tenant automatically, so the UI doesn’t need to set `data-tenant-id` or call `setAuthTenantId` just to distinguish environments.
+When two tenants share `localhost`, list each frontend origin (for example `http://localhost:8000` for Gravity and `http://localhost:4173` for the MPR demo) under `tenant_origins`. TAuth inspects the `Origin` header and resolves the tenant automatically, so the UI doesn’t need to set `data-tenant-id` or call `setAuthTenantId` just to distinguish environments.
 
 Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, origins, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
@@ -197,7 +197,7 @@ TAuth now reads **all** configuration from a single YAML file (`config.yaml` by 
 tenants:
   - id: "demo"
     display_name: "Demo tenant"
-    allowed_hosts:
+    tenant_origins:
       - "https://demo.localhost"
       - "https://demo.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
@@ -212,7 +212,7 @@ Rules enforced by the loader:
 
 - IDs must use lowercase letters, digits, underscores, or hyphens (`demo`, `customer_b`).
 - `display_name` is required so operators can distinguish tenants in logs.
-- `allowed_hosts` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
+- `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
 - `google_web_client_id` and each TTL must be present and non-empty. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.

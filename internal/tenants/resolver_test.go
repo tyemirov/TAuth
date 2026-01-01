@@ -498,7 +498,7 @@ func loadTestConfig(t *testing.T) Config {
 			{
 				"id": "demo",
 				"display_name": "Demo",
-				"allowed_hosts": ["https://demo.example.com", "https://demo.example.com:8443", "https://demo.localhost", "https://[2001:db8::1]"],
+				"tenant_origins": ["https://demo.example.com", "https://demo.example.com:8443", "https://demo.localhost", "https://[2001:db8::1]"],
 				"google_web_client_id": "demo-client.apps.googleusercontent.com",
 				"jwt_signing_key": "demo-key",
 				"cookie_domain": "demo.example.com",
@@ -511,7 +511,7 @@ func loadTestConfig(t *testing.T) Config {
 			{
 				"id": "prod",
 				"display_name": "Prod",
-				"allowed_hosts": ["https://prod.example.com"],
+				"tenant_origins": ["https://prod.example.com"],
 				"google_web_client_id": "prod-client.apps.googleusercontent.com",
 				"jwt_signing_key": "prod-key",
 				"cookie_domain": ".example.com",
@@ -542,7 +542,7 @@ func loadConfigWithOriginOnlyHosts(testingHandle *testing.T) Config {
 			{
 				"id": "ps",
 				"display_name": "PoodleScanner",
-				"allowed_hosts": ["https://ps.localhost"],
+				"tenant_origins": ["https://ps.localhost"],
 				"google_web_client_id": "ps-client.apps.googleusercontent.com",
 				"jwt_signing_key": "ps-key",
 				"cookie_domain": "",
@@ -555,7 +555,7 @@ func loadConfigWithOriginOnlyHosts(testingHandle *testing.T) Config {
 			{
 				"id": "loopaware",
 				"display_name": "Loopaware",
-				"allowed_hosts": ["https://loopaware.localhost"],
+				"tenant_origins": ["https://loopaware.localhost"],
 				"google_web_client_id": "loopaware-client.apps.googleusercontent.com",
 				"jwt_signing_key": "loopaware-key",
 				"cookie_domain": "",
@@ -586,7 +586,7 @@ func loadConfigWithOriginOnlySharedOrigin(testingHandle *testing.T) Config {
 			{
 				"id": "notes",
 				"display_name": "Gravity Notes",
-				"allowed_hosts": ["https://pinguin.localhost"],
+				"tenant_origins": ["https://pinguin.localhost"],
 				"google_web_client_id": "notes-client.apps.googleusercontent.com",
 				"jwt_signing_key": "notes-key",
 				"cookie_domain": "",
@@ -599,7 +599,7 @@ func loadConfigWithOriginOnlySharedOrigin(testingHandle *testing.T) Config {
 			{
 				"id": "mpr-sites",
 				"display_name": "MPR Sites",
-				"allowed_hosts": ["https://pinguin.localhost"],
+				"tenant_origins": ["https://pinguin.localhost"],
 				"google_web_client_id": "mpr-client.apps.googleusercontent.com",
 				"jwt_signing_key": "mpr-key",
 				"cookie_domain": "",
@@ -630,7 +630,7 @@ func loadConfigWithSharedHost(t *testing.T) Config {
 			{
 				"id": "demo",
 				"display_name": "Demo",
-				"allowed_hosts": ["https://shared.localhost"],
+				"tenant_origins": ["https://shared.localhost"],
 				"google_web_client_id": "demo-client.apps.googleusercontent.com",
 				"jwt_signing_key": "demo-key",
 				"cookie_domain": "",
@@ -642,7 +642,7 @@ func loadConfigWithSharedHost(t *testing.T) Config {
 			{
 				"id": "admin",
 				"display_name": "Admin",
-				"allowed_hosts": ["https://shared.localhost"],
+				"tenant_origins": ["https://shared.localhost"],
 				"google_web_client_id": "admin-client.apps.googleusercontent.com",
 				"jwt_signing_key": "admin-key",
 				"cookie_domain": "",
@@ -672,7 +672,7 @@ func loadConfigWithOrigins(t *testing.T) Config {
 			{
 				"id": "notes",
 				"display_name": "Gravity Notes",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:8000"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:8000"],
 				"google_web_client_id": "notes-client.apps.googleusercontent.com",
 				"jwt_signing_key": "notes-key",
 				"cookie_domain": "",
@@ -685,7 +685,7 @@ func loadConfigWithOrigins(t *testing.T) Config {
 			{
 				"id": "mpr-sites",
 				"display_name": "MPR Sites",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:4173"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:4173"],
 				"google_web_client_id": "mpr-client.apps.googleusercontent.com",
 				"jwt_signing_key": "mpr-key",
 				"cookie_domain": "",
