@@ -4,39 +4,23 @@ const assert = require("node:assert/strict");
 const fileSystem = require("node:fs/promises");
 const pathModule = require("node:path");
 
-const DEMO_INDEX_PATH = pathModule.join(
+const DEMO_FIXTURE_ROOT = pathModule.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "tauth-demo",
-  "index.html",
 );
-const DEMO_CONFIG_PATH = pathModule.join(
-  __dirname,
-  "..",
-  "examples",
-  "tauth-demo",
-  "tauth-config.js",
-);
+const DEMO_INDEX_PATH = pathModule.join(DEMO_FIXTURE_ROOT, "index.html");
+const DEMO_CONFIG_PATH = pathModule.join(DEMO_FIXTURE_ROOT, "tauth-config.js");
 const DEMO_ENV_TEMPLATE_PATH = pathModule.join(
-  __dirname,
-  "..",
-  "examples",
-  "tauth-demo",
+  DEMO_FIXTURE_ROOT,
   ".env.tauth.example",
 );
 const DEMO_TENANT_CONFIG_PATH = pathModule.join(
-  __dirname,
-  "..",
-  "examples",
-  "tauth-demo",
+  DEMO_FIXTURE_ROOT,
   "config.yaml",
 );
 const DEMO_LOCAL_CONFIG_PATH = pathModule.join(
-  __dirname,
-  "..",
-  "examples",
-  "tauth-demo",
+  DEMO_FIXTURE_ROOT,
   "demo-config.js",
 );
 const DEMO_FRONTEND_ORIGINS = Object.freeze([
@@ -93,7 +77,7 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
     "Expected demo config to expose an auth client readiness handle",
   );
   assert.ok(
-    configSource.includes("mpr-ui@latest/mpr-ui.js"),
+    configSource.includes("mpr-ui@3.3.0/mpr-ui.js"),
     "Expected demo config to load the mpr-ui bundle from the CDN",
   );
   assert.ok(

@@ -1,16 +1,63 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.7]
+
+### Features ✨
+
+- Decoupled demo test fixtures and moved tenant origin validation to edge.
+- Restored demo bootstrap assets and improved demo hosting to use computercat.mprlab.com and port 8081.
+- Added tenant ID to the example env sample for better demo configuration.
+- Implemented enhanced demo frontend app supporting Google sign-in and session status display.
+
+### Improvements ⚙️
+
+- Updated demo to pin mpr-ui assets to v3.3.0 to ensure Google site ID attributes are honored.
+- Aligned demo origins with documented 8080 frontend ports and clarified tenant origin validation error messages.
+- Switched demo server to use HTTPS with mounted TLS certificates and surfaced auth errors in the demo app.
+- Updated mpr-header to use an updated DSL with TAuth and restored header auth attributes in demo.
+- Changed demo compose file to mount required 3rd party tools and use computercat host.
 
 ### Bug Fixes 🐛
-- Ensure `initAuthClient` clears stale auth state when a peer refresh broadcast arrives without a profile, with regression coverage.
+
+- Fixed demo environment fixture tracking issues.
+- Restored Google sign-in on HTTPS demo ensuring functional sign-in button rendering.
+- Cleared stale auth state after empty peer refresh broadcasts to avoid stale profile retention.
+- Improved error surfacing for authentication and header issues within demo.
+- Fixed configuration and origin validation rules for multi-tenant setup.
 
 ### Improvements ⚙️
 - Renamed tenant origin configuration from `allowed_hosts` to `tenant_origins` and aligned preflight output and flags.
 - Default session validator issuer to `tauth` when omitted so clients do not need to configure it explicitly.
 
 ### Testing 🧪
-- Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
+
+- Added browser integration test covering demo sign-out flow verifying header reset after logout.
+- Introduced GitHub Actions workflow for frontend tests and type checking on frontend changes.
+- Moved demo-related tests to fixtures to isolate asset changes from test scaffolding.
+
+### Docs 📚
+
+- Documented `cors_allowed_origin_exceptions` for non-tenant CORS origins including Google Identity Services.
+- Updated example configs to align with stricter tenant origin validation rules.
+- Improved issue tracker documentation with relevant features and bug fixes related to demo and tenant handling.
+
+## [v0.9.6]
+
+### Bug Fixes 🐛
+
+- Clear stale auth state in `initAuthClient` after an empty peer refresh broadcast, preventing stale profile retention.
+- Enriched tenant origin validation errors with the expected format and specific failure reasons.
+- Restored the tauth demo bootstrap scripts and aligned demo origins with the documented 8080 frontend ports.
+- Restored mpr-ui header auth attributes in the demo so the Google sign-in button renders.
+- Pinned demo and fixture mpr-ui assets to v3.3.0 so google-site-id attributes are honored.
+- Surfaced mpr-ui authentication and header errors in the demo status panel and moved the entrypoint to `app.js`.
+- Mounted computercat TLS certificates in the demo compose file and switched ghttp to serve HTTPS.
+
+### Testing 🧪
+
+- Added browser integration test covering the demo sign-out flow to verify header reset after logout.
+- Introduced a GitHub Actions workflow to run frontend tests and type checks on frontend changes.
+- Moved demo-related tests onto fixtures so demo asset changes do not affect test scaffolding.
 
 ### Docs 📚
 - Documented `cors_allowed_origin_exceptions` usage (including GIS) and updated example configs to match validation rules.
@@ -19,12 +66,14 @@
 ## [v0.9.5]
 
 ### Features ✨
+
 - `tauth.js` exposes nonce issuance and Google credential exchange helpers for client integrations.
 - Require explicit base URL in `initAuthClient`; remove script-origin inference in the auth client.
 - Added GitHub Pages deployment workflow for the `web/` directory.
 - Rebuilt the docs landing page with a new neon layout, deep dive sections, palette suggestions, and GitHub/Docs/Community footer links.
 
 ### Improvements ⚙️
+
 - Renamed browser helper from `auth-client.js` to `tauth.js` and serve it at `/tauth.js` for better GitHub Pages compatibility.
 - Static browser helpers no longer infer the API host from the script origin.
 - Updated docs, examples, and tests to reflect the rename and new base URL requirements.
@@ -35,6 +84,7 @@
 - Removed the legacy `/mpr-sites.js` asset and demo HTML from service assets so only `/tauth.js` ships with the API.
 
 ### Bug Fixes 🐛
+
 - Removed legacy auth-client server route.
 - Allowed static auth-client serving on shared hosts even when Origin headers are missing.
 - Enforced nonce requirement for Google Sign-In exchanges; mismatched nonces cause authentication failure.
@@ -53,6 +103,7 @@
 - Aligned tools/mpr-ui docs and demo wiring with `/tauth.js`, and updated the mpr-ui auth header to prefer tauth.js helpers with a base-url fallback.
 
 ### Testing 🧪
+
 - Added coverage for database-backed user/nonce stores.
 - Added regression tests for refresh cookie duplication, overlapping cookie scopes, and cross-type cookie collisions.
 - Added regression coverage for tenant configuration validation related to cookie name collisions.
@@ -64,6 +115,7 @@
 - Added regression coverage for the demo tauth.js cache-busting loader.
 
 ### Docs 📚
+
 - Updated README and ARCHITECTURE.md to replace `auth-client.js` references with `tauth.js`.
 - Documented the explicit base URL requirement for `tauth.js` initialization.
 - Updated issue tracker with new features and bug fixes related to auth client renaming and API changes.
@@ -73,11 +125,13 @@
 ## [v0.9.0]
 
 ### Features ✨
+
 - Introduced WebAssetsVolume configuration and landing page updates with footer integration and layout improvements.
 - Added EmbeddedAuthServer for mounting auth routes and auth endpoint helpers with automatic base URL resolution.
 - Added pre-start configuration report and validation via `tauth preflight` with redacted effective-config report for external validation.
 
 ### Improvements ⚙️
+
 - Migrated preflight package to reusable `github.com/tyemirov/utils/preflight`; enhanced Viper adapter to support YAML + env bindings.
 - Auth client now auto-detects base URL and exposes `getAuthEndpoints()`; sessionvalidator loader supports tenant config from `config.yaml`.
 - Updated Dockerfile to add `/web` volume for web assets; updated dependencies and module namespace.
@@ -85,14 +139,17 @@
 - Increased test coverage to 95%, adding sandbox-safe integration tests and expanded coverage on multiple modules.
 
 ### Bug Fixes 🐛
+
 - Cleaned host collision rules and fixed multi-tenant hygiene validation in preflight.
 - Fixed config loading and validation including env variable placeholder support and handling missing env vars gracefully.
 
 ### Testing 🧪
+
 - Added extensive unit and integration tests for sessionvalidator, config loaders, tenant runtime, preflight reports, and server coverage.
 - Integration tests use in-memory servers for end-to-end tenant routing and auth flow validation.
 
 ### Docs 📚
+
 - Documented new `tauth preflight` command and effective-config report format; updated migration guides.
 - Added detailed architecture and usage guides, including server-only endpoint contracts and sessionvalidator configuration.
 - Provided migration documentation for GAuss to TAuth and updated README with deployment tips and preflight usage.
@@ -101,6 +158,7 @@
 ## [v0.0.8]
 
 ### Features ✨
+
 - TA-212: Switched tenant configuration format from JSON to YAML to improve readability. Updated loader to parse YAML, and all documentation/examples now reference `tenants.yaml`.
 - TA-101: Added the `internal/tenants` domain model plus JSON loader that validates tenant IDs, hosts, cookies, and TTLs ahead of the multi-tenant routing work.
 - TA-102: Introduced the tenant resolver + gin middleware with optional `X-TAuth-Tenant` overrides plus comprehensive tests so upcoming auth routes can bind per-tenant configs safely.
@@ -113,18 +171,22 @@
 - TA-109: Generalized preflight reporting with `github.com/tyemirov/utils/preflight`, added a Viper-based adapter for YAML + env bindings, and refactored TAuth preflight to reuse the shared schema.
 
 ### Improvements ⚙️
+
 - TA-411: Moved the preflight package to `github.com/tyemirov/utils/preflight` to make it reusable outside the TAuth module.
 
 ### Docs 📚
+
 - TA-100: Captured the multi-tenant implementation roadmap and opened follow-up issues (TA-101-TA-105) to track tenant modelling, routing, storage isolation, runtime wiring, and documentation updates.
 - TA-110: Added a GitHub Pages landing page at `docs/index.html` with the new presentation layout and CTAs.
 - TA-111: Swapped the landing page footer to a custom component.
 - TA-112: Removed the palette suggestions section from the landing page.
 
 ### Improvements ⚙️
+
 - TA-113: Added `/web` as a Docker volume and copied web assets into the image.
 
 ### Bug Fixes 🐛
+
 - TA-339: Expanded the tenant config loader to replace `${VAR}`/`$VAR` placeholders (even when configs are embedded), added regression tests for both document and YAML entry points, and documented the behavior so missing env vars collapse to empty strings without panicking.
 - TA-333: Fixed `clearCookie` path mismatch during logout; refresh cookies (Path `/auth`) are now correctly cleared alongside session cookies.
 - TA-334: Fixed `/demo/config.js` serving default tenant config; now correctly resolves the tenant from the request context to return the appropriate Google Client ID.
@@ -134,9 +196,11 @@
 ## [v0.0.6]
 
 ### Features ✨
+
 - Support dev cookies over HTTP in server configuration for development ease.
 
 ### Improvements ⚙️
+
 - Added comprehensive usage documentation with an authoritative guide in `docs/usage.md`.
 - Introduced `.gitignore` enhancements to manage environment files and IDE artifacts.
 - Refined server CORS and cookie SameSite handling with a new `devInsecureHTTP` flag.
@@ -144,12 +208,15 @@
 - Updated README to link to the new usage guide for easier onboarding.
 
 ### Bug Fixes 🐛
+
 - Fixed handling of development cookies to support HTTP environments.
 
 ### Testing 🧪
+
 - Expanded integration test coverage for auth routes to improve reliability.
 
 ### Docs 📚
+
 - Created a detailed usage guide covering setup, session management, and client integration.
 - Removed obsolete docs (`loopaware-footer.md` and `refactor-plan.md`) to streamline documentation.
 - Improved README with updated references to new documentation resources.
