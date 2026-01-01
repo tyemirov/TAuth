@@ -445,7 +445,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 			{
 				"id": "tenant-a",
 				"display_name": "Tenant A",
-				"allowed_hosts": ["https://tenant-a.localhost"],
+				"tenant_origins": ["https://tenant-a.localhost"],
 				"google_web_client_id": "client-tenant-a",
 				"jwt_signing_key": "tenant-a-key",
 				"cookie_domain": "tenant-a.localhost",
@@ -459,7 +459,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 			{
 				"id": "tenant-b",
 				"display_name": "Tenant B",
-				"allowed_hosts": ["https://tenant-b.localhost"],
+				"tenant_origins": ["https://tenant-b.localhost"],
 				"google_web_client_id": "client-tenant-b",
 				"jwt_signing_key": "tenant-b-key",
 				"cookie_domain": "tenant-b.localhost",
@@ -587,7 +587,7 @@ func TestHTTPAuthOriginsResolveSharedHostTenants(t *testing.T) {
 			{
 				"id": "notes",
 				"display_name": "Gravity Notes",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:8000"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:8000"],
 				"google_web_client_id": "notes-client",
 				"jwt_signing_key": "notes-key",
 				"cookie_domain": "",
@@ -601,7 +601,7 @@ func TestHTTPAuthOriginsResolveSharedHostTenants(t *testing.T) {
 			{
 				"id": "mpr-sites",
 				"display_name": "MPR Sites",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:4173"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:4173"],
 				"google_web_client_id": "mpr-client",
 				"jwt_signing_key": "mpr-key",
 				"cookie_domain": "",
@@ -736,8 +736,8 @@ func TestHTTPAuthAllowsMultipleTenantSessionsFromSingleClient(t *testing.T) {
 
 	tenantConfig := mustLoadTenantsConfigFromString(t, `{
 		"tenants": [
-			{"id":"notes","display_name":"Notes","allowed_hosts":["https://shared.localhost","http://localhost:8000"],"google_web_client_id":"notes-client","jwt_signing_key":"notes-key","cookie_domain":"","session_cookie_name":"app_session_notes","refresh_cookie_name":"app_refresh_notes","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true},
-			{"id":"mpr-sites","display_name":"MPR","allowed_hosts":["https://shared.localhost","http://localhost:4173"],"google_web_client_id":"mpr-client","jwt_signing_key":"mpr-key","cookie_domain":"","session_cookie_name":"app_session_mpr","refresh_cookie_name":"app_refresh_mpr","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true}
+			{"id":"notes","display_name":"Notes","tenant_origins":["https://shared.localhost","http://localhost:8000"],"google_web_client_id":"notes-client","jwt_signing_key":"notes-key","cookie_domain":"","session_cookie_name":"app_session_notes","refresh_cookie_name":"app_refresh_notes","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true},
+			{"id":"mpr-sites","display_name":"MPR","tenant_origins":["https://shared.localhost","http://localhost:4173"],"google_web_client_id":"mpr-client","jwt_signing_key":"mpr-key","cookie_domain":"","session_cookie_name":"app_session_mpr","refresh_cookie_name":"app_refresh_mpr","session_ttl":"15m","refresh_ttl":"1440h","nonce_ttl":"5m","allow_insecure_http":true}
 		]}`)
 
 	resolver, err := tenants.NewResolver(tenantConfig)
@@ -855,7 +855,7 @@ func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
 			{
 				"id": "notes",
 				"display_name": "Gravity Notes",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:8000"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:8000"],
 				"google_web_client_id": "notes-client",
 				"jwt_signing_key": "notes-key",
 				"cookie_domain": "",
@@ -869,7 +869,7 @@ func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
 			{
 				"id": "mpr-sites",
 				"display_name": "MPR Sites",
-				"allowed_hosts": ["https://shared.localhost", "http://localhost:4173"],
+				"tenant_origins": ["https://shared.localhost", "http://localhost:4173"],
 				"google_web_client_id": "mpr-client",
 				"jwt_signing_key": "mpr-key",
 				"cookie_domain": "",
@@ -1499,7 +1499,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			{
 				"id": "ps",
 				"display_name": "ProductScanner",
-				"allowed_hosts": ["https://shared.localhost", "http://ps.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://ps.localhost"],
 				"google_web_client_id": "client-ps",
 				"jwt_signing_key": "ps-signing",
 				"cookie_domain": "",
@@ -1513,7 +1513,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			{
 				"id": "loopaware",
 				"display_name": "Loopaware",
-				"allowed_hosts": ["https://shared.localhost", "http://loopaware.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://loopaware.localhost"],
 				"google_web_client_id": "client-loopaware",
 				"jwt_signing_key": "loopaware-signing",
 				"cookie_domain": "",
@@ -1527,7 +1527,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			{
 				"id": "gravity",
 				"display_name": "Gravity",
-				"allowed_hosts": ["https://shared.localhost", "http://gravity.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://gravity.localhost"],
 				"google_web_client_id": "client-gravity",
 				"jwt_signing_key": "gravity-signing",
 				"cookie_domain": "",
@@ -1800,7 +1800,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			{
 				"id": "ps",
 				"display_name": "ProductScanner",
-				"allowed_hosts": ["https://shared.localhost", "http://ps.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://ps.localhost"],
 				"google_web_client_id": "client-ps",
 				"jwt_signing_key": "ps-signing",
 				"cookie_domain": "",
@@ -1814,7 +1814,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			{
 				"id": "loopaware",
 				"display_name": "Loopaware",
-				"allowed_hosts": ["https://shared.localhost", "http://loopaware.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://loopaware.localhost"],
 				"google_web_client_id": "client-loopaware",
 				"jwt_signing_key": "loopaware-signing",
 				"cookie_domain": "",
@@ -1828,7 +1828,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			{
 				"id": "gravity",
 				"display_name": "Gravity",
-				"allowed_hosts": ["https://shared.localhost", "http://gravity.localhost"],
+				"tenant_origins": ["https://shared.localhost", "http://gravity.localhost"],
 				"google_web_client_id": "client-gravity",
 				"jwt_signing_key": "gravity-signing",
 				"cookie_domain": "",

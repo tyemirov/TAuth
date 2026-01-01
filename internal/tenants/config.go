@@ -25,7 +25,7 @@ type Config struct {
 type Tenant struct {
 	id                TenantID
 	displayName       string
-	hosts             []string
+	origins           []string
 	googleWebClientID string
 	jwtSigningKey     []byte
 	cookieDomain      string
@@ -58,9 +58,9 @@ const (
 	errorCodeMissingTenants             = "tenant.missing_records"
 	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
 	errorCodeInvalidID                  = "tenant.invalid_id"
-	errorCodeMissingHosts               = "tenant.missing_hosts"
+	errorCodeMissingOrigins             = "tenant.missing_origins"
 	errorCodeInvalidOrigin              = "tenant.invalid_origin"
-	errorCodeDuplicateHost              = "tenant.duplicate_host"
+	errorCodeDuplicateOrigin            = "tenant.duplicate_origin"
 	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
@@ -72,6 +72,14 @@ const (
 	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
 	errorCodeDuplicateCookieNameCross   = "tenant.duplicate_cookie_name_cross_type"
 	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
+	originSchemeHTTP                    = "http"
+	originSchemeHTTPS                   = "https"
+	originExpectation                   = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
+	originReasonMissingScheme           = "missing scheme"
+	originReasonUnsupportedScheme       = "unsupported scheme"
+	originReasonMissingHost             = "missing host"
+	originReasonUnexpectedPath          = "origin must not include path, query, or fragment"
+	originReasonInvalidURL              = "invalid url"
 )
 
 const (
@@ -209,11 +217,11 @@ func (tenant Tenant) DisplayName() string {
 	return tenant.displayName
 }
 
-// Hosts returns the allowed origins for the tenant.
-func (tenant Tenant) Hosts() []string {
-	hostsCopy := make([]string, len(tenant.hosts))
-	copy(hostsCopy, tenant.hosts)
-	return hostsCopy
+// Origins returns the allowed origins for the tenant.
+func (tenant Tenant) Origins() []string {
+	originsCopy := make([]string, len(tenant.origins))
+	copy(originsCopy, tenant.origins)
+	return originsCopy
 }
 
 // GoogleWebClientID returns the OAuth client identifier.
@@ -271,9 +279,9 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if idErr != nil {
 		return Tenant{}, nil, idErr
 	}
-	hosts, origins, hostErr := parseHosts(raw.AllowedHosts, tenantID)
-	if hostErr != nil {
-		return Tenant{}, nil, hostErr
+	origins, originErr := parseTenantOrigins(raw.TenantOrigins, tenantID)
+	if originErr != nil {
+		return Tenant{}, nil, originErr
 	}
 	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
 	if googleWebClientID == "" {
@@ -319,7 +327,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	return Tenant{
 		id:                tenantID,
 		displayName:       displayName,
-		hosts:             hosts,
+		origins:           origins,
 		googleWebClientID: googleWebClientID,
 		jwtSigningKey:     signingKey,
 		cookieDomain:      cookieDomain,
@@ -340,26 +348,24 @@ func parseTenantID(raw string) (TenantID, error) {
 	return TenantID(trimmed), nil
 }
 
-func parseHosts(hosts []string, tenantID TenantID) ([]string, []string, error) {
-	if len(hosts) == 0 {
-		return nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingHosts, tenantID)
+func parseTenantOrigins(origins []string, tenantID TenantID) ([]string, error) {
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingOrigins, tenantID)
 	}
-	cleanHosts := make([]string, 0, len(hosts))
-	origins := make([]string, 0, len(hosts))
+	normalizedOrigins := make([]string, 0, len(origins))
 	seenOrigins := make(map[string]struct{})
-	for _, host := range hosts {
-		normalizedOrigin, err := normalizeOrigin(host)
+	for _, origin := range origins {
+		normalizedOrigin, err := normalizeOrigin(origin)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %s tenant=%s origin=%s", ErrInvalidTenantConfig, errorCodeInvalidOrigin, tenantID, host)
+			return nil, fmt.Errorf("%w: %s tenant=%s origin=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidOrigin, tenantID, origin, err)
 		}
 		if _, exists := seenOrigins[normalizedOrigin]; exists {
-			return nil, nil, fmt.Errorf("%w: %s tenant=%s host=%s", ErrInvalidTenantConfig, errorCodeDuplicateHost, tenantID, host)
+			return nil, fmt.Errorf("%w: %s tenant=%s origin=%s", ErrInvalidTenantConfig, errorCodeDuplicateOrigin, tenantID, origin)
 		}
 		seenOrigins[normalizedOrigin] = struct{}{}
-		cleanHosts = append(cleanHosts, normalizedOrigin)
-		origins = append(origins, normalizedOrigin)
+		normalizedOrigins = append(normalizedOrigins, normalizedOrigin)
 	}
-	return cleanHosts, origins, nil
+	return normalizedOrigins, nil
 }
 
 func buildTenantCookieScope(tenant Tenant, origins []string) (tenantCookieScope, error) {
@@ -603,19 +609,29 @@ func normalizeHostPort(host string) (string, string, error) {
 
 func normalizeOrigin(origin string) (string, error) {
 	trimmed := strings.TrimSpace(origin)
-	parsed, err := url.Parse(trimmed)
+	parsedURL, err := url.Parse(trimmed)
 	if err != nil {
-		return "", err
+		return "", originError(originReasonInvalidURL)
 	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return "", fmt.Errorf("invalid origin")
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme == "" {
+		return "", originError(originReasonMissingScheme)
 	}
-	if parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("invalid origin")
+	if scheme != originSchemeHTTP && scheme != originSchemeHTTPS {
+		return "", originError(fmt.Sprintf("%s: %s", originReasonUnsupportedScheme, scheme))
 	}
-	host := strings.ToLower(parsed.Host)
+	if parsedURL.Host == "" {
+		return "", originError(originReasonMissingHost)
+	}
+	if parsedURL.Path != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		return "", originError(originReasonUnexpectedPath)
+	}
+	host := strings.ToLower(parsedURL.Host)
 	return fmt.Sprintf("%s://%s", scheme, host), nil
+}
+
+func originError(reason string) error {
+	return fmt.Errorf("%s (%s)", reason, originExpectation)
 }
 
 // NormalizeOrigin returns the canonical origin string or an error for invalid origins.
@@ -642,7 +658,7 @@ func expandFileDocumentEnv(document FileDocument) FileDocument {
 func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.ID = os.ExpandEnv(tenant.ID)
 	tenant.DisplayName = os.ExpandEnv(tenant.DisplayName)
-	tenant.AllowedHosts = expandEnvSlice(tenant.AllowedHosts)
+	tenant.TenantOrigins = expandEnvSlice(tenant.TenantOrigins)
 	tenant.GoogleWebClientID = os.ExpandEnv(tenant.GoogleWebClientID)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
@@ -669,7 +685,7 @@ func expandEnvSlice(values []string) []string {
 type FileTenant struct {
 	ID                string   `json:"id" yaml:"id"`
 	DisplayName       string   `json:"display_name" yaml:"display_name"`
-	AllowedHosts      []string `json:"allowed_hosts" yaml:"allowed_hosts"`
+	TenantOrigins     []string `json:"tenant_origins" yaml:"tenant_origins"`
 	GoogleWebClientID string   `json:"google_web_client_id" yaml:"google_web_client_id"`
 	JWTSigningKey     string   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain      string   `json:"cookie_domain" yaml:"cookie_domain"`

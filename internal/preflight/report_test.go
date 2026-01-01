@@ -15,7 +15,7 @@ const (
 	testSessionCookieName = "app_session_demo"
 	testRefreshCookieName = "app_refresh_demo"
 	testSigningKey        = "demo-signing-key"
-	testAllowedHost       = "https://demo.localhost"
+	testTenantOrigin      = "https://demo.localhost"
 )
 
 func writeConfigFile(testingHandle *testing.T, contents string) string {
@@ -42,7 +42,7 @@ server:
 tenants:
   - id: "`+testTenantID+`"
     display_name: "Demo"
-    allowed_hosts: ["`+testAllowedHost+`"]
+    tenant_origins: ["`+testTenantOrigin+`"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "`+testSigningKey+`"
     cookie_domain: "demo.localhost"
@@ -81,10 +81,10 @@ type testServerPayload struct {
 type testTenantPayload struct {
 	TenantID                 string   `json:"tenant_id"`
 	DisplayName              string   `json:"display_name"`
-	AllowedHosts             []string `json:"allowed_hosts"`
-	AllowedHostsRedacted     bool     `json:"allowed_hosts_redacted"`
-	AllowedHostsCount        int      `json:"allowed_hosts_count"`
-	AllowedHostHashes        []string `json:"allowed_host_hashes"`
+	TenantOrigins            []string `json:"tenant_origins"`
+	TenantOriginsRedacted    bool     `json:"tenant_origins_redacted"`
+	TenantOriginsCount       int      `json:"tenant_origins_count"`
+	TenantOriginHashes       []string `json:"tenant_origin_hashes"`
 	GoogleWebClientID        string   `json:"google_web_client_id"`
 	CookieDomain             string   `json:"cookie_domain"`
 	SessionCookieName        string   `json:"session_cookie_name"`
@@ -98,7 +98,7 @@ type testTenantPayload struct {
 	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
 }
 
-func TestBuildRedactedReportRedactsHosts(testingHandle *testing.T) {
+func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	configPath := writeConfigFile(testingHandle, buildConfigPayload(""))
 	reportBytes, err := BuildRedactedReport(configPath)
 	if err != nil {
@@ -115,17 +115,17 @@ func TestBuildRedactedReportRedactsHosts(testingHandle *testing.T) {
 		testingHandle.Fatalf("expected one tenant, got %d", len(payload.EffectiveConfig.Tenants))
 	}
 	tenant := payload.EffectiveConfig.Tenants[0]
-	if !tenant.AllowedHostsRedacted {
-		testingHandle.Fatalf("expected hosts to be redacted")
+	if !tenant.TenantOriginsRedacted {
+		testingHandle.Fatalf("expected origins to be redacted")
 	}
-	if len(tenant.AllowedHosts) != 0 {
-		testingHandle.Fatalf("expected no allowed_hosts when redacted")
+	if len(tenant.TenantOrigins) != 0 {
+		testingHandle.Fatalf("expected no tenant_origins when redacted")
 	}
-	if tenant.AllowedHostsCount != 1 {
-		testingHandle.Fatalf("expected allowed host count 1, got %d", tenant.AllowedHostsCount)
+	if tenant.TenantOriginsCount != 1 {
+		testingHandle.Fatalf("expected tenant origin count 1, got %d", tenant.TenantOriginsCount)
 	}
-	if len(tenant.AllowedHostHashes) != 1 {
-		testingHandle.Fatalf("expected one host hash")
+	if len(tenant.TenantOriginHashes) != 1 {
+		testingHandle.Fatalf("expected one origin hash")
 	}
 	expectedFingerprint := preflightpkg.HashSHA256Hex([]byte(testSigningKey))
 	if tenant.JWTSigningKeyFingerprint != expectedFingerprint {
@@ -146,7 +146,7 @@ func TestBuildRedactedReportRedactsHosts(testingHandle *testing.T) {
 	}
 }
 
-func TestBuildFullReportIncludesHosts(testingHandle *testing.T) {
+func TestBuildFullReportIncludesOrigins(testingHandle *testing.T) {
 	configPath := writeConfigFile(testingHandle, buildConfigPayload(""))
 	reportBytes, err := BuildFullReport(configPath)
 	if err != nil {
@@ -157,11 +157,11 @@ func TestBuildFullReportIncludesHosts(testingHandle *testing.T) {
 		testingHandle.Fatalf("decode report: %v", err)
 	}
 	tenant := payload.EffectiveConfig.Tenants[0]
-	if tenant.AllowedHostsRedacted {
-		testingHandle.Fatalf("expected hosts to be included")
+	if tenant.TenantOriginsRedacted {
+		testingHandle.Fatalf("expected origins to be included")
 	}
-	if len(tenant.AllowedHosts) != 1 || tenant.AllowedHosts[0] != testAllowedHost {
-		testingHandle.Fatalf("expected allowed_hosts to include %s", testAllowedHost)
+	if len(tenant.TenantOrigins) != 1 || tenant.TenantOrigins[0] != testTenantOrigin {
+		testingHandle.Fatalf("expected tenant_origins to include %s", testTenantOrigin)
 	}
 }
 

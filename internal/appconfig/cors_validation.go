@@ -52,8 +52,8 @@ func normalizeExceptionOrigins(exceptionOrigins []string) (map[string]struct{}, 
 func buildTenantOriginSet(tenantConfig tenants.Config) map[string]struct{} {
 	tenantOriginSet := make(map[string]struct{})
 	for _, tenant := range tenantConfig.Tenants() {
-		for _, host := range tenant.Hosts() {
-			tenantOriginSet[host] = struct{}{}
+		for _, origin := range tenant.Origins() {
+			tenantOriginSet[origin] = struct{}{}
 		}
 	}
 	return tenantOriginSet

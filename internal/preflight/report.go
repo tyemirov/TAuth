@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v2"
+	reportSchemaVersion        = "tauth.preflight.v3"
 	endpointContractVersion    = "tauth.http.v1"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
@@ -50,10 +50,10 @@ type serverPayload struct {
 type tenantPayload struct {
 	TenantID                 string   `json:"tenant_id"`
 	DisplayName              string   `json:"display_name"`
-	AllowedHosts             []string `json:"allowed_hosts,omitempty"`
-	AllowedHostsRedacted     bool     `json:"allowed_hosts_redacted"`
-	AllowedHostsCount        int      `json:"allowed_hosts_count"`
-	AllowedHostHashes        []string `json:"allowed_host_hashes,omitempty"`
+	TenantOrigins            []string `json:"tenant_origins,omitempty"`
+	TenantOriginsRedacted    bool     `json:"tenant_origins_redacted"`
+	TenantOriginsCount       int      `json:"tenant_origins_count"`
+	TenantOriginHashes       []string `json:"tenant_origin_hashes,omitempty"`
 	GoogleWebClientID        string   `json:"google_web_client_id"`
 	CookieDomain             string   `json:"cookie_domain"`
 	SessionCookieName        string   `json:"session_cookie_name"`
@@ -157,19 +157,19 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 	for _, tenant := range tenantList {
 		tenantID := string(tenant.ID())
 		serverConfig := registry.Config(tenantID)
-		hosts := tenant.Hosts()
-		hostHashes := make([]string, 0, len(hosts))
-		for _, host := range hosts {
-			hostHashes = append(hostHashes, preflight.HashSHA256Hex([]byte(host)))
+		origins := tenant.Origins()
+		originHashes := make([]string, 0, len(origins))
+		for _, origin := range origins {
+			originHashes = append(originHashes, preflight.HashSHA256Hex([]byte(origin)))
 		}
-		sort.Strings(hostHashes)
+		sort.Strings(originHashes)
 
 		payload := tenantPayload{
 			TenantID:                 tenantID,
 			DisplayName:              tenant.DisplayName(),
-			AllowedHostsRedacted:     mode == preflight.RedactionModeRedacted,
-			AllowedHostsCount:        len(hosts),
-			AllowedHostHashes:        hostHashes,
+			TenantOriginsRedacted:    mode == preflight.RedactionModeRedacted,
+			TenantOriginsCount:       len(origins),
+			TenantOriginHashes:       originHashes,
 			GoogleWebClientID:        tenant.GoogleWebClientID(),
 			CookieDomain:             tenant.CookieDomain(),
 			SessionCookieName:        tenant.SessionCookieName(),
@@ -184,7 +184,7 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 		}
 
 		if mode == preflight.RedactionModeFull {
-			payload.AllowedHosts = append([]string(nil), hosts...)
+			payload.TenantOrigins = append([]string(nil), origins...)
 		}
 		payloads = append(payloads, payload)
 	}

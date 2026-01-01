@@ -22,7 +22,7 @@ func TestLoadConfigSuccess(t *testing.T) {
 	configYAML := []byte(`tenants:
   - id: "demo"
     display_name: "Demo Tenant"
-    allowed_hosts:
+    tenant_origins:
       - "https://demo.localhost"
       - "https://demo.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
@@ -37,7 +37,7 @@ func TestLoadConfigSuccess(t *testing.T) {
 
   - id: "prod"
     display_name: "Production Tenant"
-    allowed_hosts:
+    tenant_origins:
       - "https://app.example.com"
       - "https://app.mprlab.com"
     google_web_client_id: "prod-client.apps.googleusercontent.com"
@@ -76,8 +76,8 @@ func TestLoadConfigSuccess(t *testing.T) {
 	if string(demoTenant.SigningKey()) != "demo-tenant-key" {
 		t.Fatalf("unexpected signing key: %s", demoTenant.SigningKey())
 	}
-	if !sameStringSlices(demoTenant.Hosts(), []string{"https://demo.localhost", "https://demo.example.com"}) {
-		t.Fatalf("unexpected allowed_hosts: %#v", demoTenant.Hosts())
+	if !sameStringSlices(demoTenant.Origins(), []string{"https://demo.localhost", "https://demo.example.com"}) {
+		t.Fatalf("unexpected tenant_origins: %#v", demoTenant.Origins())
 	}
 	if demoTenant.CookieDomain() != "demo.example.com" {
 		t.Fatalf("unexpected cookie domain: %s", demoTenant.CookieDomain())
@@ -113,7 +113,7 @@ func TestLoadConfigAllowsHostOnlyCookieDomain(t *testing.T) {
 			{
 				ID:                "host-only",
 				DisplayName:       "Host Only",
-				AllowedHosts:      []string{"http://localhost"},
+				TenantOrigins:     []string{"http://localhost"},
 				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
 				JWTSigningKey:     "host-only-key",
 				CookieDomain:      "",
@@ -145,7 +145,7 @@ func TestLoadConfigSupportsCustomCookieNames(t *testing.T) {
 			{
 				ID:                "custom",
 				DisplayName:       "Custom",
-				AllowedHosts:      []string{"https://custom.localhost"},
+				TenantOrigins:     []string{"https://custom.localhost"},
 				GoogleWebClientID: "custom-client.apps.googleusercontent.com",
 				JWTSigningKey:     "custom-key",
 				CookieDomain:      "",
@@ -184,7 +184,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 			content: `tenants:
   - id: ""
     display_name: "Demo Tenant"
-    allowed_hosts: ["https://demo.localhost"]
+    tenant_origins: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "signing"
     cookie_domain: "demo.example.com"
@@ -201,7 +201,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 			content: `tenants:
   - id: "demo"
     display_name: "Demo Tenant"
-    allowed_hosts: ["https://demo.example.com"]
+    tenant_origins: ["https://demo.example.com"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "signing"
     cookie_domain: "demo.example.com"
@@ -218,7 +218,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 			content: `tenants:
   - id: "demo"
     unknown_field: "unexpected"
-    allowed_hosts: ["https://demo.example.com"]
+    tenant_origins: ["https://demo.example.com"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "signing"
     cookie_domain: "demo.example.com"
@@ -260,7 +260,7 @@ func TestConfigAllowsSharedOrigins(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "",
@@ -272,7 +272,7 @@ func TestConfigAllowsSharedOrigins(t *testing.T) {
 			{
 				ID:                "admin",
 				DisplayName:       "Admin",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "admin-client.apps.googleusercontent.com",
 				JWTSigningKey:     "admin-key",
 				CookieDomain:      "",
@@ -393,7 +393,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
 				SessionCookieName: "app_session_demo",
@@ -410,7 +410,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -427,7 +427,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -444,7 +444,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"demo.localhost"},
+				TenantOrigins:     []string{"demo.localhost"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -457,11 +457,11 @@ func TestBuildTenantErrors(t *testing.T) {
 			wantErr: errorCodeInvalidOrigin,
 		},
 		{
-			name: "duplicate hosts",
+			name: "duplicate origins",
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost", "https://DEMO.LOCALHOST"},
+				TenantOrigins:     []string{"https://demo.localhost", "https://DEMO.LOCALHOST"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -471,14 +471,14 @@ func TestBuildTenantErrors(t *testing.T) {
 				RefreshTTL:        "720h",
 				NonceTTL:          "5m",
 			},
-			wantErr: errorCodeDuplicateHost,
+			wantErr: errorCodeDuplicateOrigin,
 		},
 		{
 			name: "missing signing key",
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "client",
 				CookieDomain:      "demo.localhost",
 				SessionCookieName: "app_session_demo",
@@ -494,7 +494,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -510,7 +510,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key",
 				CookieDomain:      "demo.localhost",
@@ -538,7 +538,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost", "https://demo.example.com"},
+				TenantOrigins:     []string{"https://demo.localhost", "https://demo.example.com"},
 				GoogleWebClientID: "client",
 				JWTSigningKey:     "key1",
 				CookieDomain:      "demo.localhost",
@@ -551,7 +551,7 @@ func TestBuildTenantErrors(t *testing.T) {
 			{
 				ID:                "prod",
 				DisplayName:       "Prod",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "prod-client",
 				JWTSigningKey:     "key2",
 				CookieDomain:      "prod.localhost",
@@ -572,6 +572,33 @@ func TestBuildTenantErrors(t *testing.T) {
 	}
 }
 
+func TestInvalidOriginErrorIncludesExpectation(t *testing.T) {
+	invalidTenant := FileTenant{
+		ID:                "demo",
+		DisplayName:       "Demo",
+		TenantOrigins:     []string{"demo.localhost"},
+		GoogleWebClientID: "client",
+		JWTSigningKey:     "key",
+		CookieDomain:      "demo.localhost",
+		SessionCookieName: "app_session_demo",
+		RefreshCookieName: "app_refresh_demo",
+		SessionTTL:        "15m",
+		RefreshTTL:        "720h",
+		NonceTTL:          "5m",
+	}
+
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{invalidTenant}})
+	if loadErr == nil {
+		t.Fatalf("expected config error")
+	}
+	if !strings.Contains(loadErr.Error(), originReasonMissingScheme) {
+		t.Fatalf("expected invalid origin error to mention %q, got %v", originReasonMissingScheme, loadErr)
+	}
+	if !strings.Contains(loadErr.Error(), originExpectation) {
+		t.Fatalf("expected invalid origin error to mention %q, got %v", originExpectation, loadErr)
+	}
+}
+
 func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	t.Setenv("TENANT_COOKIE_DOMAIN", ".example.com")
 	tempDir := t.TempDir()
@@ -579,7 +606,7 @@ func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	configYAML := []byte(`tenants:
   - id: "demo"
     display_name: ""
-    allowed_hosts: ["https://demo.localhost"]
+    tenant_origins: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "demo-key"
     cookie_domain: "${TENANT_COOKIE_DOMAIN}"
@@ -626,7 +653,7 @@ func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
 			{
 				ID:                "env-demo",
 				DisplayName:       "Env Demo",
-				AllowedHosts:      []string{"${TENANT_ALLOWED_HOST}"},
+				TenantOrigins:     []string{"${TENANT_ALLOWED_HOST}"},
 				GoogleWebClientID: "$TENANT_CLIENT_ID",
 				JWTSigningKey:     "${TENANT_SIGNING_KEY}",
 				CookieDomain:      "$TENANT_COOKIE_DOMAIN",
@@ -656,8 +683,8 @@ func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
 	if string(tenant.SigningKey()) != "env-signing-key" {
 		t.Fatalf("expected env signing key, got %s", tenant.SigningKey())
 	}
-	if !sameStringSlices(tenant.Hosts(), []string{"https://env.localhost"}) {
-		t.Fatalf("expected env host to be expanded, got %#v", tenant.Hosts())
+	if !sameStringSlices(tenant.Origins(), []string{"https://env.localhost"}) {
+		t.Fatalf("expected env origin to be expanded, got %#v", tenant.Origins())
 	}
 	if tenant.SessionCookieName() != "env_session_cookie" {
 		t.Fatalf("expected env session cookie name, got %s", tenant.SessionCookieName())
@@ -682,7 +709,7 @@ func TestLoadConfigHandlesMissingEnvVars(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "${MISSING_DISPLAY_NAME}",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "$UNSET_COOKIE_DOMAIN",
@@ -717,7 +744,7 @@ func TestLoadConfigTrimsQuotedPath(t *testing.T) {
 	configYAML := []byte(`tenants:
   - id: "demo"
     display_name: "Demo"
-    allowed_hosts: ["https://demo.localhost"]
+    tenant_origins: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "demo-key"
     cookie_domain: "demo.localhost"
@@ -752,10 +779,10 @@ func TestConfigTenantsReturnsCopy(t *testing.T) {
 	}
 }
 
-func buildTestTenant(tenantID string, allowedHosts []string, cookieDomain string, sessionCookieName string, refreshCookieName string, signingKey string) FileTenant {
+func buildTestTenant(tenantID string, tenantOrigins []string, cookieDomain string, sessionCookieName string, refreshCookieName string, signingKey string) FileTenant {
 	return FileTenant{
 		ID:                tenantID,
-		AllowedHosts:      allowedHosts,
+		TenantOrigins:     tenantOrigins,
 		GoogleWebClientID: testGoogleWebClientID,
 		JWTSigningKey:     signingKey,
 		CookieDomain:      cookieDomain,
