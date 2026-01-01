@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tyemirov/tauth/internal/appconfig"
 )
 
 // Clock provides the current time.
@@ -128,8 +129,12 @@ func New(configuration Config) (*Validator, error) {
 	if len(configuration.SigningKey) == 0 {
 		return nil, fmt.Errorf("session.validator.new: %w", ErrMissingSigningKey)
 	}
-	if strings.TrimSpace(configuration.Issuer) == "" {
-		return nil, fmt.Errorf("session.validator.new: %w", ErrMissingIssuer)
+	issuer := strings.TrimSpace(configuration.Issuer)
+	if issuer == "" {
+		if configuration.Issuer != "" {
+			return nil, fmt.Errorf("session.validator.new: %w", ErrMissingIssuer)
+		}
+		issuer = appconfig.DefaultJWTIssuer
 	}
 	cookieName := configuration.CookieName
 	if strings.TrimSpace(cookieName) == "" {
@@ -141,7 +146,7 @@ func New(configuration Config) (*Validator, error) {
 	}
 	return &Validator{
 		signingKey: configuration.SigningKey,
-		issuer:     configuration.Issuer,
+		issuer:     issuer,
 		cookieName: cookieName,
 		clock:      clock,
 	}, nil

@@ -17,7 +17,6 @@ import (
 func main() {
 	validator, err := sessionvalidator.New(sessionvalidator.Config{
 		SigningKey: []byte(os.Getenv("TAUTH_NOTES_JWT_SIGNING_KEY")),
-		Issuer:     "tauth",
 		// CookieName defaults to app_session.
 	})
 	if err != nil {
@@ -38,9 +37,12 @@ func main() {
 }
 ```
 
+Consumers should never set an issuer; the validator uses the TAuth issuer
+automatically, so pass only the signing key and cookie name (if you override it).
+
 If you already have access to the same `config.yaml` used by TAuth, call
-`LoadTenantAuthConfig` to derive the signing key, issuer, and cookie names for
-a given tenant ID, then pass `ValidatorConfig()` into `New`.
+`LoadTenantAuthConfig` to derive the signing key and cookie names for a given
+tenant ID, then pass `ValidatorConfig()` into `New`.
 
 ## Features
 
@@ -49,8 +51,8 @@ a given tenant ID, then pass `ValidatorConfig()` into `New`.
 - Gin middleware adapter with configurable context key.
 - Exposes typed claims struct matching TAuth’s JWT payload (user id, email,
   display name, avatar URL, roles, expiry metadata).
-- Helper to load tenant-specific signing keys, issuer, and cookie names from
-  the TAuth config file.
+- Helper to load tenant-specific signing keys and cookie names from the TAuth
+  config file.
 
 ## Testing
 
