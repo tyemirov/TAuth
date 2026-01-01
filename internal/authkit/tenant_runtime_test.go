@@ -63,7 +63,7 @@ func TestResolveTenantIDUsesResolvedTenantFromContext(t *testing.T) {
 			{
 				ID:                "context-tenant",
 				DisplayName:       "Context Tenant",
-				AllowedHosts:      []string{"https://context.localhost"},
+				TenantOrigins:     []string{"https://context.localhost"},
 				GoogleWebClientID: "client-id",
 				JWTSigningKey:     "signing-key",
 				CookieDomain:      "",

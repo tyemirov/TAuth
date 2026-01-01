@@ -185,7 +185,7 @@ type RefreshTokenStore interface {
 | `cors_allowed_origins` | List of allowed origins when CORS is enabled (include GIS) | `["https://app.example.com","https://accounts.google.com"]` |
 | `cors_allowed_origin_exceptions` | Non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/testing) | `true`                                     |
-| `tenants`              | Array of tenant entries (id, allowed_hosts, client IDs, TTLs) | See README §5 |
+| `tenants`              | Array of tenant entries (id, tenant_origins, client IDs, TTLs) | See README §5 |
 
 Configuration is loaded from a single YAML file (`config.yaml` by default, override via `tauth --config=/path/to/file` or `TAUTH_CONFIG_FILE`).
 
@@ -197,7 +197,7 @@ Every deployment relies on the declarative config file parsed by `internal/tenan
 tenants:
   - id: "demo"
     display_name: "Demo tenant"
-    allowed_hosts:
+    tenant_origins:
       - "https://demo.localhost"
       - "https://app.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"

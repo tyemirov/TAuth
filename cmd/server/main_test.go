@@ -333,7 +333,7 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 	tenantDocument := `tenants:
   - id: "alpha"
     display_name: "Alpha"
-    allowed_hosts: ["https://alpha.localhost"]
+    tenant_origins: ["https://alpha.localhost"]
     google_web_client_id: "alpha-client.apps.googleusercontent.com"
     jwt_signing_key: "alpha-tenant-key"
     cookie_domain: ".example.com"
@@ -346,7 +346,7 @@ func TestBuildTenantRegistryUsesTenantSettings(t *testing.T) {
 
   - id: "beta"
     display_name: "Beta"
-    allowed_hosts: ["https://beta.localhost"]
+    tenant_origins: ["https://beta.localhost"]
     google_web_client_id: "beta-client.apps.googleusercontent.com"
     jwt_signing_key: "beta-tenant-key"
     cookie_domain: "beta.localhost"
@@ -421,7 +421,7 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"https://alpha.localhost"},
+				TenantOrigins:     []string{"https://alpha.localhost"},
 				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      "",
@@ -434,7 +434,7 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"https://beta.localhost"},
+				TenantOrigins:     []string{"https://beta.localhost"},
 				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "",
@@ -473,7 +473,7 @@ func TestStaticAuthClientRequiresKnownOrigin(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "",
@@ -520,7 +520,7 @@ func TestStaticAuthClientAllowsMissingOriginForSharedOrigins(t *testing.T) {
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -534,7 +534,7 @@ func TestStaticAuthClientAllowsMissingOriginForSharedOrigins(t *testing.T) {
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",
@@ -587,7 +587,7 @@ func TestOriginGateMiddlewareRequiresOriginForSharedOrigins(t *testing.T) {
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -600,7 +600,7 @@ func TestOriginGateMiddlewareRequiresOriginForSharedOrigins(t *testing.T) {
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",
@@ -740,7 +740,7 @@ func sampleApplicationConfig() appconfig.ApplicationConfig {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"https://alpha.localhost"},
+				TenantOrigins:     []string{"https://alpha.localhost"},
 				GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      ".example.com",
@@ -754,7 +754,7 @@ func sampleApplicationConfig() appconfig.ApplicationConfig {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"https://beta.localhost"},
+				TenantOrigins:     []string{"https://beta.localhost"},
 				GoogleWebClientID: "beta-client.apps.googleusercontent.com",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "beta.localhost",
@@ -789,7 +789,7 @@ func TestOriginAllowedRequiresOverrideWhenOriginMissing(testingHandle *testing.T
 			{
 				ID:                "notes",
 				DisplayName:       "Notes",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:8000"},
 				GoogleWebClientID: "notes-client",
 				JWTSigningKey:     "notes-key",
 				CookieDomain:      "",
@@ -801,7 +801,7 @@ func TestOriginAllowedRequiresOverrideWhenOriginMissing(testingHandle *testing.T
 			{
 				ID:                "mpr",
 				DisplayName:       "MPR",
-				AllowedHosts:      []string{"https://shared.localhost", "http://localhost:4173"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:4173"},
 				GoogleWebClientID: "mpr-client",
 				JWTSigningKey:     "mpr-key",
 				CookieDomain:      "",

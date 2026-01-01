@@ -33,7 +33,7 @@ I will confirm the GAuss responsibilities that must move to TAuth and identify a
 I will deploy TAuth as a separate service with production-grade settings.
 
 - Choose the TAuth host and cookie domain so cookies cover the product origin without leaking beyond the intended registrable domain.
-- Configure the tenant entry with allowed hosts, Google web client ID, JWT signing key, and TTLs that match existing session expectations.
+- Configure the tenant entry with tenant origins, Google web client ID, JWT signing key, and TTLs that match existing session expectations.
 - Use a persistent refresh token store and set database_url to avoid losing refresh tokens between restarts.
 - Enable CORS only when the UI and TAuth are on different origins and include accounts.google.com and the product origin in cors_allowed_origins; list accounts.google.com under cors_allowed_origin_exceptions so validation permits the non-tenant origin.
 - Keep allow_insecure_http disabled in production and terminate TLS in front of TAuth so Secure cookies are issued.

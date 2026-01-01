@@ -138,7 +138,7 @@ func TestTenantSigningKeyReturnsCopyAndHandlesEmptyKey(t *testing.T) {
 			{
 				ID:                "demo",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client",
 				JWTSigningKey:     "signing",
 				CookieDomain:      "",
@@ -316,13 +316,13 @@ func TestLoadConfigReturnsErrorWhenFileMissing(t *testing.T) {
 	}
 }
 
-func TestParseHostsRejectsDuplicateEntries(t *testing.T) {
-	_, _, err := parseHosts([]string{"https://demo.localhost", "https://Demo.Localhost"}, "demo")
+func TestParseTenantOriginsRejectsDuplicateEntries(t *testing.T) {
+	_, err := parseTenantOrigins([]string{"https://demo.localhost", "https://Demo.Localhost"}, "demo")
 	if err == nil || !errors.Is(err, ErrInvalidTenantConfig) {
 		t.Fatalf("expected ErrInvalidTenantConfig, got %v", err)
 	}
-	if !strings.Contains(err.Error(), errorCodeDuplicateHost) {
-		t.Fatalf("expected duplicate host code, got %v", err)
+	if !strings.Contains(err.Error(), errorCodeDuplicateOrigin) {
+		t.Fatalf("expected duplicate origin code, got %v", err)
 	}
 }
 
@@ -343,7 +343,7 @@ func TestLoadConfigExpandsEnvironmentVariables(t *testing.T) {
 			{
 				ID:                "${TENANT_ID}",
 				DisplayName:       "Demo",
-				AllowedHosts:      []string{"https://demo.localhost"},
+				TenantOrigins:     []string{"https://demo.localhost"},
 				GoogleWebClientID: "demo-client",
 				JWTSigningKey:     "demo-key",
 				CookieDomain:      "",

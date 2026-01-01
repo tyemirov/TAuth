@@ -62,7 +62,7 @@ func TestHostAllowedHandlesAmbiguity(testingHandle *testing.T) {
 			{
 				ID:                "alpha",
 				DisplayName:       "Alpha",
-				AllowedHosts:      []string{"https://shared.localhost", "http://alpha.localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://alpha.localhost:8000"},
 				GoogleWebClientID: "alpha-client",
 				JWTSigningKey:     "alpha-key",
 				CookieDomain:      "",
@@ -76,7 +76,7 @@ func TestHostAllowedHandlesAmbiguity(testingHandle *testing.T) {
 			{
 				ID:                "beta",
 				DisplayName:       "Beta",
-				AllowedHosts:      []string{"https://shared.localhost", "http://beta.localhost:8000"},
+				TenantOrigins:     []string{"https://shared.localhost", "http://beta.localhost:8000"},
 				GoogleWebClientID: "beta-client",
 				JWTSigningKey:     "beta-key",
 				CookieDomain:      "",
@@ -143,7 +143,7 @@ server:
 
 tenants:
   - id: "demo"
-    allowed_hosts: ["https://demo.localhost"]
+    tenant_origins: ["https://demo.localhost"]
     google_web_client_id: "demo-client"
     jwt_signing_key: "demo-key"
     cookie_domain: ""
