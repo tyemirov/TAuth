@@ -7,6 +7,7 @@
 
 ### Improvements ⚙️
 - Renamed tenant origin configuration from `allowed_hosts` to `tenant_origins` and aligned preflight output and flags.
+- Default session validator issuer to `tauth` when omitted so clients do not need to configure it explicitly.
 
 ### Testing 🧪
 - Added a browser integration test that signs in via the demo helper, clicks sign out, and asserts the header resets.
