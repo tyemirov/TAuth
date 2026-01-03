@@ -152,7 +152,7 @@ The simplest way to use TAuth from the browser is through the helper served at `
 - `initAuthClient(options)` – hydrates the current user and sets up refresh behaviour.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
 - `getCurrentUser()` – returns the current profile object or `null`.
-- `getAuthEndpoints()` – returns the resolved URL map for `/me` and `/auth/*`.
+- `getAuthEndpoints()` – returns the resolved URL map for `/api/me` and `/auth/*`.
 - `requestNonce()` – fetches a one-time nonce for Google Identity Services.
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
 - `logout()` – revokes the refresh token and clears client state.
@@ -194,10 +194,10 @@ Call `initAuthClient` once during startup, after the script loads. The `baseUrl`
 
 Behaviour:
 
-- TAuth calls `GET /me` to check for an existing session.
+- TAuth calls `GET /api/me` to check for an existing session.
 - If missing or expired, it attempts `POST /auth/refresh`.
 - If refresh succeeds, it calls `onAuthenticated(profile)`; otherwise it calls `onUnauthenticated()`.
-- The `profile` object matches the `/me` response (see section 6.3).
+- The `profile` object matches the `/api/me` response (see section 6.3).
 
 ### 4.3 Calling your own APIs with `apiFetch`
 
@@ -241,7 +241,7 @@ The helper:
 
 ### 4.5 Selecting a tenant explicitly
 
-Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls with either your explicit `tenantId` or, when omitted, the current page origin so shared-origin setups continue to function even if certain requests omit `Origin`. You can still pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
+Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/api/me` and `/auth/*` calls with either your explicit `tenantId` or, when omitted, the current page origin so shared-origin setups continue to function even if certain requests omit `Origin`. You can still pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
 
 ```js
 initAuthClient({
@@ -252,7 +252,7 @@ initAuthClient({
 });
 ```
 
-The helper automatically attaches `X-TAuth-Tenant: team-blue` (or the current page origin when no ID is supplied) to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected.
+The helper automatically attaches `X-TAuth-Tenant: team-blue` (or the current page origin when no ID is supplied) to `/api/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected.
 
 ---
 
@@ -322,7 +322,7 @@ Verifies a Google ID token and mints cookies.
   }
   ```
 
-- **Response**: `200 OK` with user profile JSON (see `/me` below). Sets `app_session` and `app_refresh` cookies.
+- **Response**: `200 OK` with user profile JSON (see `/api/me` below). Sets `app_session` and `app_refresh` cookies.
 
 Common failure cases:
 
@@ -330,7 +330,7 @@ Common failure cases:
 - Mismatched nonce (`401`).
 - Audience (`aud`) does not match the resolved tenant’s `google_web_client_id` (`401`).
 
-### 6.3 `GET /me`
+### 6.3 `GET /api/me`
 
 Returns the profile associated with the current session.
 
@@ -358,7 +358,7 @@ Rotates the refresh token and mints a new access cookie.
 - **Request body**: empty.
 - **Response**: `204 No Content` on success. Sets new `app_session` and `app_refresh` cookies.
 
-After a successful refresh, call `/me` again or rely on `tauth.js` to hydrate the profile.
+After a successful refresh, call `/api/me` again or rely on `tauth.js` to hydrate the profile.
 
 ### 6.5 `POST /auth/logout`
 
@@ -433,7 +433,7 @@ func main() {
     router := gin.Default()
     router.Use(validator.GinMiddleware(sessionvalidator.DefaultContextKey))
 
-    router.GET("/me", func(context *gin.Context) {
+    router.GET("/api/me", func(context *gin.Context) {
         claimsValue, exists := context.Get(sessionvalidator.DefaultContextKey)
         if !exists {
             context.AbortWithStatus(http.StatusUnauthorized)
@@ -513,7 +513,7 @@ Using the shared validator keeps your services aligned with TAuth’s JWT format
 
 Use this checklist when integrating:
 
-- **401 from `/me` but refresh works** – Session cookie expired; ensure your client either uses `tauth.js` or calls `/auth/refresh` before retrying.
+- **401 from `/api/me` but refresh works** – Session cookie expired; ensure your client either uses `tauth.js` or calls `/auth/refresh` before retrying.
 - **401 from `/auth/refresh`** – Refresh cookie missing or revoked; treat as “signed out” and prompt the user to sign in again.
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).

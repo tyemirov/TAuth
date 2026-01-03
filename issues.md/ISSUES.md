@@ -46,7 +46,14 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   Added `docs/index.html` with the requested structure, copy, and palette guidance for GitHub Pages hosting.
 - [x] [TA-111] Integrate the mpr-ui footer component into the GitHub Pages landing page.
   Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
+- [ ] [TA-112] Here is how imagine the proper way of TAuth configuration
+ 
+  1. Tauth supplies a backend client which reads the .env configuration local to the client. 
+  2. The backend client mounts an endpoint to expose this configuration
+  3. tauth.js reads this configuration on initialization
+  4. This is the only available way of configuring tauth front end client
 
+  The problem is that I cant think of a way making it secure
 
 ## Improvements (341–640)
 
