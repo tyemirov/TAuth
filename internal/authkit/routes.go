@@ -96,6 +96,7 @@ const (
 	metricAuthRefreshSuccess = "auth.refresh.success"
 	metricAuthRefreshFailure = "auth.refresh.failure"
 	metricAuthLogoutSuccess  = "auth.logout.success"
+	errorUserNotAllowed      = "user_not_allowed"
 )
 
 func recordMetric(event string) {
@@ -253,6 +254,12 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.unverified_identity", nil)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
+			return
+		}
+		if !isAllowedUser(userEmail, config.AllowedUsers) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
 
@@ -490,6 +497,22 @@ func isUnauthorizedRefreshTokenError(err error) bool {
 	return errors.Is(err, ErrRefreshTokenEmptyOpaque) ||
 		errors.Is(err, ErrRefreshTokenNotFound) ||
 		errors.Is(err, ErrRefreshTokenExpired)
+}
+
+func isAllowedUser(userEmail string, allowedUsers map[string]struct{}) bool {
+	if len(allowedUsers) == 0 {
+		return true
+	}
+	normalizedEmail := normalizeUserEmail(userEmail)
+	if normalizedEmail == "" {
+		return false
+	}
+	_, allowed := allowedUsers[normalizedEmail]
+	return allowed
+}
+
+func normalizeUserEmail(userEmail string) string {
+	return strings.ToLower(strings.TrimSpace(userEmail))
 }
 
 func isHTTPS(request *http.Request) bool {

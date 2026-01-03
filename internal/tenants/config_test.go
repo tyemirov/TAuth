@@ -107,6 +107,48 @@ func TestLoadConfigSuccess(t *testing.T) {
 	}
 }
 
+func TestLoadConfigNormalizesAllowedUsers(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AllowedUsers = []string{"User@Example.com", "admin@example.com"}
+	document := FileDocument{Tenants: []FileTenant{tenant}}
+
+	config, loadErr := LoadConfigFromDocument(document)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	if !sameStringSlices(loadedTenant.AllowedUsers(), []string{"user@example.com", "admin@example.com"}) {
+		testingHandle.Fatalf("unexpected allowed users: %#v", loadedTenant.AllowedUsers())
+	}
+}
+
+func TestLoadConfigRejectsInvalidAllowedUser(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AllowedUsers = []string{"not-an-email"}
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr == nil {
+		testingHandle.Fatalf("expected invalid allowed user error")
+	}
+	if !containsStableCode(loadErr, errorCodeInvalidAllowedUser) {
+		testingHandle.Fatalf("expected error code %s, got %v", errorCodeInvalidAllowedUser, loadErr)
+	}
+}
+
+func TestLoadConfigRejectsDuplicateAllowedUser(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AllowedUsers = []string{"user@example.com", "User@example.com"}
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr == nil {
+		testingHandle.Fatalf("expected duplicate allowed user error")
+	}
+	if !containsStableCode(loadErr, errorCodeDuplicateAllowedUser) {
+		testingHandle.Fatalf("expected error code %s, got %v", errorCodeDuplicateAllowedUser, loadErr)
+	}
+}
+
 func TestLoadConfigAllowsHostOnlyCookieDomain(t *testing.T) {
 	document := FileDocument{
 		Tenants: []FileTenant{
