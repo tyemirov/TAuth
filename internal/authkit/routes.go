@@ -500,7 +500,7 @@ func isUnauthorizedRefreshTokenError(err error) bool {
 }
 
 func isAllowedUser(userEmail string, allowedUsers map[string]struct{}) bool {
-	if len(allowedUsers) == 0 {
+	if allowedUsers == nil {
 		return true
 	}
 	normalizedEmail := normalizeUserEmail(userEmail)

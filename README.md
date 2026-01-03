@@ -47,7 +47,7 @@ Each entry defines:
 - `id` – stable identifier used inside JWTs and storage (lowercase letters/numbers/underscores/hyphens).
 - `display_name` – friendly label surfaced in logs and the demo UI.
 - `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header (or the `X-TAuth-Tenant` override) to select a tenant, so do not list the TAuth API hostname here.
-- `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in.
+- `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
@@ -214,7 +214,7 @@ Rules enforced by the loader:
 - IDs must use lowercase letters, digits, underscores, or hyphens (`demo`, `customer_b`).
 - `display_name` is required so operators can distinguish tenants in logs.
 - `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
-- `allowed_users` is optional; when provided, only those email addresses can log in for the tenant.
+- `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Unlisted users are rejected during `/auth/google` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
 - `google_web_client_id` and each TTL must be present and non-empty. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.

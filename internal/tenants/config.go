@@ -230,6 +230,9 @@ func (tenant Tenant) Origins() []string {
 
 // AllowedUsers returns the allowed user emails for the tenant.
 func (tenant Tenant) AllowedUsers() []string {
+	if tenant.allowedUsers == nil {
+		return nil
+	}
 	allowedUsersCopy := make([]string, len(tenant.allowedUsers))
 	copy(allowedUsersCopy, tenant.allowedUsers)
 	return allowedUsersCopy
@@ -385,8 +388,11 @@ func parseTenantOrigins(origins []string, tenantID TenantID) ([]string, error) {
 }
 
 func parseAllowedUsers(rawAllowedUsers []string, tenantID TenantID) ([]string, error) {
-	if len(rawAllowedUsers) == 0 {
+	if rawAllowedUsers == nil {
 		return nil, nil
+	}
+	if len(rawAllowedUsers) == 0 {
+		return []string{}, nil
 	}
 	normalizedUsers := make([]string, 0, len(rawAllowedUsers))
 	seenUsers := make(map[string]struct{}, len(rawAllowedUsers))

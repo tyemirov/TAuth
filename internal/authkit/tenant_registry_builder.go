@@ -63,7 +63,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 }
 
 func buildAllowedUserLookup(allowedUsers []string) map[string]struct{} {
-	if len(allowedUsers) == 0 {
+	if allowedUsers == nil {
 		return nil
 	}
 	allowedUserLookup := make(map[string]struct{}, len(allowedUsers))

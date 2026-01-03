@@ -16,6 +16,7 @@
 ### Bug Fixes 🐛
 - Fixed configuration and origin validation rules for multi-tenant setups.
 - Improved error handling for authentication and header issues in the demo.
+- Enforced empty `allowed_users` as deny-all instead of disabling allowlist enforcement.
 
 ### Testing 🧪
 - Added browser integration tests covering demo sign-out and header reset flows.

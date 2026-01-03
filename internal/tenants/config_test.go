@@ -94,6 +94,9 @@ func TestLoadConfigSuccess(t *testing.T) {
 	if !demoTenant.AllowInsecureHTTP() {
 		t.Fatalf("expected allow insecure http to be true")
 	}
+	if demoTenant.AllowedUsers() != nil {
+		t.Fatalf("expected allowed users to be unset, got %#v", demoTenant.AllowedUsers())
+	}
 
 	prodTenant := tenantsList[1]
 	if prodTenant.ID() != "prod" {
@@ -122,6 +125,28 @@ func TestLoadConfigNormalizesAllowedUsers(testingHandle *testing.T) {
 	}
 	if !sameStringSlices(loadedTenant.AllowedUsers(), []string{"user@example.com", "admin@example.com"}) {
 		testingHandle.Fatalf("unexpected allowed users: %#v", loadedTenant.AllowedUsers())
+	}
+}
+
+func TestLoadConfigAllowsEmptyAllowedUsers(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AllowedUsers = []string{}
+	document := FileDocument{Tenants: []FileTenant{tenant}}
+
+	config, loadErr := LoadConfigFromDocument(document)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	allowedUsers := loadedTenant.AllowedUsers()
+	if allowedUsers == nil {
+		testingHandle.Fatalf("expected allowed users to be present")
+	}
+	if len(allowedUsers) != 0 {
+		testingHandle.Fatalf("expected allowed users to be empty, got %#v", allowedUsers)
 	}
 }
 
