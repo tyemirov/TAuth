@@ -225,3 +225,7 @@ Analyze the issue and deploy the fix
   Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use `tenant_origins` and `tenant_origin_hashes`.
 - [x] [TA-429] Default session validator issuer to `tauth` when omitted.
   Updated `pkg/sessionvalidator` to fall back to the shared default issuer and refreshed validator tests.
+- [x] [TA-430] Add per-tenant allowed_users login allowlist.
+  Added allowed_users config parsing + enforcement in auth login, updated docs/examples, and added tests.
+- [x] [TA-431] Enforce empty allowed_users as deny-all.
+  Treated explicit empty allowlists as deny-all, added tests, and documented the 403 user_not_allowed behavior.

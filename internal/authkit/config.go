@@ -14,6 +14,7 @@ type ServerConfig struct {
 	CookieDomain      string
 	SessionCookieName string
 	RefreshCookieName string
+	AllowedUsers      map[string]struct{}
 	SessionTTL        time.Duration
 	RefreshTTL        time.Duration
 	NonceTTL          time.Duration

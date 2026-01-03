@@ -75,6 +75,8 @@ tenants:
     display_name: "Production Tenant"
     tenant_origins:
       - "https://app.example.com"
+    allowed_users:
+      - "user@example.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".example.com"
@@ -88,6 +90,8 @@ tauth --config=config.yaml
 ```
 
 Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
+To restrict sign-ins, set `allowed_users` on a tenant; when present, only those email addresses are permitted to log in (an empty list denies all logins).
+Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 
 When migrating an existing tenant that expects the legacy cookie names (`app_session`, `app_refresh`), set the `session_cookie_name` / `refresh_cookie_name` fields inside the tenant block. These fields are always required—choose unique names per tenant to avoid collisions when multiple tenants share `localhost`. Legacy stacks (such as Gravity) can keep `app_session` / `app_refresh`, but doing so means any other tenant using the same names will overwrite those cookies.
 
@@ -515,6 +519,7 @@ Use this checklist when integrating:
   - The response comes from HTTPS (in production).
   - The tenant’s `cookie_domain` matches the registrable domain you expect.
   - CORS is configured correctly when using a split origin (`enable_cors` and `cors_allowed_origins` in `config.yaml`).
+- **403 from `/auth/google` with `user_not_allowed`** – The email is not listed under the tenant’s `allowed_users` allowlist (or the list is empty).
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.

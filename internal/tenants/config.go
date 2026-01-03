@@ -3,6 +3,7 @@ package tenants
 import (
 	"errors"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"os"
 	"regexp"
@@ -26,6 +27,7 @@ type Tenant struct {
 	id                TenantID
 	displayName       string
 	origins           []string
+	allowedUsers      []string
 	googleWebClientID string
 	jwtSigningKey     []byte
 	cookieDomain      string
@@ -61,6 +63,8 @@ const (
 	errorCodeMissingOrigins             = "tenant.missing_origins"
 	errorCodeInvalidOrigin              = "tenant.invalid_origin"
 	errorCodeDuplicateOrigin            = "tenant.duplicate_origin"
+	errorCodeInvalidAllowedUser         = "tenant.invalid_allowed_user"
+	errorCodeDuplicateAllowedUser       = "tenant.duplicate_allowed_user"
 	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
@@ -224,6 +228,16 @@ func (tenant Tenant) Origins() []string {
 	return originsCopy
 }
 
+// AllowedUsers returns the allowed user emails for the tenant.
+func (tenant Tenant) AllowedUsers() []string {
+	if tenant.allowedUsers == nil {
+		return nil
+	}
+	allowedUsersCopy := make([]string, len(tenant.allowedUsers))
+	copy(allowedUsersCopy, tenant.allowedUsers)
+	return allowedUsersCopy
+}
+
 // GoogleWebClientID returns the OAuth client identifier.
 func (tenant Tenant) GoogleWebClientID() string {
 	return tenant.googleWebClientID
@@ -283,6 +297,10 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if originErr != nil {
 		return Tenant{}, nil, originErr
 	}
+	allowedUsers, allowedUsersErr := parseAllowedUsers(raw.AllowedUsers, tenantID)
+	if allowedUsersErr != nil {
+		return Tenant{}, nil, allowedUsersErr
+	}
 	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
 	if googleWebClientID == "" {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
@@ -328,6 +346,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		id:                tenantID,
 		displayName:       displayName,
 		origins:           origins,
+		allowedUsers:      allowedUsers,
 		googleWebClientID: googleWebClientID,
 		jwtSigningKey:     signingKey,
 		cookieDomain:      cookieDomain,
@@ -366,6 +385,37 @@ func parseTenantOrigins(origins []string, tenantID TenantID) ([]string, error) {
 		normalizedOrigins = append(normalizedOrigins, normalizedOrigin)
 	}
 	return normalizedOrigins, nil
+}
+
+func parseAllowedUsers(rawAllowedUsers []string, tenantID TenantID) ([]string, error) {
+	if rawAllowedUsers == nil {
+		return nil, nil
+	}
+	if len(rawAllowedUsers) == 0 {
+		return []string{}, nil
+	}
+	normalizedUsers := make([]string, 0, len(rawAllowedUsers))
+	seenUsers := make(map[string]struct{}, len(rawAllowedUsers))
+	for _, rawUser := range rawAllowedUsers {
+		trimmedUser := strings.TrimSpace(rawUser)
+		if trimmedUser == "" {
+			return nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID)
+		}
+		normalizedUser := strings.ToLower(trimmedUser)
+		if _, exists := seenUsers[normalizedUser]; exists {
+			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeDuplicateAllowedUser, tenantID, normalizedUser)
+		}
+		parsedAddress, parseErr := mail.ParseAddress(normalizedUser)
+		if parseErr != nil {
+			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID, normalizedUser)
+		}
+		if parsedAddress.Address != normalizedUser {
+			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID, normalizedUser)
+		}
+		seenUsers[normalizedUser] = struct{}{}
+		normalizedUsers = append(normalizedUsers, normalizedUser)
+	}
+	return normalizedUsers, nil
 }
 
 func buildTenantCookieScope(tenant Tenant, origins []string) (tenantCookieScope, error) {
@@ -659,6 +709,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.ID = os.ExpandEnv(tenant.ID)
 	tenant.DisplayName = os.ExpandEnv(tenant.DisplayName)
 	tenant.TenantOrigins = expandEnvSlice(tenant.TenantOrigins)
+	tenant.AllowedUsers = expandEnvSlice(tenant.AllowedUsers)
 	tenant.GoogleWebClientID = os.ExpandEnv(tenant.GoogleWebClientID)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
@@ -686,6 +737,7 @@ type FileTenant struct {
 	ID                string   `json:"id" yaml:"id"`
 	DisplayName       string   `json:"display_name" yaml:"display_name"`
 	TenantOrigins     []string `json:"tenant_origins" yaml:"tenant_origins"`
+	AllowedUsers      []string `json:"allowed_users" yaml:"allowed_users"`
 	GoogleWebClientID string   `json:"google_web_client_id" yaml:"google_web_client_id"`
 	JWTSigningKey     string   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain      string   `json:"cookie_domain" yaml:"cookie_domain"`

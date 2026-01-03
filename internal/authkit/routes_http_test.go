@@ -2936,6 +2936,227 @@ func TestHTTPAuthLoginUnverifiedIdentity(t *testing.T) {
 	}
 }
 
+func TestHTTPAuthLoginRejectsDisallowedUser(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"disallowed-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-disallowed",
+					"email":          "denied@example.com",
+					"email_verified": true,
+					"name":           "Denied User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(testingHandle))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	config.AllowedUsers = map[string]struct{}{"allowed@example.com": {}}
+	registry := NewSingleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(testingHandle, client, server.URL)
+	result := validator.results["disallowed-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["disallowed-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "disallowed-token",
+		"nonce_token":     nonce,
+	}
+	payload, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal payload: %v", marshalErr)
+	}
+
+	request, requestErr := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if requestErr != nil {
+		testingHandle.Fatalf("build request: %v", requestErr)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, responseErr := client.Do(request)
+	if responseErr != nil {
+		testingHandle.Fatalf("request failed: %v", responseErr)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		testingHandle.Fatalf("expected 403 for disallowed user, got %d", response.StatusCode)
+	}
+	var responsePayload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&responsePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode payload: %v", decodeErr)
+	}
+	if responsePayload["error"] != errorUserNotAllowed {
+		testingHandle.Fatalf("expected %s error, got %v", errorUserNotAllowed, responsePayload["error"])
+	}
+}
+
+func TestHTTPAuthLoginRejectsEmptyAllowlist(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"empty-allowlist-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-empty-allowlist",
+					"email":          "user@example.com",
+					"email_verified": true,
+					"name":           "Empty Allowlist",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(testingHandle))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	config.AllowedUsers = map[string]struct{}{}
+	registry := NewSingleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(testingHandle, client, server.URL)
+	result := validator.results["empty-allowlist-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["empty-allowlist-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "empty-allowlist-token",
+		"nonce_token":     nonce,
+	}
+	payload, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal payload: %v", marshalErr)
+	}
+
+	request, requestErr := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if requestErr != nil {
+		testingHandle.Fatalf("build request: %v", requestErr)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, responseErr := client.Do(request)
+	if responseErr != nil {
+		testingHandle.Fatalf("request failed: %v", responseErr)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		testingHandle.Fatalf("expected 403 for empty allowlist, got %d", response.StatusCode)
+	}
+	var responsePayload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&responsePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode payload: %v", decodeErr)
+	}
+	if responsePayload["error"] != errorUserNotAllowed {
+		testingHandle.Fatalf("expected %s error, got %v", errorUserNotAllowed, responsePayload["error"])
+	}
+}
+
+func TestHTTPAuthLoginAllowsListedUser(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"allowed-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-allowed",
+					"email":          "ALLOWED@EXAMPLE.COM",
+					"email_verified": true,
+					"name":           "Allowed User",
+					"picture":        "https://example.com/avatar.png",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(NewSystemClock())
+	defer ProvideClock(nil)
+	ProvideMetrics(NewCounterMetrics())
+	defer ProvideMetrics(nil)
+	ProvideLogger(zaptest.NewLogger(testingHandle))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	config.AllowedUsers = map[string]struct{}{"allowed@example.com": {}}
+	registry := NewSingleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	nonce := issueNonceViaClient(testingHandle, client, server.URL)
+	result := validator.results["allowed-token"]
+	result.payload.Claims["nonce"] = nonce
+	validator.results["allowed-token"] = result
+
+	body := map[string]string{
+		"google_id_token": "allowed-token",
+		"nonce_token":     nonce,
+	}
+	payload, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal payload: %v", marshalErr)
+	}
+
+	request, requestErr := http.NewRequest(http.MethodPost, server.URL+"/auth/google", bytes.NewReader(payload))
+	if requestErr != nil {
+		testingHandle.Fatalf("build request: %v", requestErr)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, responseErr := client.Do(request)
+	if responseErr != nil {
+		testingHandle.Fatalf("request failed: %v", responseErr)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		testingHandle.Fatalf("expected 200 for allowed user, got %d", response.StatusCode)
+	}
+}
+
 func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) string {
 	return issueNonceViaClientWithHeaders(t, client, baseURL, nil)
 }

@@ -17,6 +17,9 @@ tenants:
     tenant_origins:
       - "http://localhost"
       - "http://localhost:8000"
+    allowed_users:
+      - "temirov@gmail.com"
+      - "peter.tyemirov@gmail.com"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
     jwt_signing_key: "${TAUTH_NOTES_JWT_SIGNING_KEY}"
     cookie_domain: ""
@@ -32,6 +35,9 @@ tenants:
     tenant_origins:
       - "http://localhost"
       - "http://localhost:4173"
+    allowed_users:
+      - "temirov@gmail.com"
+      - "peter.tyemirov@gmail.com"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"
     jwt_signing_key: "${TAUTH_MPR_JWT_SIGNING_KEY}"
     cookie_domain: ""

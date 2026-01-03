@@ -6,6 +6,7 @@
 - Introduced `SessionValidatorIssuer` guidance and moved session validation to edge.
 - Added default `SessionValidatorIssuer` to simplify client configuration.
 - Introduced `tenant_origins` schema replacing `allowed_hosts` for tenant origin configuration.
+- Added per-tenant `allowed_users` allowlists to restrict Google sign-ins by email.
 
 ### Improvements ⚙️
 - Renamed tenant origin config from `allowed_hosts` to `tenant_origins` and aligned validation and preflight outputs.
@@ -15,6 +16,7 @@
 ### Bug Fixes 🐛
 - Fixed configuration and origin validation rules for multi-tenant setups.
 - Improved error handling for authentication and header issues in the demo.
+- Enforced empty `allowed_users` as deny-all instead of disabling allowlist enforcement.
 
 ### Testing 🧪
 - Added browser integration tests covering demo sign-out and header reset flows.

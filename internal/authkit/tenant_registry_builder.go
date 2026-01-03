@@ -50,6 +50,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
 		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()
 		tenantServerConfig.RefreshCookieName = tenant.RefreshCookieName()
+		tenantServerConfig.AllowedUsers = buildAllowedUserLookup(tenant.AllowedUsers())
 		tenantServerConfig.SessionTTL = tenant.SessionTTL()
 		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
 		tenantServerConfig.NonceTTL = tenant.NonceTTL()
@@ -59,4 +60,15 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 	}
 	defaultTenantID := string(tenantList[0].ID())
 	return NewTenantRegistryFromMap(defaultTenantID, configs), nil
+}
+
+func buildAllowedUserLookup(allowedUsers []string) map[string]struct{} {
+	if allowedUsers == nil {
+		return nil
+	}
+	allowedUserLookup := make(map[string]struct{}, len(allowedUsers))
+	for _, allowedUserEmail := range allowedUsers {
+		allowedUserLookup[allowedUserEmail] = struct{}{}
+	}
+	return allowedUserLookup
 }

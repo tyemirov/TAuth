@@ -51,11 +51,12 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 2. Browser requests a nonce from `/auth/nonce`, passes it to Google Identity Services via `google.accounts.id.initialize({ nonce })`, and includes the same value as `nonce_token` when posting `{ "google_id_token": "...", "nonce_token": "..." }` to `/auth/google`.
 3. `MountAuthRoutes` enforces HTTPS unless `AllowInsecureHTTP` is explicitly enabled for local development.
 4. `idtoken.NewValidator` validates issuer and audience against `ServerConfig.GoogleWebClientID`.
-5. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.
-6. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`) embedding `tenant_id`, `user_avatar_url`, and the other profile claims so downstream services can verify both the user and the tenant context.
-7. `RefreshTokenStore.Issue` creates a new opaque refresh token (hashed before storage) with `RefreshTTL`.
-8. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
-9. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
+5. If the tenant config includes `allowed_users`, `/auth/google` rejects any email not on the list with `403` and `error: "user_not_allowed"`.
+6. `UserStore.UpsertGoogleUser` persists or updates email, display name, and avatar URL, then returns the application user ID plus roles.
+7. `MintAppJWT` signs a short-lived access JWT (`HS256`, issuer `ServerConfig.AppJWTIssuer`) embedding `tenant_id`, `user_avatar_url`, and the other profile claims so downstream services can verify both the user and the tenant context.
+8. `RefreshTokenStore.Issue` creates a new opaque refresh token (hashed before storage) with `RefreshTTL`.
+9. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
+10. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
 
 ### 3.4 Browser helper handshake
 
@@ -200,6 +201,8 @@ tenants:
     tenant_origins:
       - "https://demo.localhost"
       - "https://app.example.com"
+    allowed_users:
+      - "user@example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
@@ -214,6 +217,8 @@ Validation rules baked into the loader:
 - IDs use lowercase letters/digits/underscores/hyphens; duplicates are rejected.
 - `display_name` is required so operators can identify tenants in logs.
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
+- `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
+- Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 - `google_web_client_id` must be present for every tenant. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - Before decoding, the loader expands environment variables (`$VAR` / `${VAR}`) inside the YAML so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values.
