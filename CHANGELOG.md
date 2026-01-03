@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.9.9]
+
+### Features ✨
+- Introduced `allowed_users` allowlist for tenants to restrict Google sign-ins by email.
+- Enforce `allowed_users` allowlist semantics at edge, rejecting disallowed emails with HTTP 403 `user_not_allowed` error.
+
+### Improvements ⚙️
+- Updated documentation and examples to include `allowed_users` configuration and behavior.
+- Clarified `allowed_users` behavior: absent means allow all, empty deny all, and presence restricts to listed emails.
+- Renamed tenant origin config from `allowed_hosts` to `tenant_origins`.
+
+### Bug Fixes 🐛
+- Enforced empty `allowed_users` list as deny-all, preventing unintended unrestricted access.
+- Fixed origin validation and error handling for multi-tenant authentication.
+
+### Testing 🧪
+- Added comprehensive HTTP tests for authentication rejecting users not on the allowlist.
+- Included tests for empty `allowed_users` list resulting in denied logins.
+
+### Docs 📚
+- Documented `allowed_users` behavior in README, usage guide, and architecture notes.
+- Added usage examples for tenant `allowed_users` in multi-tenant configs.
+
 ## [v0.9.8]
 
 ### Features ✨
