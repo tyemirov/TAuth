@@ -91,6 +91,7 @@ tauth --config=config.yaml
 
 Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
 To restrict sign-ins, set `allowed_users` on a tenant; when present, only those email addresses are permitted to log in (an empty list denies all logins).
+Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 
 When migrating an existing tenant that expects the legacy cookie names (`app_session`, `app_refresh`), set the `session_cookie_name` / `refresh_cookie_name` fields inside the tenant block. These fields are always required—choose unique names per tenant to avoid collisions when multiple tenants share `localhost`. Legacy stacks (such as Gravity) can keep `app_session` / `app_refresh`, but doing so means any other tenant using the same names will overwrite those cookies.
 

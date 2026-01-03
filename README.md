@@ -215,6 +215,7 @@ Rules enforced by the loader:
 - `display_name` is required so operators can distinguish tenants in logs.
 - `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
+- Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 - Unlisted users are rejected during `/auth/google` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
 - `google_web_client_id` and each TTL must be present and non-empty. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
