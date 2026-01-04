@@ -46,7 +46,7 @@ Each entry defines:
 
 - `id` – stable identifier used inside JWTs and storage (lowercase letters/numbers/underscores/hyphens).
 - `display_name` – friendly label surfaced in logs and the demo UI.
-- `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header (or the `X-TAuth-Tenant` override) to select a tenant, so do not list the TAuth API hostname here.
+- `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header to select a tenant, and can optionally accept an `X-TAuth-Tenant` override when you enable it for shared-origin or non-browser clients.
 - `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
@@ -116,7 +116,7 @@ The sample config now defines **two tenants** so you can exercise origin-based r
 
 This setup lets you verify header overrides, cookie isolation, and resolver behavior locally before promoting changes to production.
 
-When two tenants share `localhost`, list each frontend origin (for example `http://localhost:8000` for Gravity and `http://localhost:4173` for the MPR demo) under `tenant_origins`. TAuth inspects the `Origin` header and resolves the tenant automatically, so the UI doesn’t need to set `data-tenant-id` or call `setAuthTenantId` just to distinguish environments.
+When multiple tenants run on the same machine, list each distinct frontend origin (for example `http://localhost:8000` for Gravity and `http://localhost:4173` for the MPR demo) under `tenant_origins`. TAuth resolves tenants by the request `Origin` header, so you only need explicit tenant overrides when two tenants intentionally share the exact same origin.
 
 Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, origins, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
@@ -228,7 +228,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - For local development, non-browser clients, or shared origins, enable the optional header override (`enable_tenant_header_override: true`). When enabled, TAuth accepts either a tenant ID (`X-TAuth-Tenant: demo`) or a frontend origin (`X-TAuth-Tenant: http://localhost:8000`) as the override hint. Leave it disabled in production when every tenant owns unique origins.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
-- Front-ends that share a single origin can still opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` automatically adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls (falling back to the current page origin whenever you don’t provide a tenant ID) while leaving your product’s API traffic untouched.
+- Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between tenants.
 
 ---

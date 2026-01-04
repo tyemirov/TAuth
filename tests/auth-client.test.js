@@ -294,7 +294,7 @@ test("auth client clears cached profile when session refresh fails", async () =>
   assert.equal(fetch.calls[2].url, "https://example.com/auth/refresh");
 });
 
-test("auth client sends tenant header derived from location origin when unset", async () => {
+test("auth client omits tenant header when tenant id is unset", async () => {
   const fetch = createFetchWithQueue([
     { status: 401, body: {} },
     { status: 401, body: {} },
@@ -311,16 +311,8 @@ test("auth client sends tenant header derived from location origin when unset", 
   });
 
   assert.equal(fetch.calls.length, 2);
-  assertHeader(
-    fetch.calls[0],
-    "X-TAuth-Tenant",
-    "http://ui-origin.localhost",
-  );
-  assertHeader(
-    fetch.calls[1],
-    "X-TAuth-Tenant",
-    "http://ui-origin.localhost",
-  );
+  assertMissingHeader(fetch.calls[0], "X-TAuth-Tenant");
+  assertMissingHeader(fetch.calls[1], "X-TAuth-Tenant");
 });
 
 test("auth client rejects missing baseUrl", async () => {
