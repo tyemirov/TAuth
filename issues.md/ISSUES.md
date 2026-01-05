@@ -239,3 +239,42 @@ Analyze the issue and deploy the fix
   Added allowed_users config parsing + enforcement in auth login, updated docs/examples, and added tests.
 - [x] [TA-431] Enforce empty allowed_users as deny-all.
   Treated explicit empty allowlists as deny-all, added tests, and documented the 403 user_not_allowed behavior.
+- [ ] [TA-432] I am getting this error in production. Can you help diagnose and understadn what is happening:
+JS Console
+```
+[Error] Preflight response is not successful. Status code: 405
+[Error] Fetch API cannot load https://tauth.mprlab.com/auth/nonce due to access control checks.
+[Error] Failed to load resource: Preflight response is not successful. Status code: 405 (nonce, line 0)
+[Error] Failed to request auth nonce – TypeError: Load failed
+TypeError: Load failed
+	exchangeCredentialWithTAuth (app.js:398)
+```
+There are no new logs on the backend.
+The production configuration can be found at tools/mprlab-gateway
+
+The network console in Safari shows:
+```
+Summary
+URL: https://tauth.mprlab.com/auth/nonce
+Status: —
+Source: —
+Initiator: 
+tauth.js:265
+
+Request
+Accept: */*
+Cache-Control: no-cache
+Content-Type: application/json
+Origin: https://gravity.mprlab.com
+Pragma: no-cache
+Referer: https://gravity.mprlab.com/
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-site
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15
+X-Requested-With: XMLHttpRequest
+X-TAuth-Tenant: gravity
+
+Response
+No response headers
+```
