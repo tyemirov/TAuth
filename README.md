@@ -239,6 +239,33 @@ Custom clients must follow the nonce exchange documented in [ARCHITECTURE.md#goo
 
 ---
 
+## Validate configurations with `tauth doctor`
+
+The `tauth doctor` command validates TAuth configurations and reports issues. Use it to verify your configuration before deployment or to audit multiple project configurations:
+
+```bash
+# Validate a single configuration
+tauth doctor config.yaml
+
+# Validate multiple configurations with cross-config checks
+tauth doctor config.yaml other-config.yaml --cross-validate
+
+# Output as JSON for CI/CD pipelines
+tauth doctor config.yaml --json
+
+# Check database connectivity
+tauth doctor config.yaml --check-database
+```
+
+The doctor command performs comprehensive validation including:
+- Configuration file syntax and structure
+- Tenant configuration requirements (TTLs, signing keys, origins)
+- CORS origin alignment with tenant origins
+- Cookie scope isolation across tenants
+- Cross-config validation (conflicting origins, shared signing keys)
+
+---
+
 ## Deploy with confidence
 
 - Works out of the box for any single registrable domain—host TAuth once and share cookies across subdomains.

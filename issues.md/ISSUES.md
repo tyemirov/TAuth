@@ -2,7 +2,7 @@
 
 Entries record newly discovered requests or changes, with their outcomes. No instructive content lives here. Read @NOTES.md for the process to follow when fixing issues.
 
-Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.md . Start working on open issues. Work autonomously and stack up PRs
+Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to documentation. Read @issues.md/POLICY.md, @issues.md/PLANNING.md, @issues.md/NOTES.md, and @issues.md/ISSUES.md. Start working on open issues. Prioritize bugfixes and maintenance. Work autonomously and stack up PRs.
 
 ## Features (112–199)
 
@@ -55,7 +55,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
   The problem is that I cant think of a way making it secure
 
-- [ ] [TA-113] Add tauth doctor command. Move all the functionality from tools/mprlab-gateway/cmd to TAuth. I want the TAuth configuration of multiple project to be validated by TAUth doctor command, where TAuth will be the authorative source on the correctness of the configuration. after the execution, the mprlab-gateway shall have an open PR which will move all TAuth validation to Tauth but leave pinguin validation intact for now. The other PR will be the TAuth pr that will add TAuth doctor command.
+- [x] [TA-113] Add tauth doctor command. Move all the functionality from tools/mprlab-gateway/cmd to TAuth. I want the TAuth configuration of multiple project to be validated by TAUth doctor command, where TAuth will be the authorative source on the correctness of the configuration. after the execution, the mprlab-gateway shall have an open PR which will move all TAuth validation to Tauth but leave pinguin validation intact for now. The other PR will be the TAuth pr that will add TAuth doctor command.
+  Added `tauth doctor` command that validates TAuth configurations with comprehensive checks for tenant requirements (TTLs, signing keys, origins), CORS alignment, and cookie scope isolation. The command supports multiple config files with cross-config validation (`--cross-validate`), database connectivity checks (`--check-database`), and JSON output for CI/CD (`--json`). TAuth is now the authoritative source for configuration validation.
 
 ## Improvements (341–640)
 
