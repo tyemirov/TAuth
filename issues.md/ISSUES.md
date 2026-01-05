@@ -55,6 +55,8 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
 
   The problem is that I cant think of a way making it secure
 
+- [ ] [TA-113] Add tauth doctor command. Move all the functionality from tools/mprlab-gateway/cmd to TAuth. I want the TAuth configuration of multiple project to be validated by TAUth doctor command, where TAuth will be the authorative source on the correctness of the configuration. after the execution, the mprlab-gateway shall have an open PR which will move all TAuth validation to Tauth but leave pinguin validation intact for now. The other PR will be the TAuth pr that will add TAuth doctor command.
+
 ## Improvements (341–640)
 
 - [x] [TA-112] Remove the palette suggestions section from the landing page.
