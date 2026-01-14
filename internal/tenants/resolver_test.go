@@ -1,6 +1,7 @@
 package tenants
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -291,6 +292,23 @@ func TestTenantMiddlewareRejectsUnknownOrigin(t *testing.T) {
 
 	if response.Code != http.StatusTeapot {
 		t.Fatalf("expected rejection status 418, got %d", response.Code)
+	}
+	var payload map[string]string
+	decodeErr := json.Unmarshal(response.Body.Bytes(), &payload)
+	if decodeErr != nil {
+		t.Fatalf("failed to decode response payload: %v", decodeErr)
+	}
+	if payload[errorPayloadKeyCode] != errorCodeUnknownOrigin {
+		t.Fatalf("expected error code %s, got %s", errorCodeUnknownOrigin, payload[errorPayloadKeyCode])
+	}
+	if payload[errorPayloadKeyOrigin] != "https://unknown.example.com" {
+		t.Fatalf("expected origin echo, got %s", payload[errorPayloadKeyOrigin])
+	}
+	if strings.TrimSpace(payload[errorPayloadKeyMessage]) == "" {
+		t.Fatalf("expected error message")
+	}
+	if strings.TrimSpace(payload[errorPayloadKeyHint]) == "" {
+		t.Fatalf("expected error hint")
 	}
 }
 
