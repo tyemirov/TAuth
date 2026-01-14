@@ -288,3 +288,5 @@ No response headers
   Root cause: Gravity frontend was calling `tauth.mprlab.com` but the Caddyfile only had `tauth-api.mprlab.com`. DNS for `tauth.mprlab.com` pointed to the Caddy server, but Caddy had no site block for it, causing requests to fail before reaching TAuth (hence no backend logs). Fix: Updated Gravity's `authBaseUrl` to `tauth-api.mprlab.com` and consolidated production config to JSON-only (Gravity PR #181).
 - [x] [TA-433] Reset incompatible refresh store schemas on upgrade.
   Dropped and recreated refresh/user/nonce tables once per schema version, persisted the schema marker, and added a regression test for legacy SQLite tables.
+- [x] [TA-422] Correction: decouple demo-related tests from repo assets by using fixture copies for docs, multi-tenant configs, and `tauth.js`.
+  Added fixture assets and repointed tests/servers to them so demo and docs changes no longer affect test scaffolding.
