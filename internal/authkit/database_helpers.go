@@ -76,6 +76,37 @@ func openDatabase(requestContext context.Context, databaseURL string, errorPrefi
 	return databaseHandle, driverLabel, nil
 }
 
+// CheckDatabaseConnectivity opens the configured database and pings it without migrating schema.
+func CheckDatabaseConnectivity(requestContext context.Context, databaseURL string) (string, error) {
+	trimmedDatabaseURL := strings.TrimSpace(databaseURL)
+	if trimmedDatabaseURL == "" {
+		return "", fmt.Errorf("%s.open: %w", refreshStoreErrorPrefix, errEmptyDatabaseURL)
+	}
+	dialector, driverLabel, resolveError := resolveDialector(trimmedDatabaseURL, refreshStoreErrorPrefix)
+	if resolveError != nil {
+		return "", resolveError
+	}
+	databaseHandle, openError := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if openError != nil {
+		return "", fmt.Errorf("%s.open.%s: %w", refreshStoreErrorPrefix, driverLabel, openError)
+	}
+	rawHandle, rawError := databaseHandle.DB()
+	if rawError != nil {
+		return "", fmt.Errorf("%s.open.%s: %w", refreshStoreErrorPrefix, driverLabel, rawError)
+	}
+	pingError := rawHandle.PingContext(requestContext)
+	if pingError != nil {
+		return "", fmt.Errorf("%s.ping.%s: %w", refreshStoreErrorPrefix, driverLabel, pingError)
+	}
+	closeError := rawHandle.Close()
+	if closeError != nil {
+		return "", fmt.Errorf("%s.close.%s: %w", refreshStoreErrorPrefix, driverLabel, closeError)
+	}
+	return driverLabel, nil
+}
+
 func resolveDialector(databaseURL string, errorPrefix string) (gorm.Dialector, string, error) {
 	parsed, parseErr := url.Parse(databaseURL)
 	if parseErr != nil {

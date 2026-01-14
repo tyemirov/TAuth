@@ -17,6 +17,7 @@
 - Enforced empty `allowed_users` list as deny-all, preventing unintended unrestricted access.
 - Fixed origin validation and error handling for multi-tenant authentication.
 - Reset incompatible refresh token schemas on upgrade by dropping and recreating store tables once per schema version.
+- Prevented `tauth doctor --check-database` from migrating or resetting refresh token schemas.
 
 ### Testing 🧪
 - Added comprehensive HTTP tests for authentication rejecting users not on the allowlist.

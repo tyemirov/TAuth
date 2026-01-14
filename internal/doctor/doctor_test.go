@@ -2,9 +2,14 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	sqliteDialector "github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestRunValidatesValidConfig(testingHandle *testing.T) {
@@ -203,6 +208,78 @@ func TestWarningForInsecureHTTP(testingHandle *testing.T) {
 	}
 }
 
+func TestRunCheckDatabaseDoesNotMutateRefreshStore(testingHandle *testing.T) {
+	tempDir := testingHandle.TempDir()
+	databasePath := filepath.Join(tempDir, "tauth.db")
+	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
+	databaseHandle, openErr := gorm.Open(sqliteDialector.Open(filepath.ToSlash(databasePath)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if openErr != nil {
+		testingHandle.Fatalf("open database: %v", openErr)
+	}
+	createStatement := fmt.Sprintf(
+		"CREATE TABLE %s (token_id TEXT PRIMARY KEY, user_id TEXT NOT NULL)",
+		legacyRefreshTokenTableName,
+	)
+	if createErr := databaseHandle.Exec(createStatement).Error; createErr != nil {
+		testingHandle.Fatalf("create refresh token table: %v", createErr)
+	}
+	insertStatement := fmt.Sprintf(
+		"INSERT INTO %s (token_id, user_id) VALUES (?, ?)",
+		legacyRefreshTokenTableName,
+	)
+	if insertErr := databaseHandle.Exec(insertStatement, "legacy-token", "legacy-user").Error; insertErr != nil {
+		testingHandle.Fatalf("insert refresh token: %v", insertErr)
+	}
+	rawHandle, rawErr := databaseHandle.DB()
+	if rawErr != nil {
+		testingHandle.Fatalf("access sql handle: %v", rawErr)
+	}
+	if closeErr := rawHandle.Close(); closeErr != nil {
+		testingHandle.Fatalf("close database: %v", closeErr)
+	}
+
+	configPath := filepath.Join(tempDir, "config.yaml")
+	writeTestConfig(testingHandle, configPath, fmt.Sprintf(validCheckDatabaseConfigYAML, databaseURL))
+
+	report, runErr := Run(context.Background(), Options{
+		ConfigPaths:        []string{configPath},
+		CheckDatabaseStore: true,
+	})
+	if runErr != nil {
+		testingHandle.Fatalf("expected no error, got %v", runErr)
+	}
+	if !report.Diagnostics[0].Valid {
+		testingHandle.Fatalf("expected config to be valid, got %v", report.Diagnostics[0].Errors)
+	}
+	if len(report.Diagnostics[0].Warnings) != 0 {
+		testingHandle.Fatalf("expected no warnings, got %v", report.Diagnostics[0].Warnings)
+	}
+
+	verifyHandle, verifyErr := gorm.Open(sqliteDialector.Open(filepath.ToSlash(databasePath)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if verifyErr != nil {
+		testingHandle.Fatalf("reopen database: %v", verifyErr)
+	}
+	var tokenCount int64
+	countErr := verifyHandle.Table(legacyRefreshTokenTableName).Count(&tokenCount).Error
+	if countErr != nil {
+		testingHandle.Fatalf("count refresh tokens: %v", countErr)
+	}
+	if tokenCount != 1 {
+		testingHandle.Fatalf("expected refresh tokens to remain, got %d", tokenCount)
+	}
+	verifyRawHandle, verifyRawErr := verifyHandle.DB()
+	if verifyRawErr != nil {
+		testingHandle.Fatalf("access verify sql handle: %v", verifyRawErr)
+	}
+	if closeErr := verifyRawHandle.Close(); closeErr != nil {
+		testingHandle.Fatalf("close verify database: %v", closeErr)
+	}
+}
+
 func writeTestConfig(testingHandle *testing.T, path string, content string) {
 	testingHandle.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -281,4 +358,27 @@ server:
 tenants:
   - id: invalid
     display_name: Invalid Tenant
+`
+
+const legacyRefreshTokenTableName = "refresh_tokens"
+
+const validCheckDatabaseConfigYAML = `
+server:
+  listen_addr: ":8082"
+  database_url: "%s"
+  enable_cors: false
+
+tenants:
+  - id: demo
+    display_name: Demo Tenant
+    tenant_origins:
+      - http://localhost:8000
+    google_web_client_id: demo-client.apps.googleusercontent.com
+    jwt_signing_key: demo-signing-key-at-least-32-chars
+    session_cookie_name: app_session_demo
+    refresh_cookie_name: app_refresh_demo
+    session_ttl: 30m
+    refresh_ttl: 720h
+    nonce_ttl: 5m
+    allow_insecure_http: false
 `
