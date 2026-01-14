@@ -290,3 +290,7 @@ No response headers
   Dropped and recreated refresh/user/nonce tables once per schema version, persisted the schema marker, and added a regression test for legacy SQLite tables.
 - [x] [TA-422] Correction: decouple demo-related tests from repo assets by using fixture copies for docs, multi-tenant configs, and `tauth.js`.
   Added fixture assets and repointed tests/servers to them so demo and docs changes no longer affect test scaffolding.
+- [x] [TA-435] Avoid destructive schema resets during `tauth doctor --check-database`.
+  Switched doctor to a non-migrating connectivity probe and added coverage ensuring legacy refresh tokens are preserved.
+- [x] [TA-436] Align demo fixture `tauth.js` with shipped tenant-header behavior.
+  Updated fixture assets to match the current auth client so demo/browser tests no longer send `X-TAuth-Tenant` when no tenant is configured.

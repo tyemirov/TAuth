@@ -66,7 +66,7 @@
     onUnauthenticated: function onUnauthenticatedDefault() {},
   };
 
-  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string, originHint: string }} */
+  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string }} */
   var runtime = {
     options: null,
     userProfile: null,
@@ -78,7 +78,6 @@
     broadcastHandlerAttached: false,
     profileSyncPromise: null,
     tenantId: "",
-    originHint: "",
   };
 
   function detectInitialTenantId() {
@@ -111,25 +110,6 @@
     return "";
   }
 
-  function detectOriginHint() {
-    if (
-      typeof window !== "undefined" &&
-      window.location &&
-      typeof window.location.origin === "string"
-    ) {
-      return window.location.origin;
-    }
-    if (
-      typeof globalThis !== "undefined" &&
-      globalThis.location &&
-      typeof globalThis.location.origin === "string"
-    ) {
-      return globalThis.location.origin;
-    }
-    return "";
-  }
-
-  runtime.originHint = detectOriginHint();
   setTenantId(detectInitialTenantId());
 
   /**
@@ -489,27 +469,11 @@
     return runtime.tenantId;
   }
 
-  function resolveTenantHeaderValue() {
-    var explicitTenant = currentTenantId();
-    if (explicitTenant) {
-      return explicitTenant;
-    }
-    if (runtime.originHint) {
-      return runtime.originHint;
-    }
-    var detected = detectOriginHint();
-    if (detected) {
-      runtime.originHint = detected;
-      return detected;
-    }
-    return "";
-  }
-
   function withTenantHeader(headers) {
     var combined = Object.assign({}, headers || {});
-    var headerValue = resolveTenantHeaderValue();
-    if (headerValue) {
-      combined[tenantHeaderName] = headerValue;
+    var tenantValue = currentTenantId();
+    if (tenantValue) {
+      combined[tenantHeaderName] = tenantValue;
     }
     return combined;
   }

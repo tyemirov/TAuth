@@ -158,9 +158,9 @@ func validateConfig(ctx context.Context, configPath string, checkDatabase bool) 
 	if checkDatabase && strings.TrimSpace(config.Server.DatabaseURL) != "" {
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		_, storeErr := authkit.NewDatabaseRefreshTokenStore(ctxWithTimeout, config.Server.DatabaseURL)
-		if storeErr != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("database_store: %v", storeErr))
+		_, probeErr := authkit.CheckDatabaseConnectivity(ctxWithTimeout, config.Server.DatabaseURL)
+		if probeErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("database_store: %v", probeErr))
 		}
 	}
 
