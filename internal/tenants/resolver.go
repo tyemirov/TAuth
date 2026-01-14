@@ -30,6 +30,14 @@ const (
 	errorCodeAmbiguousOrigin       = "tenantresolver.ambiguous_origin"
 	errorCodeMissingHeaderOverride = "tenantresolver.missing_tenant_header"
 	errorCodeOverrideMismatch      = "tenantresolver.override_mismatch"
+
+	errorPayloadKeyError       = "error"
+	errorPayloadKeyCode        = "error_code"
+	errorPayloadKeyMessage     = "error_message"
+	errorPayloadKeyHint        = "hint"
+	errorPayloadKeyOrigin      = "origin"
+	errorPayloadKeyHeaderName  = "header_name"
+	errorPayloadKeyHeaderValue = "header_value"
 )
 
 // ErrResolverUninitialized indicates tenants were not provided.
@@ -158,14 +166,24 @@ func TenantMiddleware(resolver *Resolver, rejectionStatus int) gin.HandlerFunc {
 		rejectionStatus = http.StatusNotFound
 	}
 	return func(context *gin.Context) {
-		tenant, err := resolver.Resolve(context.Request)
-		if err != nil {
+		tenant, resolveErr := resolver.Resolve(context.Request)
+		if resolveErr != nil {
 			status := rejectionStatus
-			if errors.Is(err, ErrResolverUninitialized) {
+			if errors.Is(resolveErr, ErrResolverUninitialized) {
 				status = http.StatusInternalServerError
 			}
 			context.AbortWithStatusJSON(status, gin.H{
-				"error": err.Error(),
+				errorPayloadKeyError:      resolveErr.Error(),
+				errorPayloadKeyCode:       resolveTenantErrorCode(resolveErr),
+				errorPayloadKeyMessage:    resolveTenantErrorMessage(resolveErr),
+				errorPayloadKeyHint:       resolveTenantErrorHint(resolver, resolveErr),
+				errorPayloadKeyOrigin:     resolveTenantErrorOrigin(context.Request),
+				errorPayloadKeyHeaderName: resolveTenantErrorHeaderName(resolver, resolveErr),
+				errorPayloadKeyHeaderValue: resolveTenantErrorHeaderValue(
+					resolver,
+					context.Request,
+					resolveErr,
+				),
 			})
 			return
 		}
@@ -210,4 +228,120 @@ func (resolver *Resolver) originAllowsTenant(origin string, tenantID TenantID) b
 		}
 	}
 	return false
+}
+
+func resolveTenantErrorCode(resolveErr error) string {
+	if resolveErr == nil {
+		return ""
+	}
+	if errors.Is(resolveErr, ErrResolverUninitialized) {
+		return errorCodeInvalidConfig
+	}
+	message := resolveErr.Error()
+	knownCodes := []string{
+		errorCodeMissingOrigin,
+		errorCodeUnknownOrigin,
+		errorCodeUnknownTenantID,
+		errorCodeInvalidConfig,
+		errorCodeAmbiguousOrigin,
+		errorCodeMissingHeaderOverride,
+		errorCodeOverrideMismatch,
+	}
+	for _, codeValue := range knownCodes {
+		if strings.Contains(message, codeValue) {
+			return codeValue
+		}
+	}
+	return ""
+}
+
+func resolveTenantErrorMessage(resolveErr error) string {
+	errorCode := resolveTenantErrorCode(resolveErr)
+	switch errorCode {
+	case errorCodeMissingOrigin:
+		return "Origin header is required to resolve the tenant."
+	case errorCodeUnknownOrigin:
+		return "Origin is not registered for any tenant."
+	case errorCodeAmbiguousOrigin:
+		return "Origin matches more than one tenant."
+	case errorCodeMissingHeaderOverride:
+		return "Tenant override header is required for this request."
+	case errorCodeOverrideMismatch:
+		return "Tenant override does not match the resolved origin."
+	case errorCodeUnknownTenantID:
+		return "Tenant override does not match any configured tenant."
+	case errorCodeInvalidConfig:
+		return "Tenant resolver is not configured."
+	default:
+		if errors.Is(resolveErr, ErrTenantNotFound) {
+			return "Tenant could not be resolved."
+		}
+		return "Tenant resolution failed."
+	}
+}
+
+func resolveTenantErrorHint(resolver *Resolver, resolveErr error) string {
+	errorCode := resolveTenantErrorCode(resolveErr)
+	headerName := resolveTenantErrorHeaderName(resolver, resolveErr)
+	if headerName == "" {
+		headerName = defaultTenantHeader
+	}
+	switch errorCode {
+	case errorCodeMissingOrigin:
+		return "Ensure the browser sends an Origin header or enable tenant header overrides for non-browser or same-origin clients."
+	case errorCodeUnknownOrigin:
+		return "Add the origin to tenant_origins (include scheme and port) and restart the service."
+	case errorCodeAmbiguousOrigin:
+		return fmt.Sprintf("Use distinct tenant_origins per tenant or provide %s to select the tenant.", headerName)
+	case errorCodeMissingHeaderOverride:
+		return fmt.Sprintf("Provide %s with the tenant id or frontend origin and set enable_tenant_header_override to true.", headerName)
+	case errorCodeOverrideMismatch:
+		return fmt.Sprintf("Ensure %s matches the tenant that owns the Origin.", headerName)
+	case errorCodeUnknownTenantID:
+		return "Check the tenant id spelling or use a valid frontend origin."
+	case errorCodeInvalidConfig:
+		return "Verify config.yaml includes at least one tenant and the server loaded the config."
+	default:
+		if errors.Is(resolveErr, ErrTenantNotFound) {
+			return "Check tenant_origins and header override settings."
+		}
+		return ""
+	}
+}
+
+func resolveTenantErrorOrigin(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+	return strings.TrimSpace(request.Header.Get("Origin"))
+}
+
+func resolveTenantErrorHeaderName(resolver *Resolver, resolveErr error) string {
+	if resolver == nil {
+		return ""
+	}
+	errorCode := resolveTenantErrorCode(resolveErr)
+	switch errorCode {
+	case errorCodeMissingHeaderOverride,
+		errorCodeOverrideMismatch,
+		errorCodeUnknownTenantID:
+		return resolver.headerOverrideName
+	default:
+		return ""
+	}
+}
+
+func resolveTenantErrorHeaderValue(resolver *Resolver, request *http.Request, resolveErr error) string {
+	if resolver == nil || request == nil {
+		return ""
+	}
+	errorCode := resolveTenantErrorCode(resolveErr)
+	switch errorCode {
+	case errorCodeMissingHeaderOverride,
+		errorCodeOverrideMismatch,
+		errorCodeUnknownTenantID:
+		return strings.TrimSpace(request.Header.Get(resolver.headerOverrideName))
+	default:
+		return ""
+	}
 }
