@@ -284,6 +284,10 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 - Cobra command `tauth` reads configuration from a single YAML file (`--config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`).
 - `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
+- `tauth doctor <config-paths...>` validates one or more TAuth configurations and reports issues:
+  - `--cross-validate`: Check for conflicts across multiple configs (shared origins, signing keys, cookie names).
+  - `--check-database`: Verify database connectivity for configured database URLs.
+  - `--json`: Output results as JSON for CI/CD pipelines.
 - Graceful shutdown listens for `SIGINT`/`SIGTERM`, allowing 10s for in-flight requests.
 - zap middleware logs method, path, status, IP, and latency for each request.
 - Integration tests use the exported CLI wiring to spin up in-memory servers (`go test ./...`).

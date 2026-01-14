@@ -3,11 +3,20 @@ package authkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
 	sqliteDialector "github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+const (
+	refreshTokenTenantIDColumn = "tenant_id"
+	refreshTokenIssuedAtColumn = "issued_at_unix"
 )
 
 func TestResolveDialectorUnsupportedScheme(t *testing.T) {
@@ -102,6 +111,88 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 	missingRevokeErr := store.Revoke(context.Background(), "tenant-a", "missing-token")
 	if !errors.Is(missingRevokeErr, ErrRefreshTokenNotFound) {
 		t.Fatalf("expected ErrRefreshTokenNotFound, got %v", missingRevokeErr)
+	}
+}
+
+func TestRefreshTokenStoreResetsSQLiteSchemaOnLegacyTable(testContext *testing.T) {
+	databasePath := filepath.Join(testContext.TempDir(), "tauth.db")
+	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
+	legacyDatabaseHandle, openErr := gorm.Open(sqliteDialector.Open(filepath.ToSlash(databasePath)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if openErr != nil {
+		testContext.Fatalf("failed to open legacy database: %v", openErr)
+	}
+	createStatement := fmt.Sprintf(
+		"CREATE TABLE %s (token_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, expires_unix BIGINT NOT NULL, revoked_at_unix BIGINT NOT NULL DEFAULT 0)",
+		refreshTokenTableName,
+	)
+	if createErr := legacyDatabaseHandle.Exec(createStatement).Error; createErr != nil {
+		testContext.Fatalf("failed to create legacy refresh token table: %v", createErr)
+	}
+	insertStatement := fmt.Sprintf(
+		"INSERT INTO %s (token_id, user_id, token_hash, expires_unix, revoked_at_unix) VALUES (?, ?, ?, ?, ?)",
+		refreshTokenTableName,
+	)
+	if insertErr := legacyDatabaseHandle.Exec(insertStatement, "legacy-token", "legacy-user", "legacy-hash", int64(1700000000), int64(0)).Error; insertErr != nil {
+		testContext.Fatalf("failed to insert legacy refresh token: %v", insertErr)
+	}
+	rawDatabaseHandle, rawErr := legacyDatabaseHandle.DB()
+	if rawErr != nil {
+		testContext.Fatalf("failed to access legacy sql handle: %v", rawErr)
+	}
+	if closeErr := rawDatabaseHandle.Close(); closeErr != nil {
+		testContext.Fatalf("failed to close legacy database: %v", closeErr)
+	}
+
+	store, storeErr := NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+	if storeErr != nil {
+		testContext.Fatalf("failed to open refresh token store: %v", storeErr)
+	}
+	if !store.db.Migrator().HasColumn(&refreshTokenRecord{}, refreshTokenTenantIDColumn) {
+		testContext.Fatalf("expected tenant_id column after reset migration")
+	}
+	if !store.db.Migrator().HasColumn(&refreshTokenRecord{}, refreshTokenIssuedAtColumn) {
+		testContext.Fatalf("expected issued_at_unix column after reset migration")
+	}
+	var tokenCount int64
+	if countErr := store.db.Model(&refreshTokenRecord{}).Count(&tokenCount).Error; countErr != nil {
+		testContext.Fatalf("failed to count refresh tokens after reset: %v", countErr)
+	}
+	if tokenCount != 0 {
+		testContext.Fatalf("expected legacy refresh tokens to be dropped, got %d", tokenCount)
+	}
+
+	expiryUnix := time.Now().Add(10 * time.Minute).Unix()
+	_, _, issueErr := store.Issue(context.Background(), "tenant-a", "user-123", expiryUnix, "")
+	if issueErr != nil {
+		testContext.Fatalf("failed to issue refresh token after reset: %v", issueErr)
+	}
+	var issuedCount int64
+	if countErr := store.db.Model(&refreshTokenRecord{}).Count(&issuedCount).Error; countErr != nil {
+		testContext.Fatalf("failed to count issued refresh tokens: %v", countErr)
+	}
+	if issuedCount == 0 {
+		testContext.Fatalf("expected issued refresh token to persist")
+	}
+	rawStoreHandle, rawStoreErr := store.db.DB()
+	if rawStoreErr != nil {
+		testContext.Fatalf("failed to access store sql handle: %v", rawStoreErr)
+	}
+	if closeErr := rawStoreHandle.Close(); closeErr != nil {
+		testContext.Fatalf("failed to close store database: %v", closeErr)
+	}
+
+	secondStore, secondStoreErr := NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+	if secondStoreErr != nil {
+		testContext.Fatalf("failed to reopen refresh token store: %v", secondStoreErr)
+	}
+	var secondCount int64
+	if countErr := secondStore.db.Model(&refreshTokenRecord{}).Count(&secondCount).Error; countErr != nil {
+		testContext.Fatalf("failed to count refresh tokens after reopen: %v", countErr)
+	}
+	if secondCount != issuedCount {
+		testContext.Fatalf("expected refresh token count to persist, got %d", secondCount)
 	}
 }
 

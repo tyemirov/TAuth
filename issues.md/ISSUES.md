@@ -2,7 +2,7 @@
 
 Entries record newly discovered requests or changes, with their outcomes. No instructive content lives here. Read @NOTES.md for the process to follow when fixing issues.
 
-Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.md . Start working on open issues. Work autonomously and stack up PRs
+Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to documentation. Read @issues.md/POLICY.md, @issues.md/PLANNING.md, @issues.md/NOTES.md, and @issues.md/ISSUES.md. Start working on open issues. Prioritize bugfixes and maintenance. Work autonomously and stack up PRs.
 
 ## Features (112–199)
 
@@ -54,6 +54,9 @@ Read AGENTS.md , ARCHITECTURE.md , POLICY.md , NOTES.md ,  README.md and ISSUES.
   4. This is the only available way of configuring tauth front end client
 
   The problem is that I cant think of a way making it secure
+
+- [x] [TA-113] Add tauth doctor command. Move all the functionality from tools/mprlab-gateway/cmd to TAuth. I want the TAuth configuration of multiple project to be validated by TAUth doctor command, where TAuth will be the authorative source on the correctness of the configuration. after the execution, the mprlab-gateway shall have an open PR which will move all TAuth validation to Tauth but leave pinguin validation intact for now. The other PR will be the TAuth pr that will add TAuth doctor command.
+  Added `tauth doctor` command that validates TAuth configurations with comprehensive checks for tenant requirements (TTLs, signing keys, origins), CORS alignment, and cookie scope isolation. The command supports multiple config files with cross-config validation (`--cross-validate`), database connectivity checks (`--check-database`), and JSON output for CI/CD (`--json`). TAuth is now the authoritative source for configuration validation.
 
 ## Improvements (341–640)
 
@@ -236,9 +239,54 @@ Analyze the issue and deploy the fix
   Added allowed_users config parsing + enforcement in auth login, updated docs/examples, and added tests.
 - [x] [TA-431] Enforce empty allowed_users as deny-all.
   Treated explicit empty allowlists as deny-all, added tests, and documented the 403 user_not_allowed behavior.
+- [ ] [TA-432] I am getting this error in production. Can you help diagnose and understadn what is happening:
+JS Console
+```
+[Error] Preflight response is not successful. Status code: 405
+[Error] Fetch API cannot load https://tauth.mprlab.com/auth/nonce due to access control checks.
+[Error] Failed to load resource: Preflight response is not successful. Status code: 405 (nonce, line 0)
+[Error] Failed to request auth nonce – TypeError: Load failed
+TypeError: Load failed
+	exchangeCredentialWithTAuth (app.js:398)
+```
+There are no new logs on the backend.
+The production configuration can be found at tools/mprlab-gateway
+
+The network console in Safari shows:
+```
+Summary
+URL: https://tauth.mprlab.com/auth/nonce
+Status: —
+Source: —
+Initiator: 
+tauth.js:265
+
+Request
+Accept: */*
+Cache-Control: no-cache
+Content-Type: application/json
+Origin: https://gravity.mprlab.com
+Pragma: no-cache
+Referer: https://gravity.mprlab.com/
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-site
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15
+X-Requested-With: XMLHttpRequest
+X-TAuth-Tenant: gravity
+
+Response
+No response headers
+```
 - [x] [TA-432] Make tenant-id optional for web clients; default to Origin-only routing; improve tenant-resolution diagnostics.
   Updated `tauth.js` to send `X-TAuth-Tenant` only when a tenant id is explicitly configured, removed origin fallback, added structured tenant-resolution payloads (error codes + hints), and refreshed tests/docs.
 - [ ] [TA-433] Add GitHub as an additional identity provider (OAuth2 Authorization Code + PKCE) while keeping TAuth session cookies/JWT model.
   Add a per-tenant GitHub provider block (client_id, client_secret, scopes, callback URL/origin constraints, and email requirements). Implement `GET /auth/github/start` (issue state + PKCE verifier, redirect/popup URL), `GET /auth/github/callback` (validate state + PKCE, exchange code for access token, fetch user identity + verified email via GitHub API, enforce per-tenant allowed_users against the resolved verified email), then mint the same `app_session` + `app_refresh` cookies and return the same profile shape. Note: GitHub requires a redirect round-trip; support popup mode by completing auth on a TAuth-served callback page that communicates success to the opener (postMessage/BroadcastChannel) and closes. Tenant resolution for callback must not rely on `Origin` (GitHub callback requests may omit it); instead encode the tenant in the signed `state` payload (or use tenant-specific callback paths) and re-validate it against config. Document error codes/hints for common failures (missing/invalid state, PKCE mismatch, code exchange failure, missing verified email when email is private, user_not_allowed, misconfigured callback URL, issuer/signing-key mismatch on downstream services). Add integration tests covering the full GitHub flow with a mock GitHub server (no external network) and table-driven cases.
 - [ ] [TA-434] Add `tauth doctor` to proactively diagnose auth misconfiguration.
   Provide a CLI command that reads `config.yaml` and prints a focused, actionable report (and stable error codes) for common “can’t authenticate” issues: origin not configured/unknown, ambiguous origins requiring tenant override, CORS allowlist missing the frontend origin, cookie scope collisions, cookie_domain/localhost pitfalls, missing/incorrect `enable_tenant_header_override` for shared-origin clients, and JWT validation parameters to sync with downstream services (issuer, session cookie name, tenant signing key fingerprints). Include a dedicated check/hint for issuer mismatch with common downstream validators (e.g. expecting `mprlab-auth` vs TAuth issuer `tauth`).
+- [x] [TA-432] Production CORS preflight 405 error.
+  Root cause: Gravity frontend was calling `tauth.mprlab.com` but the Caddyfile only had `tauth-api.mprlab.com`. DNS for `tauth.mprlab.com` pointed to the Caddy server, but Caddy had no site block for it, causing requests to fail before reaching TAuth (hence no backend logs). Fix: Updated Gravity's `authBaseUrl` to `tauth-api.mprlab.com` and consolidated production config to JSON-only (Gravity PR #181).
+- [x] [TA-433] Reset incompatible refresh store schemas on upgrade.
+  Dropped and recreated refresh/user/nonce tables once per schema version, persisted the schema marker, and added a regression test for legacy SQLite tables.
+- [x] [TA-422] Correction: decouple demo-related tests from repo assets by using fixture copies for docs, multi-tenant configs, and `tauth.js`.
+  Added fixture assets and repointed tests/servers to them so demo and docs changes no longer affect test scaffolding.

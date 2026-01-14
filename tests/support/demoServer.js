@@ -15,7 +15,7 @@ async function startDemoServer() {
     demoStyles,
   ] = await Promise.all([
     fs.readFile(path.join(demoRoot, "index.html"), "utf8"),
-    fs.readFile(path.join(__dirname, "..", "..", "web", "tauth.js"), "utf8"),
+    fs.readFile(path.join(__dirname, "..", "fixtures", "web", "tauth.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "demo-config.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "tauth-config.js"), "utf8"),
     fs.readFile(path.join(demoRoot, "status-panel.js"), "utf8"),

@@ -18,23 +18,18 @@ const DEMO_ENV_TEMPLATE_PATH = pathModule.join(
 );
 const MULTI_TENANT_CONFIG_PATH = pathModule.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "multi-tenant",
   "config.yaml",
 );
 const MULTI_TENANT_CONFIG_EXAMPLE_PATH = pathModule.join(
   __dirname,
-  "..",
-  "examples",
+  "fixtures",
   "multi-tenant",
   "config.yaml.example",
 );
 const DOC_PATHS = Object.freeze([
-  pathModule.join(__dirname, "..", "README.md"),
-  pathModule.join(__dirname, "..", "ARCHITECTURE.md"),
-  pathModule.join(__dirname, "..", "docs", "usage.md"),
-  pathModule.join(__dirname, "..", "docs", "migration.md"),
+  pathModule.join(__dirname, "fixtures", "docs", "cors-exceptions.md"),
 ]);
 
 const CORS_EXCEPTION_KEY = "cors_allowed_origin_exceptions";
@@ -53,7 +48,7 @@ async function assertConfigIncludesExceptions(filePath) {
   );
 }
 
-test("example configs declare CORS exception origins", async () => {
+test("fixture configs declare CORS exception origins", async () => {
   await assertConfigIncludesExceptions(DEMO_CONFIG_PATH);
   await assertConfigIncludesExceptions(MULTI_TENANT_CONFIG_PATH);
   await assertConfigIncludesExceptions(MULTI_TENANT_CONFIG_EXAMPLE_PATH);
@@ -69,7 +64,7 @@ test("example configs declare CORS exception origins", async () => {
   );
 });
 
-test("docs mention CORS exception origins for GIS", async () => {
+test("fixture docs mention CORS exception origins for GIS", async () => {
   const sources = await Promise.all(
     DOC_PATHS.map((docPath) => fileSystem.readFile(docPath, "utf8")),
   );

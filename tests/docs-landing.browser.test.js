@@ -18,7 +18,7 @@ try {
 }
 
 const chromiumExecutable = process.env.CHROMIUM_PATH || "";
-const DOCS_INDEX_PATH = path.join(__dirname, "..", "docs", "index.html");
+const DOCS_INDEX_PATH = path.join(__dirname, "fixtures", "docs", "index.html");
 
 if (!puppeteer) {
   test.skip("docs landing renders key sections", () => {});

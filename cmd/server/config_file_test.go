@@ -109,7 +109,7 @@ func TestLoadApplicationConfigRejectsEmptyPath(testingHandle *testing.T) {
 	}
 }
 
-func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
+func TestLoadApplicationConfigMultiTenantFixture(testingHandle *testing.T) {
 	testingHandle.Setenv("TAUTH_LISTEN_ADDR", ":8082")
 	testingHandle.Setenv("TAUTH_DATABASE_URL", "sqlite:///data/example.db")
 	testingHandle.Setenv("TAUTH_ENABLE_CORS", "true")
@@ -117,24 +117,10 @@ func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
 	testingHandle.Setenv("TAUTH_CORS_ORIGIN_2", "http://127.0.0.1:8000")
 	testingHandle.Setenv("TAUTH_CORS_ORIGIN_3", "http://localhost:4173")
 	testingHandle.Setenv("TAUTH_CORS_EXCEPTION_1", "https://accounts.google.com")
-	testingHandle.Setenv("TAUTH_TENANT_ID_GRAVITY", "notes")
-	testingHandle.Setenv("TAUTH_TENANT_DISPLAY_NAME_GRAVITY", "Gravity Notes")
-	testingHandle.Setenv("TAUTH_TENANT_ORIGIN_GRAVITY", "http://localhost:8000")
-	testingHandle.Setenv("TAUTH_TENANT_GOOGLE_WEB_CLIENT_GRAVITY", "notes-client")
-	testingHandle.Setenv("TAUTH_TENANT_JWT_SIGNING_KEY_GRAVITY", "notes-signing-key")
-	testingHandle.Setenv("TAUTH_TENANT_SESSION_COOKIE_NAME_GRAVITY", "app_session_notes")
-	testingHandle.Setenv("TAUTH_TENANT_REFRESH_COOKIE_NAME_GRAVITY", "app_refresh_notes")
-	testingHandle.Setenv("TAUTH_TENANT_ID_MPR", "mpr-sites")
-	testingHandle.Setenv("TAUTH_TENANT_DISPLAY_NAME_MPR", "MPR Sites")
-	testingHandle.Setenv("TAUTH_TENANT_ORIGIN_MPR", "http://localhost:4173")
-	testingHandle.Setenv("TAUTH_TENANT_GOOGLE_WEB_CLIENT_ID_MPR", "mpr-client")
-	testingHandle.Setenv("TAUTH_TENANT_JWT_SIGNING_KEY_MPR", "mpr-signing-key")
-	testingHandle.Setenv("TAUTH_TENANT_SESSION_COOKIE_NAME_MPR", "app_session_mpr")
-	testingHandle.Setenv("TAUTH_TENANT_REFRESH_COOKIE_NAME_MPR", "app_refresh_mpr")
-	testingHandle.Setenv("TAUTH_COOKIE_DOMAIN", "localhost")
-	testingHandle.Setenv("TAUTH_SESSION_TTL", "30m")
-	testingHandle.Setenv("TAUTH_REFRESH_TTL", "720h")
-	testingHandle.Setenv("TAUTH_NONCE_TTL", "5m")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID1", "notes-client")
+	testingHandle.Setenv("TAUTH_NOTES_JWT_SIGNING_KEY", "notes-signing-key")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
+	testingHandle.Setenv("TAUTH_MPR_JWT_SIGNING_KEY", "mpr-signing-key")
 	testingHandle.Setenv("TAUTH_ALLOW_INSECURE_HTTP", "true")
 
 	_, filename, _, ok := runtime.Caller(0)
@@ -142,9 +128,9 @@ func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
 		testingHandle.Fatalf("runtime caller unavailable")
 	}
 	baseDir := filepath.Dir(filename)
-	configPath := filepath.Join(baseDir, "..", "..", "examples", "multi-tenant", "config.yaml")
+	configPath := filepath.Join(baseDir, "..", "..", "tests", "fixtures", "multi-tenant", "config.yaml")
 	if _, err := os.Stat(configPath); err != nil {
-		testingHandle.Fatalf("example config missing: %v", err)
+		testingHandle.Fatalf("fixture config missing: %v", err)
 	}
 
 	config, loadErr := appconfig.LoadConfig(configPath)
