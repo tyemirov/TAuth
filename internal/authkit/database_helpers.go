@@ -39,12 +39,6 @@ var (
 	errUnknownSchemaVersion  = errors.New("schema.unknown_version")
 )
 
-var storeSchemaVersions = map[string]int{
-	refreshStoreErrorPrefix: refreshStoreSchemaVersion,
-	userStoreErrorPrefix:    userStoreSchemaVersion,
-	nonceStoreErrorPrefix:   nonceStoreSchemaVersion,
-}
-
 type schemaMigrationRecord struct {
 	StoreName string `gorm:"column:store_name;primaryKey"`
 	Version   int    `gorm:"column:version;not null"`
@@ -54,9 +48,10 @@ func (schemaMigrationRecord) TableName() string {
 	return schemaMigrationTableName
 }
 
-type storeSchemaVersion struct {
-	StoreName string
-	Version   int
+var storeSchemaVersions = map[string]int{
+	refreshStoreErrorPrefix: refreshStoreSchemaVersion,
+	userStoreErrorPrefix:    userStoreSchemaVersion,
+	nonceStoreErrorPrefix:   nonceStoreSchemaVersion,
 }
 
 func openDatabase(requestContext context.Context, databaseURL string, errorPrefix string, models ...interface{}) (*gorm.DB, string, error) {
@@ -162,7 +157,7 @@ func ensureSchemaVersion(requestContext context.Context, databaseHandle *gorm.DB
 	return nil
 }
 
-func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, schemaVersion storeSchemaVersion, models ...interface{}) error {
+func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, schemaVersion schemaMigrationRecord, models ...interface{}) error {
 	migrator := databaseHandle.WithContext(requestContext).Migrator()
 	dropError := migrator.DropTable(models...)
 	if dropError != nil {
@@ -172,10 +167,7 @@ func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB
 	if migrationError != nil {
 		return fmt.Errorf("%s.migrate.%s: %w", errorPrefix, driverLabel, migrationError)
 	}
-	migrationRecord := schemaMigrationRecord{
-		StoreName: schemaVersion.StoreName,
-		Version:   schemaVersion.Version,
-	}
+	migrationRecord := schemaVersion
 	upsertError := databaseHandle.WithContext(requestContext).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: schemaMigrationNameColumn}},
 		DoUpdates: clause.AssignmentColumns([]string{schemaMigrationVersionColumn}),
@@ -186,15 +178,15 @@ func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB
 	return nil
 }
 
-func newStoreSchemaVersion(storeName string) (storeSchemaVersion, error) {
+func newStoreSchemaVersion(storeName string) (schemaMigrationRecord, error) {
 	versionValue, ok := storeSchemaVersions[storeName]
 	if !ok {
-		return storeSchemaVersion{}, errUnknownSchemaVersion
+		return schemaMigrationRecord{}, errUnknownSchemaVersion
 	}
 	if versionValue < 1 {
-		return storeSchemaVersion{}, errUnknownSchemaVersion
+		return schemaMigrationRecord{}, errUnknownSchemaVersion
 	}
-	return storeSchemaVersion{
+	return schemaMigrationRecord{
 		StoreName: storeName,
 		Version:   versionValue,
 	}, nil
