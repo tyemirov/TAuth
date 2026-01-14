@@ -10,6 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const refreshTokenTableName = "refresh_tokens"
+
 // DatabaseRefreshTokenStore persists rotating refresh tokens using GORM.
 type DatabaseRefreshTokenStore struct {
 	db          *gorm.DB
@@ -33,7 +35,7 @@ type refreshTokenRecord struct {
 }
 
 func (refreshTokenRecord) TableName() string {
-	return "refresh_tokens"
+	return refreshTokenTableName
 }
 
 // NewDatabaseRefreshTokenStore constructs a GORM-backed store.
