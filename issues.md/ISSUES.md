@@ -278,3 +278,8 @@ X-TAuth-Tenant: gravity
 Response
 No response headers
 ```
+
+- [x] [TA-432] Production CORS preflight 405 error.
+  Root cause: Gravity frontend was calling `tauth.mprlab.com` but the Caddyfile only had `tauth-api.mprlab.com`. DNS for `tauth.mprlab.com` pointed to the Caddy server, but Caddy had no site block for it, causing requests to fail before reaching TAuth (hence no backend logs). Fix: Updated Gravity's `authBaseUrl` to `tauth-api.mprlab.com` and consolidated production config to JSON-only (Gravity PR #181).
+- [x] [TA-433] Reset incompatible refresh store schemas on upgrade.
+  Dropped and recreated refresh/user/nonce tables once per schema version, persisted the schema marker, and added a regression test for legacy SQLite tables.
