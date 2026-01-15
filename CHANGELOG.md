@@ -10,10 +10,15 @@
 - Updated documentation and examples to include `allowed_users` configuration and behavior.
 - Clarified `allowed_users` behavior: absent means allow all, empty deny all, and presence restricts to listed emails.
 - Renamed tenant origin config from `allowed_hosts` to `tenant_origins`.
+- Defaulted `tauth.js` to Origin-only routing; `X-TAuth-Tenant` is now sent only when a tenant id is explicitly configured.
+- Added structured tenant resolution error payloads (error codes + hints) to simplify diagnosing missing/unknown/ambiguous Origin and override issues.
 
 ### Bug Fixes 🐛
 - Enforced empty `allowed_users` list as deny-all, preventing unintended unrestricted access.
 - Fixed origin validation and error handling for multi-tenant authentication.
+- Reset incompatible refresh token schemas on upgrade by dropping and recreating store tables once per schema version.
+- Prevented `tauth doctor --check-database` from migrating or resetting refresh token schemas.
+- Avoided dropping user store tables when schema migration records are missing by registering versions without destructive resets.
 
 ### Testing 🧪
 - Added comprehensive HTTP tests for authentication rejecting users not on the allowlist.

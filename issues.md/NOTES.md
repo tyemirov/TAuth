@@ -116,3 +116,7 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
 
 ## 2025-12-28
 - Added a Puppeteer demo auth-flow test covering login + sign-out, updated the demo test server to track auth state, and ran `node --test tests/demo-auth-logout.browser.test.js`.
+
+## 2026-01-04
+- Made tenant-id optional in `web/tauth.js` (no origin fallback), added structured tenant-resolution error payloads, updated docs/tests, and ran `go test ./internal/tenants` and `node --test tests/auth-client.test.js`.
+- Updated multi-tenant example config CORS entries and aligned config-file test env placeholders; ran `go fmt ./...`, `go vet ./...`, `go test ./...`, and `npm run verify`.

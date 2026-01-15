@@ -146,7 +146,7 @@ Nonce handling rules:
 - Dispatches events on authentication changes.
 - Attempts silent refresh on 401 using `/auth/refresh`.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
-- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper now falls back to the current page origin so header overrides remain accurate even when browsers omit `Origin` on certain requests.
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
 - Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
@@ -229,7 +229,7 @@ Tenant resolution & runtime:
 - Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when requests lack `Origin` headers or when multiple tenants share a single origin. The override accepts either tenant IDs or frontend origins. Leave it disabled in production where origins stay unique.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of origins.
-- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper falls back to the page origin so shared-origin setups work without extra wiring.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
@@ -284,6 +284,10 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 
 - Cobra command `tauth` reads configuration from a single YAML file (`--config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`).
 - `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
+- `tauth doctor <config-paths...>` validates one or more TAuth configurations and reports issues:
+  - `--cross-validate`: Check for conflicts across multiple configs (shared origins, signing keys, cookie names).
+  - `--check-database`: Verify database connectivity for configured database URLs.
+  - `--json`: Output results as JSON for CI/CD pipelines.
 - Graceful shutdown listens for `SIGINT`/`SIGTERM`, allowing 10s for in-flight requests.
 - zap middleware logs method, path, status, IP, and latency for each request.
 - Integration tests use the exported CLI wiring to spin up in-memory servers (`go test ./...`).

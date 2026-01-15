@@ -109,16 +109,17 @@ func TestLoadApplicationConfigRejectsEmptyPath(testingHandle *testing.T) {
 	}
 }
 
-func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
+func TestLoadApplicationConfigMultiTenantFixture(testingHandle *testing.T) {
 	testingHandle.Setenv("TAUTH_LISTEN_ADDR", ":8082")
 	testingHandle.Setenv("TAUTH_DATABASE_URL", "sqlite:///data/example.db")
 	testingHandle.Setenv("TAUTH_ENABLE_CORS", "true")
 	testingHandle.Setenv("TAUTH_CORS_ORIGIN_1", "http://localhost:8000")
 	testingHandle.Setenv("TAUTH_CORS_ORIGIN_2", "http://127.0.0.1:8000")
 	testingHandle.Setenv("TAUTH_CORS_ORIGIN_3", "http://localhost:4173")
+	testingHandle.Setenv("TAUTH_CORS_EXCEPTION_1", "https://accounts.google.com")
 	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID1", "notes-client")
-	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
 	testingHandle.Setenv("TAUTH_NOTES_JWT_SIGNING_KEY", "notes-signing-key")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
 	testingHandle.Setenv("TAUTH_MPR_JWT_SIGNING_KEY", "mpr-signing-key")
 	testingHandle.Setenv("TAUTH_ALLOW_INSECURE_HTTP", "true")
 
@@ -127,9 +128,9 @@ func TestLoadApplicationConfigMultiTenantExample(testingHandle *testing.T) {
 		testingHandle.Fatalf("runtime caller unavailable")
 	}
 	baseDir := filepath.Dir(filename)
-	configPath := filepath.Join(baseDir, "..", "..", "examples", "multi-tenant", "config.yaml")
+	configPath := filepath.Join(baseDir, "..", "..", "tests", "fixtures", "multi-tenant", "config.yaml")
 	if _, err := os.Stat(configPath); err != nil {
-		testingHandle.Fatalf("example config missing: %v", err)
+		testingHandle.Fatalf("fixture config missing: %v", err)
 	}
 
 	config, loadErr := appconfig.LoadConfig(configPath)
