@@ -18,6 +18,7 @@
 - Fixed origin validation and error handling for multi-tenant authentication.
 - Reset incompatible refresh token schemas on upgrade by dropping and recreating store tables once per schema version.
 - Prevented `tauth doctor --check-database` from migrating or resetting refresh token schemas.
+- Avoided dropping user store tables when schema migration records are missing by registering versions without destructive resets.
 
 ### Testing 🧪
 - Added comprehensive HTTP tests for authentication rejecting users not on the allowlist.

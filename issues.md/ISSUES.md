@@ -294,3 +294,5 @@ No response headers
   Switched doctor to a non-migrating connectivity probe and added coverage ensuring legacy refresh tokens are preserved.
 - [x] [TA-436] Align demo fixture `tauth.js` with shipped tenant-header behavior.
   Updated fixture assets to match the current auth client so demo/browser tests no longer send `X-TAuth-Tenant` when no tenant is configured.
+- [x] [TA-437] Avoid dropping user store tables when schema migrations are missing.
+  Non-destructive migrations now register missing user/nonce store schema versions without dropping tables, with regression coverage for legacy user profiles.
