@@ -48,10 +48,28 @@ func (schemaMigrationRecord) TableName() string {
 	return schemaMigrationTableName
 }
 
-var storeSchemaVersions = map[string]int{
-	refreshStoreErrorPrefix: refreshStoreSchemaVersion,
-	userStoreErrorPrefix:    userStoreSchemaVersion,
-	nonceStoreErrorPrefix:   nonceStoreSchemaVersion,
+type storeSchemaPolicy struct {
+	StoreName             string
+	Version               int
+	AllowDestructiveReset bool
+}
+
+var storeSchemaPolicies = map[string]storeSchemaPolicy{
+	refreshStoreErrorPrefix: {
+		StoreName:             refreshStoreErrorPrefix,
+		Version:               refreshStoreSchemaVersion,
+		AllowDestructiveReset: true,
+	},
+	userStoreErrorPrefix: {
+		StoreName:             userStoreErrorPrefix,
+		Version:               userStoreSchemaVersion,
+		AllowDestructiveReset: false,
+	},
+	nonceStoreErrorPrefix: {
+		StoreName:             nonceStoreErrorPrefix,
+		Version:               nonceStoreSchemaVersion,
+		AllowDestructiveReset: false,
+	},
 }
 
 func openDatabase(requestContext context.Context, databaseURL string, errorPrefix string, models ...interface{}) (*gorm.DB, string, error) {
@@ -164,9 +182,9 @@ func buildSQLiteDSN(parsed *url.URL) (string, error) {
 }
 
 func ensureSchemaVersion(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, models ...interface{}) error {
-	schemaVersion, versionError := newStoreSchemaVersion(errorPrefix)
-	if versionError != nil {
-		return fmt.Errorf("%s.schema_version: %w", errorPrefix, versionError)
+	storePolicy, policyError := newStoreSchemaPolicy(errorPrefix)
+	if policyError != nil {
+		return fmt.Errorf("%s.schema_version: %w", errorPrefix, policyError)
 	}
 	migrationError := databaseHandle.WithContext(requestContext).AutoMigrate(&schemaMigrationRecord{})
 	if migrationError != nil {
@@ -174,18 +192,29 @@ func ensureSchemaVersion(requestContext context.Context, databaseHandle *gorm.DB
 	}
 	var migrationRecord schemaMigrationRecord
 	queryError := databaseHandle.WithContext(requestContext).
-		Where(schemaMigrationLookupByName, schemaVersion.StoreName).
+		Where(schemaMigrationLookupByName, storePolicy.StoreName).
 		Take(&migrationRecord).Error
 	if queryError != nil {
 		if errors.Is(queryError, gorm.ErrRecordNotFound) {
-			return resetDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, schemaVersion, models...)
+			return applySchemaPolicy(requestContext, databaseHandle, errorPrefix, driverLabel, storePolicy, models...)
 		}
 		return fmt.Errorf(schemaErrorFormat, errorPrefix, driverLabel, queryError)
 	}
-	if migrationRecord.Version != schemaVersion.Version {
-		return resetDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, schemaVersion, models...)
+	if migrationRecord.Version != storePolicy.Version {
+		return applySchemaPolicy(requestContext, databaseHandle, errorPrefix, driverLabel, storePolicy, models...)
 	}
 	return nil
+}
+
+func applySchemaPolicy(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, storePolicy storeSchemaPolicy, models ...interface{}) error {
+	migrationRecord := schemaMigrationRecord{
+		StoreName: storePolicy.StoreName,
+		Version:   storePolicy.Version,
+	}
+	if storePolicy.AllowDestructiveReset {
+		return resetDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, migrationRecord, models...)
+	}
+	return migrateDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, migrationRecord, models...)
 }
 
 func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, schemaVersion schemaMigrationRecord, models ...interface{}) error {
@@ -209,16 +238,28 @@ func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB
 	return nil
 }
 
-func newStoreSchemaVersion(storeName string) (schemaMigrationRecord, error) {
-	versionValue, ok := storeSchemaVersions[storeName]
-	if !ok {
-		return schemaMigrationRecord{}, errUnknownSchemaVersion
+func migrateDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, migrationRecord schemaMigrationRecord, models ...interface{}) error {
+	migrationError := databaseHandle.WithContext(requestContext).AutoMigrate(models...)
+	if migrationError != nil {
+		return fmt.Errorf("%s.migrate.%s: %w", errorPrefix, driverLabel, migrationError)
 	}
-	if versionValue < 1 {
-		return schemaMigrationRecord{}, errUnknownSchemaVersion
+	upsertError := databaseHandle.WithContext(requestContext).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: schemaMigrationNameColumn}},
+		DoUpdates: clause.AssignmentColumns([]string{schemaMigrationVersionColumn}),
+	}).Create(&migrationRecord).Error
+	if upsertError != nil {
+		return fmt.Errorf(schemaErrorFormat, errorPrefix, driverLabel, upsertError)
 	}
-	return schemaMigrationRecord{
-		StoreName: storeName,
-		Version:   versionValue,
-	}, nil
+	return nil
+}
+
+func newStoreSchemaPolicy(storeName string) (storeSchemaPolicy, error) {
+	storePolicy, policyFound := storeSchemaPolicies[storeName]
+	if !policyFound {
+		return storeSchemaPolicy{}, errUnknownSchemaVersion
+	}
+	if storePolicy.Version < 1 {
+		return storeSchemaPolicy{}, errUnknownSchemaVersion
+	}
+	return storePolicy, nil
 }

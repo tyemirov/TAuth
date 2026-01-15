@@ -3,9 +3,15 @@ package authkit
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
+	sqliteDialector "github.com/glebarez/sqlite"
 	"github.com/tyemirov/tauth/internal/web"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestDatabaseUserStoreLifecycle(testContext *testing.T) {
@@ -59,5 +65,83 @@ func TestDatabaseUserStoreLifecycle(testContext *testing.T) {
 
 	if _, _, _, _, missingErr := store.GetUserProfile(context.Background(), "tenant-a", "missing-user"); !errors.Is(missingErr, web.ErrUserNotFound) {
 		testContext.Fatalf("expected ErrUserNotFound for missing user, got %v", missingErr)
+	}
+}
+
+func TestUserStorePreservesLegacySchemaWhenMigrationRecordMissing(testContext *testing.T) {
+	databasePath := filepath.Join(testContext.TempDir(), "tauth.db")
+	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
+	legacyDatabaseHandle, openErr := gorm.Open(sqliteDialector.Open(filepath.ToSlash(databasePath)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if openErr != nil {
+		testContext.Fatalf("failed to open legacy database: %v", openErr)
+	}
+	createStatement := fmt.Sprintf(
+		"CREATE TABLE %s (tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, user_email TEXT NOT NULL, user_display_name TEXT NOT NULL, user_avatar_url TEXT NOT NULL, user_roles TEXT NOT NULL, created_at_unix BIGINT NOT NULL, last_updated_unix BIGINT NOT NULL, PRIMARY KEY (tenant_id, user_id))",
+		userProfileTableName,
+	)
+	if createErr := legacyDatabaseHandle.Exec(createStatement).Error; createErr != nil {
+		testContext.Fatalf("failed to create legacy user table: %v", createErr)
+	}
+	rolePayload := fmt.Sprintf("[\"%s\"]", defaultUserRole)
+	legacyTenantID := "tenant-legacy"
+	legacyUserID := "google:legacy-user"
+	legacyUserEmail := "legacy@example.com"
+	legacyDisplayName := "Legacy User"
+	legacyAvatarURL := "https://example.com/avatar.png"
+	nowUnix := time.Now().UTC().Unix()
+	insertStatement := fmt.Sprintf(
+		"INSERT INTO %s (tenant_id, user_id, user_email, user_display_name, user_avatar_url, user_roles, created_at_unix, last_updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		userProfileTableName,
+	)
+	if insertErr := legacyDatabaseHandle.Exec(insertStatement, legacyTenantID, legacyUserID, legacyUserEmail, legacyDisplayName, legacyAvatarURL, rolePayload, nowUnix, nowUnix).Error; insertErr != nil {
+		testContext.Fatalf("failed to insert legacy user: %v", insertErr)
+	}
+	rawDatabaseHandle, rawErr := legacyDatabaseHandle.DB()
+	if rawErr != nil {
+		testContext.Fatalf("failed to access legacy sql handle: %v", rawErr)
+	}
+	if closeErr := rawDatabaseHandle.Close(); closeErr != nil {
+		testContext.Fatalf("failed to close legacy database: %v", closeErr)
+	}
+
+	store, storeErr := NewDatabaseUserStore(context.Background(), databaseURL)
+	if storeErr != nil {
+		testContext.Fatalf("failed to open user store: %v", storeErr)
+	}
+	var userCount int64
+	if countErr := store.db.Model(&userProfileRecord{}).Count(&userCount).Error; countErr != nil {
+		testContext.Fatalf("failed to count user profiles: %v", countErr)
+	}
+	if userCount != 1 {
+		testContext.Fatalf("expected legacy user profiles to remain, got %d", userCount)
+	}
+	email, display, avatarURL, roles, fetchErr := store.GetUserProfile(context.Background(), legacyTenantID, legacyUserID)
+	if fetchErr != nil {
+		testContext.Fatalf("failed to fetch legacy profile: %v", fetchErr)
+	}
+	if email != legacyUserEmail || display != legacyDisplayName || avatarURL != legacyAvatarURL {
+		testContext.Fatalf("unexpected legacy profile data")
+	}
+	if len(roles) != 1 || roles[0] != defaultUserRole {
+		testContext.Fatalf("unexpected legacy roles")
+	}
+	var migrationRecord schemaMigrationRecord
+	migrationErr := store.db.WithContext(context.Background()).
+		Where(schemaMigrationLookupByName, userStoreErrorPrefix).
+		Take(&migrationRecord).Error
+	if migrationErr != nil {
+		testContext.Fatalf("failed to load migration record: %v", migrationErr)
+	}
+	if migrationRecord.Version != userStoreSchemaVersion {
+		testContext.Fatalf("expected user store schema version %d, got %d", userStoreSchemaVersion, migrationRecord.Version)
+	}
+	rawStoreHandle, rawStoreErr := store.db.DB()
+	if rawStoreErr != nil {
+		testContext.Fatalf("failed to access store sql handle: %v", rawStoreErr)
+	}
+	if closeErr := rawStoreHandle.Close(); closeErr != nil {
+		testContext.Fatalf("failed to close store database: %v", closeErr)
 	}
 }
