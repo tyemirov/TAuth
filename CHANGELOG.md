@@ -1,5 +1,43 @@
 # Changelog
 
+## [v1.0.0]
+
+### Features ✨
+- Introduce store schema policy and store schema version constructor with validation moved to edge.
+- Add database connectivity probe for health checks.
+- Optional tenant override header (`X-TAuth-Tenant`) support for web clients; structured tenant resolution errors added.
+- Add `tauth doctor` command for comprehensive configuration validation, including cross-configuration checks and database connectivity.
+- Fixtures and assets added for test scaffolding.
+- Multi-tenant configuration is now fully functional.
+
+### Improvements ⚙️
+- Default `tauth.js` to only send tenant override header when tenant ID is explicitly configured.
+- Refine tenant resolution to rely primarily on browser Origin headers, with optional override for non-browser or shared-origin clients.
+- Prevent destructive refresh token schema resets; register schema versions safely to avoid data loss.
+- Improved configuration docs, examples, and test fixtures for multi-tenant setups.
+- Docker build optimized by ignoring unnecessary files.
+- `tauth doctor` supports JSON output for CI/CD pipelines.
+
+### Bug Fixes 🐛
+- Fix database schema and fixture issues.
+- Fix schema version record alignment.
+- Enforce empty `allowed_users` lists to deny all logins.
+- Prevent migration during database connectivity checks in `tauth doctor`.
+- Reset incompatible refresh token schemas only once per schema version to avoid repeated drops.
+- Correct origin validation and error handling for multi-tenant authentication.
+
+### Testing 🧪
+- Add extensive tests for `tauth doctor` command including config validation and cross-validation.
+- Add HTTP tests for authentication reject logic based on allowlist.
+- Add tests for multi-tenant configuration loading.
+- Add multiple new database-related and store tests.
+
+### Docs 📚
+- Update README and ARCHITECTURE.md with tenant override header usage and validation details.
+- Document `tauth doctor` usage, features, and examples.
+- Clarify multi-tenant origin resolution in usage and readme files.
+- Add test fixtures and example configurations for multi-tenant support.
+
 ## [v0.9.9]
 
 ### Features ✨
