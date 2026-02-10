@@ -5,6 +5,8 @@
 TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
+TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google access/refresh tokens.
+
 ---
 
 ## Why teams choose TAuth
@@ -140,7 +142,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <div id="googleSignIn"></div>
 ```
 
-The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `web/` directory, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
+The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `docs/` site and copies `web/tauth.js` into the site root, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin.
 
