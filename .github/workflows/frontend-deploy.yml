@@ -1,13 +1,12 @@
-name: Deploy /web to GitHub Pages
+name: Deploy GitHub Pages site
 
 on:
   push:
     branches:
       - master
     paths:
-      - "web/**/*.js"
-      - "web/**/*.html"
-      - "web/**/*.css"
+      - "docs/**"
+      - "web/**"
       - ".github/workflows/frontend-deploy.yml"
   workflow_dispatch:
 
@@ -33,10 +32,18 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload /web as artifact
+      - name: Build pages artifact
+        run: |
+          set -euo pipefail
+          rm -rf pages-dist
+          mkdir -p pages-dist
+          cp -R docs/. pages-dist/
+          cp web/tauth.js pages-dist/tauth.js
+
+      - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: pages-dist
 
       - name: Deploy to GitHub Pages
         id: deployment

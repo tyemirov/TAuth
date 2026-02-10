@@ -14,6 +14,7 @@ TAuth sits between Google Identity Services (GIS) and your product UI:
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
+- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc) and does not issue Google API access tokens.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 

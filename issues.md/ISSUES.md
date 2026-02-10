@@ -195,8 +195,10 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Updated fixture assets to match the current auth client so demo/browser tests no longer send `X-TAuth-Tenant` when no tenant is configured.
 - [x] [TA-437] Avoid dropping user store tables when schema migrations are missing.
   Non-destructive migrations now register missing user/nonce store schema versions without dropping tables, with regression coverage for legacy user profiles.
+- [x] [TA-438] (P1) Add Google OAuth scope support (YouTube channel access) to TAuth.
+  Request: TAuth currently verifies Google ID tokens only (GIS) and cannot obtain OAuth access/refresh tokens needed for YouTube Data API calls such as `channels.list(mine=true)`. Implement a Google OAuth2 Authorization Code (offline) flow, store per-tenant/per-user Google refresh tokens server-side, and expose a session-protected endpoint that returns authenticated YouTube channel metadata without putting Google tokens in browser storage. Feasibility analysis captured in `docs/youtube-scopes-feasibility.md`.
+  Resolved (2026-02-10): Declined. TAuth remains authentication-only and will not implement third-party authorization/token custody (YouTube/Drive/etc).
 
 
 ## Planning (500–59999)
 *do not implement yet*
-
