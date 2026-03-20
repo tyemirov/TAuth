@@ -1,5 +1,30 @@
 # Changelog
 
+## [v1.0.1] - 2026-03-20
+
+### Features ✨
+- Support multi-arch linux/arm64 Docker images and GitHub workflow.
+- Added a detailed YouTube scopes feasibility report.
+- New comprehensive usage.html page rendered from usage.md for GitHub Pages.
+
+### Improvements ⚙️
+- Deploy docs site to GitHub Pages, copying tauth.js to site root.
+- Added Google Analytics tags to docs pages.
+- Update documentation to clarify TAuth does not implement OAuth2 authorization flows or manage Google API tokens.
+- Enhance Dockerfile to support target OS/architecture build arguments.
+- Streamlined GitHub Pages workflow to publish docs and web folders.
+
+### Bug Fixes 🐛
+- Fixed `usage.html` properly loading `usage.md`.
+
+### Testing 🧪
+- _No changes._
+
+### Docs 📚
+- Major docs update including new usage.html and youtube-scopes-feasibility.md.
+- Added Google tag script to main docs pages.
+- Clarified TAuth's authentication-only scope and limitation regarding OAuth2 tokens in README and usage.md.
+
 ## [v1.0.0]
 
 ### Features ✨
