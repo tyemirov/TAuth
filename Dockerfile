@@ -1,4 +1,7 @@
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -7,7 +10,9 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/tauth ./cmd/server
+RUN targetOs="${TARGETOS:-$(go env GOOS)}" && \
+    targetArch="${TARGETARCH:-$(go env GOARCH)}" && \
+    CGO_ENABLED=0 GOOS="${targetOs}" GOARCH="${targetArch}" go build -ldflags="-s -w" -o /app/tauth ./cmd/server
 
 FROM alpine:3.20
 

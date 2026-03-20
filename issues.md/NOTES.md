@@ -120,3 +120,6 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
 ## 2026-01-04
 - Made tenant-id optional in `web/tauth.js` (no origin fallback), added structured tenant-resolution error payloads, updated docs/tests, and ran `go test ./internal/tenants` and `node --test tests/auth-client.test.js`.
 - Updated multi-tenant example config CORS entries and aligned config-file test env placeholders; ran `go fmt ./...`, `go vet ./...`, `go test ./...`, and `npm run verify`.
+
+## 2026-03-20
+- Fixed container publishing so TAuth can produce real `linux/arm64` images: the Dockerfile now builds for `TARGETARCH`/`TARGETOS` with host fallbacks, and the release workflow now sets up QEMU and publishes `linux/amd64,linux/arm64` manifests to GHCR. Verified with `go fmt ./...`, `go vet ./...`, `go test ./...`, `docker buildx build --platform linux/amd64 --load -t tauth:test-amd64 .`, and `docker buildx build --platform linux/arm64 --load -t tauth:test-arm64 .`.
