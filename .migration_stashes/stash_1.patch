@@ -1,0 +1,33 @@
+diff --git a/ISSUES.md b/ISSUES.md
+index c661fc0..301d77a 100644
+--- a/ISSUES.md
++++ b/ISSUES.md
+@@ -61,6 +61,7 @@ Resolution: Swapped the refresh token store to the CGO-free `github.com/glebarez
+ - [x] [TA-402] Review @POLICY.md and verify what code areas need improvements and refactoring. Prepare a detailed plan of refactoring. Check for bugs, missing tests, poor coding practices, uplication and slop. Ensure strong encapsulation and following the principles og @AGENTS.md and policies of @POLICY.md — Authored `docs/refactor-plan.md` documenting policy gaps, remediation tasks, and prioritised roadmap.
+ - [x] [TA-403] preparea comprehensive code coverage. Use external tests (so no direct testing of internal functions) and strive to achive 95% code coverage using exposed API. — Added extensive integration/unit tests across auth flows, CLI, and stores; achieved ~90.5% overall Go coverage (short of the 95% target) with `go test ./... -coverprofile=coverage.out`.
+ - [x] [TA-335] The `examples/docker-compose` quick-start folder (compose file + `.env` template) is missing from `master`. Reintroduce it, document the workflow in README, and ensure local `.env.tauth` overrides stay gitignored. — Restored the sample compose stack with `.env` template, ignored local overrides, and refreshed README instructions so contributors can run `docker compose up --build` locally.
++- [ ] [TA-336] The compose example references a `demo` web container even though this repo no longer ships the HTML demo assets, forcing users to delete the service manually. Update `examples/docker-compose` and README to only start TAuth (or include real assets), ensuring the quick-start matches the current repo contents.
+ 
+ ## Planning
+ So not work on these, not ready
+diff --git a/examples/docker-compose/docker-compose.yml b/examples/docker-compose/docker-compose.yml
+index ffbc52a..30b9b79 100644
+--- a/examples/docker-compose/docker-compose.yml
++++ b/examples/docker-compose/docker-compose.yml
+@@ -12,16 +12,5 @@ services:
+       - tauth_data:/data
+     restart: unless-stopped
+ 
+-  demo:
+-    image: ghcr.io/tyemirov/ghttp:latest
+-    depends_on:
+-      - tauth
+-    command: ["--directory", "/srv/web", "8000"]
+-    ports:
+-      - "8000:8000"
+-    volumes:
+-      - ../../web:/srv/web:ro
+-    restart: unless-stopped
+-
+ volumes:
+   tauth_data:

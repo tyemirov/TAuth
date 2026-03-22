@@ -1,0 +1,12 @@
+diff --git a/ISSUES.md b/ISSUES.md
+index e1d6b21..6f46669 100644
+--- a/ISSUES.md
++++ b/ISSUES.md
+@@ -76,6 +76,7 @@ Gracefully Stopping... press Ctrl+C again to force
+ - [x] [TA-403] preparea comprehensive code coverage. Use external tests (so no direct testing of internal functions) and strive to achive 95% code coverage using exposed API. — Added extensive integration/unit tests across auth flows, CLI, and stores; achieved ~90.5% overall Go coverage (short of the 95% target) with `go test ./... -coverprofile=coverage.out`.
+ - [x] [TA-332] Provide a checked-in `docker-compose` + `.env` example that boots the published `ghcr.io/tyemirov/tauth` image locally with sane defaults, illustrating the required environment variables (including the corrected SQLite triple-slash DSN) so developers can spin up the service quickly. — Added `examples/docker-compose` with a compose file, `.env` template, README instructions, and `.gitignore` entries so local overrides stay untracked.
+ - [x] [TA-333] Update the docker-compose example to build the TAuth image from the local Dockerfile instead of pulling `ghcr.io/tyemirov/tauth:latest`, so contributors can test unmerged changes without publishing to a registry. README instructions must reflect the new workflow (build + up). — The compose stack now uses `build: ../../` with the repo’s Dockerfile, tags the result as `tauth-local:latest`, and README documents running `docker compose up --build`.
++- [ ] [TA-334] Docker Compose runs still fail with `refresh_store.open.sqlite: unable to open database file: out of memory (14)` because the containerized TAuth process (user `tauth`) lacks write access to `/data`. Ensure the Docker image provisions `/data` with the correct ownership/permissions so SQLite can create `tauth.db` when using the provided compose example.
+ 
+ ## Planning
+ So not work on these, not ready

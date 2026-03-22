@@ -1,0 +1,55 @@
+diff --git a/examples/multi-tenant/config.yaml b/examples/multi-tenant/config.yaml
+index 1f752a8..6f5e643 100644
+--- a/examples/multi-tenant/config.yaml
++++ b/examples/multi-tenant/config.yaml
+@@ -5,37 +5,34 @@ server:
+   cors_allowed_origins:
+     - "${TAUTH_CORS_ORIGIN_1}"
+     - "${TAUTH_CORS_ORIGIN_2}"
+-    - "${TAUTH_CORS_ORIGIN_3}"
+   cors_allowed_origin_exceptions:
+     - "${TAUTH_CORS_EXCEPTION_1}"
+-  enable_tenant_header_override: true
++  enable_tenant_header_override: ${TAUTH_ENABLE_TENANT_HEADER_OVERRIDE}
+ 
+ tenants:
+-  - id: "notes"
+-    display_name: "Gravity Notes"
++  - id: ${TAUTH_TENANT_ID_GRAVITY}
++    display_name: ${TAUTH_TENANT_DISPLAY_NAME_GRAVITY}
+     tenant_origins:
+-      - "http://localhost:8000"
+-      - "http://127.0.0.1:8000"
++      - ${TAUTH_GRAVITY_TENANT_ORIGIN_GRAVITY}
+     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
+     jwt_signing_key: "${TAUTH_NOTES_JWT_SIGNING_KEY}"
+     cookie_domain: ""
+-    session_cookie_name: "app_session"
+-    refresh_cookie_name: "app_refresh"
++    session_cookie_name: ${TAUTH_TENANT_SESSION_COOKIE_NAME_GRAVITY}
++    refresh_cookie_name: ${TAUTH_TENANT_REFRESH_COOKIE_NAME_GRAVITY}
+     session_ttl: "30m"
+     refresh_ttl: "720h"
+     nonce_ttl: "10m"
+     allow_insecure_http: "${TAUTH_ALLOW_INSECURE_HTTP}"
+ 
+-  - id: "mpr-sites"
+-    display_name: "MPR Sites"
++  - id: ${TAUTH_TENANT_ID_MPR}
++    display_name: ${TAUTH_TENANT_DISPLAY_NAME_MPR}
+     tenant_origins:
+-      - "http://localhost:4173"
+-      - "http://127.0.0.1:4173"
+-    google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"
+-    jwt_signing_key: "${TAUTH_MPR_JWT_SIGNING_KEY}"
++      - ${TAUTH_TENANT_ORIGIN_MPR}
++    google_web_client_id: "${TAUTH_TENANT_GOOGLE_WEB_CLIENT_ID_MPR}"
++    jwt_signing_key: "${TAUTH_TENANT_JWT_SIGNING_KEY_MPR}"
+     cookie_domain: ""
+-    session_cookie_name: "app_session_mpr"
+-    refresh_cookie_name: "app_refresh_mpr"
++    session_cookie_name: ${TAUTH_TENANT_SESSION_COOKIE_NAME_MPR}
++    refresh_cookie_name: ${TAUTH_TENANT_REFRESH_COOKIE_NAME_MPR}
+     session_ttl: "30m"
+     refresh_ttl: "720h"
+     nonce_ttl: "10m"
