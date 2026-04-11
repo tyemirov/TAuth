@@ -5,7 +5,7 @@
 TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
-TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google access/refresh tokens.
+TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google API access/refresh tokens.
 
 ---
 
@@ -33,6 +33,7 @@ tenants:
       - "https://gravity.mprlab.com"
       - "https://pinguin.mprlab.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
+    google_native_client_id: "your_native_client_id.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".mprlab.com"
     session_ttl: "15m"
@@ -51,6 +52,7 @@ Each entry defines:
 - `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header to select a tenant, and can optionally accept an `X-TAuth-Tenant` override when you enable it for shared-origin or non-browser clients.
 - `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
+- `google_native_client_id` – optional OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`. When set, it must be unique per tenant.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
@@ -76,6 +78,7 @@ tenants:
     display_name: "Gravity"
     tenant_origins: ["https://gravity.mprlab.com"]
     google_web_client_id: "gravity-client.apps.googleusercontent.com"
+    google_native_client_id: "gravity-native.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-gravity-signing-key"
     cookie_domain: ".mprlab.com"
     session_ttl: "30m"
@@ -173,6 +176,18 @@ The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes t
 
 > **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/tauth-demo/.env.tauth`. Replace it with your own value before sharing the stack beyond local testing.
 
+### Native desktop login (system browser + PKCE)
+
+TAuth also supports installed apps that cannot use the browser popup flow. Native clients such as PromptDew should:
+
+1. Fetch tenant-specific metadata from `GET /auth/google/native/config`.
+2. Open Google in the system browser with PKCE and a loopback redirect like `http://127.0.0.1:<port>/oauth/google/callback`.
+3. Exchange the authorization code directly with Google and extract the returned `id_token`.
+4. Send that `id_token` plus the original OIDC nonce to `POST /auth/google/native`.
+5. Reuse the minted `app_session` / `app_refresh` cookies just like a browser client.
+
+This keeps TAuth authentication-only: Google authorization codes and Google refresh tokens never transit through TAuth.
+
 ### Example `/me` payload
 
 Successful exchanges populate `/me` with a rich profile:
@@ -204,6 +219,7 @@ tenants:
       - "https://demo.localhost"
       - "https://demo.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
+    google_native_client_id: "demo-native.apps.googleusercontent.com"
     cookie_domain: "demo.example.com"
     session_ttl: "30m"
     refresh_ttl: "720h"
@@ -219,7 +235,7 @@ Rules enforced by the loader:
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 - Unlisted users are rejected during `/auth/google` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
-- `google_web_client_id` and each TTL must be present and non-empty. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
+- `google_web_client_id` and each TTL must be present and non-empty. `google_native_client_id` is optional and enables `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; when present it must be unique across tenants. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors.

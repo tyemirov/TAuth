@@ -55,6 +55,7 @@ type tenantPayload struct {
 	TenantOriginsCount       int      `json:"tenant_origins_count"`
 	TenantOriginHashes       []string `json:"tenant_origin_hashes,omitempty"`
 	GoogleWebClientID        string   `json:"google_web_client_id"`
+	GoogleNativeClientID     string   `json:"google_native_client_id"`
 	CookieDomain             string   `json:"cookie_domain"`
 	SessionCookieName        string   `json:"session_cookie_name"`
 	RefreshCookieName        string   `json:"refresh_cookie_name"`
@@ -171,6 +172,7 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			TenantOriginsCount:       len(origins),
 			TenantOriginHashes:       originHashes,
 			GoogleWebClientID:        tenant.GoogleWebClientID(),
+			GoogleNativeClientID:     tenant.GoogleNativeClientID(),
 			CookieDomain:             tenant.CookieDomain(),
 			SessionCookieName:        tenant.SessionCookieName(),
 			RefreshCookieName:        tenant.RefreshCookieName(),

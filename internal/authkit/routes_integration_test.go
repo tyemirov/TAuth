@@ -150,18 +150,19 @@ func (store *stubRefreshStore) Revoke(ctx context.Context, tenantID string, toke
 
 func newTestServerConfig() ServerConfig {
 	return ServerConfig{
-		GoogleWebClientID: "client-id",
-		AppJWTSigningKey:  []byte("secret-key-1234567890"),
-		AppJWTIssuer:      "test-issuer",
-		TenantID:          "tenant-test",
-		CookieDomain:      "",
-		SessionCookieName: "app_session",
-		RefreshCookieName: "app_refresh",
-		SessionTTL:        time.Minute,
-		RefreshTTL:        15 * time.Minute,
-		NonceTTL:          5 * time.Minute,
-		SameSiteMode:      http.SameSiteStrictMode,
-		AllowInsecureHTTP: true,
+		GoogleWebClientID:    "client-id",
+		GoogleNativeClientID: "native-client-id",
+		AppJWTSigningKey:     []byte("secret-key-1234567890"),
+		AppJWTIssuer:         "test-issuer",
+		TenantID:             "tenant-test",
+		CookieDomain:         "",
+		SessionCookieName:    "app_session",
+		RefreshCookieName:    "app_refresh",
+		SessionTTL:           time.Minute,
+		RefreshTTL:           15 * time.Minute,
+		NonceTTL:             5 * time.Minute,
+		SameSiteMode:         http.SameSiteStrictMode,
+		AllowInsecureHTTP:    true,
 	}
 }
 
@@ -345,6 +346,166 @@ func TestAuthLifecycle(t *testing.T) {
 	router.ServeHTTP(postLogoutResponse, postLogoutRequest)
 	if postLogoutResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after logout, got %d", postLogoutResponse.Code)
+	}
+}
+
+func TestNativeGoogleConfigLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/google/native/config", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 from native config, got %d", response.Code)
+	}
+
+	var payload nativeGoogleConfigResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode native config payload: %v", err)
+	}
+	if payload.ClientID != config.GoogleNativeClientID {
+		t.Fatalf("unexpected client_id: %s", payload.ClientID)
+	}
+	if payload.AuthorizationEndpoint != googleAuthorizationEndpoint {
+		t.Fatalf("unexpected authorization endpoint: %s", payload.AuthorizationEndpoint)
+	}
+	if payload.TokenEndpoint != googleTokenEndpoint {
+		t.Fatalf("unexpected token endpoint: %s", payload.TokenEndpoint)
+	}
+	if len(payload.Scopes) != len(googleNativeScopes) {
+		t.Fatalf("unexpected scopes length: %d", len(payload.Scopes))
+	}
+}
+
+func TestNativeGoogleLoginLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	registry := singleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+
+	payload := &idtoken.Payload{
+		Claims: map[string]interface{}{
+			"iss":            googleIssuerHTTPS,
+			"sub":            "sub-native-123",
+			"email":          "native@example.com",
+			"email_verified": true,
+			"name":           "Native User",
+			"picture":        "https://example.com/native.png",
+			"nonce":          "native-nonce",
+		},
+	}
+
+	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
+		return &fakeGoogleValidator{
+			results: map[string]validatorResult{
+				"valid-native-token": {
+					payload:          payload,
+					expectedAudience: config.GoogleNativeClientID,
+				},
+			},
+		}, nil
+	})
+	defer restoreValidator()
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+
+	body, err := json.Marshal(map[string]string{
+		"google_id_token": "valid-native-token",
+		"nonce_token":     "native-nonce",
+	})
+	if err != nil {
+		t.Fatalf("marshal native login payload: %v", err)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google/native", bytes.NewBuffer(body))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginResponse := httptest.NewRecorder()
+	router.ServeHTTP(loginResponse, loginRequest)
+
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 from native login, got %d", loginResponse.Code)
+	}
+
+	cookies := collectCookies(loginResponse.Result().Cookies())
+	if _, ok := cookies[config.SessionCookieName]; !ok {
+		t.Fatalf("missing session cookie")
+	}
+	if _, ok := cookies[config.RefreshCookieName]; !ok {
+		t.Fatalf("missing refresh cookie")
+	}
+
+	if tenantProfiles, exists := userStore.profiles[config.TenantID]; !exists {
+		t.Fatalf("tenant profiles missing after native login")
+	} else if _, ok := tenantProfiles["google:sub-native-123"]; !ok {
+		t.Fatalf("user not persisted after native login")
+	}
+}
+
+func TestNativeGoogleConfigReturnsNotFoundWhenClientMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.GoogleNativeClientID = ""
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/google/native/config", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 from native config, got %d", response.Code)
+	}
+	var payload map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode native config error payload: %v", err)
+	}
+	if payload["error"] != errorNativeGoogleLoginNotConfigured {
+		t.Fatalf("unexpected error payload: %v", payload["error"])
+	}
+}
+
+func TestNativeGoogleLoginReturnsNotFoundWhenClientMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.GoogleNativeClientID = ""
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	body, err := json.Marshal(map[string]string{
+		"google_id_token": "any-token",
+		"nonce_token":     "native-nonce",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/google/native", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 from native login, got %d", response.Code)
+	}
+	var payload map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode native login error payload: %v", err)
+	}
+	if payload["error"] != errorNativeGoogleLoginNotConfigured {
+		t.Fatalf("unexpected error payload: %v", payload["error"])
 	}
 }
 

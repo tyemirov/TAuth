@@ -44,6 +44,7 @@ tenants:
     display_name: "Demo"
     tenant_origins: ["`+testTenantOrigin+`"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
+    google_native_client_id: "demo-native.apps.googleusercontent.com"
     jwt_signing_key: "`+testSigningKey+`"
     cookie_domain: "demo.localhost"
     session_cookie_name: "`+testSessionCookieName+`"
@@ -86,6 +87,7 @@ type testTenantPayload struct {
 	TenantOriginsCount       int      `json:"tenant_origins_count"`
 	TenantOriginHashes       []string `json:"tenant_origin_hashes"`
 	GoogleWebClientID        string   `json:"google_web_client_id"`
+	GoogleNativeClientID     string   `json:"google_native_client_id"`
 	CookieDomain             string   `json:"cookie_domain"`
 	SessionCookieName        string   `json:"session_cookie_name"`
 	RefreshCookieName        string   `json:"refresh_cookie_name"`
@@ -143,6 +145,9 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	}
 	if tenant.SameSiteMode == "" || tenant.JWTIssuer == "" {
 		testingHandle.Fatalf("expected same_site_mode and jwt_issuer")
+	}
+	if tenant.GoogleNativeClientID == "" {
+		testingHandle.Fatalf("expected google_native_client_id")
 	}
 }
 

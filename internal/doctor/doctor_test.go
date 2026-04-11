@@ -302,6 +302,7 @@ tenants:
     tenant_origins:
       - http://localhost:8000
     google_web_client_id: demo-client.apps.googleusercontent.com
+    google_native_client_id: demo-native.apps.googleusercontent.com
     jwt_signing_key: demo-signing-key-at-least-32-chars
     session_cookie_name: app_session_demo
     refresh_cookie_name: app_refresh_demo
@@ -322,6 +323,7 @@ tenants:
     tenant_origins:
       - http://localhost:9000
     google_web_client_id: other-client.apps.googleusercontent.com
+    google_native_client_id: other-native.apps.googleusercontent.com
     jwt_signing_key: other-signing-key-at-least-32-chars
     session_cookie_name: app_session_other
     refresh_cookie_name: app_refresh_other
@@ -342,6 +344,7 @@ tenants:
     tenant_origins:
       - http://localhost:8000
     google_web_client_id: conflicting-client.apps.googleusercontent.com
+    google_native_client_id: conflicting-native.apps.googleusercontent.com
     jwt_signing_key: conflicting-signing-key-at-least
     session_cookie_name: app_session_conflict
     refresh_cookie_name: app_refresh_conflict
@@ -374,6 +377,7 @@ tenants:
     tenant_origins:
       - http://localhost:8000
     google_web_client_id: demo-client.apps.googleusercontent.com
+    google_native_client_id: demo-native.apps.googleusercontent.com
     jwt_signing_key: demo-signing-key-at-least-32-chars
     session_cookie_name: app_session_demo
     refresh_cookie_name: app_refresh_demo

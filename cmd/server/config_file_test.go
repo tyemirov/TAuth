@@ -42,6 +42,7 @@ tenants:
     display_name: "Demo"
     tenant_origins: ["https://demo.localhost"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
+    google_native_client_id: "demo-native.apps.googleusercontent.com"
     jwt_signing_key: "demo-tenant-key"
     cookie_domain: "demo.localhost"
     session_cookie_name: "app_session_demo"
@@ -73,6 +74,9 @@ tenants:
 	}
 	if len(config.Tenants) != 1 || config.Tenants[0].ID != "demo" {
 		testingHandle.Fatalf("expected single demo tenant")
+	}
+	if config.Tenants[0].GoogleNativeClientID != "demo-native.apps.googleusercontent.com" {
+		testingHandle.Fatalf("expected native google client id to be parsed")
 	}
 }
 

@@ -24,19 +24,20 @@ type Config struct {
 
 // Tenant represents one logical deployment tenant and its auth configuration.
 type Tenant struct {
-	id                TenantID
-	displayName       string
-	origins           []string
-	allowedUsers      []string
-	googleWebClientID string
-	jwtSigningKey     []byte
-	cookieDomain      string
-	sessionCookieName string
-	refreshCookieName string
-	sessionTTL        time.Duration
-	refreshTTL        time.Duration
-	nonceTTL          time.Duration
-	allowInsecureHTTP bool
+	id                   TenantID
+	displayName          string
+	origins              []string
+	allowedUsers         []string
+	googleWebClientID    string
+	googleNativeClientID string
+	jwtSigningKey        []byte
+	cookieDomain         string
+	sessionCookieName    string
+	refreshCookieName    string
+	sessionTTL           time.Duration
+	refreshTTL           time.Duration
+	nonceTTL             time.Duration
+	allowInsecureHTTP    bool
 }
 
 // TenantID identifies each tenant block.
@@ -66,6 +67,7 @@ const (
 	errorCodeInvalidAllowedUser         = "tenant.invalid_allowed_user"
 	errorCodeDuplicateAllowedUser       = "tenant.duplicate_allowed_user"
 	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
+	errorCodeDuplicateNativeGoogleID    = "tenant.duplicate_native_google_client_id"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
 	errorCodeInvalidNonceTTL            = "tenant.invalid_nonce_ttl"
@@ -93,6 +95,7 @@ const (
 	cookieScopeErrorFormat         = "%w: %s tenant=%s"
 	cookieScopeOriginErrorFormat   = "%w: %s tenant=%s origin=%s"
 	duplicateCookieNameErrorFormat = "%w: %s cookie_name=%s tenant=%s other_tenant=%s overlap=%s"
+	duplicateGoogleIDErrorFormat   = "%w: %s google_native_client_id=%s tenant=%s other_tenant=%s"
 )
 
 var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
@@ -129,6 +132,7 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 
 	tenantIndex := make(map[TenantID]Tenant)
 	originToTenantIDs := make(map[string][]TenantID)
+	nativeGoogleClientIDs := make(map[string]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
 	cookieScopes := make([]tenantCookieScope, 0, len(document.Tenants))
 
@@ -143,6 +147,20 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 		}
 		if _, exists := tenantIndex[tenant.id]; exists {
 			return Config{}, fmt.Errorf("%w: %s id=%s", ErrInvalidTenantConfig, errorCodeDuplicateTenantID, tenant.id)
+		}
+		nativeGoogleClientID := tenant.GoogleNativeClientID()
+		if nativeGoogleClientID != "" {
+			if otherTenantID, exists := nativeGoogleClientIDs[nativeGoogleClientID]; exists {
+				return Config{}, fmt.Errorf(
+					duplicateGoogleIDErrorFormat,
+					ErrInvalidTenantConfig,
+					errorCodeDuplicateNativeGoogleID,
+					nativeGoogleClientID,
+					tenant.id,
+					otherTenantID,
+				)
+			}
+			nativeGoogleClientIDs[nativeGoogleClientID] = tenant.id
 		}
 		for _, origin := range origins {
 			originToTenantIDs[origin] = append(originToTenantIDs[origin], tenant.id)
@@ -243,6 +261,11 @@ func (tenant Tenant) GoogleWebClientID() string {
 	return tenant.googleWebClientID
 }
 
+// GoogleNativeClientID returns the installed-app OAuth client identifier.
+func (tenant Tenant) GoogleNativeClientID() string {
+	return tenant.googleNativeClientID
+}
+
 // SigningKey returns a copy of the tenant-specific signing key, if provided.
 func (tenant Tenant) SigningKey() []byte {
 	if len(tenant.jwtSigningKey) == 0 {
@@ -305,6 +328,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if googleWebClientID == "" {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
 	}
+	googleNativeClientID := strings.TrimSpace(raw.GoogleNativeClientID)
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
@@ -343,19 +367,20 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	}
 
 	return Tenant{
-		id:                tenantID,
-		displayName:       displayName,
-		origins:           origins,
-		allowedUsers:      allowedUsers,
-		googleWebClientID: googleWebClientID,
-		jwtSigningKey:     signingKey,
-		cookieDomain:      cookieDomain,
-		sessionCookieName: sessionCookieName,
-		refreshCookieName: refreshCookieName,
-		sessionTTL:        sessionTTL,
-		refreshTTL:        refreshTTL,
-		nonceTTL:          nonceTTL,
-		allowInsecureHTTP: bool(raw.AllowInsecureHTTP),
+		id:                   tenantID,
+		displayName:          displayName,
+		origins:              origins,
+		allowedUsers:         allowedUsers,
+		googleWebClientID:    googleWebClientID,
+		googleNativeClientID: googleNativeClientID,
+		jwtSigningKey:        signingKey,
+		cookieDomain:         cookieDomain,
+		sessionCookieName:    sessionCookieName,
+		refreshCookieName:    refreshCookieName,
+		sessionTTL:           sessionTTL,
+		refreshTTL:           refreshTTL,
+		nonceTTL:             nonceTTL,
+		allowInsecureHTTP:    bool(raw.AllowInsecureHTTP),
 	}, origins, nil
 }
 
@@ -711,6 +736,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.TenantOrigins = expandEnvSlice(tenant.TenantOrigins)
 	tenant.AllowedUsers = expandEnvSlice(tenant.AllowedUsers)
 	tenant.GoogleWebClientID = os.ExpandEnv(tenant.GoogleWebClientID)
+	tenant.GoogleNativeClientID = os.ExpandEnv(tenant.GoogleNativeClientID)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -734,19 +760,20 @@ func expandEnvSlice(values []string) []string {
 
 // FileTenant represents a single tenant entry inside the YAML document.
 type FileTenant struct {
-	ID                string   `json:"id" yaml:"id"`
-	DisplayName       string   `json:"display_name" yaml:"display_name"`
-	TenantOrigins     []string `json:"tenant_origins" yaml:"tenant_origins"`
-	AllowedUsers      []string `json:"allowed_users" yaml:"allowed_users"`
-	GoogleWebClientID string   `json:"google_web_client_id" yaml:"google_web_client_id"`
-	JWTSigningKey     string   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
-	CookieDomain      string   `json:"cookie_domain" yaml:"cookie_domain"`
-	SessionCookieName string   `json:"session_cookie_name" yaml:"session_cookie_name"`
-	RefreshCookieName string   `json:"refresh_cookie_name" yaml:"refresh_cookie_name"`
-	SessionTTL        string   `json:"session_ttl" yaml:"session_ttl"`
-	RefreshTTL        string   `json:"refresh_ttl" yaml:"refresh_ttl"`
-	NonceTTL          string   `json:"nonce_ttl" yaml:"nonce_ttl"`
-	AllowInsecureHTTP yamlBool `json:"allow_insecure_http" yaml:"allow_insecure_http"`
+	ID                   string   `json:"id" yaml:"id"`
+	DisplayName          string   `json:"display_name" yaml:"display_name"`
+	TenantOrigins        []string `json:"tenant_origins" yaml:"tenant_origins"`
+	AllowedUsers         []string `json:"allowed_users" yaml:"allowed_users"`
+	GoogleWebClientID    string   `json:"google_web_client_id" yaml:"google_web_client_id"`
+	GoogleNativeClientID string   `json:"google_native_client_id" yaml:"google_native_client_id"`
+	JWTSigningKey        string   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
+	CookieDomain         string   `json:"cookie_domain" yaml:"cookie_domain"`
+	SessionCookieName    string   `json:"session_cookie_name" yaml:"session_cookie_name"`
+	RefreshCookieName    string   `json:"refresh_cookie_name" yaml:"refresh_cookie_name"`
+	SessionTTL           string   `json:"session_ttl" yaml:"session_ttl"`
+	RefreshTTL           string   `json:"refresh_ttl" yaml:"refresh_ttl"`
+	NonceTTL             string   `json:"nonce_ttl" yaml:"nonce_ttl"`
+	AllowInsecureHTTP    yamlBool `json:"allow_insecure_http" yaml:"allow_insecure_http"`
 }
 
 type yamlBool bool

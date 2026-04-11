@@ -46,6 +46,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig := base
 		tenantServerConfig.TenantID = string(tenant.ID())
 		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
+		tenantServerConfig.GoogleNativeClientID = tenant.GoogleNativeClientID()
 		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
 		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()

@@ -3,6 +3,7 @@ package authkit
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"net"
 	"net/http"
@@ -40,6 +41,10 @@ var validatorCache struct {
 }
 
 var errMissingTenantContext = errors.New("auth.tenant.missing_context")
+var errInvalidGoogleIssuer = errors.New("auth.login.invalid_issuer")
+var errGoogleLoginUserStore = errors.New("auth.login.user_store")
+var errGoogleLoginMintJWT = errors.New("auth.login.mint_jwt")
+var errGoogleLoginIssueRefresh = errors.New("auth.login.issue_refresh")
 
 // ProvideGoogleTokenValidator injects a singleton validator for auth routes.
 func ProvideGoogleTokenValidator(validator GoogleTokenValidator) {
@@ -91,13 +96,41 @@ func resolveGoogleValidator(ctx context.Context) (GoogleTokenValidator, error) {
 }
 
 const (
-	metricAuthLoginSuccess   = "auth.login.success"
-	metricAuthLoginFailure   = "auth.login.failure"
-	metricAuthRefreshSuccess = "auth.refresh.success"
-	metricAuthRefreshFailure = "auth.refresh.failure"
-	metricAuthLogoutSuccess  = "auth.logout.success"
-	errorUserNotAllowed      = "user_not_allowed"
+	metricAuthLoginSuccess              = "auth.login.success"
+	metricAuthLoginFailure              = "auth.login.failure"
+	metricAuthRefreshSuccess            = "auth.refresh.success"
+	metricAuthRefreshFailure            = "auth.refresh.failure"
+	metricAuthLogoutSuccess             = "auth.logout.success"
+	errorUserNotAllowed                 = "user_not_allowed"
+	errorNativeGoogleLoginNotConfigured = "native_google_login_not_configured"
+	googleIssuerHTTPS                   = "https://accounts.google.com"
+	googleIssuerLegacy                  = "accounts.google.com"
+	googleAuthorizationEndpoint         = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenEndpoint                 = "https://oauth2.googleapis.com/token"
 )
+
+var googleNativeScopes = []string{"openid", "email", "profile"}
+
+type googleLoginInbound struct {
+	GoogleIDToken string `json:"google_id_token"`
+	NonceToken    string `json:"nonce_token"`
+}
+
+type nativeGoogleConfigResponse struct {
+	ClientID              string   `json:"client_id"`
+	AuthorizationEndpoint string   `json:"authorization_endpoint"`
+	TokenEndpoint         string   `json:"token_endpoint"`
+	Scopes                []string `json:"scopes"`
+}
+
+type googleIdentity struct {
+	Sub           string
+	Email         string
+	EmailVerified bool
+	DisplayName   string
+	AvatarURL     string
+	Nonce         string
+}
 
 func recordMetric(event string) {
 	if configuredMetrics == nil {
@@ -156,6 +189,27 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		contextGin.JSON(http.StatusOK, gin.H{"nonce": token})
 	})
 
+	router.GET("/auth/google/native/config", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		if strings.TrimSpace(config.GoogleNativeClientID) == "" {
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGoogleLoginNotConfigured})
+			return
+		}
+		scopes := append([]string(nil), googleNativeScopes...)
+		contextGin.JSON(http.StatusOK, nativeGoogleConfigResponse{
+			ClientID:              config.GoogleNativeClientID,
+			AuthorizationEndpoint: googleAuthorizationEndpoint,
+			TokenEndpoint:         googleTokenEndpoint,
+			Scopes:                scopes,
+		})
+	})
+
 	router.POST("/auth/google", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
 		if !resolved {
@@ -165,13 +219,10 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 		config := registry.Config(tenantID)
-		var inbound struct {
-			GoogleIDToken string `json:"google_id_token"`
-			NonceToken    string `json:"nonce_token"`
-		}
-		if err := contextGin.BindJSON(&inbound); err != nil || strings.TrimSpace(inbound.GoogleIDToken) == "" {
+		inbound, ok := bindGoogleLoginInbound(contextGin)
+		if !ok {
 			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.invalid_json", err)
+			logAuthWarning("auth.login.invalid_json", nil)
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
@@ -196,108 +247,151 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		payload, validateErr := validator.Validate(context.Background(), inbound.GoogleIDToken, config.GoogleWebClientID)
+		payload, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
 		if validateErr != nil {
 			recordMetric(metricAuthLoginFailure)
+			if errors.Is(validateErr, errInvalidGoogleIssuer) {
+				logAuthWarning("auth.login.invalid_issuer", validateErr)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_issuer"})
+				return
+			}
 			logAuthWarning("auth.login.invalid_google_token", validateErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_google_token"})
 			return
 		}
-		issuerValue, okIssuer := payload.Claims["iss"].(string)
-		if !okIssuer || (issuerValue != "https://accounts.google.com" && issuerValue != "accounts.google.com") {
+		if consumeErr := consumeBrowserNonce(contextGin, nonces, tenantID, inbound.NonceToken, payload); consumeErr != nil {
 			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.invalid_issuer", nil, zap.String("issuer", issuerValue))
-			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_issuer"})
+			logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
 		}
-		googleSub, _ := payload.Claims["sub"].(string)
-		userEmail, _ := payload.Claims["email"].(string)
-		emailVerified, _ := payload.Claims["email_verified"].(bool)
-		userDisplayName, _ := payload.Claims["name"].(string)
-		userAvatarURL, _ := payload.Claims["picture"].(string)
-		nonceClaim, _ := payload.Claims["nonce"].(string)
-		if nonceClaim == "" {
-			if consumeErr := nonces.Consume(contextGin, tenantID, inbound.NonceToken); consumeErr != nil {
-				recordMetric(metricAuthLoginFailure)
-				logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
-				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
-				return
-			}
-		} else {
-			expectedHashedNonce := hashOpaque(inbound.NonceToken)
-			nonceMatchesInbound := nonceClaim == inbound.NonceToken
-			nonceMatchesHashed := nonceClaim == expectedHashedNonce
-			tokenToConsume := inbound.NonceToken
-			fallbackNonce := false
-			if !nonceMatchesInbound && !nonceMatchesHashed {
-				tokenToConsume = nonceClaim
-				fallbackNonce = true
-			}
-			if consumeErr := nonces.Consume(contextGin, tenantID, tokenToConsume); consumeErr != nil {
-				recordMetric(metricAuthLoginFailure)
-				if fallbackNonce {
-					logAuthWarning(
-						"auth.login.nonce_mismatch",
-						consumeErr,
-						zap.String("google_nonce", nonceClaim),
-						zap.String("expected_nonce_hashed", expectedHashedNonce),
-					)
-				} else {
-					logAuthWarning("auth.login.invalid_nonce_token", consumeErr)
-				}
-				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
-				return
-			}
-		}
 
-		if googleSub == "" || userEmail == "" || !emailVerified {
+		if identity.Sub == "" || identity.Email == "" || !identity.EmailVerified {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.unverified_identity", nil)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
 			return
 		}
-		if !isAllowedUser(userEmail, config.AllowedUsers) {
+		if !isAllowedUser(identity.Email, config.AllowedUsers) {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.user_not_allowed", nil)
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
 
-		applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(contextGin, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
-		if upsertErr != nil || applicationUserID == "" {
+		if finalizeErr := finalizeGoogleLogin(contextGin, users, refreshTokens, clock, config, tenantID, identity); finalizeErr != nil {
 			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.user_store", upsertErr)
+			switch {
+			case errors.Is(finalizeErr, errGoogleLoginUserStore):
+				logAuthError("auth.login.user_store", finalizeErr)
+			case errors.Is(finalizeErr, errGoogleLoginMintJWT):
+				logAuthError("auth.login.mint_jwt", finalizeErr)
+			case errors.Is(finalizeErr, errGoogleLoginIssueRefresh):
+				logAuthError("auth.login.issue_refresh", finalizeErr)
+			default:
+				logAuthError("auth.login.finalize", finalizeErr)
+			}
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
+		recordMetric(metricAuthLoginSuccess)
+	})
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
-		if mintErr != nil {
+	router.POST("/auth/google/native", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
 			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.mint_jwt", mintErr)
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-
-		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
-		_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), "")
-		if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
+		config := registry.Config(tenantID)
+		if strings.TrimSpace(config.GoogleNativeClientID) == "" {
 			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.issue_refresh", issueErr)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGoogleLoginNotConfigured})
+			return
+		}
+		inbound, ok := bindGoogleLoginInbound(contextGin)
+		if !ok {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.invalid_json", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		if strings.TrimSpace(inbound.NonceToken) == "" {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.missing_nonce", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.insecure_http", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		validator, validatorErr := resolveGoogleValidator(context.Background())
+		if validatorErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.native.validator_init", validatorErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-
-		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
-		writeRefreshCookie(contextGin, config, refreshOpaque, refreshDeadline)
-
-		contextGin.JSON(http.StatusOK, gin.H{
-			"user_id":    applicationUserID,
-			"user_email": userEmail,
-			"display":    userDisplayName,
-			"avatar_url": userAvatarURL,
-			"roles":      userRoles,
-		})
+		_, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleNativeClientID)
+		if validateErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			if errors.Is(validateErr, errInvalidGoogleIssuer) {
+				logAuthWarning("auth.login.native.invalid_issuer", validateErr)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_issuer"})
+				return
+			}
+			logAuthWarning("auth.login.native.invalid_google_token", validateErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_google_token"})
+			return
+		}
+		if strings.TrimSpace(identity.Nonce) == "" {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.missing_nonce_claim", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if identity.Nonce != strings.TrimSpace(inbound.NonceToken) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning(
+				"auth.login.native.nonce_mismatch",
+				nil,
+				zap.String("google_nonce", identity.Nonce),
+			)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if identity.Sub == "" || identity.Email == "" || !identity.EmailVerified {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.unverified_identity", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
+			return
+		}
+		if !isAllowedUser(identity.Email, config.AllowedUsers) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		if finalizeErr := finalizeGoogleLogin(contextGin, users, refreshTokens, clock, config, tenantID, identity); finalizeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			switch {
+			case errors.Is(finalizeErr, errGoogleLoginUserStore):
+				logAuthError("auth.login.native.user_store", finalizeErr)
+			case errors.Is(finalizeErr, errGoogleLoginMintJWT):
+				logAuthError("auth.login.native.mint_jwt", finalizeErr)
+			case errors.Is(finalizeErr, errGoogleLoginIssueRefresh):
+				logAuthError("auth.login.native.issue_refresh", finalizeErr)
+			default:
+				logAuthError("auth.login.native.finalize", finalizeErr)
+			}
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
 		recordMetric(metricAuthLoginSuccess)
 	})
 
@@ -410,6 +504,125 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 	whoAmI := router.Group("/")
 	whoAmI.Use(RequireSession(registry))
 	whoAmI.GET("/me", web.HandleWhoAmI(configuredLogger))
+}
+
+func bindGoogleLoginInbound(contextGin *gin.Context) (googleLoginInbound, bool) {
+	var inbound googleLoginInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return googleLoginInbound{}, false
+	}
+	if strings.TrimSpace(inbound.GoogleIDToken) == "" {
+		return googleLoginInbound{}, false
+	}
+	return inbound, true
+}
+
+func validateGoogleIdentityToken(ctx context.Context, validator GoogleTokenValidator, idToken string, audience string) (*idtoken.Payload, googleIdentity, error) {
+	payload, validateErr := validator.Validate(ctx, idToken, audience)
+	if validateErr != nil {
+		return nil, googleIdentity{}, validateErr
+	}
+	issuerValue, okIssuer := payload.Claims["iss"].(string)
+	if !okIssuer || (issuerValue != googleIssuerHTTPS && issuerValue != googleIssuerLegacy) {
+		return nil, googleIdentity{}, fmt.Errorf("%w issuer=%s", errInvalidGoogleIssuer, issuerValue)
+	}
+	return payload, googleIdentity{
+		Sub:           readStringClaim(payload, "sub"),
+		Email:         readStringClaim(payload, "email"),
+		EmailVerified: readBoolClaim(payload, "email_verified"),
+		DisplayName:   readStringClaim(payload, "name"),
+		AvatarURL:     readStringClaim(payload, "picture"),
+		Nonce:         readStringClaim(payload, "nonce"),
+	}, nil
+}
+
+func readStringClaim(payload *idtoken.Payload, claim string) string {
+	if payload == nil {
+		return ""
+	}
+	value, _ := payload.Claims[claim].(string)
+	return value
+}
+
+func readBoolClaim(payload *idtoken.Payload, claim string) bool {
+	if payload == nil {
+		return false
+	}
+	value, _ := payload.Claims[claim].(bool)
+	return value
+}
+
+func consumeBrowserNonce(contextGin *gin.Context, nonces NonceStore, tenantID string, nonceToken string, payload *idtoken.Payload) error {
+	nonceClaim := readStringClaim(payload, "nonce")
+	if nonceClaim == "" {
+		return nonces.Consume(contextGin, tenantID, nonceToken)
+	}
+	expectedHashedNonce := hashOpaque(nonceToken)
+	nonceMatchesInbound := nonceClaim == nonceToken
+	nonceMatchesHashed := nonceClaim == expectedHashedNonce
+	tokenToConsume := nonceToken
+	if !nonceMatchesInbound && !nonceMatchesHashed {
+		tokenToConsume = nonceClaim
+	}
+	return nonces.Consume(contextGin, tenantID, tokenToConsume)
+}
+
+func finalizeGoogleLogin(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	identity googleIdentity,
+) error {
+	applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(
+		contextGin,
+		tenantID,
+		identity.Sub,
+		identity.Email,
+		identity.DisplayName,
+		identity.AvatarURL,
+	)
+	if upsertErr != nil || applicationUserID == "" {
+		if upsertErr != nil {
+			return fmt.Errorf("%w: %w", errGoogleLoginUserStore, upsertErr)
+		}
+		return fmt.Errorf("%w: empty_user_id", errGoogleLoginUserStore)
+	}
+	sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
+		clock,
+		tenantID,
+		applicationUserID,
+		identity.Email,
+		identity.DisplayName,
+		identity.AvatarURL,
+		userRoles,
+		config.AppJWTIssuer,
+		config.AppJWTSigningKey,
+		config.SessionTTL,
+	)
+	if mintErr != nil {
+		return fmt.Errorf("%w: %w", errGoogleLoginMintJWT, mintErr)
+	}
+	refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
+	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), "")
+	if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
+		if issueErr != nil {
+			return fmt.Errorf("%w: %w", errGoogleLoginIssueRefresh, issueErr)
+		}
+		return fmt.Errorf("%w: empty_token", errGoogleLoginIssueRefresh)
+	}
+	writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
+	writeRefreshCookie(contextGin, config, refreshOpaque, refreshDeadline)
+	contextGin.JSON(http.StatusOK, gin.H{
+		"user_id":    applicationUserID,
+		"user_email": identity.Email,
+		"display":    identity.DisplayName,
+		"avatar_url": identity.AvatarURL,
+		"roles":      userRoles,
+	})
+	return nil
 }
 
 func writeSessionCookie(contextGin *gin.Context, configuration ServerConfig, sessionToken string, expiresAt time.Time) {

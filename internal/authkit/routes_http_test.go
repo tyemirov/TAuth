@@ -2156,6 +2156,290 @@ func TestHTTPAuthLoginMissingNonce(t *testing.T) {
 	}
 }
 
+func TestHTTPNativeGoogleConfigEndpointUsesTenantHeaderOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `{
+		"tenants": [
+			{
+				"id": "tenant-a",
+				"display_name": "Tenant A",
+				"tenant_origins": ["https://tenant-a.localhost"],
+				"google_web_client_id": "client-tenant-a",
+				"google_native_client_id": "native-client-tenant-a",
+				"jwt_signing_key": "tenant-a-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_tenant_a",
+				"refresh_cookie_name": "app_refresh_tenant_a",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			},
+			{
+				"id": "tenant-b",
+				"display_name": "Tenant B",
+				"tenant_origins": ["https://tenant-b.localhost"],
+				"google_web_client_id": "client-tenant-b",
+				"google_native_client_id": "native-client-tenant-b",
+				"jwt_signing_key": "tenant-b-key",
+				"cookie_domain": "",
+				"session_cookie_name": "app_session_tenant_b",
+				"refresh_cookie_name": "app_refresh_tenant_b",
+				"session_ttl": "15m",
+				"refresh_ttl": "1440h",
+				"nonce_ttl": "5m",
+				"allow_insecure_http": true
+			}
+		]
+	}`)
+	baseConfig := newTestServerConfig()
+	registry, registryErr := BuildTenantRegistry(baseConfig, tenantConfig, NewSameSiteResolver(false))
+	if registryErr != nil {
+		t.Fatalf("build registry: %v", registryErr)
+	}
+	resolver, resolverErr := tenants.NewResolver(tenantConfig, tenants.WithHeaderOverride(""))
+	if resolverErr != nil {
+		t.Fatalf("create resolver: %v", resolverErr)
+	}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	missingTenantRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/google/native/config", nil)
+	if err != nil {
+		t.Fatalf("build missing tenant request: %v", err)
+	}
+	missingTenantResponse, err := client.Do(missingTenantRequest)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer missingTenantResponse.Body.Close()
+	if missingTenantResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 without origin or tenant override, got %d", missingTenantResponse.StatusCode)
+	}
+
+	validRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/google/native/config", nil)
+	if err != nil {
+		t.Fatalf("build native config request: %v", err)
+	}
+	validRequest.Header.Set("X-TAuth-Tenant", "tenant-b")
+
+	validResponse, err := client.Do(validRequest)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer validResponse.Body.Close()
+	if validResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with tenant override, got %d", validResponse.StatusCode)
+	}
+
+	var payload nativeGoogleConfigResponse
+	if decodeErr := json.NewDecoder(validResponse.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode payload: %v", decodeErr)
+	}
+	if payload.ClientID != "native-client-tenant-b" {
+		t.Fatalf("unexpected client id: %s", payload.ClientID)
+	}
+}
+
+func TestHTTPNativeGoogleLoginValidationMatrix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name           string
+		configure      func(config *ServerConfig)
+		validator      *fakeGoogleValidator
+		nonceToken     string
+		expectedStatus int
+		expectedError  string
+	}{
+		{
+			name:           "missing_request_nonce",
+			validator:      &fakeGoogleValidator{},
+			nonceToken:     "",
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "missing_nonce",
+		},
+		{
+			name:           "invalid_google_token",
+			validator:      &fakeGoogleValidator{results: map[string]validatorResult{}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "invalid_google_token",
+		},
+		{
+			name: "invalid_issuer",
+			validator: &fakeGoogleValidator{results: map[string]validatorResult{
+				"native-token": {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            "https://issuer.invalid",
+							"sub":            "sub-invalid-issuer",
+							"email":          "issuer@example.com",
+							"email_verified": true,
+							"name":           "Issuer User",
+							"nonce":          "native-nonce",
+						},
+					},
+					expectedAudience: "native-client-id",
+				},
+			}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "invalid_issuer",
+		},
+		{
+			name: "missing_nonce_claim",
+			validator: &fakeGoogleValidator{results: map[string]validatorResult{
+				"native-token": {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            googleIssuerHTTPS,
+							"sub":            "sub-missing-nonce",
+							"email":          "nonce@example.com",
+							"email_verified": true,
+							"name":           "Nonce User",
+						},
+					},
+					expectedAudience: "native-client-id",
+				},
+			}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "invalid_nonce",
+		},
+		{
+			name: "nonce_mismatch",
+			validator: &fakeGoogleValidator{results: map[string]validatorResult{
+				"native-token": {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            googleIssuerHTTPS,
+							"sub":            "sub-nonce-mismatch",
+							"email":          "nonce@example.com",
+							"email_verified": true,
+							"name":           "Nonce User",
+							"nonce":          "other-nonce",
+						},
+					},
+					expectedAudience: "native-client-id",
+				},
+			}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "invalid_nonce",
+		},
+		{
+			name: "unverified_identity",
+			validator: &fakeGoogleValidator{results: map[string]validatorResult{
+				"native-token": {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            googleIssuerHTTPS,
+							"sub":            "sub-unverified",
+							"email":          "native@example.com",
+							"email_verified": false,
+							"name":           "Unverified User",
+							"nonce":          "native-nonce",
+						},
+					},
+					expectedAudience: "native-client-id",
+				},
+			}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "unverified_identity",
+		},
+		{
+			name: "user_not_allowed",
+			configure: func(config *ServerConfig) {
+				config.AllowedUsers = map[string]struct{}{"allowed@example.com": {}}
+			},
+			validator: &fakeGoogleValidator{results: map[string]validatorResult{
+				"native-token": {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            googleIssuerHTTPS,
+							"sub":            "sub-disallowed",
+							"email":          "denied@example.com",
+							"email_verified": true,
+							"name":           "Denied User",
+							"nonce":          "native-nonce",
+						},
+					},
+					expectedAudience: "native-client-id",
+				},
+			}},
+			nonceToken:     "native-nonce",
+			expectedStatus: http.StatusForbidden,
+			expectedError:  errorUserNotAllowed,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ProvideGoogleTokenValidator(testCase.validator)
+			defer ProvideGoogleTokenValidator(nil)
+			ProvideClock(NewSystemClock())
+			defer ProvideClock(nil)
+			ProvideMetrics(NewCounterMetrics())
+			defer ProvideMetrics(nil)
+			ProvideLogger(zaptest.NewLogger(t))
+			defer ProvideLogger(nil)
+
+			config := newTestServerConfig()
+			if testCase.configure != nil {
+				testCase.configure(&config)
+			}
+			registry := NewSingleTenantRegistry(config)
+			router := gin.New()
+			MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+			server := newInProcessServer(router, true)
+			defer server.Close()
+			client := server.Client()
+
+			body := map[string]string{
+				"google_id_token": "native-token",
+				"nonce_token":     testCase.nonceToken,
+			}
+			payloadBytes, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google/native", bytes.NewReader(payloadBytes))
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != testCase.expectedStatus {
+				t.Fatalf("expected %d, got %d", testCase.expectedStatus, response.StatusCode)
+			}
+
+			var payload map[string]string
+			if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+				t.Fatalf("decode payload: %v", decodeErr)
+			}
+			if payload["error"] != testCase.expectedError {
+				t.Fatalf("expected %s, got %v", testCase.expectedError, payload["error"])
+			}
+		})
+	}
+}
+
 func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

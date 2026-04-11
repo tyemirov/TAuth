@@ -52,12 +52,12 @@ TAuth is intentionally different from GAuss:
   - `app_session` (JWT access cookie)
   - `app_refresh` (opaque refresh cookie for TAuth’s own session rotation)
 - TAuth does not obtain OAuth access tokens and has no concept of OAuth scopes.
-- Tenant configuration includes `google_web_client_id` but does not include a Google OAuth client secret or Google API scopes.
+- Tenant configuration includes `google_web_client_id` and an optional `google_native_client_id`, but it still does not include a Google OAuth client secret or Google API scopes.
 
 Code pointers:
 
 - ID token validation + session/refresh cookie minting: `internal/authkit/routes.go`
-- Tenant schema (`google_web_client_id` only): `internal/tenants/config.go`
+- Tenant schema (`google_web_client_id` plus optional `google_native_client_id`): `internal/tenants/config.go`
 - Client helper used by frontends to call `/auth/*` + `/me`: `web/tauth.js`
 
 ## Why YouTube Channel APIs Need “Wider Scopes”

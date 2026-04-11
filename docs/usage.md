@@ -10,7 +10,7 @@ For a deep dive into internal architecture and implementation details, see `ARCH
 
 TAuth sits between Google Identity Services (GIS) and your product UI:
 
-- Verifies Google ID tokens issued by a Google OAuth Web client.
+- Verifies Google ID tokens issued by Google OAuth Web clients and optional Desktop/installed-app clients.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
@@ -79,6 +79,7 @@ tenants:
     allowed_users:
       - "user@example.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
+    google_native_client_id: "your_native_client_id.apps.googleusercontent.com"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".example.com"
     session_ttl: "15m"
@@ -293,6 +294,18 @@ The required sequence for custom clients is:
 
 When using `tauth.js` or the mpr‑ui header component, this flow is handled internally; you only need to surface the Google button and configure your client ID.
 
+### 5.3 Native installed-app flow (system browser + PKCE)
+
+Native apps such as PromptDew must not embed Google sign-in in a web view. Instead, they should:
+
+1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header.
+2. Open Google in the system browser with PKCE, `scope=openid email profile`, a loopback redirect URI, and an OIDC `nonce`.
+3. Exchange the authorization code directly with Google and extract the returned `id_token`.
+4. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "..." }`.
+5. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
+
+This path validates the `id_token` against the tenant’s optional `google_native_client_id`. If that field is absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. Native client IDs must be unique across tenants.
+
 ---
 
 ## 6. HTTP endpoints
@@ -330,6 +343,47 @@ Common failure cases:
 - Invalid or expired ID token (`401`).
 - Mismatched nonce (`401`).
 - Audience (`aud`) does not match the resolved tenant’s `google_web_client_id` (`401`).
+
+### 6.2a `GET /auth/google/native/config`
+
+Returns the tenant-specific metadata a native client needs before opening the Google authorization URL.
+
+- **Headers**: send `X-TAuth-Tenant` when the request does not include a browser `Origin`.
+- **Response**: `200 OK`
+
+  ```json
+  {
+    "client_id": "native-client.apps.googleusercontent.com",
+    "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_endpoint": "https://oauth2.googleapis.com/token",
+    "scopes": ["openid", "email", "profile"]
+  }
+  ```
+
+- **Errors**:
+  - `404` with `error: "native_google_login_not_configured"` when the tenant has no `google_native_client_id`
+  - tenant-resolution failures when no `Origin` or `X-TAuth-Tenant` can resolve a tenant
+
+### 6.2b `POST /auth/google/native`
+
+Verifies a Google ID token obtained by a native system-browser flow and mints the standard session cookies.
+
+- **Request body**:
+
+  ```json
+  {
+    "google_id_token": "<id_token_from_google_token_endpoint>",
+    "nonce_token": "<raw_oidc_nonce>"
+  }
+  ```
+
+- **Validation**:
+  - the ID token audience must match the resolved tenant’s `google_native_client_id`
+  - issuer must be Google
+  - the ID token must contain a verified email
+  - the ID token `nonce` claim must exactly equal `nonce_token`
+
+- **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
 
 ### 6.3 `GET /api/me`
 
@@ -530,6 +584,7 @@ Use this checklist when integrating:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.
   - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
+- **Native desktop login returns `native_google_login_not_configured`** – Add `google_native_client_id` to the tenant config and ensure the native app sends `X-TAuth-Tenant` when it has no browser `Origin` header.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
 - When multiple tenants share the same origin, list each frontend origin under `tenant_origins` so TAuth can resolve the tenant from the `Origin` header. You can override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper only sends `X-TAuth-Tenant` when you opt into an explicit override.

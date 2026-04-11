@@ -26,6 +26,7 @@ func TestLoadConfigSuccess(t *testing.T) {
       - "https://demo.localhost"
       - "https://demo.example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
+    google_native_client_id: "demo-native.apps.googleusercontent.com"
     jwt_signing_key: "demo-tenant-key"
     cookie_domain: "demo.example.com"
     session_cookie_name: "app_session_demo"
@@ -41,6 +42,7 @@ func TestLoadConfigSuccess(t *testing.T) {
       - "https://app.example.com"
       - "https://app.mprlab.com"
     google_web_client_id: "prod-client.apps.googleusercontent.com"
+    google_native_client_id: "prod-native.apps.googleusercontent.com"
     jwt_signing_key: "prod-tenant-key"
     cookie_domain: ".example.com"
     session_cookie_name: "app_session_prod"
@@ -72,6 +74,9 @@ func TestLoadConfigSuccess(t *testing.T) {
 	}
 	if demoTenant.GoogleWebClientID() != "demo-client.apps.googleusercontent.com" {
 		t.Fatalf("unexpected google web client id: %s", demoTenant.GoogleWebClientID())
+	}
+	if demoTenant.GoogleNativeClientID() != "demo-native.apps.googleusercontent.com" {
+		t.Fatalf("unexpected google native client id: %s", demoTenant.GoogleNativeClientID())
 	}
 	if string(demoTenant.SigningKey()) != "demo-tenant-key" {
 		t.Fatalf("unexpected signing key: %s", demoTenant.SigningKey())
@@ -449,6 +454,49 @@ func TestLoadConfigRejectsOverlappingCookieNames(testContext *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsDuplicateNativeGoogleClientID(t *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			buildTestTenant("alpha", []string{"https://alpha.localhost"}, "", "app_session_alpha", "app_refresh_alpha", "alpha-key"),
+			buildTestTenant("beta", []string{"https://beta.localhost"}, "", "app_session_beta", "app_refresh_beta", "beta-key"),
+		},
+	}
+	document.Tenants[0].GoogleNativeClientID = "shared-native.apps.googleusercontent.com"
+	document.Tenants[1].GoogleNativeClientID = "shared-native.apps.googleusercontent.com"
+
+	_, loadErr := LoadConfigFromDocument(document)
+	if loadErr == nil {
+		t.Fatalf("expected config error")
+	}
+	if !errors.Is(loadErr, ErrInvalidTenantConfig) {
+		t.Fatalf("expected ErrInvalidTenantConfig, got %v", loadErr)
+	}
+	if !containsStableCode(loadErr, errorCodeDuplicateNativeGoogleID) {
+		t.Fatalf("expected error to contain code %s, got %v", errorCodeDuplicateNativeGoogleID, loadErr)
+	}
+}
+
+func TestLoadConfigAllowsMissingNativeGoogleClientID(t *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			buildTestTenant("alpha", []string{"https://alpha.localhost"}, "", "app_session_alpha", "app_refresh_alpha", "alpha-key"),
+			buildTestTenant("beta", []string{"https://beta.localhost"}, "", "app_session_beta", "app_refresh_beta", "beta-key"),
+		},
+	}
+
+	config, loadErr := LoadConfigFromDocument(document)
+	if loadErr != nil {
+		t.Fatalf("expected config to load, got %v", loadErr)
+	}
+	alphaTenant, exists := config.TenantByID("alpha")
+	if !exists {
+		t.Fatalf("expected alpha tenant")
+	}
+	if alphaTenant.GoogleNativeClientID() != "" {
+		t.Fatalf("expected empty native client id, got %s", alphaTenant.GoogleNativeClientID())
+	}
+}
+
 func TestBuildTenantErrors(t *testing.T) {
 	testCases := []struct {
 		name    string
@@ -707,6 +755,7 @@ func TestLoadConfigExpandsEnvVars(t *testing.T) {
 func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
 	t.Setenv("TENANT_ALLOWED_HOST", "https://env.localhost")
 	t.Setenv("TENANT_CLIENT_ID", "env-client.apps.googleusercontent.com")
+	t.Setenv("TENANT_NATIVE_CLIENT_ID", "env-native.apps.googleusercontent.com")
 	t.Setenv("TENANT_SIGNING_KEY", "env-signing-key")
 	t.Setenv("TENANT_COOKIE_DOMAIN", ".env.example.com")
 	t.Setenv("SESSION_COOKIE_NAME", "env_session_cookie")
@@ -718,17 +767,18 @@ func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
 	document := FileDocument{
 		Tenants: []FileTenant{
 			{
-				ID:                "env-demo",
-				DisplayName:       "Env Demo",
-				TenantOrigins:     []string{"${TENANT_ALLOWED_HOST}"},
-				GoogleWebClientID: "$TENANT_CLIENT_ID",
-				JWTSigningKey:     "${TENANT_SIGNING_KEY}",
-				CookieDomain:      "$TENANT_COOKIE_DOMAIN",
-				SessionCookieName: "$SESSION_COOKIE_NAME",
-				RefreshCookieName: "${REFRESH_COOKIE_NAME}",
-				SessionTTL:        "${SESSION_TTL}",
-				RefreshTTL:        "$REFRESH_TTL",
-				NonceTTL:          "$NONCE_TTL",
+				ID:                   "env-demo",
+				DisplayName:          "Env Demo",
+				TenantOrigins:        []string{"${TENANT_ALLOWED_HOST}"},
+				GoogleWebClientID:    "$TENANT_CLIENT_ID",
+				GoogleNativeClientID: "$TENANT_NATIVE_CLIENT_ID",
+				JWTSigningKey:        "${TENANT_SIGNING_KEY}",
+				CookieDomain:         "$TENANT_COOKIE_DOMAIN",
+				SessionCookieName:    "$SESSION_COOKIE_NAME",
+				RefreshCookieName:    "${REFRESH_COOKIE_NAME}",
+				SessionTTL:           "${SESSION_TTL}",
+				RefreshTTL:           "$REFRESH_TTL",
+				NonceTTL:             "$NONCE_TTL",
 			},
 		},
 	}
@@ -746,6 +796,9 @@ func TestLoadConfigFromDocumentExpandsEnvVars(t *testing.T) {
 	}
 	if tenant.GoogleWebClientID() != "env-client.apps.googleusercontent.com" {
 		t.Fatalf("expected env client id, got %s", tenant.GoogleWebClientID())
+	}
+	if tenant.GoogleNativeClientID() != "env-native.apps.googleusercontent.com" {
+		t.Fatalf("expected env native client id, got %s", tenant.GoogleNativeClientID())
 	}
 	if string(tenant.SigningKey()) != "env-signing-key" {
 		t.Fatalf("expected env signing key, got %s", tenant.SigningKey())
