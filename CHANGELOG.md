@@ -1,5 +1,30 @@
 # Changelog
 
+## [v1.1.0] - 2026-04-11
+
+### Features ✨
+- Added native system-browser login flow for installed apps via `GET /auth/google/native/config` and `POST /auth/google/native`.
+- Introduced support for native OAuth desktop/installed-app clients in tenant configuration (`google_native_client_id`).
+- Enabled native clients to authenticate using PKCE and local loopback redirect without embedding Google sign-in in a web view.
+
+### Improvements ⚙️
+- Updated tenant configuration schema to include optional native client IDs for isolated tenant sessions.
+- Enhanced documentation with native installed-app login instructions and updated architecture overview.
+- Improved configuration validation and testing to cover native client ID parsing and uniqueness.
+- Refined auth routes to handle native login flow with ID token and nonce validation.
+
+### Bug Fixes 🐛
+- _No changes._
+
+### Testing 🧪
+- Added tests verifying native client ID parsing in configuration.
+- Expanded integration and HTTP route tests to cover native OAuth flow and error cases.
+
+### Docs 📚
+- Documented native system-browser exchange flow including tenant config, API endpoints, and client usage.
+- Updated README and usage guides to describe native installed-app login alongside web popup flow.
+- Clarified tenant config requirements and API error semantics for native login endpoints.
+
 ## [v1.0.1] - 2026-03-20
 
 ### Features ✨
