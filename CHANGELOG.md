@@ -8,6 +8,27 @@
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 
+## [v1.1.2] - 2026-05-08
+
+### Features ✨
+- _No changes._
+
+### Improvements ⚙️
+- Added local `make release`, `make publish`, and `make deploy` wrappers to satisfy shared MPR deployed-app workflow contract.
+- Updated release workflow to tag images with both `vX.Y.Z` and `X.Y.Z` aliases for better image consistency.
+- Deployment scripts now accept `latest` as a valid release alias when matching image tags during verification.
+
+### Bug Fixes 🐛
+- Fixed deploy image verification to correctly accept `latest` tag digest matching any of the normalized SemVer aliases (e.g., `1.1.1`) instead of only the literal Git tag (e.g., `v1.1.1`).
+- Resolved issue where local publish and GitHub workflows could divergent tag images leading to false deploy verification errors.
+
+### Testing 🧪
+- Verified deploy image matching using extensive timeout-controlled local and CI runs including gateway workflow verification.
+
+### Docs 📚
+- Updated documentation to remove references to deprecated `/demo` endpoint and reflect auth client readiness changes in the demo.
+- Improved ISSUE tracking heuristics and added notes on deploy image verification behavior.
+
 ## [v1.1.1] - 2026-05-08
 
 ### Features ✨
