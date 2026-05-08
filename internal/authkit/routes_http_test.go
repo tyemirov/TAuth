@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/pkg/sessionvalidator"
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/api/idtoken"
 )
@@ -223,6 +224,36 @@ func mustLoadTenantsConfigFromString(t *testing.T, contents string) tenants.Conf
 		t.Fatalf("load tenants config: %v", err)
 	}
 	return cfg
+}
+
+func newMobileNativeTestServerConfig() ServerConfig {
+	config := newTestServerConfig()
+	config.GoogleNativeClientID = ""
+	config.NativeGoogleClients = []NativeGoogleClientConfig{
+		{
+			Platform: "ios",
+			ClientID: "ios-client-id",
+			RedirectURIs: []string{
+				"com.promptdew.mobile://oauth2redirect/google",
+				"https://promptdew.mprlab.com/oauth/google/callback",
+			},
+		},
+		{
+			Platform:     "android",
+			ClientID:     "android-client-id",
+			RedirectURIs: []string{"com.promptdew.mobile:/oauth2redirect/google"},
+		},
+	}
+	return config
+}
+
+func stringSliceContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
@@ -2246,6 +2277,402 @@ func TestHTTPNativeGoogleConfigEndpointUsesTenantHeaderOverride(t *testing.T) {
 	}
 	if payload.ClientID != "native-client-tenant-b" {
 		t.Fatalf("unexpected client id: %s", payload.ClientID)
+	}
+}
+
+func TestHTTPNativeGoogleMobileConfigReturnsPlatformMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tenantConfig := mustLoadTenantsConfigFromString(t, `
+tenants:
+  - id: mobile
+    display_name: Mobile
+    tenant_origins: ["https://mobile.localhost"]
+    google_web_client_id: "web-client-id"
+    google_native_clients:
+      - platform: ios
+        client_id: "ios-client-id"
+        redirect_uris:
+          - "com.promptdew.mobile://oauth2redirect/google"
+          - "https://promptdew.mprlab.com/oauth/google/callback"
+      - platform: android
+        client_id: "android-client-id"
+        redirect_uris:
+          - "com.promptdew.mobile:/oauth2redirect/google"
+    jwt_signing_key: "mobile-key"
+    cookie_domain: ""
+    session_cookie_name: "app_session_mobile"
+    refresh_cookie_name: "app_refresh_mobile"
+    session_ttl: "15m"
+    refresh_ttl: "1440h"
+    nonce_ttl: "5m"
+    allow_insecure_http: true
+`)
+	baseConfig := newTestServerConfig()
+	registry, registryErr := BuildTenantRegistry(baseConfig, tenantConfig, NewSameSiteResolver(false))
+	if registryErr != nil {
+		t.Fatalf("build registry: %v", registryErr)
+	}
+	resolver, resolverErr := tenants.NewResolver(tenantConfig, tenants.WithHeaderOverride(""))
+	if resolverErr != nil {
+		t.Fatalf("create resolver: %v", resolverErr)
+	}
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	testCases := []struct {
+		platform         string
+		expectedClient   string
+		expectedRedirect string
+	}{
+		{
+			platform:         "ios",
+			expectedClient:   "ios-client-id",
+			expectedRedirect: "com.promptdew.mobile://oauth2redirect/google",
+		},
+		{
+			platform:         "android",
+			expectedClient:   "android-client-id",
+			expectedRedirect: "com.promptdew.mobile:/oauth2redirect/google",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.platform, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodGet, server.URL+"/auth/google/native/config?platform="+testCase.platform, nil)
+			if err != nil {
+				t.Fatalf("build native config request: %v", err)
+			}
+			request.Header.Set("X-TAuth-Tenant", "mobile")
+
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", response.StatusCode)
+			}
+
+			var payload nativeGoogleConfigResponse
+			if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+				t.Fatalf("decode payload: %v", decodeErr)
+			}
+			if payload.ClientID != testCase.expectedClient {
+				t.Fatalf("expected client %s, got %s", testCase.expectedClient, payload.ClientID)
+			}
+			if len(payload.ClientIDs) != 1 || payload.ClientIDs[0] != testCase.expectedClient {
+				t.Fatalf("unexpected client ids: %#v", payload.ClientIDs)
+			}
+			if payload.Platform != testCase.platform {
+				t.Fatalf("expected platform %s, got %s", testCase.platform, payload.Platform)
+			}
+			if !payload.PKCERequired || !stringSliceContains(payload.CodeChallengeMethodsSupported, googleCodeChallengeMethodS256) {
+				t.Fatalf("expected PKCE S256 metadata, got required=%v methods=%#v", payload.PKCERequired, payload.CodeChallengeMethodsSupported)
+			}
+			if payload.ResponseType != googleOAuthResponseTypeCode {
+				t.Fatalf("expected response type code, got %s", payload.ResponseType)
+			}
+			if !stringSliceContains(payload.RedirectURIs, testCase.expectedRedirect) {
+				t.Fatalf("expected redirect %s in %#v", testCase.expectedRedirect, payload.RedirectURIs)
+			}
+			if len(payload.Clients) != 1 || payload.Clients[0].Platform != testCase.platform {
+				t.Fatalf("unexpected native clients: %#v", payload.Clients)
+			}
+		})
+	}
+}
+
+func TestHTTPNativeMobileGoogleLoginLifecycleAndSessionCompatibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		platform    string
+		token       string
+		audience    string
+		redirectURI string
+	}{
+		{
+			platform:    "ios",
+			token:       "ios-token",
+			audience:    "ios-client-id",
+			redirectURI: "com.promptdew.mobile://oauth2redirect/google",
+		},
+		{
+			platform:    "android",
+			token:       "android-token",
+			audience:    "android-client-id",
+			redirectURI: "com.promptdew.mobile:/oauth2redirect/google",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.platform, func(t *testing.T) {
+			config := newMobileNativeTestServerConfig()
+			validator := &fakeGoogleValidator{results: map[string]validatorResult{
+				testCase.token: {
+					payload: &idtoken.Payload{
+						Claims: map[string]interface{}{
+							"iss":            googleIssuerHTTPS,
+							"sub":            "sub-" + testCase.platform,
+							"email":          testCase.platform + "@example.com",
+							"email_verified": true,
+							"name":           "Mobile User",
+							"picture":        "https://example.com/mobile.png",
+							"nonce":          "mobile-nonce",
+						},
+					},
+					expectedAudience: testCase.audience,
+				},
+			}}
+			ProvideGoogleTokenValidator(validator)
+			defer ProvideGoogleTokenValidator(nil)
+			ProvideClock(NewSystemClock())
+			defer ProvideClock(nil)
+			ProvideMetrics(NewCounterMetrics())
+			defer ProvideMetrics(nil)
+			ProvideLogger(zaptest.NewLogger(t))
+			defer ProvideLogger(nil)
+
+			router := gin.New()
+			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+			server := newInProcessServer(router, true)
+			defer server.Close()
+			client := server.Client()
+
+			body := map[string]string{
+				"google_id_token": testCase.token,
+				"nonce_token":     "mobile-nonce",
+				"platform":        testCase.platform,
+				"redirect_uri":    testCase.redirectURI,
+			}
+			payloadBytes, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google/native", bytes.NewReader(payloadBytes))
+			if err != nil {
+				t.Fatalf("build login request: %v", err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", response.StatusCode)
+			}
+
+			cookies := collectCookies(response.Cookies())
+			sessionCookie := cookies[config.SessionCookieName]
+			if sessionCookie == nil {
+				t.Fatalf("missing session cookie")
+			}
+			refreshCookie := cookies[config.RefreshCookieName]
+			if refreshCookie == nil {
+				t.Fatalf("missing refresh cookie")
+			}
+			sessionClaimsValidator, validatorErr := sessionvalidator.New(sessionvalidator.Config{
+				SigningKey: config.AppJWTSigningKey,
+				Issuer:     config.AppJWTIssuer,
+				CookieName: config.SessionCookieName,
+			})
+			if validatorErr != nil {
+				t.Fatalf("build session validator: %v", validatorErr)
+			}
+			claims, validateErr := sessionClaimsValidator.ValidateToken(sessionCookie.Value)
+			if validateErr != nil {
+				t.Fatalf("validate mobile session token: %v", validateErr)
+			}
+			if claims.GetTenantID() != config.TenantID || claims.GetUserEmail() != testCase.platform+"@example.com" {
+				t.Fatalf("unexpected claims tenant=%s email=%s", claims.GetTenantID(), claims.GetUserEmail())
+			}
+
+			if testCase.platform == "ios" {
+				refreshRequest, refreshErr := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
+				if refreshErr != nil {
+					t.Fatalf("build refresh request: %v", refreshErr)
+				}
+				refreshRequest.AddCookie(refreshCookie)
+				refreshResponse, refreshErr := client.Do(refreshRequest)
+				if refreshErr != nil {
+					t.Fatalf("refresh request failed: %v", refreshErr)
+				}
+				defer refreshResponse.Body.Close()
+				if refreshResponse.StatusCode != http.StatusNoContent {
+					t.Fatalf("expected refresh 204, got %d", refreshResponse.StatusCode)
+				}
+				refreshedCookies := collectCookies(refreshResponse.Cookies())
+				refreshedSessionCookie := refreshedCookies[config.SessionCookieName]
+				if refreshedSessionCookie == nil {
+					t.Fatalf("missing refreshed session cookie")
+				}
+				if _, validateErr := sessionClaimsValidator.ValidateToken(refreshedSessionCookie.Value); validateErr != nil {
+					t.Fatalf("validate refreshed session token: %v", validateErr)
+				}
+				refreshedRefreshCookie := refreshedCookies[config.RefreshCookieName]
+				if refreshedRefreshCookie == nil {
+					t.Fatalf("missing refreshed refresh cookie")
+				}
+
+				logoutRequest, logoutErr := http.NewRequest(http.MethodPost, server.URL+"/auth/logout", nil)
+				if logoutErr != nil {
+					t.Fatalf("build logout request: %v", logoutErr)
+				}
+				logoutRequest.AddCookie(refreshedRefreshCookie)
+				logoutResponse, logoutErr := client.Do(logoutRequest)
+				if logoutErr != nil {
+					t.Fatalf("logout request failed: %v", logoutErr)
+				}
+				defer logoutResponse.Body.Close()
+				if logoutResponse.StatusCode != http.StatusNoContent {
+					t.Fatalf("expected logout 204, got %d", logoutResponse.StatusCode)
+				}
+				logoutCookies := collectCookies(logoutResponse.Cookies())
+				if logoutCookies[config.SessionCookieName] == nil || logoutCookies[config.SessionCookieName].MaxAge != -1 {
+					t.Fatalf("expected cleared session cookie")
+				}
+				if logoutCookies[config.RefreshCookieName] == nil || logoutCookies[config.RefreshCookieName].MaxAge != -1 {
+					t.Fatalf("expected cleared refresh cookie")
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPNativeMobileGoogleLoginRejectsWrongPlatformAudience(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newMobileNativeTestServerConfig()
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"android-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            googleIssuerHTTPS,
+					"sub":            "sub-android",
+					"email":          "android@example.com",
+					"email_verified": true,
+					"name":           "Android User",
+					"nonce":          "mobile-nonce",
+				},
+			},
+			expectedAudience: "android-client-id",
+		},
+	}}
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+
+	router := gin.New()
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	body := map[string]string{
+		"google_id_token": "android-token",
+		"nonce_token":     "mobile-nonce",
+		"platform":        "ios",
+		"redirect_uri":    "com.promptdew.mobile://oauth2redirect/google",
+	}
+	payloadBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google/native", bytes.NewReader(payloadBytes))
+	if err != nil {
+		t.Fatalf("build login request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", response.StatusCode)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode payload: %v", decodeErr)
+	}
+	if payload["error"] != "invalid_google_token" {
+		t.Fatalf("expected invalid_google_token, got %v", payload["error"])
+	}
+}
+
+func TestHTTPNativeMobileGoogleLoginRejectsInvalidRedirectURI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newMobileNativeTestServerConfig()
+	router := gin.New()
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	testCases := []struct {
+		name        string
+		redirectURI string
+	}{
+		{
+			name:        "missing",
+			redirectURI: "",
+		},
+		{
+			name:        "unconfigured",
+			redirectURI: "com.promptdew.mobile://unexpected",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := map[string]string{
+				"google_id_token": "ios-token",
+				"nonce_token":     "mobile-nonce",
+				"platform":        "ios",
+			}
+			if testCase.redirectURI != "" {
+				body["redirect_uri"] = testCase.redirectURI
+			}
+			payloadBytes, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/auth/google/native", bytes.NewReader(payloadBytes))
+			if err != nil {
+				t.Fatalf("build login request: %v", err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", response.StatusCode)
+			}
+			var payload map[string]string
+			if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+				t.Fatalf("decode payload: %v", decodeErr)
+			}
+			if payload["error"] != errorNativeGoogleRedirectURIInvalid {
+				t.Fatalf("expected invalid redirect error, got %v", payload["error"])
+			}
+		})
 	}
 }
 

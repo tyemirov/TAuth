@@ -9,6 +9,7 @@ import (
 type ServerConfig struct {
 	GoogleWebClientID    string
 	GoogleNativeClientID string
+	NativeGoogleClients  []NativeGoogleClientConfig
 	AppJWTSigningKey     []byte
 	AppJWTIssuer         string
 	TenantID             string
@@ -21,4 +22,11 @@ type ServerConfig struct {
 	NonceTTL             time.Duration
 	SameSiteMode         http.SameSite
 	AllowInsecureHTTP    bool
+}
+
+// NativeGoogleClientConfig configures one accepted native Google OAuth client.
+type NativeGoogleClientConfig struct {
+	Platform     string
+	ClientID     string
+	RedirectURIs []string
 }

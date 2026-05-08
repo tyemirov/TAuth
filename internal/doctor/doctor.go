@@ -196,8 +196,8 @@ func validateTenantConfig(tenant tenants.Tenant, result *DiagnosticResult) {
 		result.Valid = false
 		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: google_web_client_id is required", tenantID))
 	}
-	if tenant.GoogleNativeClientID() == "" {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_native_client_id is not configured; native desktop login will return 404", tenantID))
+	if len(tenant.NativeGoogleClients()) == 0 {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_native_client_id/google_native_clients is not configured; native login will return 404", tenantID))
 	}
 
 	if len(tenant.Origins()) == 0 {

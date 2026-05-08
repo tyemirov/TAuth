@@ -30,6 +30,7 @@ type Tenant struct {
 	allowedUsers         []string
 	googleWebClientID    string
 	googleNativeClientID string
+	nativeGoogleClients  []NativeGoogleClient
 	jwtSigningKey        []byte
 	cookieDomain         string
 	sessionCookieName    string
@@ -42,6 +43,13 @@ type Tenant struct {
 
 // TenantID identifies each tenant block.
 type TenantID string
+
+// NativeGoogleClient represents one accepted installed-app Google audience.
+type NativeGoogleClient struct {
+	platform     string
+	clientID     string
+	redirectURIs []string
+}
 
 type tenantCookieScope struct {
 	tenantID          TenantID
@@ -56,7 +64,9 @@ var ErrInvalidTenantConfig = errors.New("tenantconfig.invalid")
 
 const (
 	tenantIDPattern                     = "^[a-z0-9][a-z0-9_-]{1,63}$"
+	nativeGooglePlatformPattern         = "^[a-z][a-z0-9_-]{1,31}$"
 	defaultNonceTTL                     = 5 * time.Minute
+	defaultNativeGooglePlatform         = "desktop"
 	errorCodeInvalidPath                = "tenant.invalid_path"
 	errorCodeMissingTenants             = "tenant.missing_records"
 	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
@@ -67,6 +77,9 @@ const (
 	errorCodeInvalidAllowedUser         = "tenant.invalid_allowed_user"
 	errorCodeDuplicateAllowedUser       = "tenant.duplicate_allowed_user"
 	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
+	errorCodeInvalidNativeGoogleID      = "tenant.invalid_native_google_client_id"
+	errorCodeInvalidNativePlatform      = "tenant.invalid_native_google_platform"
+	errorCodeInvalidNativeRedirectURI   = "tenant.invalid_native_redirect_uri"
 	errorCodeDuplicateNativeGoogleID    = "tenant.duplicate_native_google_client_id"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
@@ -99,6 +112,7 @@ const (
 )
 
 var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
+var nativeGooglePlatformRegex = regexp.MustCompile(nativeGooglePlatformPattern)
 
 // LoadConfig reads and validates tenants from the provided YAML file path.
 func LoadConfig(path string) (Config, error) {
@@ -148,8 +162,7 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 		if _, exists := tenantIndex[tenant.id]; exists {
 			return Config{}, fmt.Errorf("%w: %s id=%s", ErrInvalidTenantConfig, errorCodeDuplicateTenantID, tenant.id)
 		}
-		nativeGoogleClientID := tenant.GoogleNativeClientID()
-		if nativeGoogleClientID != "" {
+		for _, nativeGoogleClientID := range tenant.NativeGoogleClientIDs() {
 			if otherTenantID, exists := nativeGoogleClientIDs[nativeGoogleClientID]; exists {
 				return Config{}, fmt.Errorf(
 					duplicateGoogleIDErrorFormat,
@@ -266,6 +279,49 @@ func (tenant Tenant) GoogleNativeClientID() string {
 	return tenant.googleNativeClientID
 }
 
+// NativeGoogleClients returns the accepted installed-app Google clients.
+func (tenant Tenant) NativeGoogleClients() []NativeGoogleClient {
+	if len(tenant.nativeGoogleClients) == 0 {
+		return nil
+	}
+	clients := make([]NativeGoogleClient, len(tenant.nativeGoogleClients))
+	for index, client := range tenant.nativeGoogleClients {
+		clients[index] = NativeGoogleClient{
+			platform:     client.platform,
+			clientID:     client.clientID,
+			redirectURIs: append([]string(nil), client.redirectURIs...),
+		}
+	}
+	return clients
+}
+
+// NativeGoogleClientIDs returns the accepted native Google audiences.
+func (tenant Tenant) NativeGoogleClientIDs() []string {
+	if len(tenant.nativeGoogleClients) == 0 {
+		return nil
+	}
+	clientIDs := make([]string, 0, len(tenant.nativeGoogleClients))
+	for _, client := range tenant.nativeGoogleClients {
+		clientIDs = append(clientIDs, client.clientID)
+	}
+	return clientIDs
+}
+
+// Platform returns the native platform label.
+func (client NativeGoogleClient) Platform() string {
+	return client.platform
+}
+
+// ClientID returns the accepted Google OAuth client ID.
+func (client NativeGoogleClient) ClientID() string {
+	return client.clientID
+}
+
+// RedirectURIs returns configured OAuth redirect URIs for the client.
+func (client NativeGoogleClient) RedirectURIs() []string {
+	return append([]string(nil), client.redirectURIs...)
+}
+
 // SigningKey returns a copy of the tenant-specific signing key, if provided.
 func (tenant Tenant) SigningKey() []byte {
 	if len(tenant.jwtSigningKey) == 0 {
@@ -328,7 +384,11 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if googleWebClientID == "" {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
 	}
-	googleNativeClientID := strings.TrimSpace(raw.GoogleNativeClientID)
+	nativeGoogleClients, nativeGoogleClientErr := parseNativeGoogleClients(raw, tenantID)
+	if nativeGoogleClientErr != nil {
+		return Tenant{}, nil, nativeGoogleClientErr
+	}
+	googleNativeClientID := firstNativeGoogleClientID(nativeGoogleClients)
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
@@ -373,6 +433,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		allowedUsers:         allowedUsers,
 		googleWebClientID:    googleWebClientID,
 		googleNativeClientID: googleNativeClientID,
+		nativeGoogleClients:  nativeGoogleClients,
 		jwtSigningKey:        signingKey,
 		cookieDomain:         cookieDomain,
 		sessionCookieName:    sessionCookieName,
@@ -382,6 +443,98 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		nonceTTL:             nonceTTL,
 		allowInsecureHTTP:    bool(raw.AllowInsecureHTTP),
 	}, origins, nil
+}
+
+func parseNativeGoogleClients(raw FileTenant, tenantID TenantID) ([]NativeGoogleClient, error) {
+	clients := make([]NativeGoogleClient, 0, 1+len(raw.GoogleNativeClients))
+	legacyClientID := strings.TrimSpace(raw.GoogleNativeClientID)
+	if legacyClientID != "" {
+		clients = append(clients, NativeGoogleClient{
+			platform: defaultNativeGooglePlatform,
+			clientID: legacyClientID,
+		})
+	}
+	for _, rawClient := range raw.GoogleNativeClients {
+		client, clientErr := parseNativeGoogleClient(rawClient, tenantID)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		clients = append(clients, client)
+	}
+	return clients, nil
+}
+
+func parseNativeGoogleClient(raw FileNativeGoogleClient, tenantID TenantID) (NativeGoogleClient, error) {
+	platform := strings.ToLower(strings.TrimSpace(raw.Platform))
+	if !nativeGooglePlatformRegex.MatchString(platform) {
+		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s", ErrInvalidTenantConfig, errorCodeInvalidNativePlatform, tenantID, platform)
+	}
+	clientID := strings.TrimSpace(raw.ClientID)
+	if clientID == "" {
+		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeGoogleID, tenantID, platform)
+	}
+	redirectURIs, redirectErr := parseNativeGoogleRedirectURIs(raw.RedirectURIs, tenantID, platform)
+	if redirectErr != nil {
+		return NativeGoogleClient{}, redirectErr
+	}
+	return NativeGoogleClient{
+		platform:     platform,
+		clientID:     clientID,
+		redirectURIs: redirectURIs,
+	}, nil
+}
+
+func parseNativeGoogleRedirectURIs(rawRedirectURIs []string, tenantID TenantID, platform string) ([]string, error) {
+	if len(rawRedirectURIs) == 0 {
+		return nil, nil
+	}
+	redirectURIs := make([]string, 0, len(rawRedirectURIs))
+	seenRedirectURIs := make(map[string]struct{}, len(rawRedirectURIs))
+	for _, rawRedirectURI := range rawRedirectURIs {
+		redirectURI, redirectErr := normalizeNativeGoogleRedirectURI(rawRedirectURI)
+		if redirectErr != nil {
+			return nil, fmt.Errorf("%w: %s tenant=%s platform=%s redirect_uri=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeRedirectURI, tenantID, platform, rawRedirectURI, redirectErr)
+		}
+		duplicateKey := strings.ToLower(redirectURI)
+		if _, exists := seenRedirectURIs[duplicateKey]; exists {
+			return nil, fmt.Errorf("%w: %s tenant=%s platform=%s redirect_uri=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeRedirectURI, tenantID, platform, redirectURI)
+		}
+		seenRedirectURIs[duplicateKey] = struct{}{}
+		redirectURIs = append(redirectURIs, redirectURI)
+	}
+	return redirectURIs, nil
+}
+
+func normalizeNativeGoogleRedirectURI(rawRedirectURI string) (string, error) {
+	trimmed := strings.TrimSpace(rawRedirectURI)
+	parsedURI, parseErr := url.Parse(trimmed)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if parsedURI.Scheme == "" {
+		return "", fmt.Errorf("missing scheme")
+	}
+	if parsedURI.Fragment != "" {
+		return "", fmt.Errorf("fragment is not allowed")
+	}
+	scheme := strings.ToLower(parsedURI.Scheme)
+	if scheme == originSchemeHTTP || scheme == originSchemeHTTPS {
+		if parsedURI.Host == "" {
+			return "", fmt.Errorf("missing host")
+		}
+		return trimmed, nil
+	}
+	if parsedURI.Host == "" && parsedURI.Path == "" && parsedURI.Opaque == "" {
+		return "", fmt.Errorf("missing redirect target")
+	}
+	return trimmed, nil
+}
+
+func firstNativeGoogleClientID(clients []NativeGoogleClient) string {
+	if len(clients) == 0 {
+		return ""
+	}
+	return clients[0].clientID
 }
 
 func parseTenantID(raw string) (TenantID, error) {
@@ -737,6 +890,11 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.AllowedUsers = expandEnvSlice(tenant.AllowedUsers)
 	tenant.GoogleWebClientID = os.ExpandEnv(tenant.GoogleWebClientID)
 	tenant.GoogleNativeClientID = os.ExpandEnv(tenant.GoogleNativeClientID)
+	for index := range tenant.GoogleNativeClients {
+		tenant.GoogleNativeClients[index].Platform = os.ExpandEnv(tenant.GoogleNativeClients[index].Platform)
+		tenant.GoogleNativeClients[index].ClientID = os.ExpandEnv(tenant.GoogleNativeClients[index].ClientID)
+		tenant.GoogleNativeClients[index].RedirectURIs = expandEnvSlice(tenant.GoogleNativeClients[index].RedirectURIs)
+	}
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -760,20 +918,28 @@ func expandEnvSlice(values []string) []string {
 
 // FileTenant represents a single tenant entry inside the YAML document.
 type FileTenant struct {
-	ID                   string   `json:"id" yaml:"id"`
-	DisplayName          string   `json:"display_name" yaml:"display_name"`
-	TenantOrigins        []string `json:"tenant_origins" yaml:"tenant_origins"`
-	AllowedUsers         []string `json:"allowed_users" yaml:"allowed_users"`
-	GoogleWebClientID    string   `json:"google_web_client_id" yaml:"google_web_client_id"`
-	GoogleNativeClientID string   `json:"google_native_client_id" yaml:"google_native_client_id"`
-	JWTSigningKey        string   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
-	CookieDomain         string   `json:"cookie_domain" yaml:"cookie_domain"`
-	SessionCookieName    string   `json:"session_cookie_name" yaml:"session_cookie_name"`
-	RefreshCookieName    string   `json:"refresh_cookie_name" yaml:"refresh_cookie_name"`
-	SessionTTL           string   `json:"session_ttl" yaml:"session_ttl"`
-	RefreshTTL           string   `json:"refresh_ttl" yaml:"refresh_ttl"`
-	NonceTTL             string   `json:"nonce_ttl" yaml:"nonce_ttl"`
-	AllowInsecureHTTP    yamlBool `json:"allow_insecure_http" yaml:"allow_insecure_http"`
+	ID                   string                   `json:"id" yaml:"id"`
+	DisplayName          string                   `json:"display_name" yaml:"display_name"`
+	TenantOrigins        []string                 `json:"tenant_origins" yaml:"tenant_origins"`
+	AllowedUsers         []string                 `json:"allowed_users" yaml:"allowed_users"`
+	GoogleWebClientID    string                   `json:"google_web_client_id" yaml:"google_web_client_id"`
+	GoogleNativeClientID string                   `json:"google_native_client_id" yaml:"google_native_client_id"`
+	GoogleNativeClients  []FileNativeGoogleClient `json:"google_native_clients" yaml:"google_native_clients"`
+	JWTSigningKey        string                   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
+	CookieDomain         string                   `json:"cookie_domain" yaml:"cookie_domain"`
+	SessionCookieName    string                   `json:"session_cookie_name" yaml:"session_cookie_name"`
+	RefreshCookieName    string                   `json:"refresh_cookie_name" yaml:"refresh_cookie_name"`
+	SessionTTL           string                   `json:"session_ttl" yaml:"session_ttl"`
+	RefreshTTL           string                   `json:"refresh_ttl" yaml:"refresh_ttl"`
+	NonceTTL             string                   `json:"nonce_ttl" yaml:"nonce_ttl"`
+	AllowInsecureHTTP    yamlBool                 `json:"allow_insecure_http" yaml:"allow_insecure_http"`
+}
+
+// FileNativeGoogleClient represents one raw native Google client entry.
+type FileNativeGoogleClient struct {
+	Platform     string   `json:"platform" yaml:"platform"`
+	ClientID     string   `json:"client_id" yaml:"client_id"`
+	RedirectURIs []string `json:"redirect_uris" yaml:"redirect_uris"`
 }
 
 type yamlBool bool

@@ -80,24 +80,32 @@ type testServerPayload struct {
 }
 
 type testTenantPayload struct {
-	TenantID                 string   `json:"tenant_id"`
-	DisplayName              string   `json:"display_name"`
-	TenantOrigins            []string `json:"tenant_origins"`
-	TenantOriginsRedacted    bool     `json:"tenant_origins_redacted"`
-	TenantOriginsCount       int      `json:"tenant_origins_count"`
-	TenantOriginHashes       []string `json:"tenant_origin_hashes"`
-	GoogleWebClientID        string   `json:"google_web_client_id"`
-	GoogleNativeClientID     string   `json:"google_native_client_id"`
-	CookieDomain             string   `json:"cookie_domain"`
-	SessionCookieName        string   `json:"session_cookie_name"`
-	RefreshCookieName        string   `json:"refresh_cookie_name"`
-	SessionTTL               string   `json:"session_ttl"`
-	RefreshTTL               string   `json:"refresh_ttl"`
-	NonceTTL                 string   `json:"nonce_ttl"`
-	AllowInsecureHTTP        bool     `json:"allow_insecure_http"`
-	SameSiteMode             string   `json:"same_site_mode"`
-	JWTIssuer                string   `json:"jwt_issuer"`
-	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
+	TenantID                 string                          `json:"tenant_id"`
+	DisplayName              string                          `json:"display_name"`
+	TenantOrigins            []string                        `json:"tenant_origins"`
+	TenantOriginsRedacted    bool                            `json:"tenant_origins_redacted"`
+	TenantOriginsCount       int                             `json:"tenant_origins_count"`
+	TenantOriginHashes       []string                        `json:"tenant_origin_hashes"`
+	GoogleWebClientID        string                          `json:"google_web_client_id"`
+	GoogleNativeClientID     string                          `json:"google_native_client_id"`
+	GoogleNativeClientIDs    []string                        `json:"google_native_client_ids"`
+	GoogleNativeClients      []testNativeGoogleClientPayload `json:"google_native_clients"`
+	CookieDomain             string                          `json:"cookie_domain"`
+	SessionCookieName        string                          `json:"session_cookie_name"`
+	RefreshCookieName        string                          `json:"refresh_cookie_name"`
+	SessionTTL               string                          `json:"session_ttl"`
+	RefreshTTL               string                          `json:"refresh_ttl"`
+	NonceTTL                 string                          `json:"nonce_ttl"`
+	AllowInsecureHTTP        bool                            `json:"allow_insecure_http"`
+	SameSiteMode             string                          `json:"same_site_mode"`
+	JWTIssuer                string                          `json:"jwt_issuer"`
+	JWTSigningKeyFingerprint string                          `json:"jwt_signing_key_fingerprint"`
+}
+
+type testNativeGoogleClientPayload struct {
+	Platform     string   `json:"platform"`
+	ClientID     string   `json:"client_id"`
+	RedirectURIs []string `json:"redirect_uris"`
 }
 
 func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
@@ -148,6 +156,12 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	}
 	if tenant.GoogleNativeClientID == "" {
 		testingHandle.Fatalf("expected google_native_client_id")
+	}
+	if len(tenant.GoogleNativeClientIDs) != 1 || tenant.GoogleNativeClientIDs[0] != tenant.GoogleNativeClientID {
+		testingHandle.Fatalf("unexpected google_native_client_ids: %#v", tenant.GoogleNativeClientIDs)
+	}
+	if len(tenant.GoogleNativeClients) != 1 || tenant.GoogleNativeClients[0].Platform != "desktop" {
+		testingHandle.Fatalf("unexpected google_native_clients: %#v", tenant.GoogleNativeClients)
 	}
 }
 

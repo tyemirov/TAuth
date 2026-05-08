@@ -78,6 +78,9 @@ func TestLoadConfigSuccess(t *testing.T) {
 	if demoTenant.GoogleNativeClientID() != "demo-native.apps.googleusercontent.com" {
 		t.Fatalf("unexpected google native client id: %s", demoTenant.GoogleNativeClientID())
 	}
+	if clients := demoTenant.NativeGoogleClients(); len(clients) != 1 || clients[0].Platform() != defaultNativeGooglePlatform {
+		t.Fatalf("unexpected native google clients: %#v", clients)
+	}
 	if string(demoTenant.SigningKey()) != "demo-tenant-key" {
 		t.Fatalf("unexpected signing key: %s", demoTenant.SigningKey())
 	}
@@ -473,6 +476,80 @@ func TestLoadConfigRejectsDuplicateNativeGoogleClientID(t *testing.T) {
 	}
 	if !containsStableCode(loadErr, errorCodeDuplicateNativeGoogleID) {
 		t.Fatalf("expected error to contain code %s, got %v", errorCodeDuplicateNativeGoogleID, loadErr)
+	}
+}
+
+func TestLoadConfigParsesPlatformNativeGoogleClients(t *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			buildTestTenant("mobile", []string{"https://mobile.localhost"}, "", "app_session_mobile", "app_refresh_mobile", "mobile-key"),
+		},
+	}
+	document.Tenants[0].GoogleNativeClients = []FileNativeGoogleClient{
+		{
+			Platform: "iOS",
+			ClientID: "ios-client.apps.googleusercontent.com",
+			RedirectURIs: []string{
+				"com.promptdew.mobile://oauth2redirect/google",
+				"https://promptdew.mprlab.com/oauth/google/callback",
+			},
+		},
+		{
+			Platform:     "android",
+			ClientID:     "android-client.apps.googleusercontent.com",
+			RedirectURIs: []string{"com.promptdew.mobile:/oauth2redirect/google"},
+		},
+	}
+
+	config, loadErr := LoadConfigFromDocument(document)
+	if loadErr != nil {
+		t.Fatalf("expected config to load, got %v", loadErr)
+	}
+	tenant, exists := config.TenantByID("mobile")
+	if !exists {
+		t.Fatalf("expected mobile tenant")
+	}
+	if tenant.GoogleNativeClientID() != "ios-client.apps.googleusercontent.com" {
+		t.Fatalf("unexpected first native client id: %s", tenant.GoogleNativeClientID())
+	}
+	if !sameStringSlices(tenant.NativeGoogleClientIDs(), []string{"ios-client.apps.googleusercontent.com", "android-client.apps.googleusercontent.com"}) {
+		t.Fatalf("unexpected native client ids: %#v", tenant.NativeGoogleClientIDs())
+	}
+	clients := tenant.NativeGoogleClients()
+	if len(clients) != 2 {
+		t.Fatalf("expected two native clients, got %d", len(clients))
+	}
+	if clients[0].Platform() != "ios" {
+		t.Fatalf("expected normalized ios platform, got %s", clients[0].Platform())
+	}
+	if !sameStringSlices(clients[0].RedirectURIs(), []string{"com.promptdew.mobile://oauth2redirect/google", "https://promptdew.mprlab.com/oauth/google/callback"}) {
+		t.Fatalf("unexpected ios redirect uris: %#v", clients[0].RedirectURIs())
+	}
+}
+
+func TestLoadConfigRejectsInvalidNativeGoogleRedirectURI(t *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			buildTestTenant("mobile", []string{"https://mobile.localhost"}, "", "app_session_mobile", "app_refresh_mobile", "mobile-key"),
+		},
+	}
+	document.Tenants[0].GoogleNativeClients = []FileNativeGoogleClient{
+		{
+			Platform:     "ios",
+			ClientID:     "ios-client.apps.googleusercontent.com",
+			RedirectURIs: []string{"/oauth2redirect/google"},
+		},
+	}
+
+	_, loadErr := LoadConfigFromDocument(document)
+	if loadErr == nil {
+		t.Fatalf("expected config error")
+	}
+	if !errors.Is(loadErr, ErrInvalidTenantConfig) {
+		t.Fatalf("expected ErrInvalidTenantConfig, got %v", loadErr)
+	}
+	if !containsStableCode(loadErr, errorCodeInvalidNativeRedirectURI) {
+		t.Fatalf("expected error to contain code %s, got %v", errorCodeInvalidNativeRedirectURI, loadErr)
 	}
 }
 

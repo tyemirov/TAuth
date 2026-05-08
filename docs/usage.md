@@ -79,9 +79,20 @@ tenants:
     allowed_users:
       - "user@example.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
-    google_native_client_id: "your_native_client_id.apps.googleusercontent.com"
+    google_native_client_id: "your_desktop_native_client_id.apps.googleusercontent.com"
+    google_native_clients:
+      - platform: "ios"
+        client_id: "your_ios_client_id.apps.googleusercontent.com"
+        redirect_uris:
+          - "com.example.app://oauth2redirect/google"
+      - platform: "android"
+        client_id: "your_android_client_id.apps.googleusercontent.com"
+        redirect_uris:
+          - "com.example.app:/oauth2redirect/google"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".example.com"
+    session_cookie_name: "app_session_prod"
+    refresh_cookie_name: "app_refresh_prod"
     session_ttl: "15m"
     refresh_ttl: "1440h"
     nonce_ttl: "5m"
@@ -298,13 +309,39 @@ When using `tauth.js` or the mpr‑ui header component, this flow is handled int
 
 Native apps such as PromptDew must not embed Google sign-in in a web view. Instead, they should:
 
-1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header.
-2. Open Google in the system browser with PKCE, `scope=openid email profile`, a loopback redirect URI, and an OIDC `nonce`.
+1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header. Expo clients should add `?platform=ios` or `?platform=android`.
+2. Open Google in the system browser with PKCE `S256`, `response_type=code`, `scope=openid email profile`, one configured redirect URI, and an OIDC `nonce`.
 3. Exchange the authorization code directly with Google and extract the returned `id_token`.
-4. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "..." }`.
+4. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }`.
 5. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
 
-This path validates the `id_token` against the tenant’s optional `google_native_client_id`. If that field is absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. Native client IDs must be unique across tenants.
+This path validates the `id_token` against the tenant’s optional `google_native_client_id` and/or `google_native_clients` entries. If native clients are absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. If a requested platform is absent, they return `404` with `error: "native_google_platform_not_configured"`. Native client IDs must be unique across tenants.
+
+Expo AuthSession recipe:
+
+```ts
+const tenantId = "promptdew";
+const platform = Platform.OS === "ios" ? "ios" : "android";
+const configResponse = await fetch(
+  `${tauthBaseUrl}/auth/google/native/config?platform=${platform}`,
+  { headers: { "X-TAuth-Tenant": tenantId }, credentials: "include" },
+);
+const nativeConfig = await configResponse.json();
+const nonce = crypto.randomUUID();
+const request = new AuthSession.AuthRequest({
+  clientId: nativeConfig.client_id,
+  scopes: nativeConfig.scopes,
+  redirectUri: nativeConfig.redirect_uris[0],
+  responseType: AuthSession.ResponseType.Code,
+  usePKCE: true,
+  extraParams: { nonce },
+});
+const result = await request.promptAsync({
+  authorizationEndpoint: nativeConfig.authorization_endpoint,
+});
+```
+
+After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.mprlab.com`.
 
 ---
 
@@ -354,14 +391,28 @@ Returns the tenant-specific metadata a native client needs before opening the Go
   ```json
   {
     "client_id": "native-client.apps.googleusercontent.com",
+    "client_ids": ["native-client.apps.googleusercontent.com"],
+    "platform": "ios",
+    "redirect_uris": ["com.promptdew.mobile://oauth2redirect/google"],
+    "clients": [
+      {
+        "platform": "ios",
+        "client_id": "native-client.apps.googleusercontent.com",
+        "redirect_uris": ["com.promptdew.mobile://oauth2redirect/google"]
+      }
+    ],
     "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
     "token_endpoint": "https://oauth2.googleapis.com/token",
-    "scopes": ["openid", "email", "profile"]
+    "scopes": ["openid", "email", "profile"],
+    "response_type": "code",
+    "pkce_required": true,
+    "code_challenge_methods_supported": ["S256"]
   }
   ```
 
 - **Errors**:
-  - `404` with `error: "native_google_login_not_configured"` when the tenant has no `google_native_client_id`
+  - `404` with `error: "native_google_login_not_configured"` when the tenant has no native Google clients
+  - `404` with `error: "native_google_platform_not_configured"` when `platform` is requested but not configured
   - tenant-resolution failures when no `Origin` or `X-TAuth-Tenant` can resolve a tenant
 
 ### 6.2b `POST /auth/google/native`
@@ -373,12 +424,15 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
   ```json
   {
     "google_id_token": "<id_token_from_google_token_endpoint>",
-    "nonce_token": "<raw_oidc_nonce>"
+    "nonce_token": "<raw_oidc_nonce>",
+    "platform": "ios",
+    "redirect_uri": "com.promptdew.mobile://oauth2redirect/google"
   }
   ```
 
 - **Validation**:
-  - the ID token audience must match the resolved tenant’s `google_native_client_id`
+  - the ID token audience must match the requested platform’s configured native client ID, or any configured native client ID when `platform` is omitted
+  - when `redirect_uri` is provided, it must be one of the configured redirect URIs for the selected native client
   - issuer must be Google
   - the ID token must contain a verified email
   - the ID token `nonce` claim must exactly equal `nonce_token`
@@ -584,7 +638,8 @@ Use this checklist when integrating:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.
   - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
-- **Native desktop login returns `native_google_login_not_configured`** – Add `google_native_client_id` to the tenant config and ensure the native app sends `X-TAuth-Tenant` when it has no browser `Origin` header.
+- **Native login returns `native_google_login_not_configured`** – Add `google_native_client_id` or `google_native_clients` to the tenant config and ensure the native app sends `X-TAuth-Tenant` when it has no browser `Origin` header.
+- **Native login returns `native_google_platform_not_configured`** – Add a matching `google_native_clients` entry for `platform: "ios"` or `platform: "android"`, or omit `platform` to accept any configured native client audience.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
 - When multiple tenants share the same origin, list each frontend origin under `tenant_origins` so TAuth can resolve the tenant from the `Origin` header. You can override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper only sends `X-TAuth-Tenant` when you opt into an explicit override.
