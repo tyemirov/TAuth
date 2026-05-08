@@ -48,6 +48,11 @@ image_digest() {
   docker buildx imagetools inspect "${image_ref}" | awk '/^Digest:/ { print $2; exit }'
 }
 
+image_digest_or_empty() {
+  local image_ref="$1"
+  docker buildx imagetools inspect "${image_ref}" 2>/dev/null | awk '/^Digest:/ { print $2; exit }'
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --gateway-dir)
@@ -157,18 +162,39 @@ if [[ "${SKIP_CI}" != "true" && "${SKIP_BACKEND}" != "true" ]]; then
   timeout -k 1200s -s SIGKILL 1200s make ci
 fi
 
-if [[ "${SKIP_IMAGE_VERIFY}" != "true" && "${SKIP_BACKEND}" != "true" ]]; then
+if [[ "${SKIP_IMAGE_VERIFY}" != "true" ]]; then
   command -v docker >/dev/null 2>&1 || { echo "error: docker is required for image verification" >&2; exit 1; }
   docker buildx version >/dev/null 2>&1 || { echo "error: docker buildx is required for image verification" >&2; exit 1; }
-  echo "==> [deploy] Verifying ${IMAGE_REPOSITORY}:latest matches ${TAG}"
-  release_digest="$(image_digest "${IMAGE_REPOSITORY}:${TAG}")"
+  echo "==> [deploy] Verifying ${IMAGE_REPOSITORY}:latest matches release ${TAG}"
   latest_digest="$(image_digest "${IMAGE_REPOSITORY}:latest")"
-  [[ -n "${release_digest}" ]] || { echo "error: could not resolve digest for ${IMAGE_REPOSITORY}:${TAG}" >&2; exit 1; }
   [[ -n "${latest_digest}" ]] || { echo "error: could not resolve digest for ${IMAGE_REPOSITORY}:latest" >&2; exit 1; }
-  if [[ "${release_digest}" != "${latest_digest}" ]]; then
-    echo "error: ${IMAGE_REPOSITORY}:latest digest ${latest_digest} does not match ${TAG} digest ${release_digest}; run make publish first" >&2
+
+  release_image_tags=()
+  if [[ "${TAG}" == v* ]]; then
+    release_image_tags+=("${TAG#v}")
+  fi
+  release_image_tags+=("${TAG}")
+
+  matched_release_tag=""
+  resolved_release_digests=()
+  for release_image_tag in "${release_image_tags[@]}"; do
+    release_digest="$(image_digest_or_empty "${IMAGE_REPOSITORY}:${release_image_tag}")"
+    if [[ -z "${release_digest}" ]]; then
+      resolved_release_digests+=("${release_image_tag}=missing")
+      continue
+    fi
+    resolved_release_digests+=("${release_image_tag}=${release_digest}")
+    if [[ "${release_digest}" == "${latest_digest}" ]]; then
+      matched_release_tag="${release_image_tag}"
+      break
+    fi
+  done
+
+  if [[ -z "${matched_release_tag}" ]]; then
+    echo "error: ${IMAGE_REPOSITORY}:latest digest ${latest_digest} does not match release aliases for ${TAG}: ${resolved_release_digests[*]}; run make publish first" >&2
     exit 1
   fi
+  echo "==> [deploy] Verified ${IMAGE_REPOSITORY}:latest matches ${matched_release_tag}"
 fi
 
 if [[ "${SKIP_BACKEND}" != "true" ]]; then

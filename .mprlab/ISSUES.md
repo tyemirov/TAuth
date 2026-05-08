@@ -67,6 +67,9 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [TA-441] Deploy image verification rejects valid GitHub release workflow images when tag aliases differ.
+  `make deploy` compares `ghcr.io/tyemirov/tauth:latest` to the literal `v*` release tag, but the GitHub release workflow publishes SemVer aliases such as `1.1.1` and `latest`. A local `v1.1.1` image can therefore differ from the workflow-published `1.1.1`/`latest` image even though the gateway will pull the correct `latest` image for the release.
+  Resolved: deploy verification now accepts `latest` when it matches a release alias for the current tag, preferring the normalized SemVer alias (`1.1.1`) for `v*` releases; local publish and the GitHub release workflow now tag both `vX.Y.Z` and `X.Y.Z` so future release images keep both aliases aligned. Validation passed with `timeout -k 120s -s SIGKILL 120s bash scripts/deploy.sh --tag v1.1.1 --skip-ci --skip-backend`, `timeout -k 350s -s SIGKILL 350s make ci`, and the sibling gateway `timeout -k 1200s -s SIGKILL 1200s make verify-app-workflows`.
 - [x] [TA-253] Demo bootstrap now waits for tauth.js readiness before wiring GIS; docs no longer describe a `/demo` endpoint.
   Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
 - [x] [TA-332] Ensure the cancellat context is propagated.

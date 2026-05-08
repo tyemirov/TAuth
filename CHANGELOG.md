@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Bug Fixes
+- Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
+
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 
