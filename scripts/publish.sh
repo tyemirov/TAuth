@@ -151,6 +151,7 @@ if [[ ! "${TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; the
   echo "error: release tag must match vMAJOR.MINOR.PATCH (got: ${TAG})" >&2
   exit 1
 fi
+NORMALIZED_TAG="${TAG#v}"
 
 git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null || { echo "error: release tag ${TAG} does not exist locally" >&2; exit 1; }
 tag_sha="$(git rev-list -n 1 "${TAG}")"
@@ -177,6 +178,9 @@ if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
   echo "release_branch=${PUBLISH_BRANCH}"
   echo "release_tag=${TAG}"
   echo "image=${IMAGE}:${TAG}"
+  if [[ "${NORMALIZED_TAG}" != "${TAG}" ]]; then
+    echo "image=${IMAGE}:${NORMALIZED_TAG}"
+  fi
   if [[ "${PUSH_LATEST}" == "true" ]]; then
     echo "image=${IMAGE}:latest"
   fi
@@ -209,6 +213,9 @@ build_args=(
   -t "${IMAGE}:${TAG}"
 )
 
+if [[ "${NORMALIZED_TAG}" != "${TAG}" ]]; then
+  build_args+=(-t "${IMAGE}:${NORMALIZED_TAG}")
+fi
 if [[ "${PUSH_LATEST}" == "true" ]]; then
   build_args+=(-t "${IMAGE}:latest")
 fi
@@ -220,6 +227,9 @@ build_args+=(.)
 "${build_args[@]}"
 
 echo "Published image: ${IMAGE}:${TAG}"
+if [[ "${NORMALIZED_TAG}" != "${TAG}" ]]; then
+  echo "Published image: ${IMAGE}:${NORMALIZED_TAG}"
+fi
 if [[ "${PUSH_LATEST}" == "true" ]]; then
   echo "Published image: ${IMAGE}:latest"
 fi
