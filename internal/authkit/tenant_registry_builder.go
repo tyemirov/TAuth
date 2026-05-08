@@ -47,6 +47,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.TenantID = string(tenant.ID())
 		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
 		tenantServerConfig.GoogleNativeClientID = tenant.GoogleNativeClientID()
+		tenantServerConfig.NativeGoogleClients = buildNativeGoogleClientConfigs(tenant.NativeGoogleClients())
 		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
 		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()
@@ -61,6 +62,21 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 	}
 	defaultTenantID := string(tenantList[0].ID())
 	return NewTenantRegistryFromMap(defaultTenantID, configs), nil
+}
+
+func buildNativeGoogleClientConfigs(clients []tenants.NativeGoogleClient) []NativeGoogleClientConfig {
+	if len(clients) == 0 {
+		return nil
+	}
+	configs := make([]NativeGoogleClientConfig, 0, len(clients))
+	for _, client := range clients {
+		configs = append(configs, NativeGoogleClientConfig{
+			Platform:     client.Platform(),
+			ClientID:     client.ClientID(),
+			RedirectURIs: client.RedirectURIs(),
+		})
+	}
+	return configs
 }
 
 func buildAllowedUserLookup(allowedUsers []string) map[string]struct{} {

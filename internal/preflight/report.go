@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v3"
+	reportSchemaVersion        = "tauth.preflight.v4"
 	endpointContractVersion    = "tauth.http.v1"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
@@ -48,24 +48,32 @@ type serverPayload struct {
 }
 
 type tenantPayload struct {
-	TenantID                 string   `json:"tenant_id"`
-	DisplayName              string   `json:"display_name"`
-	TenantOrigins            []string `json:"tenant_origins,omitempty"`
-	TenantOriginsRedacted    bool     `json:"tenant_origins_redacted"`
-	TenantOriginsCount       int      `json:"tenant_origins_count"`
-	TenantOriginHashes       []string `json:"tenant_origin_hashes,omitempty"`
-	GoogleWebClientID        string   `json:"google_web_client_id"`
-	GoogleNativeClientID     string   `json:"google_native_client_id"`
-	CookieDomain             string   `json:"cookie_domain"`
-	SessionCookieName        string   `json:"session_cookie_name"`
-	RefreshCookieName        string   `json:"refresh_cookie_name"`
-	SessionTTL               string   `json:"session_ttl"`
-	RefreshTTL               string   `json:"refresh_ttl"`
-	NonceTTL                 string   `json:"nonce_ttl"`
-	AllowInsecureHTTP        bool     `json:"allow_insecure_http"`
-	SameSiteMode             string   `json:"same_site_mode"`
-	JWTIssuer                string   `json:"jwt_issuer"`
-	JWTSigningKeyFingerprint string   `json:"jwt_signing_key_fingerprint"`
+	TenantID                 string                      `json:"tenant_id"`
+	DisplayName              string                      `json:"display_name"`
+	TenantOrigins            []string                    `json:"tenant_origins,omitempty"`
+	TenantOriginsRedacted    bool                        `json:"tenant_origins_redacted"`
+	TenantOriginsCount       int                         `json:"tenant_origins_count"`
+	TenantOriginHashes       []string                    `json:"tenant_origin_hashes,omitempty"`
+	GoogleWebClientID        string                      `json:"google_web_client_id"`
+	GoogleNativeClientID     string                      `json:"google_native_client_id"`
+	GoogleNativeClientIDs    []string                    `json:"google_native_client_ids,omitempty"`
+	GoogleNativeClients      []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
+	CookieDomain             string                      `json:"cookie_domain"`
+	SessionCookieName        string                      `json:"session_cookie_name"`
+	RefreshCookieName        string                      `json:"refresh_cookie_name"`
+	SessionTTL               string                      `json:"session_ttl"`
+	RefreshTTL               string                      `json:"refresh_ttl"`
+	NonceTTL                 string                      `json:"nonce_ttl"`
+	AllowInsecureHTTP        bool                        `json:"allow_insecure_http"`
+	SameSiteMode             string                      `json:"same_site_mode"`
+	JWTIssuer                string                      `json:"jwt_issuer"`
+	JWTSigningKeyFingerprint string                      `json:"jwt_signing_key_fingerprint"`
+}
+
+type nativeGoogleClientPayload struct {
+	Platform     string   `json:"platform"`
+	ClientID     string   `json:"client_id"`
+	RedirectURIs []string `json:"redirect_uris,omitempty"`
 }
 
 // BuildRedactedReport builds a preflight report with redacted origins.
@@ -173,6 +181,8 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			TenantOriginHashes:       originHashes,
 			GoogleWebClientID:        tenant.GoogleWebClientID(),
 			GoogleNativeClientID:     tenant.GoogleNativeClientID(),
+			GoogleNativeClientIDs:    tenant.NativeGoogleClientIDs(),
+			GoogleNativeClients:      buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
 			CookieDomain:             tenant.CookieDomain(),
 			SessionCookieName:        tenant.SessionCookieName(),
 			RefreshCookieName:        tenant.RefreshCookieName(),
@@ -189,6 +199,21 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			payload.TenantOrigins = append([]string(nil), origins...)
 		}
 		payloads = append(payloads, payload)
+	}
+	return payloads
+}
+
+func buildNativeGoogleClientPayloads(clients []tenants.NativeGoogleClient) []nativeGoogleClientPayload {
+	if len(clients) == 0 {
+		return nil
+	}
+	payloads := make([]nativeGoogleClientPayload, 0, len(clients))
+	for _, client := range clients {
+		payloads = append(payloads, nativeGoogleClientPayload{
+			Platform:     client.Platform(),
+			ClientID:     client.ClientID(),
+			RedirectURIs: client.RedirectURIs(),
+		})
 	}
 	return payloads
 }

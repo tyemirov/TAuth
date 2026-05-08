@@ -29,7 +29,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | Method | Path            | Responsibility                                          | Response                                    |
 | ------ | --------------- | ------------------------------------------------------- | ------------------------------------------- |
 | POST   | `/auth/nonce`   | Issue short-lived single-use nonce for Google exchange | `200` JSON `{ nonce }`                       |
-| GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant | `200` JSON `{ client_id, authorization_endpoint, ... }` |
+| GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, ... }` |
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
@@ -64,14 +64,15 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 
 Installed apps such as PromptDew use the same session issuance path without embedding Google sign-in in a `WKWebView`:
 
-1. The native client resolves tenant metadata from `GET /auth/google/native/config`.
-2. The client starts a local loopback listener and opens Google in the system browser with PKCE and an OIDC nonce.
-3. Google redirects back to `http://127.0.0.1:<port>/oauth/google/callback`.
+1. The native client resolves tenant metadata from `GET /auth/google/native/config`. Expo iOS/Android clients request `?platform=ios` or `?platform=android`.
+2. The client opens Google in the system browser with `response_type=code`, PKCE `S256`, `scope=openid email profile`, one configured redirect URI, and an OIDC nonce.
+3. Google redirects back to a loopback URI for desktop, or to a custom-scheme/app-link URI for mobile.
 4. The native client exchanges the authorization code directly with Google and extracts the returned `id_token`.
-5. The client posts `{ "google_id_token": "...", "nonce_token": "..." }` to `/auth/google/native`.
-6. `MountAuthRoutes` validates that ID token against `ServerConfig.GoogleNativeClientID`, requires the nonce claim to match the posted `nonce_token`, then mints the same access and refresh cookies used by the browser flow.
+5. The client posts `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }` to `/auth/google/native`.
+6. `MountAuthRoutes` validates that ID token against the selected platform’s accepted Google native audience, checks any supplied redirect URI against config, requires the nonce claim to match the posted `nonce_token`, then mints the same access and refresh cookies used by the browser flow.
 
 TAuth still does not receive Google authorization codes or store Google refresh tokens.
+TAuth also does not return mobile bearer tokens in the response body. Mobile apps persist the issued `HttpOnly` cookies in the platform cookie jar; downstream API hosts under the same configured `cookie_domain` validate `app_session` with `pkg/sessionvalidator`.
 
 ### 3.5 Browser helper handshake
 
@@ -220,8 +221,20 @@ tenants:
       - "user@example.com"
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     google_native_client_id: "demo-native.apps.googleusercontent.com"
+    google_native_clients:
+      - platform: "ios"
+        client_id: "demo-ios.apps.googleusercontent.com"
+        redirect_uris:
+          - "com.demo.app://oauth2redirect/google"
+          - "https://demo.example.com/oauth/google/callback"
+      - platform: "android"
+        client_id: "demo-android.apps.googleusercontent.com"
+        redirect_uris:
+          - "com.demo.app:/oauth2redirect/google"
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
+    session_cookie_name: "app_session_demo"
+    refresh_cookie_name: "app_refresh_demo"
     session_ttl: "30m"
     refresh_ttl: "720h"
     nonce_ttl: "10m"
@@ -235,7 +248,7 @@ Validation rules baked into the loader:
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- `google_web_client_id` must be present for every tenant. `google_native_client_id` is optional and enables native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; when configured it must be unique across tenants. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - Before decoding, the loader expands environment variables (`$VAR` / `${VAR}`) inside the YAML so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values.
 
@@ -245,6 +258,7 @@ Tenant resolution & runtime:
 - Local and development tooling can opt into the `X-TAuth-Tenant` override header (configurable via `WithHeaderOverride`/`--enable_tenant_header_override`) when requests lack `Origin` headers or when multiple tenants share a single origin. The override accepts either tenant IDs or frontend origins. Leave it disabled in production where origins stay unique.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of origins.
+- Native clients without a browser `Origin` header must send `X-TAuth-Tenant`; mobile clients additionally use `platform` to select iOS or Android audiences. If `platform` is omitted, `/auth/google/native` accepts any configured native Google audience for the tenant.
 - Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.

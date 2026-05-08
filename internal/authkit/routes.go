@@ -96,17 +96,22 @@ func resolveGoogleValidator(ctx context.Context) (GoogleTokenValidator, error) {
 }
 
 const (
-	metricAuthLoginSuccess              = "auth.login.success"
-	metricAuthLoginFailure              = "auth.login.failure"
-	metricAuthRefreshSuccess            = "auth.refresh.success"
-	metricAuthRefreshFailure            = "auth.refresh.failure"
-	metricAuthLogoutSuccess             = "auth.logout.success"
-	errorUserNotAllowed                 = "user_not_allowed"
-	errorNativeGoogleLoginNotConfigured = "native_google_login_not_configured"
-	googleIssuerHTTPS                   = "https://accounts.google.com"
-	googleIssuerLegacy                  = "accounts.google.com"
-	googleAuthorizationEndpoint         = "https://accounts.google.com/o/oauth2/v2/auth"
-	googleTokenEndpoint                 = "https://oauth2.googleapis.com/token"
+	metricAuthLoginSuccess                 = "auth.login.success"
+	metricAuthLoginFailure                 = "auth.login.failure"
+	metricAuthRefreshSuccess               = "auth.refresh.success"
+	metricAuthRefreshFailure               = "auth.refresh.failure"
+	metricAuthLogoutSuccess                = "auth.logout.success"
+	errorUserNotAllowed                    = "user_not_allowed"
+	errorNativeGoogleLoginNotConfigured    = "native_google_login_not_configured"
+	errorNativeGooglePlatformNotConfigured = "native_google_platform_not_configured"
+	errorNativeGoogleRedirectURIInvalid    = "invalid_redirect_uri"
+	googleIssuerHTTPS                      = "https://accounts.google.com"
+	googleIssuerLegacy                     = "accounts.google.com"
+	googleAuthorizationEndpoint            = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenEndpoint                    = "https://oauth2.googleapis.com/token"
+	googleOAuthResponseTypeCode            = "code"
+	googleCodeChallengeMethodS256          = "S256"
+	nativeGoogleDefaultPlatform            = "desktop"
 )
 
 var googleNativeScopes = []string{"openid", "email", "profile"}
@@ -114,13 +119,28 @@ var googleNativeScopes = []string{"openid", "email", "profile"}
 type googleLoginInbound struct {
 	GoogleIDToken string `json:"google_id_token"`
 	NonceToken    string `json:"nonce_token"`
+	Platform      string `json:"platform"`
+	RedirectURI   string `json:"redirect_uri"`
 }
 
 type nativeGoogleConfigResponse struct {
-	ClientID              string   `json:"client_id"`
-	AuthorizationEndpoint string   `json:"authorization_endpoint"`
-	TokenEndpoint         string   `json:"token_endpoint"`
-	Scopes                []string `json:"scopes"`
+	ClientID                      string                       `json:"client_id"`
+	ClientIDs                     []string                     `json:"client_ids"`
+	Platform                      string                       `json:"platform,omitempty"`
+	RedirectURIs                  []string                     `json:"redirect_uris"`
+	Clients                       []nativeGoogleClientResponse `json:"clients"`
+	AuthorizationEndpoint         string                       `json:"authorization_endpoint"`
+	TokenEndpoint                 string                       `json:"token_endpoint"`
+	Scopes                        []string                     `json:"scopes"`
+	ResponseType                  string                       `json:"response_type"`
+	PKCERequired                  bool                         `json:"pkce_required"`
+	CodeChallengeMethodsSupported []string                     `json:"code_challenge_methods_supported"`
+}
+
+type nativeGoogleClientResponse struct {
+	Platform     string   `json:"platform"`
+	ClientID     string   `json:"client_id"`
+	RedirectURIs []string `json:"redirect_uris"`
 }
 
 type googleIdentity struct {
@@ -197,16 +217,32 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 		config := registry.Config(tenantID)
-		if strings.TrimSpace(config.GoogleNativeClientID) == "" {
-			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGoogleLoginNotConfigured})
+		platform := strings.TrimSpace(contextGin.Query("platform"))
+		nativeClients := nativeGoogleClientsForPlatform(config, platform)
+		if len(nativeClients) == 0 {
+			errorCode := errorNativeGoogleLoginNotConfigured
+			if platform != "" {
+				errorCode = errorNativeGooglePlatformNotConfigured
+			}
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorCode})
 			return
 		}
 		scopes := append([]string(nil), googleNativeScopes...)
+		codeChallengeMethods := []string{googleCodeChallengeMethodS256}
+		clientIDs := nativeGoogleClientIDs(nativeClients)
+		redirectURIs := nativeGoogleRedirectURIs(nativeClients)
 		contextGin.JSON(http.StatusOK, nativeGoogleConfigResponse{
-			ClientID:              config.GoogleNativeClientID,
-			AuthorizationEndpoint: googleAuthorizationEndpoint,
-			TokenEndpoint:         googleTokenEndpoint,
-			Scopes:                scopes,
+			ClientID:                      clientIDs[0],
+			ClientIDs:                     clientIDs,
+			Platform:                      normalizeNativeGooglePlatform(platform),
+			RedirectURIs:                  redirectURIs,
+			Clients:                       nativeGoogleClientResponses(nativeClients),
+			AuthorizationEndpoint:         googleAuthorizationEndpoint,
+			TokenEndpoint:                 googleTokenEndpoint,
+			Scopes:                        scopes,
+			ResponseType:                  googleOAuthResponseTypeCode,
+			PKCERequired:                  true,
+			CodeChallengeMethodsSupported: codeChallengeMethods,
 		})
 	})
 
@@ -306,7 +342,8 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 		config := registry.Config(tenantID)
-		if strings.TrimSpace(config.GoogleNativeClientID) == "" {
+		nativeClients := nativeGoogleClientsForPlatform(config, "")
+		if len(nativeClients) == 0 {
 			recordMetric(metricAuthLoginFailure)
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGoogleLoginNotConfigured})
 			return
@@ -324,6 +361,19 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
 			return
 		}
+		nativeClients = nativeGoogleClientsForPlatform(config, inbound.Platform)
+		if len(nativeClients) == 0 {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.platform_not_configured", nil, zap.String("platform", inbound.Platform))
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGooglePlatformNotConfigured})
+			return
+		}
+		if redirectErr := validateNativeGoogleRedirectURI(nativeClients, inbound.RedirectURI); redirectErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.native.invalid_redirect_uri", redirectErr)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorNativeGoogleRedirectURIInvalid})
+			return
+		}
 		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.native.insecure_http", nil)
@@ -337,7 +387,7 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		_, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleNativeClientID)
+		_, identity, validateErr := validateGoogleIdentityTokenForAudiences(context.Background(), validator, inbound.GoogleIDToken, nativeGoogleClientIDs(nativeClients))
 		if validateErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			if errors.Is(validateErr, errInvalidGoogleIssuer) {
@@ -534,6 +584,159 @@ func validateGoogleIdentityToken(ctx context.Context, validator GoogleTokenValid
 		AvatarURL:     readStringClaim(payload, "picture"),
 		Nonce:         readStringClaim(payload, "nonce"),
 	}, nil
+}
+
+func validateGoogleIdentityTokenForAudiences(ctx context.Context, validator GoogleTokenValidator, idToken string, audiences []string) (*idtoken.Payload, googleIdentity, error) {
+	acceptedAudiences := uniqueNonEmptyStrings(audiences)
+	if len(acceptedAudiences) == 0 {
+		return nil, googleIdentity{}, errors.New("auth.login.native.missing_audience")
+	}
+	var lastErr error
+	for _, audience := range acceptedAudiences {
+		payload, identity, validateErr := validateGoogleIdentityToken(ctx, validator, idToken, audience)
+		if validateErr == nil {
+			return payload, identity, nil
+		}
+		lastErr = validateErr
+	}
+	return nil, googleIdentity{}, lastErr
+}
+
+func nativeGoogleClientsForPlatform(config ServerConfig, platform string) []NativeGoogleClientConfig {
+	clients := configuredNativeGoogleClients(config)
+	normalizedPlatform := normalizeNativeGooglePlatform(platform)
+	if normalizedPlatform == "" {
+		return clients
+	}
+	filteredClients := make([]NativeGoogleClientConfig, 0, len(clients))
+	for _, client := range clients {
+		if normalizeNativeGooglePlatform(client.Platform) == normalizedPlatform {
+			filteredClients = append(filteredClients, client)
+		}
+	}
+	return filteredClients
+}
+
+func configuredNativeGoogleClients(config ServerConfig) []NativeGoogleClientConfig {
+	clients := make([]NativeGoogleClientConfig, 0, len(config.NativeGoogleClients)+1)
+	for _, client := range config.NativeGoogleClients {
+		clientID := strings.TrimSpace(client.ClientID)
+		if clientID == "" {
+			continue
+		}
+		platform := normalizeNativeGooglePlatform(client.Platform)
+		if platform == "" {
+			platform = nativeGoogleDefaultPlatform
+		}
+		clients = append(clients, NativeGoogleClientConfig{
+			Platform:     platform,
+			ClientID:     clientID,
+			RedirectURIs: append([]string(nil), client.RedirectURIs...),
+		})
+	}
+	legacyClientID := strings.TrimSpace(config.GoogleNativeClientID)
+	if legacyClientID != "" && !nativeGoogleClientIDExists(clients, legacyClientID) {
+		clients = append(clients, NativeGoogleClientConfig{
+			Platform: nativeGoogleDefaultPlatform,
+			ClientID: legacyClientID,
+		})
+	}
+	return clients
+}
+
+func nativeGoogleClientIDExists(clients []NativeGoogleClientConfig, clientID string) bool {
+	for _, client := range clients {
+		if client.ClientID == clientID {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeGoogleClientIDs(clients []NativeGoogleClientConfig) []string {
+	clientIDs := make([]string, 0, len(clients))
+	seenClientIDs := make(map[string]struct{}, len(clients))
+	for _, client := range clients {
+		clientID := strings.TrimSpace(client.ClientID)
+		if clientID == "" {
+			continue
+		}
+		if _, exists := seenClientIDs[clientID]; exists {
+			continue
+		}
+		seenClientIDs[clientID] = struct{}{}
+		clientIDs = append(clientIDs, clientID)
+	}
+	return clientIDs
+}
+
+func nativeGoogleRedirectURIs(clients []NativeGoogleClientConfig) []string {
+	redirectURIs := make([]string, 0)
+	seenRedirectURIs := make(map[string]struct{})
+	for _, client := range clients {
+		for _, redirectURI := range client.RedirectURIs {
+			trimmedRedirectURI := strings.TrimSpace(redirectURI)
+			if trimmedRedirectURI == "" {
+				continue
+			}
+			if _, exists := seenRedirectURIs[trimmedRedirectURI]; exists {
+				continue
+			}
+			seenRedirectURIs[trimmedRedirectURI] = struct{}{}
+			redirectURIs = append(redirectURIs, trimmedRedirectURI)
+		}
+	}
+	return redirectURIs
+}
+
+func nativeGoogleClientResponses(clients []NativeGoogleClientConfig) []nativeGoogleClientResponse {
+	responses := make([]nativeGoogleClientResponse, 0, len(clients))
+	for _, client := range clients {
+		responses = append(responses, nativeGoogleClientResponse{
+			Platform:     normalizeNativeGooglePlatform(client.Platform),
+			ClientID:     strings.TrimSpace(client.ClientID),
+			RedirectURIs: append([]string(nil), client.RedirectURIs...),
+		})
+	}
+	return responses
+}
+
+func validateNativeGoogleRedirectURI(clients []NativeGoogleClientConfig, redirectURI string) error {
+	acceptedRedirectURIs := nativeGoogleRedirectURIs(clients)
+	if len(acceptedRedirectURIs) == 0 {
+		return nil
+	}
+	trimmedRedirectURI := strings.TrimSpace(redirectURI)
+	if trimmedRedirectURI == "" {
+		return errors.New("auth.login.native.redirect_uri_required")
+	}
+	for _, acceptedRedirectURI := range acceptedRedirectURIs {
+		if acceptedRedirectURI == trimmedRedirectURI {
+			return nil
+		}
+	}
+	return errors.New("auth.login.native.redirect_uri_not_allowed")
+}
+
+func normalizeNativeGooglePlatform(platform string) string {
+	return strings.ToLower(strings.TrimSpace(platform))
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	uniqueValues := make([]string, 0, len(values))
+	seenValues := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedValue == "" {
+			continue
+		}
+		if _, exists := seenValues[trimmedValue]; exists {
+			continue
+		}
+		seenValues[trimmedValue] = struct{}{}
+		uniqueValues = append(uniqueValues, trimmedValue)
+	}
+	return uniqueValues
 }
 
 func readStringClaim(payload *idtoken.Payload, claim string) string {
