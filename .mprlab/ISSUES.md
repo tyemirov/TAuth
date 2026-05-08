@@ -134,6 +134,9 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Maintenance (438–499)
 
+- [x] [TA-440] Add the deployed-app release/publish/deploy contract for TAuth.
+  `make release && make publish` currently fails at `make release` because TAuth has no repo-local deployment workflow targets. Add the shared MPR deployment surface (`make release`, `make publish`, `make deploy`) so TAuth can publish its GHCR image and hand backend deployment to `mprlab-gateway`, and register the app with the gateway verifier.
+  Resolved: added `make release`, `make publish`, and `make deploy` wrappers backed by `scripts/release.sh`, `scripts/publish.sh`, and `scripts/deploy.sh`; `publish` builds/pushes only the TAuth GHCR image, and `deploy` verifies the release/latest image before handing off to `mprlab-gateway` with `TARGET=tauth`. Validation passed with `timeout -k 350s -s SIGKILL 350s make ci` and the sibling gateway `timeout -k 1200s -s SIGKILL 1200s make verify-app-workflows`.
 - [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image.
   Added `/web` as a Docker volume and copied the web assets into the image.
 - [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user.

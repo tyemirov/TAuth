@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Improvements
+- Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
+
 ## [v1.1.0] - 2026-04-11
 
 ### Features ✨
