@@ -5,6 +5,28 @@
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 
+## [v1.1.1] - 2026-05-08
+
+### Features ✨
+- Add repo-local `make release`, `make publish`, and `make deploy` scripts for TAuth to enable streamlined GHCR image publishing and backend deployment.
+- Implement native mobile Google sign-in support for Expo iOS and Android clients with platform-specific redirect URIs and audience validation.
+
+### Improvements ⚙️
+- Improve documentation and configuration handling across modules, updating README, ARCHITECTURE, and usage docs with detailed Expo client recipe.
+- Refactor repository layout to use `.mprlab/` folder for autonomous flow and issue tracking files.
+- Enhance Google OAuth client configurations, including platform audiences and mobile-specific client IDs.
+
+### Bug Fixes 🐛
+- _No changes._
+
+### Testing 🧪
+- Add black-box tests covering Google authorization flows, including mobile redirect handling, nonce validation, audience verification, and session refresh/logout.
+- Validation and compatibility tested with `make ci` and integration against sibling gateway workflows.
+
+### Docs 📚
+- Update documentation to include native mobile OAuth flow details and configuration.
+- Clarify usage instructions and repo deployment workflows in README and related docs.
+
 ## [v1.1.0] - 2026-04-11
 
 ### Features ✨
