@@ -15,6 +15,30 @@
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 
+## [v1.1.4] - 2026-05-14
+
+### Features ✨
+- Added tenant-enabled email/password authentication with `POST /auth/password/login` endpoint.
+- Included bcrypt-hashed user credential storage and password hash verification.
+- Introduced `exchangePasswordCredential` helper in the browser client for password login.
+  
+### Improvements ⚙️
+- Added tenant-scoped password auth config contract and backend support.
+- Implemented startup seeding with removed-user reconciliation for password users.
+- Enhanced session and token handling for password authentication flows.
+- Updated documentation covering password credential reconciliation and usage.
+  
+### Bug Fixes 🐛
+- Masked timing during password credential lookup to prevent information leaks.
+
+### Testing 🧪
+- Added black-box and integration tests covering password login and credential stores.
+- Extended existing tests for multi-tenant password auth scenarios.
+
+### Docs 📚
+- Documented password credential reconciliation, password auth config, and login usage.
+- Updated architecture and usage docs to include password authentication flows.
+
 ## [v1.1.3] - 2026-05-14
 
 ### Features ✨
