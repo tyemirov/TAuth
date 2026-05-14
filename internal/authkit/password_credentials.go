@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	passwordUserIDPrefix = "email:"
-	passwordBcryptCost   = bcrypt.DefaultCost
-	passwordMaxBytes     = 72
+	passwordUserIDPrefix         = "email:"
+	passwordBcryptCost           = bcrypt.DefaultCost
+	passwordMaxBytes             = 72
+	passwordCredentialTimingHash = "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
 )
 
 var (
@@ -44,15 +45,21 @@ type passwordCredential struct {
 	passwordHash string
 }
 
+type passwordHashComparer func(hashedPassword []byte, password []byte) error
+
 // MemoryPasswordCredentialStore stores password credentials in memory.
 type MemoryPasswordCredentialStore struct {
-	mu      sync.RWMutex
-	tenants map[string]map[string]passwordCredential
+	mu                   sync.RWMutex
+	tenants              map[string]map[string]passwordCredential
+	passwordHashComparer passwordHashComparer
 }
 
 // NewMemoryPasswordCredentialStore constructs an empty in-memory credential store.
 func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
-	return &MemoryPasswordCredentialStore{tenants: make(map[string]map[string]passwordCredential)}
+	return &MemoryPasswordCredentialStore{
+		tenants:              make(map[string]map[string]passwordCredential),
+		passwordHashComparer: bcrypt.CompareHashAndPassword,
+	}
 }
 
 // HashPassword returns a bcrypt hash suitable for password credential seeding.
@@ -116,9 +123,10 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	credential, exists := tenantCredentials[normalizedEmail]
 	store.mu.RUnlock()
 	if !exists {
+		_ = store.passwordHashComparer([]byte(passwordCredentialTimingHash), []byte(password))
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 	}
-	if compareErr := bcrypt.CompareHashAndPassword([]byte(credential.passwordHash), []byte(password)); compareErr != nil {
+	if compareErr := store.passwordHashComparer([]byte(credential.passwordHash), []byte(password)); compareErr != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 	}
 	return PasswordCredentialProfile{

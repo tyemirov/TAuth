@@ -123,6 +123,33 @@ func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
 	}
 }
 
+func TestDatabaseUserStoreMasksUnknownPasswordCredentialLookup(testContext *testing.T) {
+	testContext.Parallel()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(context.Background(), databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+	compareCalls := 0
+	var comparedHash string
+	store.passwordHashComparer = func(hashedPassword []byte, password []byte) error {
+		compareCalls++
+		comparedHash = string(hashedPassword)
+		return errors.New("password mismatch")
+	}
+
+	_, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "missing@example.com", "correct horse battery staple")
+	if !errors.Is(authErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected invalid credential error, got %v", authErr)
+	}
+	if compareCalls != 1 {
+		testContext.Fatalf("expected one dummy compare, got %d", compareCalls)
+	}
+	if comparedHash != passwordCredentialTimingHash {
+		testContext.Fatalf("expected dummy timing hash, got %s", comparedHash)
+	}
+}
+
 func TestDatabaseUserStoreReconcilesPasswordCredentials(testContext *testing.T) {
 	testContext.Parallel()
 	databaseURL := sqliteDatabaseURL(testContext)

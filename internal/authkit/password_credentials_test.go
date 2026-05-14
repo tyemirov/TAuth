@@ -36,6 +36,28 @@ func TestMemoryPasswordCredentialStoreAuthenticates(testingHandle *testing.T) {
 	}
 }
 
+func TestMemoryPasswordCredentialStoreMasksUnknownEmailLookup(testingHandle *testing.T) {
+	store := NewMemoryPasswordCredentialStore()
+	compareCalls := 0
+	var comparedHash string
+	store.passwordHashComparer = func(hashedPassword []byte, password []byte) error {
+		compareCalls++
+		comparedHash = string(hashedPassword)
+		return errors.New("password mismatch")
+	}
+
+	_, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "missing@example.com", "correct horse battery staple")
+	if !errors.Is(authErr, ErrPasswordCredentialInvalid) {
+		testingHandle.Fatalf("expected invalid credential error, got %v", authErr)
+	}
+	if compareCalls != 1 {
+		testingHandle.Fatalf("expected one dummy compare, got %d", compareCalls)
+	}
+	if comparedHash != passwordCredentialTimingHash {
+		testingHandle.Fatalf("expected dummy timing hash, got %s", comparedHash)
+	}
+}
+
 func TestMemoryPasswordCredentialStoreReconcilesCredentials(testingHandle *testing.T) {
 	store := NewMemoryPasswordCredentialStore()
 	passwordHash, hashErr := HashPassword("correct horse battery staple")

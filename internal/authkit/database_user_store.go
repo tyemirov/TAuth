@@ -25,9 +25,10 @@ var errUserStoreRolesScanType = errors.New("user_store.roles.scan_type")
 
 // DatabaseUserStore persists user profiles using GORM.
 type DatabaseUserStore struct {
-	db          *gorm.DB
-	driverLabel string
-	now         func() time.Time
+	db                   *gorm.DB
+	driverLabel          string
+	now                  func() time.Time
+	passwordHashComparer passwordHashComparer
 }
 
 // Driver returns the active database driver label.
@@ -123,9 +124,10 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 		return nil, openErr
 	}
 	return &DatabaseUserStore{
-		db:          databaseHandle,
-		driverLabel: driverLabel,
-		now:         time.Now,
+		db:                   databaseHandle,
+		driverLabel:          driverLabel,
+		now:                  time.Now,
+		passwordHashComparer: bcrypt.CompareHashAndPassword,
 	}, nil
 }
 
@@ -248,11 +250,12 @@ func (store *DatabaseUserStore) AuthenticatePassword(ctx context.Context, tenant
 		Take(&record).Error
 	if queryErr != nil {
 		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			_ = store.passwordHashComparer([]byte(passwordCredentialTimingHash), []byte(password))
 			return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 		}
 		return PasswordCredentialProfile{}, fmt.Errorf("%s.password_auth.%s: %w", userStoreErrorPrefix, store.driverLabel, queryErr)
 	}
-	if compareErr := bcrypt.CompareHashAndPassword([]byte(record.PasswordHash), []byte(password)); compareErr != nil {
+	if compareErr := store.passwordHashComparer([]byte(record.PasswordHash), []byte(password)); compareErr != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 	}
 	return PasswordCredentialProfile{
