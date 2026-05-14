@@ -213,6 +213,26 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 	return nil
 }
 
+// ReconcilePasswordCredentials removes tenant credentials absent from the current config.
+func (store *DatabaseUserStore) ReconcilePasswordCredentials(ctx context.Context, tenantID string, configuredEmails []string) error {
+	configuredEmailSet, normalizeErr := normalizePasswordEmailSet(configuredEmails)
+	if normalizeErr != nil {
+		return fmt.Errorf("%s.password_credential_reconcile.%s: %w", userStoreErrorPrefix, store.driverLabel, normalizeErr)
+	}
+	configuredEmailList := make([]string, 0, len(configuredEmailSet))
+	for configuredEmail := range configuredEmailSet {
+		configuredEmailList = append(configuredEmailList, configuredEmail)
+	}
+	deleteQuery := store.db.WithContext(ctx).Where("tenant_id = ?", tenantID)
+	if len(configuredEmailList) > 0 {
+		deleteQuery = deleteQuery.Where("user_email NOT IN ?", configuredEmailList)
+	}
+	if err := deleteQuery.Delete(&passwordCredentialRecord{}).Error; err != nil {
+		return fmt.Errorf("%s.password_credential_reconcile.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
+	}
+	return nil
+}
+
 // AuthenticatePassword verifies one password credential and returns its profile.
 func (store *DatabaseUserStore) AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error) {
 	normalizedEmail, emailErr := normalizePasswordEmail(userEmail)

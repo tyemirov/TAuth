@@ -82,6 +82,26 @@ func (store *MemoryPasswordCredentialStore) UpsertPasswordCredential(ctx context
 	return nil
 }
 
+// ReconcilePasswordCredentials removes tenant credentials absent from the current config.
+func (store *MemoryPasswordCredentialStore) ReconcilePasswordCredentials(ctx context.Context, tenantID string, configuredEmails []string) error {
+	configuredEmailSet, normalizeErr := normalizePasswordEmailSet(configuredEmails)
+	if normalizeErr != nil {
+		return normalizeErr
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	tenantCredentials := store.tenants[tenantID]
+	for credentialEmail := range tenantCredentials {
+		if _, exists := configuredEmailSet[credentialEmail]; !exists {
+			delete(tenantCredentials, credentialEmail)
+		}
+	}
+	if len(tenantCredentials) == 0 {
+		delete(store.tenants, tenantID)
+	}
+	return nil
+}
+
 // AuthenticatePassword verifies a password credential and returns its profile.
 func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error) {
 	normalizedEmail, emailErr := normalizePasswordEmail(userEmail)
@@ -146,6 +166,18 @@ func normalizePasswordEmail(rawEmail string) (string, error) {
 		return "", fmt.Errorf("password_auth.email_invalid")
 	}
 	return normalizedEmail, nil
+}
+
+func normalizePasswordEmailSet(rawEmails []string) (map[string]struct{}, error) {
+	emailSet := make(map[string]struct{}, len(rawEmails))
+	for _, rawEmail := range rawEmails {
+		normalizedEmail, emailErr := normalizePasswordEmail(rawEmail)
+		if emailErr != nil {
+			return nil, fmt.Errorf("%w: email", ErrPasswordCredentialConfig)
+		}
+		emailSet[normalizedEmail] = struct{}{}
+	}
+	return emailSet, nil
 }
 
 func validatePlainPassword(password string) error {

@@ -310,7 +310,9 @@ func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userSto
 			continue
 		}
 		tenantID := string(tenant.ID())
+		configuredEmails := make([]string, 0, len(tenant.PasswordUsers()))
 		for _, passwordUser := range tenant.PasswordUsers() {
+			configuredEmails = append(configuredEmails, passwordUser.Email())
 			_, _, profileErr := userStore.UpsertPasswordUser(ctx, tenantID, passwordUser.Email(), passwordUser.DisplayName(), passwordUser.AvatarURL())
 			if profileErr != nil {
 				return fmt.Errorf("password_auth.seed_profile tenant=%s user=%s: %w", tenantID, passwordUser.Email(), profileErr)
@@ -324,6 +326,10 @@ func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userSto
 			if credentialErr != nil {
 				return fmt.Errorf("password_auth.seed_credential tenant=%s user=%s: %w", tenantID, passwordUser.Email(), credentialErr)
 			}
+		}
+		reconcileErr := passwordCredentialStore.ReconcilePasswordCredentials(ctx, tenantID, configuredEmails)
+		if reconcileErr != nil {
+			return fmt.Errorf("password_auth.reconcile_credentials tenant=%s: %w", tenantID, reconcileErr)
 		}
 	}
 	return nil

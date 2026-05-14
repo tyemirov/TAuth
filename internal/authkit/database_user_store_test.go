@@ -123,6 +123,44 @@ func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
 	}
 }
 
+func TestDatabaseUserStoreReconcilesPasswordCredentials(testContext *testing.T) {
+	testContext.Parallel()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(context.Background(), databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+	passwordHash, hashErr := HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testContext.Fatalf("failed to hash password: %v", hashErr)
+	}
+	for _, userEmail := range []string{"kept@example.com", "removed@example.com"} {
+		credentialErr := store.UpsertPasswordCredential(context.Background(), "tenant-a", PasswordCredentialSeed{
+			UserEmail:    userEmail,
+			DisplayName:  userEmail,
+			PasswordHash: passwordHash,
+		})
+		if credentialErr != nil {
+			testContext.Fatalf("failed to upsert password credential: %v", credentialErr)
+		}
+	}
+	if reconcileErr := store.ReconcilePasswordCredentials(context.Background(), "tenant-a", []string{"kept@example.com"}); reconcileErr != nil {
+		testContext.Fatalf("failed to reconcile password credentials: %v", reconcileErr)
+	}
+	if _, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "kept@example.com", "correct horse battery staple"); authErr != nil {
+		testContext.Fatalf("expected kept credential to authenticate: %v", authErr)
+	}
+	if _, removedErr := store.AuthenticatePassword(context.Background(), "tenant-a", "removed@example.com", "correct horse battery staple"); !errors.Is(removedErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected removed credential to be rejected, got %v", removedErr)
+	}
+	if reconcileErr := store.ReconcilePasswordCredentials(context.Background(), "tenant-a", nil); reconcileErr != nil {
+		testContext.Fatalf("failed to reconcile empty password credentials: %v", reconcileErr)
+	}
+	if _, removedErr := store.AuthenticatePassword(context.Background(), "tenant-a", "kept@example.com", "correct horse battery staple"); !errors.Is(removedErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected empty config to remove kept credential, got %v", removedErr)
+	}
+}
+
 func TestUserStorePreservesLegacySchemaWhenMigrationRecordMissing(testContext *testing.T) {
 	databasePath := filepath.Join(testContext.TempDir(), "tauth.db")
 	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))

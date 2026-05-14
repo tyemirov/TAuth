@@ -19,5 +19,6 @@ type RefreshTokenStore interface {
 // PasswordCredentialStore persists and verifies email/password credentials.
 type PasswordCredentialStore interface {
 	UpsertPasswordCredential(ctx context.Context, tenantID string, credential PasswordCredentialSeed) error
+	ReconcilePasswordCredentials(ctx context.Context, tenantID string, configuredEmails []string) error
 	AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error)
 }
