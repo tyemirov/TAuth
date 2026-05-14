@@ -89,6 +89,21 @@ func (store *testUserStore) UpsertGoogleUser(ctx context.Context, tenantID strin
 	return applicationUserID, profile.roles, nil
 }
 
+func (store *testUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	applicationUserID := "email:" + userEmail
+	profile := testUserProfile{
+		email:   userEmail,
+		display: userDisplayName,
+		avatar:  userAvatarURL,
+		roles:   []string{"user"},
+	}
+	if _, exists := store.profiles[tenantID]; !exists {
+		store.profiles[tenantID] = make(map[string]testUserProfile)
+	}
+	store.profiles[tenantID][applicationUserID] = profile
+	return applicationUserID, profile.roles, nil
+}
+
 func (store *testUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
 	tenantProfiles, exists := store.profiles[tenantID]
 	if !exists {
@@ -114,6 +129,10 @@ type failingUserStore struct {
 }
 
 func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	return "", nil, store.upsertErr
+}
+
+func (store *failingUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	return "", nil, store.upsertErr
 }
 
@@ -346,6 +365,121 @@ func TestAuthLifecycle(t *testing.T) {
 	router.ServeHTTP(postLogoutResponse, postLogoutRequest)
 	if postLogoutResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after logout, got %d", postLogoutResponse.Code)
+	}
+}
+
+func TestPasswordLoginLifecycle(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.PasswordAuthEnabled = true
+	registry := singleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	passwordStore := NewMemoryPasswordCredentialStore()
+	passwordHash, hashErr := HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to hash password: %v", hashErr)
+	}
+	seedErr := passwordStore.UpsertPasswordCredential(context.Background(), config.TenantID, PasswordCredentialSeed{
+		UserEmail:    "user@example.com",
+		DisplayName:  "Password User",
+		AvatarURL:    "https://example.com/password.png",
+		PasswordHash: passwordHash,
+	})
+	if seedErr != nil {
+		testingHandle.Fatalf("failed to seed password credential: %v", seedErr)
+	}
+
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, passwordStore)
+
+	body, marshalErr := json.Marshal(map[string]string{
+		"email":    "USER@example.com",
+		"password": "correct horse battery staple",
+	})
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal password body: %v", marshalErr)
+	}
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginResponse := httptest.NewRecorder()
+	router.ServeHTTP(loginResponse, loginRequest)
+
+	if loginResponse.Code != http.StatusOK {
+		testingHandle.Fatalf("expected 200 from password login, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	}
+	var profile map[string]interface{}
+	if decodeErr := json.NewDecoder(loginResponse.Body).Decode(&profile); decodeErr != nil {
+		testingHandle.Fatalf("decode password login response: %v", decodeErr)
+	}
+	if profile["user_id"] != "email:user@example.com" || profile["user_email"] != "user@example.com" || profile["display"] != "Password User" {
+		testingHandle.Fatalf("unexpected profile payload: %#v", profile)
+	}
+	cookies := collectCookies(loginResponse.Result().Cookies())
+	if cookies[config.SessionCookieName] == nil || cookies[config.RefreshCookieName] == nil {
+		testingHandle.Fatalf("expected session and refresh cookies")
+	}
+
+	meRequest := httptest.NewRequest(http.MethodGet, "/me", nil)
+	addCookies(meRequest, cookies, config.SessionCookieName)
+	meResponse := httptest.NewRecorder()
+	router.ServeHTTP(meResponse, meRequest)
+	if meResponse.Code != http.StatusOK {
+		testingHandle.Fatalf("expected 200 from /me after password login, got %d", meResponse.Code)
+	}
+}
+
+func TestPasswordLoginRejectsInvalidCredentials(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.PasswordAuthEnabled = true
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+
+	body := []byte(`{"email":"missing@example.com","password":"wrong-password"}`)
+	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		testingHandle.Fatalf("expected 401 for invalid password credentials, got %d", response.Code)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		testingHandle.Fatalf("decode invalid credentials payload: %v", decodeErr)
+	}
+	if payload["error"] != errorPasswordCredentialInvalid {
+		testingHandle.Fatalf("unexpected error payload: %#v", payload)
+	}
+}
+
+func TestPasswordLoginDisabledReturnsNotFound(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+
+	body := []byte(`{"email":"user@example.com","password":"correct horse battery staple"}`)
+	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		testingHandle.Fatalf("expected 404 when password auth is disabled, got %d", response.Code)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		testingHandle.Fatalf("decode disabled password payload: %v", decodeErr)
+	}
+	if payload["error"] != errorPasswordAuthNotConfigured {
+		testingHandle.Fatalf("unexpected error payload: %#v", payload)
 	}
 }
 

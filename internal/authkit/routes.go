@@ -105,6 +105,8 @@ const (
 	errorNativeGoogleLoginNotConfigured    = "native_google_login_not_configured"
 	errorNativeGooglePlatformNotConfigured = "native_google_platform_not_configured"
 	errorNativeGoogleRedirectURIInvalid    = "invalid_redirect_uri"
+	errorPasswordAuthNotConfigured         = "password_auth_not_configured"
+	errorPasswordCredentialInvalid         = "invalid_credentials"
 	googleIssuerHTTPS                      = "https://accounts.google.com"
 	googleIssuerLegacy                     = "accounts.google.com"
 	googleAuthorizationEndpoint            = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -121,6 +123,19 @@ type googleLoginInbound struct {
 	NonceToken    string `json:"nonce_token"`
 	Platform      string `json:"platform"`
 	RedirectURI   string `json:"redirect_uri"`
+}
+
+type passwordLoginInbound struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type authenticatedSessionProfile struct {
+	applicationUserID string
+	userEmail         string
+	userDisplayName   string
+	userAvatarURL     string
+	userRoles         []string
 }
 
 type nativeGoogleConfigResponse struct {
@@ -183,6 +198,11 @@ func logAuthError(code string, err error, fields ...zap.Field) {
 
 // MountAuthRoutes registers /auth endpoints and session helpers.
 func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
+	MountAuthRoutesWithPassword(router, registry, users, refreshTokens, nonces, nil)
+}
+
+// MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
+func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore) {
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -244,6 +264,79 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			PKCERequired:                  true,
 			CodeChallengeMethodsSupported: codeChallengeMethods,
 		})
+	})
+
+	router.POST("/auth/password/login", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		if !config.PasswordAuthEnabled {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorPasswordAuthNotConfigured})
+			return
+		}
+		if passwordCredentials == nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.password.store_missing", nil)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		inbound, ok := bindPasswordLoginInbound(contextGin)
+		if !ok {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.password.invalid_json", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		normalizedEmail, emailErr := normalizePasswordEmail(inbound.Email)
+		if emailErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.password.invalid_email", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_email"})
+			return
+		}
+		if inbound.Password == "" {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.password.missing_password", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_password"})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.password.insecure_http", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		if !isAllowedUser(normalizedEmail, config.AllowedUsers) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.password.user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		profile, authErr := passwordCredentials.AuthenticatePassword(contextGin, tenantID, normalizedEmail, inbound.Password)
+		if authErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			if errors.Is(authErr, ErrPasswordCredentialInvalid) {
+				logAuthWarning("auth.login.password.invalid_credentials", nil)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorPasswordCredentialInvalid})
+				return
+			}
+			logAuthError("auth.login.password.authenticate", authErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if finalizeErr := finalizePasswordLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.password.finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		recordMetric(metricAuthLoginSuccess)
 	})
 
 	router.POST("/auth/google", func(contextGin *gin.Context) {
@@ -567,6 +660,14 @@ func bindGoogleLoginInbound(contextGin *gin.Context) (googleLoginInbound, bool) 
 	return inbound, true
 }
 
+func bindPasswordLoginInbound(contextGin *gin.Context) (passwordLoginInbound, bool) {
+	var inbound passwordLoginInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return passwordLoginInbound{}, false
+	}
+	return inbound, true
+}
+
 func validateGoogleIdentityToken(ctx context.Context, validator GoogleTokenValidator, idToken string, audience string) (*idtoken.Payload, googleIdentity, error) {
 	payload, validateErr := validator.Validate(ctx, idToken, audience)
 	if validateErr != nil {
@@ -793,14 +894,62 @@ func finalizeGoogleLogin(
 		}
 		return fmt.Errorf("%w: empty_user_id", errGoogleLoginUserStore)
 	}
+	return finalizeAuthenticatedSession(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
+		applicationUserID: applicationUserID,
+		userEmail:         identity.Email,
+		userDisplayName:   identity.DisplayName,
+		userAvatarURL:     identity.AvatarURL,
+		userRoles:         userRoles,
+	})
+}
+
+func finalizePasswordLogin(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	profile PasswordCredentialProfile,
+) error {
+	applicationUserID, userRoles, upsertErr := users.UpsertPasswordUser(
+		contextGin,
+		tenantID,
+		profile.UserEmail,
+		profile.DisplayName,
+		profile.AvatarURL,
+	)
+	if upsertErr != nil || applicationUserID == "" {
+		if upsertErr != nil {
+			return fmt.Errorf("auth.login.password.user_store: %w", upsertErr)
+		}
+		return fmt.Errorf("auth.login.password.user_store: empty_user_id")
+	}
+	return finalizeAuthenticatedSession(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
+		applicationUserID: applicationUserID,
+		userEmail:         profile.UserEmail,
+		userDisplayName:   profile.DisplayName,
+		userAvatarURL:     profile.AvatarURL,
+		userRoles:         userRoles,
+	})
+}
+
+func finalizeAuthenticatedSession(
+	contextGin *gin.Context,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	profile authenticatedSessionProfile,
+) error {
 	sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
 		clock,
 		tenantID,
-		applicationUserID,
-		identity.Email,
-		identity.DisplayName,
-		identity.AvatarURL,
-		userRoles,
+		profile.applicationUserID,
+		profile.userEmail,
+		profile.userDisplayName,
+		profile.userAvatarURL,
+		profile.userRoles,
 		config.AppJWTIssuer,
 		config.AppJWTSigningKey,
 		config.SessionTTL,
@@ -809,7 +958,7 @@ func finalizeGoogleLogin(
 		return fmt.Errorf("%w: %w", errGoogleLoginMintJWT, mintErr)
 	}
 	refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
-	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), "")
+	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, profile.applicationUserID, refreshDeadline.Unix(), "")
 	if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
 		if issueErr != nil {
 			return fmt.Errorf("%w: %w", errGoogleLoginIssueRefresh, issueErr)
@@ -819,11 +968,11 @@ func finalizeGoogleLogin(
 	writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
 	writeRefreshCookie(contextGin, config, refreshOpaque, refreshDeadline)
 	contextGin.JSON(http.StatusOK, gin.H{
-		"user_id":    applicationUserID,
-		"user_email": identity.Email,
-		"display":    identity.DisplayName,
-		"avatar_url": identity.AvatarURL,
-		"roles":      userRoles,
+		"user_id":    profile.applicationUserID,
+		"user_email": profile.userEmail,
+		"display":    profile.userDisplayName,
+		"avatar_url": profile.userAvatarURL,
+		"roles":      profile.userRoles,
 	})
 	return nil
 }

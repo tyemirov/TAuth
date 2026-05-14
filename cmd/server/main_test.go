@@ -18,6 +18,7 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
 	"gopkg.in/yaml.v3"
@@ -692,6 +693,65 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tc.expected, result)
 			}
 		})
+	}
+}
+
+func TestSeedPasswordUsersLoadsConfiguredCredentials(testingHandle *testing.T) {
+	passwordHash, hashErr := authkit.HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to hash password: %v", hashErr)
+	}
+	tenant := tenants.FileTenant{
+		ID:                "alpha",
+		DisplayName:       "Alpha",
+		TenantOrigins:     []string{"https://alpha.localhost"},
+		GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+		JWTSigningKey:     "alpha-key",
+		CookieDomain:      ".example.com",
+		SessionCookieName: "app_session_alpha",
+		RefreshCookieName: "app_refresh_alpha",
+		SessionTTL:        "20m",
+		RefreshTTL:        "480h",
+		NonceTTL:          "3m",
+		AllowInsecureHTTP: true,
+		PasswordAuth: tenants.FilePasswordAuth{
+			Enabled: true,
+			Users: []tenants.FilePasswordUser{
+				{
+					Email:        "User@Example.com",
+					DisplayName:  "Password User",
+					AvatarURL:    "https://example.com/password.png",
+					PasswordHash: passwordHash,
+				},
+			},
+		},
+	}
+	tenantConfig, configErr := tenants.LoadConfigFromDocument(tenants.FileDocument{Tenants: []tenants.FileTenant{tenant}})
+	if configErr != nil {
+		testingHandle.Fatalf("failed to load tenant config: %v", configErr)
+	}
+	userStore := web.NewInMemoryUsers()
+	passwordStore := authkit.NewMemoryPasswordCredentialStore()
+	seedErr := seedPasswordUsers(context.Background(), tenantConfig, userStore, passwordStore)
+	if seedErr != nil {
+		testingHandle.Fatalf("failed to seed password users: %v", seedErr)
+	}
+	profile, authErr := passwordStore.AuthenticatePassword(context.Background(), "alpha", "user@example.com", "correct horse battery staple")
+	if authErr != nil {
+		testingHandle.Fatalf("expected password auth to pass: %v", authErr)
+	}
+	if profile.UserEmail != "user@example.com" || profile.DisplayName != "Password User" {
+		testingHandle.Fatalf("unexpected password profile: %#v", profile)
+	}
+	email, display, avatarURL, roles, profileErr := userStore.GetUserProfile(context.Background(), "alpha", "email:user@example.com")
+	if profileErr != nil {
+		testingHandle.Fatalf("expected seeded user profile: %v", profileErr)
+	}
+	if email != "user@example.com" || display != "Password User" || avatarURL != "https://example.com/password.png" {
+		testingHandle.Fatalf("unexpected seeded user profile")
+	}
+	if len(roles) != 1 || roles[0] != "user" {
+		testingHandle.Fatalf("unexpected seeded roles: %#v", roles)
 	}
 }
 

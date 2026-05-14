@@ -68,6 +68,61 @@ func TestDatabaseUserStoreLifecycle(testContext *testing.T) {
 	}
 }
 
+func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
+	testContext.Parallel()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(context.Background(), databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+
+	passwordHash, hashErr := HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testContext.Fatalf("failed to hash password: %v", hashErr)
+	}
+	profileID, roles, profileErr := store.UpsertPasswordUser(context.Background(), "tenant-a", "User@Example.com", "Password User", "https://example.com/password.png")
+	if profileErr != nil {
+		testContext.Fatalf("failed to upsert password profile: %v", profileErr)
+	}
+	if profileID != "email:user@example.com" {
+		testContext.Fatalf("unexpected password user id: %s", profileID)
+	}
+	if len(roles) != 1 || roles[0] != defaultUserRole {
+		testContext.Fatalf("unexpected roles: %#v", roles)
+	}
+	credentialErr := store.UpsertPasswordCredential(context.Background(), "tenant-a", PasswordCredentialSeed{
+		UserEmail:    "User@Example.com",
+		DisplayName:  "Password User",
+		AvatarURL:    "https://example.com/password.png",
+		PasswordHash: passwordHash,
+	})
+	if credentialErr != nil {
+		testContext.Fatalf("failed to upsert password credential: %v", credentialErr)
+	}
+
+	profile, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "user@example.com", "correct horse battery staple")
+	if authErr != nil {
+		testContext.Fatalf("expected password auth to pass: %v", authErr)
+	}
+	if profile.UserEmail != "user@example.com" || profile.DisplayName != "Password User" || profile.AvatarURL != "https://example.com/password.png" {
+		testContext.Fatalf("unexpected password profile: %#v", profile)
+	}
+	email, display, avatarURL, storedRoles, fetchErr := store.GetUserProfile(context.Background(), "tenant-a", profileID)
+	if fetchErr != nil {
+		testContext.Fatalf("failed to fetch password profile: %v", fetchErr)
+	}
+	if email != "user@example.com" || display != "Password User" || avatarURL != "https://example.com/password.png" {
+		testContext.Fatalf("unexpected stored password profile")
+	}
+	if len(storedRoles) != 1 || storedRoles[0] != defaultUserRole {
+		testContext.Fatalf("unexpected stored roles")
+	}
+	_, wrongPasswordErr := store.AuthenticatePassword(context.Background(), "tenant-a", "user@example.com", "wrong-password")
+	if !errors.Is(wrongPasswordErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected invalid credential error, got %v", wrongPasswordErr)
+	}
+}
+
 func TestUserStorePreservesLegacySchemaWhenMigrationRecordMissing(testContext *testing.T) {
 	databasePath := filepath.Join(testContext.TempDir(), "tauth.db")
 	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
