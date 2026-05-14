@@ -1,8 +1,8 @@
 # TAuth
 
-*Google Sign-In + JWT sessions for single-origin apps*
+*Google Sign-In, email/password login, and JWT sessions for single-origin apps*
 
-TAuth lets product teams accept Google Sign-In, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
+TAuth lets product teams accept Google Sign-In or tenant-managed email/password credentials, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
 TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google API access/refresh tokens.
@@ -11,7 +11,7 @@ TAuth is authentication-only: it validates Google ID tokens and issues first-par
 
 ## Why teams choose TAuth
 
-- **Own the session lifecycle** – verify Google once, then rely on short-lived access cookies and rotating refresh tokens.
+- **Own the session lifecycle** – verify an identity once, then rely on short-lived access cookies and rotating refresh tokens.
 - **Zero tokens in JavaScript** – the client handles hydration, silent refresh, and logout notifications without touching `localStorage`.
 - **Minutes to value** – a single binary with predictable defaults, powered by Gin and Google’s official identity SDK.
 - **Designed for growth** – plug in Postgres or SQLite to persist refresh tokens, and extend the web hook points to fit your product.
@@ -44,6 +44,12 @@ tenants:
         client_id: "your_android_client_id.apps.googleusercontent.com"
         redirect_uris:
           - "com.example.app:/oauth2redirect/google"
+    password_auth:
+      enabled: true
+      users:
+        - email: "operator@example.com"
+          display_name: "Operator"
+          password_hash: "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".mprlab.com"
     session_cookie_name: "app_session_prod"
@@ -66,6 +72,7 @@ Each entry defines:
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
 - `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
 - `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
+- `password_auth` – optional email/password provider. Set `enabled: true` and seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values. The first supported slice is login-only; signup, verification, reset-password, and account linking are intentionally outside this flow.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
@@ -168,6 +175,8 @@ The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes t
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
 
+For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. The response, `HttpOnly` cookies, refresh behavior, and `/me` profile shape are identical to Google login.
+
 ### Configure Google Identity Services (popup flow)
 
 1. **Create or reuse a Google OAuth Web client.** Add every product origin (e.g. `https://gravity.mprlab.com`) to the *Authorized JavaScript origins* list. Redirect URIs are not required for this popup flow.
@@ -243,6 +252,14 @@ tenants:
       - platform: "android"
         client_id: "demo-android.apps.googleusercontent.com"
         redirect_uris: ["com.demo.app:/oauth2redirect/google"]
+    password_auth:
+      enabled: true
+      users:
+        - email: "user@example.com"
+          display_name: "Example User"
+          avatar_url: "https://example.com/avatar.png"
+          password_hash: "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
+    jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
     session_cookie_name: "app_session_demo"
     refresh_cookie_name: "app_refresh_demo"
@@ -259,11 +276,12 @@ Rules enforced by the loader:
 - `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- Unlisted users are rejected during `/auth/google` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
+- Unlisted users are rejected during `/auth/google`, `/auth/google/native`, and `/auth/password/login` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
 - `google_web_client_id` and each TTL must be present and non-empty. `google_native_client_id` and `google_native_clients` are optional and enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
+- `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
-- Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors.
+- Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
 
 The `internal/tenants` package validates the entire file before returning domain objects, so downstream routing relies on trusted tenant definitions. Request routing works as follows:
 
@@ -271,7 +289,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - For local development, non-browser clients, or shared origins, enable the optional header override (`enable_tenant_header_override: true`). When enabled, TAuth accepts either a tenant ID (`X-TAuth-Tenant: demo`) or a frontend origin (`X-TAuth-Tenant: http://localhost:8000`) as the override hint. Leave it disabled in production when every tenant owns unique origins.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
-- Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched. Restore hints are scoped by `baseUrl` and tenant id so shared-origin tenants do not reuse each other’s bootstrap state.
+- Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/*`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched. Restore hints are scoped by `baseUrl` and tenant id so shared-origin tenants do not reuse each other’s bootstrap state.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between tenants.
 
 ---
