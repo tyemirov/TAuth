@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +32,8 @@ type Tenant struct {
 	googleWebClientID    string
 	googleNativeClientID string
 	nativeGoogleClients  []NativeGoogleClient
+	passwordAuthEnabled  bool
+	passwordUsers        []PasswordUser
 	jwtSigningKey        []byte
 	cookieDomain         string
 	sessionCookieName    string
@@ -49,6 +52,14 @@ type NativeGoogleClient struct {
 	platform     string
 	clientID     string
 	redirectURIs []string
+}
+
+// PasswordUser represents one configured email/password user.
+type PasswordUser struct {
+	email        string
+	displayName  string
+	avatarURL    string
+	passwordHash string
 }
 
 type tenantCookieScope struct {
@@ -81,6 +92,10 @@ const (
 	errorCodeInvalidNativePlatform      = "tenant.invalid_native_google_platform"
 	errorCodeInvalidNativeRedirectURI   = "tenant.invalid_native_redirect_uri"
 	errorCodeDuplicateNativeGoogleID    = "tenant.duplicate_native_google_client_id"
+	errorCodePasswordAuthDisabled       = "tenant.password_auth_disabled"
+	errorCodeInvalidPasswordUser        = "tenant.invalid_password_user"
+	errorCodeDuplicatePasswordUser      = "tenant.duplicate_password_user"
+	errorCodeInvalidPasswordHash        = "tenant.invalid_password_hash"
 	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
 	errorCodeInvalidNonceTTL            = "tenant.invalid_nonce_ttl"
@@ -126,10 +141,8 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%w: %s read_file", ErrInvalidTenantConfig, errorCodeInvalidPath)
 	}
 
-	expandedPayload := os.ExpandEnv(string(payload))
-
 	var document FileDocument
-	decoder := yaml.NewDecoder(strings.NewReader(expandedPayload))
+	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
 		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, err.Error())
@@ -307,6 +320,21 @@ func (tenant Tenant) NativeGoogleClientIDs() []string {
 	return clientIDs
 }
 
+// PasswordAuthEnabled indicates whether password login is available for the tenant.
+func (tenant Tenant) PasswordAuthEnabled() bool {
+	return tenant.passwordAuthEnabled
+}
+
+// PasswordUsers returns configured password users for startup seeding.
+func (tenant Tenant) PasswordUsers() []PasswordUser {
+	if len(tenant.passwordUsers) == 0 {
+		return nil
+	}
+	users := make([]PasswordUser, len(tenant.passwordUsers))
+	copy(users, tenant.passwordUsers)
+	return users
+}
+
 // Platform returns the native platform label.
 func (client NativeGoogleClient) Platform() string {
 	return client.platform
@@ -320,6 +348,26 @@ func (client NativeGoogleClient) ClientID() string {
 // RedirectURIs returns configured OAuth redirect URIs for the client.
 func (client NativeGoogleClient) RedirectURIs() []string {
 	return append([]string(nil), client.redirectURIs...)
+}
+
+// Email returns the normalized password user email.
+func (user PasswordUser) Email() string {
+	return user.email
+}
+
+// DisplayName returns the password user's display name.
+func (user PasswordUser) DisplayName() string {
+	return user.displayName
+}
+
+// AvatarURL returns the password user's configured avatar URL.
+func (user PasswordUser) AvatarURL() string {
+	return user.avatarURL
+}
+
+// PasswordHash returns the stored bcrypt password hash.
+func (user PasswordUser) PasswordHash() string {
+	return user.passwordHash
 }
 
 // SigningKey returns a copy of the tenant-specific signing key, if provided.
@@ -389,6 +437,10 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		return Tenant{}, nil, nativeGoogleClientErr
 	}
 	googleNativeClientID := firstNativeGoogleClientID(nativeGoogleClients)
+	passwordAuthEnabled, passwordUsers, passwordAuthErr := parsePasswordAuth(raw.PasswordAuth, tenantID)
+	if passwordAuthErr != nil {
+		return Tenant{}, nil, passwordAuthErr
+	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
@@ -434,6 +486,8 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		googleWebClientID:    googleWebClientID,
 		googleNativeClientID: googleNativeClientID,
 		nativeGoogleClients:  nativeGoogleClients,
+		passwordAuthEnabled:  passwordAuthEnabled,
+		passwordUsers:        passwordUsers,
 		jwtSigningKey:        signingKey,
 		cookieDomain:         cookieDomain,
 		sessionCookieName:    sessionCookieName,
@@ -575,25 +629,81 @@ func parseAllowedUsers(rawAllowedUsers []string, tenantID TenantID) ([]string, e
 	normalizedUsers := make([]string, 0, len(rawAllowedUsers))
 	seenUsers := make(map[string]struct{}, len(rawAllowedUsers))
 	for _, rawUser := range rawAllowedUsers {
-		trimmedUser := strings.TrimSpace(rawUser)
-		if trimmedUser == "" {
-			return nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID)
+		normalizedUser, normalizeErr := normalizeEmailAddress(rawUser)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID, strings.TrimSpace(rawUser))
 		}
-		normalizedUser := strings.ToLower(trimmedUser)
 		if _, exists := seenUsers[normalizedUser]; exists {
 			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeDuplicateAllowedUser, tenantID, normalizedUser)
-		}
-		parsedAddress, parseErr := mail.ParseAddress(normalizedUser)
-		if parseErr != nil {
-			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID, normalizedUser)
-		}
-		if parsedAddress.Address != normalizedUser {
-			return nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidAllowedUser, tenantID, normalizedUser)
 		}
 		seenUsers[normalizedUser] = struct{}{}
 		normalizedUsers = append(normalizedUsers, normalizedUser)
 	}
 	return normalizedUsers, nil
+}
+
+func parsePasswordAuth(raw FilePasswordAuth, tenantID TenantID) (bool, []PasswordUser, error) {
+	enabled := bool(raw.Enabled)
+	if !enabled {
+		if len(raw.Users) > 0 {
+			return false, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodePasswordAuthDisabled, tenantID)
+		}
+		return false, nil, nil
+	}
+	users := make([]PasswordUser, 0, len(raw.Users))
+	seenUsers := make(map[string]struct{}, len(raw.Users))
+	for _, rawUser := range raw.Users {
+		user, userErr := parsePasswordUser(rawUser, tenantID)
+		if userErr != nil {
+			return false, nil, userErr
+		}
+		if _, exists := seenUsers[user.email]; exists {
+			return false, nil, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeDuplicatePasswordUser, tenantID, user.email)
+		}
+		seenUsers[user.email] = struct{}{}
+		users = append(users, user)
+	}
+	return true, users, nil
+}
+
+func parsePasswordUser(raw FilePasswordUser, tenantID TenantID) (PasswordUser, error) {
+	normalizedEmail, emailErr := normalizeEmailAddress(raw.Email)
+	if emailErr != nil {
+		return PasswordUser{}, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordUser, tenantID, strings.TrimSpace(raw.Email))
+	}
+	passwordHash := strings.TrimSpace(raw.PasswordHash)
+	if passwordHash == "" {
+		return PasswordUser{}, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordHash, tenantID, normalizedEmail)
+	}
+	if _, hashErr := bcrypt.Cost([]byte(passwordHash)); hashErr != nil {
+		return PasswordUser{}, fmt.Errorf("%w: %s tenant=%s user=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordHash, tenantID, normalizedEmail)
+	}
+	displayName := strings.TrimSpace(raw.DisplayName)
+	if displayName == "" {
+		displayName = normalizedEmail
+	}
+	return PasswordUser{
+		email:        normalizedEmail,
+		displayName:  displayName,
+		avatarURL:    strings.TrimSpace(raw.AvatarURL),
+		passwordHash: passwordHash,
+	}, nil
+}
+
+func normalizeEmailAddress(rawEmail string) (string, error) {
+	trimmedEmail := strings.TrimSpace(rawEmail)
+	if trimmedEmail == "" {
+		return "", fmt.Errorf("missing email")
+	}
+	normalizedEmail := strings.ToLower(trimmedEmail)
+	parsedAddress, parseErr := mail.ParseAddress(normalizedEmail)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if parsedAddress.Address != normalizedEmail {
+		return "", fmt.Errorf("email must not include display name")
+	}
+	return normalizedEmail, nil
 }
 
 func buildTenantCookieScope(tenant Tenant, origins []string) (tenantCookieScope, error) {
@@ -895,6 +1005,12 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.GoogleNativeClients[index].ClientID = os.ExpandEnv(tenant.GoogleNativeClients[index].ClientID)
 		tenant.GoogleNativeClients[index].RedirectURIs = expandEnvSlice(tenant.GoogleNativeClients[index].RedirectURIs)
 	}
+	for index := range tenant.PasswordAuth.Users {
+		tenant.PasswordAuth.Users[index].Email = os.ExpandEnv(tenant.PasswordAuth.Users[index].Email)
+		tenant.PasswordAuth.Users[index].DisplayName = os.ExpandEnv(tenant.PasswordAuth.Users[index].DisplayName)
+		tenant.PasswordAuth.Users[index].AvatarURL = os.ExpandEnv(tenant.PasswordAuth.Users[index].AvatarURL)
+		tenant.PasswordAuth.Users[index].PasswordHash = expandPasswordHashEnv(tenant.PasswordAuth.Users[index].PasswordHash)
+	}
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -903,6 +1019,14 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.RefreshTTL = os.ExpandEnv(tenant.RefreshTTL)
 	tenant.NonceTTL = os.ExpandEnv(tenant.NonceTTL)
 	return tenant
+}
+
+func expandPasswordHashEnv(value string) string {
+	trimmedValue := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmedValue, "$2a$") || strings.HasPrefix(trimmedValue, "$2b$") || strings.HasPrefix(trimmedValue, "$2y$") {
+		return value
+	}
+	return os.ExpandEnv(value)
 }
 
 func expandEnvSlice(values []string) []string {
@@ -925,6 +1049,7 @@ type FileTenant struct {
 	GoogleWebClientID    string                   `json:"google_web_client_id" yaml:"google_web_client_id"`
 	GoogleNativeClientID string                   `json:"google_native_client_id" yaml:"google_native_client_id"`
 	GoogleNativeClients  []FileNativeGoogleClient `json:"google_native_clients" yaml:"google_native_clients"`
+	PasswordAuth         FilePasswordAuth         `json:"password_auth" yaml:"password_auth"`
 	JWTSigningKey        string                   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain         string                   `json:"cookie_domain" yaml:"cookie_domain"`
 	SessionCookieName    string                   `json:"session_cookie_name" yaml:"session_cookie_name"`
@@ -942,6 +1067,20 @@ type FileNativeGoogleClient struct {
 	RedirectURIs []string `json:"redirect_uris" yaml:"redirect_uris"`
 }
 
+// FilePasswordAuth represents the raw password-auth tenant block.
+type FilePasswordAuth struct {
+	Enabled yamlBool           `json:"enabled" yaml:"enabled"`
+	Users   []FilePasswordUser `json:"users" yaml:"users"`
+}
+
+// FilePasswordUser represents one raw password-auth user.
+type FilePasswordUser struct {
+	Email        string `json:"email" yaml:"email"`
+	DisplayName  string `json:"display_name" yaml:"display_name"`
+	AvatarURL    string `json:"avatar_url" yaml:"avatar_url"`
+	PasswordHash string `json:"password_hash" yaml:"password_hash"`
+}
+
 type yamlBool bool
 
 func (value *yamlBool) UnmarshalYAML(node *yaml.Node) error {
@@ -954,7 +1093,7 @@ func (value *yamlBool) UnmarshalYAML(node *yaml.Node) error {
 		*value = yamlBool(parsed)
 		return nil
 	case "!!str":
-		parsed, err := strconv.ParseBool(strings.TrimSpace(node.Value))
+		parsed, err := strconv.ParseBool(strings.TrimSpace(os.ExpandEnv(node.Value)))
 		if err != nil {
 			return err
 		}

@@ -90,6 +90,8 @@ type testTenantPayload struct {
 	GoogleNativeClientID     string                          `json:"google_native_client_id"`
 	GoogleNativeClientIDs    []string                        `json:"google_native_client_ids"`
 	GoogleNativeClients      []testNativeGoogleClientPayload `json:"google_native_clients"`
+	PasswordAuthEnabled      bool                            `json:"password_auth_enabled"`
+	PasswordUserCount        int                             `json:"password_user_count"`
 	CookieDomain             string                          `json:"cookie_domain"`
 	SessionCookieName        string                          `json:"session_cookie_name"`
 	RefreshCookieName        string                          `json:"refresh_cookie_name"`
@@ -162,6 +164,9 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	}
 	if len(tenant.GoogleNativeClients) != 1 || tenant.GoogleNativeClients[0].Platform != "desktop" {
 		testingHandle.Fatalf("unexpected google_native_clients: %#v", tenant.GoogleNativeClients)
+	}
+	if tenant.PasswordAuthEnabled || tenant.PasswordUserCount != 0 {
+		testingHandle.Fatalf("unexpected password auth report fields")
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -155,6 +157,73 @@ func TestLoadConfigAllowsEmptyAllowedUsers(testingHandle *testing.T) {
 	}
 	if len(allowedUsers) != 0 {
 		testingHandle.Fatalf("expected allowed users to be empty, got %#v", allowedUsers)
+	}
+}
+
+func TestLoadConfigParsesPasswordAuthUsers(testingHandle *testing.T) {
+	passwordHashBytes, hashErr := bcrypt.GenerateFromPassword([]byte("correct horse battery staple"), bcrypt.MinCost)
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to build test hash: %v", hashErr)
+	}
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.PasswordAuth = FilePasswordAuth{
+		Enabled: true,
+		Users: []FilePasswordUser{
+			{
+				Email:        "User@Example.com",
+				DisplayName:  "Password User",
+				AvatarURL:    "https://example.com/avatar.png",
+				PasswordHash: string(passwordHashBytes),
+			},
+		},
+	}
+	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	if !loadedTenant.PasswordAuthEnabled() {
+		testingHandle.Fatalf("expected password auth to be enabled")
+	}
+	passwordUsers := loadedTenant.PasswordUsers()
+	if len(passwordUsers) != 1 {
+		testingHandle.Fatalf("expected one password user, got %#v", passwordUsers)
+	}
+	if passwordUsers[0].Email() != "user@example.com" {
+		testingHandle.Fatalf("unexpected password user email: %s", passwordUsers[0].Email())
+	}
+	if passwordUsers[0].DisplayName() != "Password User" {
+		testingHandle.Fatalf("unexpected password user display name: %s", passwordUsers[0].DisplayName())
+	}
+	if passwordUsers[0].AvatarURL() != "https://example.com/avatar.png" {
+		testingHandle.Fatalf("unexpected password user avatar: %s", passwordUsers[0].AvatarURL())
+	}
+	if passwordUsers[0].PasswordHash() != string(passwordHashBytes) {
+		testingHandle.Fatalf("unexpected password hash")
+	}
+}
+
+func TestLoadConfigRejectsInvalidPasswordAuthHash(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.PasswordAuth = FilePasswordAuth{
+		Enabled: true,
+		Users: []FilePasswordUser{
+			{
+				Email:        "user@example.com",
+				DisplayName:  "Password User",
+				PasswordHash: "not-a-bcrypt-hash",
+			},
+		},
+	}
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr == nil {
+		testingHandle.Fatalf("expected invalid password hash error")
+	}
+	if !containsStableCode(loadErr, errorCodeInvalidPasswordHash) {
+		testingHandle.Fatalf("expected error code %s, got %v", errorCodeInvalidPasswordHash, loadErr)
 	}
 }
 
@@ -826,6 +895,53 @@ func TestLoadConfigExpandsEnvVars(t *testing.T) {
 	}
 	if tenant.DisplayName() != "demo" {
 		t.Fatalf("expected fallback display name, got %s", tenant.DisplayName())
+	}
+}
+
+func TestLoadConfigPreservesLiteralPasswordHashFromFile(t *testing.T) {
+	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte("secret-password"), bcrypt.MinCost)
+	if hashErr != nil {
+		t.Fatalf("failed to generate password hash: %v", hashErr)
+	}
+	passwordHash := string(hashBytes)
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "tenants.yaml")
+	configYAML := []byte(fmt.Sprintf(`tenants:
+  - id: "demo"
+    display_name: "Demo"
+    tenant_origins: ["https://demo.localhost"]
+    google_web_client_id: "demo-client.apps.googleusercontent.com"
+    password_auth:
+      enabled: true
+      users:
+        - email: "User@Example.com"
+          display_name: "Demo User"
+          password_hash: "%s"
+    jwt_signing_key: "demo-key"
+    cookie_domain: "demo.localhost"
+    session_cookie_name: "app_session_demo"
+    refresh_cookie_name: "app_refresh_demo"
+    session_ttl: "30m"
+    refresh_ttl: "720h"
+`, passwordHash))
+	if writeErr := os.WriteFile(configPath, configYAML, 0o600); writeErr != nil {
+		t.Fatalf("failed to write config: %v", writeErr)
+	}
+
+	config, loadErr := LoadConfig(configPath)
+	if loadErr != nil {
+		t.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	tenant, exists := config.TenantByID("demo")
+	if !exists {
+		t.Fatalf("expected demo tenant to exist")
+	}
+	users := tenant.PasswordUsers()
+	if len(users) != 1 {
+		t.Fatalf("expected one password user, got %d", len(users))
+	}
+	if users[0].PasswordHash() != passwordHash {
+		t.Fatalf("expected literal bcrypt hash to be preserved")
 	}
 }
 
