@@ -162,7 +162,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 
 The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `docs/` site and copies `web/tauth.js` into the site root, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
 
-`tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin.
+`tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/me` and `/auth/refresh` recovery. Use `bootstrapMode: "eager"` only when you intentionally want the legacy probe-first behavior, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 
 ### 4. Prepare and exchange Google credentials across origins
 
@@ -271,7 +271,7 @@ The `internal/tenants` package validates the entire file before returning domain
 - For local development, non-browser clients, or shared origins, enable the optional header override (`enable_tenant_header_override: true`). When enabled, TAuth accepts either a tenant ID (`X-TAuth-Tenant: demo`) or a frontend origin (`X-TAuth-Tenant: http://localhost:8000`) as the override hint. Leave it disabled in production when every tenant owns unique origins.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
-- Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched.
+- Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched. Restore hints are scoped by `baseUrl` and tenant id so shared-origin tenants do not reuse each other’s bootstrap state.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between tenants.
 
 ---

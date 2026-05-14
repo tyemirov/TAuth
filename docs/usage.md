@@ -160,12 +160,13 @@ Your product should:
 
 ## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports eight globals:
+The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports nine globals:
 
-- `initAuthClient(options)` – hydrates the current user and sets up refresh behaviour.
+- `initAuthClient(options)` – initializes client auth state and restores prior sessions when appropriate.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
 - `getCurrentUser()` – returns the current profile object or `null`.
-- `getAuthEndpoints()` – returns the resolved URL map for `/api/me` and `/auth/*`.
+- `getAuthState()` – returns `unknown`, `anonymous`, `restoring`, `authenticated`, or `error`.
+- `getAuthEndpoints()` – returns the resolved URL map for `/me` and `/auth/*`.
 - `requestNonce()` – fetches a one-time nonce for Google Identity Services.
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
 - `logout()` – revokes the refresh token and clears client state.
@@ -195,6 +196,7 @@ Call `initAuthClient` once during startup, after the script loads. The `baseUrl`
   initAuthClient({
     baseUrl: "https://auth.example.com",
     tenantId: "demo", // optional override for shared-origin dev setups
+    bootstrapMode: "restore-if-hinted",
     onAuthenticated(profile) {
       renderDashboard(profile);
     },
@@ -207,10 +209,12 @@ Call `initAuthClient` once during startup, after the script loads. The `baseUrl`
 
 Behaviour:
 
-- TAuth calls `GET /api/me` to check for an existing session.
-- If missing or expired, it attempts `POST /auth/refresh`.
-- If refresh succeeds, it calls `onAuthenticated(profile)`; otherwise it calls `onUnauthenticated()`.
-- The `profile` object matches the `/api/me` response (see section 6.3).
+- With the default `bootstrapMode: "restore-if-hinted"`, a first anonymous visit calls `onUnauthenticated()` without making `/me` or `/auth/refresh` requests.
+- After a successful login, profile restore, or refresh, the helper writes a non-secret restore hint keyed by `baseUrl` and tenant id.
+- When that hint exists, startup calls `GET /me`; if the access cookie is expired, it attempts `POST /auth/refresh` once, then re-reads `/me`.
+- `bootstrapMode: "eager"` preserves the legacy probe-first behavior. `bootstrapMode: "passive"` always starts anonymous and never restores on load.
+- `401` from `/me` or `/auth/refresh` during hinted restore means the browser is signed out and clears the hint. `403`, `404`, network failures, and `5xx` responses call `onAuthError(error)`.
+- The `profile` object matches the `/me` response (see section 6.3).
 
 ### 4.3 Calling your own APIs with `apiFetch`
 
@@ -254,7 +258,7 @@ The helper:
 
 ### 4.5 Selecting a tenant explicitly
 
-Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/api/me` and `/auth/*` calls only when you explicitly supply a `tenantId`. You can pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
+Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls only when you explicitly supply a `tenantId`. You can pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
 
 ```js
 initAuthClient({
@@ -265,7 +269,7 @@ initAuthClient({
 });
 ```
 
-The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/api/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected.
+The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected. Restore hints are tenant-scoped, so one shared-origin tenant does not trigger bootstrap probes for another.
 
 ---
 

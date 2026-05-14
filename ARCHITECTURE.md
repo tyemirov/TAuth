@@ -158,12 +158,13 @@ Nonce handling rules:
 
 ### 4.4 `web/tauth.js`
 
-- Initializes session state via `/me`.
-- Dispatches events on authentication changes.
-- Attempts silent refresh on 401 using `/auth/refresh`.
-- Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`).
+- Tracks client auth state as `unknown`, `anonymous`, `restoring`, `authenticated`, or `error`.
+- Defaults `initAuthClient` to `bootstrapMode: "restore-if-hinted"` so a fresh anonymous page load reports `onUnauthenticated()` without calling protected endpoints. Successful login, profile restore, and refresh set a non-secret local restore hint keyed by `baseUrl` and tenant id.
+- Restores hinted sessions by calling `/me`; if the access cookie is expired, it tries `/auth/refresh` once and then re-reads `/me`.
+- Preserves `bootstrapMode: "eager"` for legacy probe-first integrations and `bootstrapMode: "passive"` for public surfaces that should never restore on load.
+- Keeps `apiFetch` refresh-on-401 behavior for protected application requests, then retries the original request once on refresh success.
+- Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`, `onAuthError`) plus `getCurrentUser()` and `getAuthState()`.
 - Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
-- Emits DOM events (`auth:authenticated`, `auth:unauthenticated`) to coordinate UI without global state.
 
 ### 4.5 Interfaces and extension points
 
