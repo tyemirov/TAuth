@@ -5,6 +5,10 @@
    */
 
   /**
+   * @typedef {Error & { status?: number }} AuthClientError
+   */
+
+  /**
    * @typedef {Object} AuthClientOptions
    * @property {string} baseUrl
    * @property {string} meEndpoint
@@ -13,8 +17,10 @@
    * @property {string} refreshEndpoint
    * @property {string} logoutEndpoint
    * @property {string} tenantId
+   * @property {string} bootstrapMode
    * @property {(profile: UserProfile) => void} onAuthenticated
    * @property {() => void} onUnauthenticated
+   * @property {(error: AuthClientError) => void} onAuthError
    */
 
   /**
@@ -26,8 +32,10 @@
    * @property {string=} refreshEndpoint
    * @property {string=} logoutEndpoint
    * @property {string=} tenantId
+   * @property {string=} bootstrapMode
    * @property {(profile: UserProfile) => void=} onAuthenticated
    * @property {() => void=} onUnauthenticated
+   * @property {(error: AuthClientError) => void=} onAuthError
    */
 
   /**
@@ -62,14 +70,17 @@
     refreshEndpoint: "/auth/refresh",
     logoutEndpoint: "/auth/logout",
     tenantId: "",
+    bootstrapMode: "restore-if-hinted",
     onAuthenticated: function onAuthenticatedDefault(userProfile) {},
     onUnauthenticated: function onUnauthenticatedDefault() {},
+    onAuthError: function onAuthErrorDefault(error) {},
   };
 
-  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string }} */
+  /** @type {{ options: AuthClientOptions | null, userProfile: UserProfile | null, authState: string, isRefreshing: boolean, pendingRequests: PendingRequest[], broadcastChannel: BroadcastChannel | null, broadcastListeners: Array<(event: MessageEvent) => void>, broadcastListenerAttached: boolean, broadcastHandlerAttached: boolean, profileSyncPromise: Promise<UserProfile | null> | null, tenantId: string }} */
   var runtime = {
     options: null,
     userProfile: null,
+    authState: "unknown",
     isRefreshing: false,
     pendingRequests: [],
     broadcastChannel: null,
@@ -167,6 +178,82 @@
   var broadcastEventRefreshed = "refreshed";
   var broadcastEventLoggedOut = "logged_out";
   var broadcastWaitTimeoutMs = 360;
+  var bootstrapModeRestoreIfHinted = "restore-if-hinted";
+  var bootstrapModeEager = "eager";
+  var bootstrapModePassive = "passive";
+  var restoreHintPrefix = "tauth.restore.v1:";
+
+  function storageObject() {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        return window.localStorage;
+      }
+      if (typeof localStorage !== "undefined") {
+        return localStorage;
+      }
+    } catch (error) {
+      return null;
+    }
+    return null;
+  }
+
+  /**
+   * @param {AuthClientOptions} options
+   * @returns {string}
+   */
+  function restoreHintKey(options) {
+    return (
+      restoreHintPrefix +
+      encodeURIComponent(options.baseUrl) +
+      ":" +
+      encodeURIComponent(options.tenantId || "")
+    );
+  }
+
+  /**
+   * @param {AuthClientOptions=} selectedOptions
+   * @returns {boolean}
+   */
+  function hasRestoreHint(selectedOptions) {
+    var options = selectedOptions || runtime.options;
+    var storage = storageObject();
+    if (!options || !storage) {
+      return false;
+    }
+    try {
+      return storage.getItem(restoreHintKey(options)) !== null;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function rememberRestoreHint() {
+    var storage = storageObject();
+    if (!runtime.options || !storage) {
+      return;
+    }
+    try {
+      storage.setItem(restoreHintKey(runtime.options), "1");
+    } catch (error) {
+      void error;
+    }
+  }
+
+  /**
+   * @param {AuthClientOptions=} selectedOptions
+   */
+  function clearRestoreHint(selectedOptions) {
+    var options = selectedOptions || runtime.options;
+    var storage = storageObject();
+    if (!options || !storage) {
+      return;
+    }
+    try {
+      storage.removeItem(restoreHintKey(options));
+    } catch (error) {
+      void error;
+    }
+  }
 
   function queueWhileRefreshing(executorFunction) {
     return new Promise(function (resolve, reject) {
@@ -195,8 +282,14 @@
     runtime.userProfile = userProfile;
   }
 
+  function setAuthState(authState) {
+    runtime.authState = authState;
+  }
+
   function applyAuthenticatedProfile(profile) {
     setUserProfile(profile);
+    setAuthState("authenticated");
+    rememberRestoreHint();
     if (
       runtime.options &&
       typeof runtime.options.onAuthenticated === "function"
@@ -207,6 +300,18 @@
 
   function applyUnauthenticated() {
     setUserProfile(null);
+    setAuthState("anonymous");
+    clearRestoreHint();
+    notifyUnauthenticated();
+  }
+
+  function applyPassiveUnauthenticated() {
+    setUserProfile(null);
+    setAuthState("anonymous");
+    notifyUnauthenticated();
+  }
+
+  function notifyUnauthenticated() {
     if (
       runtime.options &&
       typeof runtime.options.onUnauthenticated === "function"
@@ -216,10 +321,25 @@
   }
 
   /**
+   * @param {AuthClientError} error
+   */
+  function applyAuthError(error) {
+    setUserProfile(null);
+    setAuthState("error");
+    if (runtime.options && typeof runtime.options.onAuthError === "function") {
+      runtime.options.onAuthError(error);
+    }
+  }
+
+  /**
    * @returns {UserProfile | null}
    */
   function getCurrentUser() {
     return runtime.userProfile;
+  }
+
+  function getAuthState() {
+    return runtime.authState;
   }
 
   /**
@@ -452,7 +572,27 @@
       }
     }
     runtime.tenantId = options.tenantId || "";
+    options.bootstrapMode = normalizeBootstrapMode(options.bootstrapMode);
     return options;
+  }
+
+  /**
+   * @param {string} rawMode
+   * @returns {string}
+   */
+  function normalizeBootstrapMode(rawMode) {
+    var mode = typeof rawMode === "string" ? rawMode.trim() : "";
+    if (!mode) {
+      return bootstrapModeRestoreIfHinted;
+    }
+    if (
+      mode === bootstrapModeRestoreIfHinted ||
+      mode === bootstrapModeEager ||
+      mode === bootstrapModePassive
+    ) {
+      return mode;
+    }
+    throw new Error("tauth.invalid_bootstrap_mode");
   }
 
   function requireOptions() {
@@ -478,7 +618,20 @@
     return combined;
   }
 
-  async function fetchCurrentProfile() {
+  /**
+   * @param {string} code
+   * @param {number=} status
+   * @returns {AuthClientError}
+   */
+  function createAuthClientError(code, status) {
+    var error = /** @type {AuthClientError} */ (new Error(code));
+    if (typeof status === "number") {
+      error.status = status;
+    }
+    return error;
+  }
+
+  async function readCurrentProfile() {
     var options = requireOptions();
     try {
       var response = await fetch(
@@ -489,12 +642,23 @@
           headers: withTenantHeader(),
         },
       );
-      if (!response.ok) {
-        return null;
+      if (response.ok) {
+        return { outcome: "authenticated", profile: await response.json() };
       }
-      return await response.json();
+      if (response.status === 401) {
+        return { outcome: "unauthenticated", profile: null };
+      }
+      return {
+        outcome: "error",
+        profile: null,
+        error: createAuthClientError("tauth.profile_error", response.status),
+      };
     } catch (error) {
-      return null;
+      return {
+        outcome: "error",
+        profile: null,
+        error: createAuthClientError("tauth.profile_network_error"),
+      };
     }
   }
 
@@ -503,18 +667,22 @@
       return runtime.profileSyncPromise;
     }
     runtime.profileSyncPromise = (async function syncProfile() {
-      var profile = await fetchCurrentProfile();
-      if (profile) {
-        applyAuthenticatedProfile(profile);
+      var result = await readCurrentProfile();
+      if (result.outcome === "authenticated") {
+        applyAuthenticatedProfile(result.profile);
+        return result.profile;
       }
-      return profile;
+      if (result.outcome === "error") {
+        applyAuthError(result.error);
+      }
+      return null;
     })();
     return runtime.profileSyncPromise.finally(function () {
       runtime.profileSyncPromise = null;
     });
   }
 
-  async function attemptRefresh() {
+  async function refreshSession() {
     var options = requireOptions();
     try {
       var refreshResponse = await fetch(
@@ -526,12 +694,22 @@
         },
       );
       if (refreshResponse.ok || refreshResponse.status === 204) {
+        rememberRestoreHint();
         broadcast(broadcastEventRefreshed);
-        return true;
+        return { outcome: "refreshed", error: null };
       }
-      return false;
+      if (refreshResponse.status === 401) {
+        return { outcome: "unauthenticated", error: null };
+      }
+      return {
+        outcome: "error",
+        error: createAuthClientError("tauth.refresh_error", refreshResponse.status),
+      };
     } catch (error) {
-      return false;
+      return {
+        outcome: "error",
+        error: createAuthClientError("tauth.refresh_network_error"),
+      };
     }
   }
 
@@ -558,26 +736,52 @@
     runtime.options = normalizeOptions(passed);
     ensureBroadcastListener();
     try {
-      var profile = await fetchCurrentProfile();
-      if (profile) {
-        applyAuthenticatedProfile(profile);
+      if (runtime.options.bootstrapMode === bootstrapModePassive) {
+        applyPassiveUnauthenticated();
         return;
       }
-      var refreshSucceeded = await attemptRefresh();
-      if (refreshSucceeded) {
-        var refreshedProfile = await fetchCurrentProfile();
-        if (refreshedProfile) {
-          applyAuthenticatedProfile(refreshedProfile);
+      if (
+        runtime.options.bootstrapMode === bootstrapModeRestoreIfHinted &&
+        !hasRestoreHint(runtime.options)
+      ) {
+        applyUnauthenticated();
+        return;
+      }
+      setAuthState("restoring");
+      var profileResult = await readCurrentProfile();
+      if (profileResult.outcome === "authenticated") {
+        applyAuthenticatedProfile(profileResult.profile);
+        return;
+      }
+      if (profileResult.outcome === "error") {
+        applyAuthError(profileResult.error);
+        return;
+      }
+      var refreshResult = await refreshSession();
+      if (refreshResult.outcome === "refreshed") {
+        var refreshedProfileResult = await readCurrentProfile();
+        if (refreshedProfileResult.outcome === "authenticated") {
+          applyAuthenticatedProfile(refreshedProfileResult.profile);
           return;
         }
+        if (refreshedProfileResult.outcome === "error") {
+          applyAuthError(refreshedProfileResult.error);
+          return;
+        }
+      } else if (refreshResult.outcome === "error") {
+        applyAuthError(refreshResult.error);
+        return;
       }
       var peerResult = await waitForPeerRefresh();
       if (peerResult.profile) {
         return;
       }
+      if (runtime.authState === "error") {
+        return;
+      }
       applyUnauthenticated();
     } catch (initializationError) {
-      applyUnauthenticated();
+      applyAuthError(createAuthClientError("tauth.bootstrap_failed"));
     }
   }
 
@@ -604,8 +808,8 @@
     }
     runtime.isRefreshing = true;
     try {
-      var refreshSucceeded = await attemptRefresh();
-      if (refreshSucceeded) {
+      var refreshResult = await refreshSession();
+      if (refreshResult.outcome === "refreshed") {
         var retryResponse = await execute();
         flushPendingRequests(null);
         return retryResponse;
@@ -615,6 +819,11 @@
         var recoveredResponse = await execute();
         flushPendingRequests(null);
         return recoveredResponse;
+      }
+      if (refreshResult.outcome === "error") {
+        applyAuthError(refreshResult.error);
+      } else {
+        applyUnauthenticated();
       }
       flushPendingRequests(new Error("refresh_failed"));
       return firstResponse;
@@ -637,7 +846,9 @@
           headers: withTenantHeader({ "X-Requested-With": "XMLHttpRequest" }),
         },
       );
-    } catch (ignore) {}
+    } catch (ignore) {
+      void ignore;
+    }
     applyUnauthenticated();
     broadcast(broadcastEventLoggedOut);
   }
@@ -646,6 +857,7 @@
     window["initAuthClient"] = initAuthClient;
     window["apiFetch"] = apiFetch;
     window["getCurrentUser"] = getCurrentUser;
+    window["getAuthState"] = getAuthState;
     window["getAuthEndpoints"] = getAuthEndpoints;
     window["requestNonce"] = requestNonce;
     window["exchangeGoogleCredential"] = exchangeGoogleCredential;

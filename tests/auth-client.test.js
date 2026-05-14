@@ -5,6 +5,26 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const vm = require("node:vm");
 
+function restoreHintKey(baseUrl, tenantId = "") {
+  return `tauth.restore.v1:${encodeURIComponent(baseUrl)}:${encodeURIComponent(tenantId)}`;
+}
+
+function createStorage(initialEntries = {}) {
+  const data = { ...initialEntries };
+  return {
+    data,
+    getItem(key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+    },
+    setItem(key, value) {
+      data[key] = String(value);
+    },
+    removeItem(key) {
+      delete data[key];
+    },
+  };
+}
+
 async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   const scriptPath = path.join(__dirname, "..", "web", "tauth.js");
   const source = await fs.readFile(scriptPath, "utf8");
@@ -88,6 +108,9 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
       },
     },
   };
+  const localStorage = createStorage(resolvedOptions.storage || {});
+  context.localStorage = localStorage;
+  context.__localStorageData = localStorage.data;
   if (typeof resolvedTenantId === "string") {
     context.__TAUTH_TENANT_ID__ = resolvedTenantId;
   }
@@ -153,6 +176,177 @@ function assertMissingHeader(call, headerName) {
   );
 }
 
+test("auth client treats first logged-out visit as anonymous without auth probes", async () => {
+  const fetch = createFetchWithQueue([]);
+  const context = await loadAuthClient(fetch, []);
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {
+      throw new Error("should not authenticate without a restore hint");
+    },
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(context.getAuthState(), "anonymous");
+  assert.equal(fetch.calls.length, 0);
+});
+
+test("auth client restores from /me when a restore hint exists", async () => {
+  const profile = {
+    user_id: "hinted-user",
+    user_email: "hinted@example.com",
+    display: "Hinted User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
+  const context = await loadAuthClient(fetch, [], {
+    storage: {
+      [restoreHintKey("https://example.com")]: "1",
+    },
+  });
+
+  let authenticatedProfile = null;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated(received) {
+      authenticatedProfile = received;
+    },
+    onUnauthenticated() {
+      throw new Error("should restore from hint");
+    },
+  });
+
+  assert.deepEqual(authenticatedProfile, profile);
+  assert.equal(context.getAuthState(), "authenticated");
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], "1");
+});
+
+test("auth client passive bootstrap preserves restore hints for later pages", async () => {
+  const fetch = createFetchWithQueue([]);
+  const context = await loadAuthClient(fetch, [], {
+    storage: {
+      [restoreHintKey("https://example.com")]: "1",
+    },
+  });
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    bootstrapMode: "passive",
+    onAuthenticated() {
+      throw new Error("passive bootstrap should not authenticate");
+    },
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getAuthState(), "anonymous");
+  assert.equal(fetch.calls.length, 0);
+  assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], "1");
+});
+
+test("auth client refreshes hinted expired sessions once", async () => {
+  const profile = {
+    user_id: "refresh-user",
+    user_email: "refresh@example.com",
+    display: "Refresh User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 401, body: {} },
+    { status: 204, body: {} },
+    { status: 200, body: profile },
+  ]);
+  const events = [];
+  const context = await loadAuthClient(fetch, events, {
+    storage: {
+      [restoreHintKey("https://example.com")]: "1",
+    },
+  });
+
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {},
+    onUnauthenticated() {
+      throw new Error("should refresh hinted session");
+    },
+  });
+
+  assert.equal(context.getAuthState(), "authenticated");
+  assert.equal(fetch.calls.length, 3);
+  assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
+  assert.equal(fetch.calls[2].url, "https://example.com/me");
+  assert.deepEqual(events, ["refreshed"]);
+});
+
+test("auth client clears restore hints when hinted refresh is unauthenticated", async () => {
+  const fetch = createFetchWithQueue([
+    { status: 401, body: {} },
+    { status: 401, body: {} },
+  ]);
+  const context = await loadAuthClient(fetch, [], {
+    storage: {
+      [restoreHintKey("https://example.com")]: "1",
+    },
+  });
+
+  let unauthenticatedCount = 0;
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {
+      throw new Error("should not authenticate");
+    },
+    onUnauthenticated() {
+      unauthenticatedCount += 1;
+    },
+  });
+
+  assert.equal(unauthenticatedCount, 1);
+  assert.equal(context.getAuthState(), "anonymous");
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], undefined);
+});
+
+test("auth client reports hinted profile service errors", async () => {
+  const fetch = createFetchWithQueue([{ status: 403, body: {} }]);
+  const context = await loadAuthClient(fetch, [], {
+    storage: {
+      [restoreHintKey("https://example.com")]: "1",
+    },
+  });
+
+  const errors = [];
+  await context.initAuthClient({
+    baseUrl: "https://example.com",
+    onAuthenticated() {
+      throw new Error("should not authenticate");
+    },
+    onUnauthenticated() {
+      throw new Error("should report an auth error instead");
+    },
+    onAuthError(error) {
+      errors.push(error);
+    },
+  });
+
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(context.getAuthState(), "error");
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, "tauth.profile_error");
+  assert.equal(errors[0].status, 403);
+});
+
 test("auth client authenticates when /me succeeds", async () => {
   const profile = {
     user_id: "user-123",
@@ -169,6 +363,7 @@ test("auth client authenticates when /me succeeds", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated(received) {
       authenticatedProfile = received;
     },
@@ -203,6 +398,7 @@ test("auth client attempts refresh before authenticating", async () => {
   let authenticatedProfile = null;
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated(received) {
       authenticatedProfile = received;
     },
@@ -235,6 +431,7 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {
       authenticatedCount += 1;
     },
@@ -271,6 +468,7 @@ test("auth client clears cached profile when session refresh fails", async () =>
 
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       unauthenticatedCount += 1;
@@ -281,6 +479,7 @@ test("auth client clears cached profile when session refresh fails", async () =>
 
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       unauthenticatedCount += 1;
@@ -306,6 +505,7 @@ test("auth client omits tenant header when tenant id is unset", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {},
   });
@@ -380,6 +580,7 @@ test("auth client requests nonce via helper", async () => {
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
     tenantId: "tenant-alpha",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {},
   });
@@ -411,6 +612,7 @@ test("auth client nonce helper rejects non-200 responses", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
   });
 
   await assert.rejects(
@@ -440,6 +642,7 @@ test("auth client nonce helper rejects invalid JSON payloads", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
   });
 
   await assert.rejects(
@@ -470,6 +673,7 @@ test("auth client exchanges Google credential and updates profile", async () => 
   const authenticatedProfiles = [];
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
     onAuthenticated(profile) {
       authenticatedProfiles.push(profile);
     },
@@ -518,6 +722,7 @@ test("auth client exchange helper surfaces server error codes", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
   });
 
   await assert.rejects(
@@ -550,6 +755,7 @@ test("auth client exchange helper rejects invalid JSON payloads", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
   });
 
   await assert.rejects(
@@ -574,6 +780,7 @@ test("initAuthClient attaches tenant override header when configured", async () 
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",
     tenantId: "demo-tenant",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       throw new Error("should authenticate");
@@ -598,6 +805,7 @@ test("apiFetch sends tenant header during refresh cycle only", async () => {
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",
     tenantId: "tenant-blue",
+    bootstrapMode: "eager",
     onUnauthenticated() {},
   });
 
@@ -631,6 +839,7 @@ test("initAuthClient uses detected tenant id when option omitted", async () => {
 
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       throw new Error("should authenticate with detected tenant");
@@ -654,6 +863,7 @@ test("setAuthTenantId before init configures tenant header", async () => {
   context.setAuthTenantId("pref-tenant");
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       throw new Error("should authenticate with preferred tenant");
@@ -680,6 +890,7 @@ test("setAuthTenantId after init updates future auth requests", async () => {
   await context.initAuthClient({
     baseUrl: "https://tenant.example.com",
     tenantId: "tenant-one",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {},
   });
@@ -715,6 +926,7 @@ test("auth client syncs profile on refreshed broadcast", async () => {
   const authenticatedProfiles = [];
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated(profile) {
       authenticatedProfiles.push(profile);
     },
@@ -767,6 +979,7 @@ test("auth client clears state when peer refresh lacks a profile", async () => {
   let unauthenticatedCount = 0;
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {
       throw new Error("should not authenticate with missing profile");
     },
@@ -793,6 +1006,7 @@ test("auth client clears state on logged_out broadcast", async () => {
   let unauthenticatedCount = 0;
   await context.initAuthClient({
     baseUrl: "https://example.com",
+    bootstrapMode: "eager",
     onAuthenticated() {},
     onUnauthenticated() {
       unauthenticatedCount += 1;
