@@ -58,6 +58,8 @@ type tenantPayload struct {
 	GoogleNativeClientID     string                      `json:"google_native_client_id"`
 	GoogleNativeClientIDs    []string                    `json:"google_native_client_ids,omitempty"`
 	GoogleNativeClients      []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
+	PasswordAuthEnabled      bool                        `json:"password_auth_enabled"`
+	PasswordUserCount        int                         `json:"password_user_count"`
 	CookieDomain             string                      `json:"cookie_domain"`
 	SessionCookieName        string                      `json:"session_cookie_name"`
 	RefreshCookieName        string                      `json:"refresh_cookie_name"`
@@ -183,6 +185,8 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			GoogleNativeClientID:     tenant.GoogleNativeClientID(),
 			GoogleNativeClientIDs:    tenant.NativeGoogleClientIDs(),
 			GoogleNativeClients:      buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
+			PasswordAuthEnabled:      tenant.PasswordAuthEnabled(),
+			PasswordUserCount:        len(tenant.PasswordUsers()),
 			CookieDomain:             tenant.CookieDomain(),
 			SessionCookieName:        tenant.SessionCookieName(),
 			RefreshCookieName:        tenant.RefreshCookieName(),

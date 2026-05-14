@@ -26,7 +26,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v3"
+const ConfigSchemaVersion = "tauth.config.v4"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
@@ -64,7 +64,7 @@ func (value *YamlBool) UnmarshalYAML(node *yaml.Node) error {
 		*value = YamlBool(parsed)
 		return nil
 	case "!!str":
-		parsed, err := strconv.ParseBool(strings.TrimSpace(node.Value))
+		parsed, err := strconv.ParseBool(strings.TrimSpace(os.ExpandEnv(node.Value)))
 		if err != nil {
 			return err
 		}
@@ -92,13 +92,13 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 		return nil, fmt.Errorf("%s: read %s: %w", ErrorCodeMissingConfigFile, cleanedPath, readErr)
 	}
 
-	expanded := os.ExpandEnv(string(payload))
 	var document ApplicationConfig
-	decoder := yaml.NewDecoder(strings.NewReader(expanded))
+	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
 		return nil, fmt.Errorf("%s: %s", ErrorCodeInvalidConfigFile, err.Error())
 	}
+	document = expandApplicationConfigEnv(document)
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
 	}
@@ -111,4 +111,23 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 // TenantDocument returns the tenants subsection as a document.
 func (config ApplicationConfig) TenantDocument() tenants.FileDocument {
 	return tenants.FileDocument{Tenants: config.Tenants}
+}
+
+func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
+	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
+	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)
+	config.Server.CORSAllowedOrigins = expandEnvSlice(config.Server.CORSAllowedOrigins)
+	config.Server.CORSAllowedOriginExceptions = expandEnvSlice(config.Server.CORSAllowedOriginExceptions)
+	return config
+}
+
+func expandEnvSlice(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	expanded := make([]string, len(values))
+	for index, value := range values {
+		expanded[index] = os.ExpandEnv(value)
+	}
+	return expanded
 }

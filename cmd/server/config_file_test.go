@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -104,6 +106,57 @@ tenants:
 	}
 	if config.Server.ListenAddr != appconfig.DefaultListenAddr {
 		testingHandle.Fatalf("expected default listen addr, got %s", config.Server.ListenAddr)
+	}
+}
+
+func TestLoadApplicationConfigPreservesLiteralPasswordHash(testingHandle *testing.T) {
+	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte("secret-password"), bcrypt.MinCost)
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to generate password hash: %v", hashErr)
+	}
+	passwordHash := string(hashBytes)
+	configPath := writeTempConfig(testingHandle, fmt.Sprintf(`
+server:
+  database_url: ""
+  enable_cors: false
+
+tenants:
+  - id: "demo"
+    display_name: "Demo"
+    tenant_origins: ["https://demo.localhost"]
+    google_web_client_id: "demo-client"
+    password_auth:
+      enabled: true
+      users:
+        - email: "user@example.com"
+          display_name: "Demo User"
+          password_hash: "%s"
+    jwt_signing_key: "demo-tenant-key"
+    cookie_domain: "demo.localhost"
+    session_cookie_name: "app_session_demo"
+    refresh_cookie_name: "app_refresh_demo"
+    session_ttl: "15m"
+    refresh_ttl: "720h"
+`, passwordHash))
+
+	config, loadErr := appconfig.LoadConfig(configPath)
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got %v", loadErr)
+	}
+	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
+	if tenantErr != nil {
+		testingHandle.Fatalf("expected tenant document to load, got %v", tenantErr)
+	}
+	tenant, exists := tenantConfig.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected demo tenant")
+	}
+	users := tenant.PasswordUsers()
+	if len(users) != 1 {
+		testingHandle.Fatalf("expected one password user, got %d", len(users))
+	}
+	if users[0].PasswordHash() != passwordHash {
+		testingHandle.Fatalf("expected literal password hash to survive app config loading")
 	}
 }
 
