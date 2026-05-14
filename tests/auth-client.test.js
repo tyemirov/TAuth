@@ -707,6 +707,43 @@ test("auth client exchanges Google credential and updates profile", async () => 
   );
 });
 
+test("auth client exchanges password credentials and updates profile", async () => {
+  const profile = {
+    user_id: "email:user@example.com",
+    user_email: "user@example.com",
+    display: "Password User",
+    roles: ["user"],
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+  ]);
+  const context = await loadAuthClient(fetch, [], {
+    tenantId: "tenant-alpha",
+  });
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    onUnauthenticated() {},
+  });
+
+  const received = await context.exchangePasswordCredential({
+    email: "user@example.com",
+    password: "correct horse battery staple",
+  });
+
+  assert.deepEqual(received, profile);
+  assert.deepEqual(context.getCurrentUser(), profile);
+  const exchangeCall = fetch.calls[0];
+  assert.equal(exchangeCall.url, "https://auth.example.com/auth/password/login");
+  assert.equal(exchangeCall.method, "POST");
+  assertHeader(exchangeCall, "Content-Type", "application/json");
+  assertHeader(exchangeCall, "X-Requested-With", "XMLHttpRequest");
+  assertHeader(exchangeCall, "X-TAuth-Tenant", "tenant-alpha");
+  assert.deepEqual(JSON.parse(exchangeCall.body), {
+    email: "user@example.com",
+    password: "correct horse battery staple",
+  });
+});
+
 test("auth client exchange helper surfaces server error codes", async () => {
   const profile = {
     user_id: "exchange-error-user",
