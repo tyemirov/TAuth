@@ -8,7 +8,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 - [x] [TA-199] Add email/password authentication as an additional identity provider while keeping TAuth session cookies/JWT model.
   Implement a scoped login-first password provider: tenant-level enablement, persistent password credential storage, password hash verification, `POST /auth/password/login`, `tauth.js` helper support, and docs/tests. The first slice does not include public self-service signup, email verification, reset-password, or account-linking UI.
-  Added tenant-scoped password auth config, memory/database credential stores, startup seeding, `/auth/password/login`, `exchangePasswordCredential`, docs, and black-box coverage; validated with `make ci`.
+  Added tenant-scoped password auth config, memory/database credential stores, startup seeding with removed-user reconciliation, `/auth/password/login`, `exchangePasswordCredential`, docs, and black-box coverage; validated with `make ci`.
 - [x] [TA-100] Make TAuth multitenant.
   Deliver implementation plan and document it as open issues in @ISSUES.md
   Captured the roadmap (tenant config, resolver, storage isolation, routing changes, docs/tests) and opened TA-101 through TA-105 to track each implementation slice.

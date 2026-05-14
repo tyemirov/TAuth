@@ -8,6 +8,7 @@
 ### Bug Fixes
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
+- Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.
 
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
