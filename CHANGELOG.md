@@ -8,6 +8,32 @@
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 
+## [v1.1.3] - 2026-05-14
+
+### Features ✨
+- `tauth.js` client now defaults to `bootstrapMode: "restore-if-hinted"`, reporting anonymous visitors without probing protected endpoints on first load.
+- Added non-secret local session restore hints keyed by `baseUrl` and tenant ID to enable silent session restoration for returning users.
+- Introduced `getAuthState()` method reporting auth states: `unknown`, `anonymous`, `restoring`, `authenticated`, or `error`.
+- Added `onAuthError` callback hook to handle 403, 404, network errors, and server failures during session restore attempts.
+
+### Improvements ⚙️
+- Modified `initAuthClient` to support explicit tenant-scoped restore hints, avoiding cross-tenant bootstrap probes on shared origins.
+- Updated client bootstrap modes: `restore-if-hinted` (default), `eager` (legacy probe-first), and `passive` (no automatic restore).
+- Enhanced backend multi-tenant support by scoping restore hints by tenant, ensuring secure tenant isolation during bootstrap.
+- Documentation updated for clearer guidance on bootstrap modes, tenant selection, and bootstrap behavior.
+
+### Bug Fixes 🐛
+- Fixed issue where public shared header loads generated noisy 401 errors in browser console for logged-out users by skipping `/me` and `/auth/refresh` probes without prior session hints.
+- Session restore hint is cleared on unauthenticated `401` responses during hinted restores, preventing stale restore attempts.
+
+### Testing 🧪
+- Added comprehensive tests for new bootstrap modes verifying anonymous initial state, hinted restores with `/me`, passive bootstrap, one-time refresh-on-401 during restore, and proper clearing of restore hints on unauthorized responses.
+
+### Docs 📚
+- Updated usage and architecture documentation to explain the new bootstrap behavior, restore hint mechanism, and tenant scoped bootstrap management.
+- Clarified helper globals and default parameters in `tauth.js`.
+- Improved README side notes detailing bootstrap modes and tenant overrides.
+
 ## [v1.1.2] - 2026-05-08
 
 ### Features ✨
