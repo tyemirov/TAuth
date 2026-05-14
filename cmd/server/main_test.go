@@ -18,6 +18,7 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
 	"gopkg.in/yaml.v3"
@@ -693,6 +694,146 @@ func TestExpandCommaSeparatedEntries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSeedPasswordUsersLoadsConfiguredCredentials(testingHandle *testing.T) {
+	passwordHash, hashErr := authkit.HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to hash password: %v", hashErr)
+	}
+	tenant := tenants.FileTenant{
+		ID:                "alpha",
+		DisplayName:       "Alpha",
+		TenantOrigins:     []string{"https://alpha.localhost"},
+		GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+		JWTSigningKey:     "alpha-key",
+		CookieDomain:      ".example.com",
+		SessionCookieName: "app_session_alpha",
+		RefreshCookieName: "app_refresh_alpha",
+		SessionTTL:        "20m",
+		RefreshTTL:        "480h",
+		NonceTTL:          "3m",
+		AllowInsecureHTTP: true,
+		PasswordAuth: tenants.FilePasswordAuth{
+			Enabled: true,
+			Users: []tenants.FilePasswordUser{
+				{
+					Email:        "User@Example.com",
+					DisplayName:  "Password User",
+					AvatarURL:    "https://example.com/password.png",
+					PasswordHash: passwordHash,
+				},
+			},
+		},
+	}
+	tenantConfig, configErr := tenants.LoadConfigFromDocument(tenants.FileDocument{Tenants: []tenants.FileTenant{tenant}})
+	if configErr != nil {
+		testingHandle.Fatalf("failed to load tenant config: %v", configErr)
+	}
+	userStore := web.NewInMemoryUsers()
+	passwordStore := authkit.NewMemoryPasswordCredentialStore()
+	seedErr := seedPasswordUsers(context.Background(), tenantConfig, userStore, passwordStore)
+	if seedErr != nil {
+		testingHandle.Fatalf("failed to seed password users: %v", seedErr)
+	}
+	profile, authErr := passwordStore.AuthenticatePassword(context.Background(), "alpha", "user@example.com", "correct horse battery staple")
+	if authErr != nil {
+		testingHandle.Fatalf("expected password auth to pass: %v", authErr)
+	}
+	if profile.UserEmail != "user@example.com" || profile.DisplayName != "Password User" {
+		testingHandle.Fatalf("unexpected password profile: %#v", profile)
+	}
+	email, display, avatarURL, roles, profileErr := userStore.GetUserProfile(context.Background(), "alpha", "email:user@example.com")
+	if profileErr != nil {
+		testingHandle.Fatalf("expected seeded user profile: %v", profileErr)
+	}
+	if email != "user@example.com" || display != "Password User" || avatarURL != "https://example.com/password.png" {
+		testingHandle.Fatalf("unexpected seeded user profile")
+	}
+	if len(roles) != 1 || roles[0] != "user" {
+		testingHandle.Fatalf("unexpected seeded roles: %#v", roles)
+	}
+}
+
+func TestSeedPasswordUsersReconcilesRemovedPersistentCredentials(testingHandle *testing.T) {
+	passwordHash, hashErr := authkit.HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to hash password: %v", hashErr)
+	}
+	databasePath := filepath.Join(testingHandle.TempDir(), "tauth.db")
+	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
+	persistentStore, storeErr := authkit.NewDatabaseUserStore(context.Background(), databaseURL)
+	if storeErr != nil {
+		testingHandle.Fatalf("failed to create persistent user store: %v", storeErr)
+	}
+	initialConfig := loadPasswordSeedTestConfig(testingHandle, []tenants.FilePasswordUser{
+		{
+			Email:        "kept@example.com",
+			DisplayName:  "Kept User",
+			PasswordHash: passwordHash,
+		},
+		{
+			Email:        "removed@example.com",
+			DisplayName:  "Removed User",
+			PasswordHash: passwordHash,
+		},
+	})
+	if seedErr := seedPasswordUsers(context.Background(), initialConfig, persistentStore, persistentStore); seedErr != nil {
+		testingHandle.Fatalf("failed to seed initial password users: %v", seedErr)
+	}
+	if _, authErr := persistentStore.AuthenticatePassword(context.Background(), "alpha", "removed@example.com", "correct horse battery staple"); authErr != nil {
+		testingHandle.Fatalf("expected removed user to authenticate before reconciliation: %v", authErr)
+	}
+	updatedConfig := loadPasswordSeedTestConfig(testingHandle, []tenants.FilePasswordUser{
+		{
+			Email:        "kept@example.com",
+			DisplayName:  "Kept User",
+			PasswordHash: passwordHash,
+		},
+	})
+	if seedErr := seedPasswordUsers(context.Background(), updatedConfig, persistentStore, persistentStore); seedErr != nil {
+		testingHandle.Fatalf("failed to seed updated password users: %v", seedErr)
+	}
+	if _, authErr := persistentStore.AuthenticatePassword(context.Background(), "alpha", "kept@example.com", "correct horse battery staple"); authErr != nil {
+		testingHandle.Fatalf("expected kept user to remain authenticated: %v", authErr)
+	}
+	if _, removedErr := persistentStore.AuthenticatePassword(context.Background(), "alpha", "removed@example.com", "correct horse battery staple"); !errors.Is(removedErr, authkit.ErrPasswordCredentialInvalid) {
+		testingHandle.Fatalf("expected removed user credential to be deleted, got %v", removedErr)
+	}
+	emptyConfig := loadPasswordSeedTestConfig(testingHandle, nil)
+	if seedErr := seedPasswordUsers(context.Background(), emptyConfig, persistentStore, persistentStore); seedErr != nil {
+		testingHandle.Fatalf("failed to seed empty password users: %v", seedErr)
+	}
+	if _, removedErr := persistentStore.AuthenticatePassword(context.Background(), "alpha", "kept@example.com", "correct horse battery staple"); !errors.Is(removedErr, authkit.ErrPasswordCredentialInvalid) {
+		testingHandle.Fatalf("expected empty config to delete remaining credential, got %v", removedErr)
+	}
+}
+
+func loadPasswordSeedTestConfig(testingHandle *testing.T, users []tenants.FilePasswordUser) tenants.Config {
+	testingHandle.Helper()
+	tenant := tenants.FileTenant{
+		ID:                "alpha",
+		DisplayName:       "Alpha",
+		TenantOrigins:     []string{"https://alpha.localhost"},
+		GoogleWebClientID: "alpha-client.apps.googleusercontent.com",
+		JWTSigningKey:     "alpha-key",
+		CookieDomain:      ".example.com",
+		SessionCookieName: "app_session_alpha",
+		RefreshCookieName: "app_refresh_alpha",
+		SessionTTL:        "20m",
+		RefreshTTL:        "480h",
+		NonceTTL:          "3m",
+		AllowInsecureHTTP: true,
+		PasswordAuth: tenants.FilePasswordAuth{
+			Enabled: true,
+			Users:   users,
+		},
+	}
+	tenantConfig, configErr := tenants.LoadConfigFromDocument(tenants.FileDocument{Tenants: []tenants.FileTenant{tenant}})
+	if configErr != nil {
+		testingHandle.Fatalf("failed to load tenant config: %v", configErr)
+	}
+	return tenantConfig
 }
 
 func withServeHTTPStub(stub func(server *http.Server) error) func() {

@@ -14,6 +14,7 @@
    * @property {string} meEndpoint
    * @property {string} nonceEndpoint
    * @property {string} googleEndpoint
+   * @property {string} passwordEndpoint
    * @property {string} refreshEndpoint
    * @property {string} logoutEndpoint
    * @property {string} tenantId
@@ -29,6 +30,7 @@
    * @property {string=} meEndpoint
    * @property {string=} nonceEndpoint
    * @property {string=} googleEndpoint
+   * @property {string=} passwordEndpoint
    * @property {string=} refreshEndpoint
    * @property {string=} logoutEndpoint
    * @property {string=} tenantId
@@ -44,6 +46,7 @@
    * @property {string} meUrl
    * @property {string} nonceUrl
    * @property {string} googleUrl
+   * @property {string} passwordUrl
    * @property {string} refreshUrl
    * @property {string} logoutUrl
    */
@@ -52,6 +55,12 @@
    * @typedef {Object} GoogleCredentialExchange
    * @property {string} credential
    * @property {string} nonceToken
+   */
+
+  /**
+   * @typedef {Object} PasswordCredentialExchange
+   * @property {string} email
+   * @property {string} password
    */
 
   /**
@@ -67,6 +76,7 @@
     meEndpoint: "/me",
     nonceEndpoint: "/auth/nonce",
     googleEndpoint: "/auth/google",
+    passwordEndpoint: "/auth/password/login",
     refreshEndpoint: "/auth/refresh",
     logoutEndpoint: "/auth/logout",
     tenantId: "",
@@ -171,6 +181,21 @@
       "tauth.missing_nonce_token",
     );
     return { credential: credential, nonceToken: nonceToken };
+  }
+
+  /**
+   * @param {PasswordCredentialExchange} input
+   * @returns {{ email: string, password: string }}
+   */
+  function normalizePasswordCredentialInput(input) {
+    if (!input || typeof input !== "object") {
+      throw new Error("tauth.missing_password_credentials");
+    }
+    var email = requireNonEmptyString(input.email, "tauth.missing_email");
+    if (typeof input.password !== "string" || input.password === "") {
+      throw new Error("tauth.missing_password");
+    }
+    return { email: email, password: input.password };
   }
 
   var tenantHeaderName = "X-TAuth-Tenant";
@@ -352,6 +377,7 @@
       meUrl: joinUrl(options.baseUrl, options.meEndpoint),
       nonceUrl: joinUrl(options.baseUrl, options.nonceEndpoint),
       googleUrl: joinUrl(options.baseUrl, options.googleEndpoint),
+      passwordUrl: joinUrl(options.baseUrl, options.passwordEndpoint),
       refreshUrl: joinUrl(options.baseUrl, options.refreshEndpoint),
       logoutUrl: joinUrl(options.baseUrl, options.logoutEndpoint),
     };
@@ -423,6 +449,45 @@
     }
     if (!payload || typeof payload !== "object") {
       throw new Error("tauth.exchange_invalid");
+    }
+    applyAuthenticatedProfile(payload);
+    return payload;
+  }
+
+  /**
+   * @param {PasswordCredentialExchange} input
+   * @returns {Promise<UserProfile>}
+   */
+  async function exchangePasswordCredential(input) {
+    var endpoints = getAuthEndpoints();
+    var normalized = normalizePasswordCredentialInput(input);
+    var response = await fetch(endpoints.passwordUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: withTenantHeader({
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      }),
+      body: JSON.stringify({
+        email: normalized.email,
+        password: normalized.password,
+      }),
+    });
+    var payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error("tauth.password_exchange_failed");
+    }
+    if (!response.ok) {
+      var errorCode =
+        payload && typeof payload.error === "string"
+          ? payload.error
+          : "tauth.password_exchange_failed";
+      throw new Error(errorCode);
+    }
+    if (!payload || typeof payload !== "object") {
+      throw new Error("tauth.password_exchange_invalid");
     }
     applyAuthenticatedProfile(payload);
     return payload;
@@ -861,6 +926,7 @@
     window["getAuthEndpoints"] = getAuthEndpoints;
     window["requestNonce"] = requestNonce;
     window["exchangeGoogleCredential"] = exchangeGoogleCredential;
+    window["exchangePasswordCredential"] = exchangePasswordCredential;
     window["logout"] = logout;
     window["setAuthTenantId"] = setTenantId;
   }

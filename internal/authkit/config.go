@@ -10,6 +10,7 @@ type ServerConfig struct {
 	GoogleWebClientID    string
 	GoogleNativeClientID string
 	NativeGoogleClients  []NativeGoogleClientConfig
+	PasswordAuthEnabled  bool
 	AppJWTSigningKey     []byte
 	AppJWTIssuer         string
 	TenantID             string

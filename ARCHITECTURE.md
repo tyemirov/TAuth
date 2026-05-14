@@ -2,11 +2,12 @@
 
 ## 1. System Overview
 
-TAuth is a single-origin authentication service that sits between Google Identity Services and your product UI. It verifies Google ID tokens, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
+TAuth is a single-origin authentication service that sits between identity providers and your product UI. It verifies Google ID tokens or tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
 
 ```
-Browser ──(Google ID token)──> TAuth ──(verify)──> Google Identity Services
-Browser <─(HttpOnly cookies)── TAuth ──(refresh token persistence)──> Database
+Browser ──(Google ID token)──────────────> TAuth ──(verify)──> Google Identity Services
+Browser ──(email/password credential)────> TAuth ──(bcrypt)──> PasswordCredentialStore
+Browser <─(HttpOnly cookies)───────────── TAuth ──(refresh token persistence)──> Database
 ```
 
 ## 2. Top-Level Layout
@@ -32,6 +33,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, ... }` |
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
+| POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
@@ -74,7 +76,19 @@ Installed apps such as PromptDew use the same session issuance path without embe
 TAuth still does not receive Google authorization codes or store Google refresh tokens.
 TAuth also does not return mobile bearer tokens in the response body. Mobile apps persist the issued `HttpOnly` cookies in the platform cookie jar; downstream API hosts under the same configured `cookie_domain` validate `app_session` with `pkg/sessionvalidator`.
 
-### 3.5 Browser helper handshake
+### 3.5 Email/password login
+
+Password login is an additional tenant-enabled identity provider. Operators opt in with `password_auth.enabled: true` and seed bcrypt-hashed users in `config.yaml`.
+
+1. The browser posts `{ "email": "...", "password": "..." }` to `POST /auth/password/login`.
+2. `MountAuthRoutesWithPassword` enforces tenant resolution, HTTPS unless `AllowInsecureHTTP` is enabled, and any tenant `allowed_users` allowlist.
+3. `PasswordCredentialStore.AuthenticatePassword` normalizes the email, verifies the bcrypt hash, and returns the trusted profile for that credential.
+4. `UserStore.UpsertPasswordUser` ensures the standard profile store has the `email:<normalized-email>` user record.
+5. TAuth mints the same `app_session` and `app_refresh` cookies and returns the same profile payload used by Google flows.
+
+This first slice is login-only. It does not provide public signup, email verification, password reset, or account linking between `google:<sub>` and `email:<address>` users.
+
+### 3.6 Browser helper handshake
 
 `web/tauth.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
 
@@ -141,7 +155,7 @@ Nonce handling rules:
 ### 4.2 `internal/authkit`
 
 - `ServerConfig`: cookie + session settings.
-- `MountAuthRoutes`: installs `/auth/*` handlers and binds stores.
+- `MountAuthRoutesWithPassword`: installs `/auth/*` handlers and binds user, refresh, nonce, and optional password credential stores. `MountAuthRoutes` remains the Google-only compatibility wrapper for tests and embedding code that do not configure password auth.
 - JWT helpers: signing, validation, claims modeling.
 - Refresh token stores:
   - Memory implementation for tests/dev.
@@ -163,6 +177,7 @@ Nonce handling rules:
 - Restores hinted sessions by calling `/me`; if the access cookie is expired, it tries `/auth/refresh` once and then re-reads `/me`.
 - Preserves `bootstrapMode: "eager"` for legacy probe-first integrations and `bootstrapMode: "passive"` for public surfaces that should never restore on load.
 - Keeps `apiFetch` refresh-on-401 behavior for protected application requests, then retries the original request once on refresh success.
+- Exposes `exchangePasswordCredential({ email, password })` for tenants that enable the password provider; the helper posts to `/auth/password/login`, applies the authenticated profile, and leaves the raw password out of client state.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`, `onAuthError`) plus `getCurrentUser()` and `getAuthState()`.
 - Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
 
@@ -171,6 +186,7 @@ Nonce handling rules:
 ```go
 type UserStore interface {
     UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+    UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
 
@@ -179,9 +195,15 @@ type RefreshTokenStore interface {
     Validate(ctx context.Context, tenantID string, tokenOpaque string) (applicationUserID string, tokenID string, expiresUnix int64, err error)
     Revoke(ctx context.Context, tenantID string, tokenID string) error
 }
+
+type PasswordCredentialStore interface {
+    UpsertPasswordCredential(ctx context.Context, tenantID string, credential PasswordCredentialSeed) error
+    AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error)
+}
 ```
 
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
+- `PasswordCredentialStore` stores bcrypt hashes separately from refresh tokens while returning profiles that flow into the same session finalizer.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
 
@@ -232,6 +254,13 @@ tenants:
         client_id: "demo-android.apps.googleusercontent.com"
         redirect_uris:
           - "com.demo.app:/oauth2redirect/google"
+    password_auth:
+      enabled: true
+      users:
+        - email: "operator@example.com"
+          display_name: "Operator"
+          avatar_url: "https://demo.example.com/operator.png"
+          password_hash: "$2a$10$..."
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
     session_cookie_name: "app_session_demo"
@@ -249,9 +278,9 @@ Validation rules baked into the loader:
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
-- Before decoding, the loader expands environment variables (`$VAR` / `${VAR}`) inside the YAML so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values.
+- String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 
 Tenant resolution & runtime:
 
@@ -266,7 +295,7 @@ Tenant resolution & runtime:
 
 ## 6. Persistence Model
 
-The persistent refresh token store manages the `refresh_tokens` table (automigrated via GORM):
+The persistent store manages refresh tokens, user profiles, and optional password credentials (automigrated via GORM). Refresh tokens live in the `refresh_tokens` table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -285,15 +314,32 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id);
 
 Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each refresh rotation inserts the new token, links it to the previous ID, and marks older tokens revoked.
 
-`DatabaseRefreshTokenStore` parses the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silences default logging, auto-migrates the schema, and tags errors with context (`refresh_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
+Email/password credentials live in `password_credentials`, keyed by tenant and normalized email, with only bcrypt hashes stored:
+
+```sql
+CREATE TABLE IF NOT EXISTS password_credentials (
+    tenant_id TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    user_display_name TEXT NOT NULL,
+    user_avatar_url TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at_unix BIGINT NOT NULL,
+    last_updated_unix BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, user_email)
+);
+```
+
+`DatabaseRefreshTokenStore` and `DatabaseUserStore` parse the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silence default logging, auto-migrate their schemas, and tag errors with context (`refresh_store.*` / `user_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
 ## 7. Security Considerations
 
 - Always run behind HTTPS in production; set a tenant’s `allow_insecure_http` to `true` only for local development.
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.
 - Validate Google tokens strictly: issuer, audience, expiry, issued-at.
-- Rate limit `/auth/google` and `/auth/refresh` and monitor failures via zap logs.
+- Rate limit `/auth/google`, `/auth/password/login`, and `/auth/refresh` and monitor failures via zap logs.
 - Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
+- Store only bcrypt password hashes; generate them outside the runtime config and rotate credentials by updating the configured hash.
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
 - Serve browser code through `/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
@@ -339,12 +385,14 @@ Opaque refresh tokens are hashed (`SHA-256`, Base64 URL) before storage. Each re
 - **401 on `/auth/refresh`** – Refresh cookie missing/expired/revoked; prompt user to sign in again.
 - **Cookies missing** – Verify the tenant’s `cookie_domain`, HTTPS usage, and CORS settings.
 - **Google token rejection** – Confirm OAuth client type (Web) and that `aud` matches configured client ID.
+- **Password login returns `password_auth_not_configured`** – Enable `password_auth.enabled` for the resolved tenant.
+- **Password login returns `invalid_credentials`** – The email/password pair did not match a seeded bcrypt credential; the same response is used for unknown users and wrong passwords.
 
 ## 12. Versioning Contract
 
 The following surface area is considered stable across releases:
 
-- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/refresh`, `/auth/logout`, `/me`.
+- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/refresh`, `/auth/logout`, `/me`.
 - Cookie names: `app_session`, `app_refresh`.
 - JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `roles`, `expires`).
 

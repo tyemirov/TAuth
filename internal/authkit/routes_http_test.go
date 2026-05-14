@@ -162,6 +162,13 @@ func (store *mutableUserStore) UpsertGoogleUser(ctx context.Context, tenantID st
 	return store.inner.UpsertGoogleUser(ctx, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
 }
 
+func (store *mutableUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	if store.upsertErr != nil {
+		return "", nil, store.upsertErr
+	}
+	return store.inner.UpsertPasswordUser(ctx, tenantID, userEmail, userDisplayName, userAvatarURL)
+}
+
 func (store *mutableUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
 	if store.profileErr != nil {
 		return "", "", "", nil, store.profileErr

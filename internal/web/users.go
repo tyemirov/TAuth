@@ -46,6 +46,16 @@ func NewInMemoryUsers() *InMemoryUsers {
 // UpsertGoogleUser inserts or updates a user based on Google sub.
 func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	applicationUserID := "google:" + googleSub
+	return store.upsertUserProfile(tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL)
+}
+
+// UpsertPasswordUser inserts or updates a user based on normalized email.
+func (store *InMemoryUsers) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	applicationUserID := "email:" + strings.ToLower(strings.TrimSpace(userEmail))
+	return store.upsertUserProfile(tenantID, applicationUserID, strings.ToLower(strings.TrimSpace(userEmail)), userDisplayName, userAvatarURL)
+}
+
+func (store *InMemoryUsers) upsertUserProfile(tenantID string, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	record := UserProfile{
 		Email:     userEmail,
 		Display:   userDisplayName,

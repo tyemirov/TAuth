@@ -162,6 +162,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	var userStore authkit.UserStore
 	var refreshStore authkit.RefreshTokenStore
+	var passwordCredentialStore authkit.PasswordCredentialStore
 
 	if databaseURL != "" {
 		persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(shutdownContext, databaseURL)
@@ -175,11 +176,13 @@ func runServer(command *cobra.Command, arguments []string) error {
 			return userStoreErr
 		}
 		userStore = persistentUserStore
+		passwordCredentialStore = persistentUserStore
 		logger.Info("using persistent user store", zap.String("driver", persistentUserStore.Driver()))
 	} else {
 		refreshStore = authkit.NewMemoryRefreshTokenStore()
 		logger.Info("using in-memory refresh token store")
 		userStore = web.NewInMemoryUsers()
+		passwordCredentialStore = authkit.NewMemoryPasswordCredentialStore()
 		logger.Info("using in-memory user store")
 	}
 
@@ -189,6 +192,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
 		return corsErr
+	}
+	if passwordSeedErr := seedPasswordUsers(shutdownContext, tenantConfig, userStore, passwordCredentialStore); passwordSeedErr != nil {
+		return passwordSeedErr
 	}
 	corsAllowedOrigins := appconfig.ExpandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
 	sameSiteResolver := authkit.NewSameSiteResolver(enableCORS)
@@ -259,7 +265,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	authkit.MountAuthRoutes(tenantRouter, registry, userStore, refreshStore, nonceStore)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))
@@ -292,6 +298,40 @@ func runServer(command *cobra.Command, arguments []string) error {
 		return fmt.Errorf("listen error: %w", err)
 	}
 	shutdownServer()
+	return nil
+}
+
+func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userStore authkit.UserStore, passwordCredentialStore authkit.PasswordCredentialStore) error {
+	if userStore == nil || passwordCredentialStore == nil {
+		return nil
+	}
+	for _, tenant := range tenantConfig.Tenants() {
+		if !tenant.PasswordAuthEnabled() {
+			continue
+		}
+		tenantID := string(tenant.ID())
+		configuredEmails := make([]string, 0, len(tenant.PasswordUsers()))
+		for _, passwordUser := range tenant.PasswordUsers() {
+			configuredEmails = append(configuredEmails, passwordUser.Email())
+			_, _, profileErr := userStore.UpsertPasswordUser(ctx, tenantID, passwordUser.Email(), passwordUser.DisplayName(), passwordUser.AvatarURL())
+			if profileErr != nil {
+				return fmt.Errorf("password_auth.seed_profile tenant=%s user=%s: %w", tenantID, passwordUser.Email(), profileErr)
+			}
+			credentialErr := passwordCredentialStore.UpsertPasswordCredential(ctx, tenantID, authkit.PasswordCredentialSeed{
+				UserEmail:    passwordUser.Email(),
+				DisplayName:  passwordUser.DisplayName(),
+				AvatarURL:    passwordUser.AvatarURL(),
+				PasswordHash: passwordUser.PasswordHash(),
+			})
+			if credentialErr != nil {
+				return fmt.Errorf("password_auth.seed_credential tenant=%s user=%s: %w", tenantID, passwordUser.Email(), credentialErr)
+			}
+		}
+		reconcileErr := passwordCredentialStore.ReconcilePasswordCredentials(ctx, tenantID, configuredEmails)
+		if reconcileErr != nil {
+			return fmt.Errorf("password_auth.reconcile_credentials tenant=%s: %w", tenantID, reconcileErr)
+		}
+	}
 	return nil
 }
 

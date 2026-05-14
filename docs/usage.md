@@ -8,13 +8,14 @@ For a deep dive into internal architecture and implementation details, see `ARCH
 
 ## 1. What TAuth provides
 
-TAuth sits between Google Identity Services (GIS) and your product UI:
+TAuth sits between identity providers and your product UI:
 
 - Verifies Google ID tokens issued by Google OAuth Web clients and optional Desktop/installed-app clients.
+- Verifies tenant-managed email/password credentials when `password_auth.enabled` is configured.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
-- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc) and does not issue Google API access tokens.
+- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc), public signup, email verification, password reset, or account linking.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 
@@ -52,6 +53,7 @@ Key notes:
 - **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. If you include non-tenant origins (for example `https://accounts.google.com`), also list them under `cors_allowed_origin_exceptions` so validation permits them.
 - **Shared origins**: If multiple tenants run on the same machine, add each distinct frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `tenant_origins` so TAuth can resolve the tenant from the request `Origin` header. Only enable `enable_tenant_header_override` (and send `X-TAuth-Tenant`) when tenants intentionally share the exact same origin or when non-browser clients omit `Origin`.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
+- **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
 ### 2.3 Example: hosted deployment
@@ -160,7 +162,7 @@ Your product should:
 
 ## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports nine globals:
+The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports ten globals:
 
 - `initAuthClient(options)` – initializes client auth state and restores prior sessions when appropriate.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
@@ -169,6 +171,7 @@ The simplest way to use TAuth from the browser is through the helper served at `
 - `getAuthEndpoints()` – returns the resolved URL map for `/me` and `/auth/*`.
 - `requestNonce()` – fetches a one-time nonce for Google Identity Services.
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
+- `exchangePasswordCredential({ email, password })` – exchanges a tenant-managed password credential for cookies and updates the profile.
 - `logout()` – revokes the refresh token and clears client state.
 - `setAuthTenantId(tenantId)` – sets the tenant override for subsequent requests.
 
@@ -269,7 +272,7 @@ initAuthClient({
 });
 ```
 
-The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me`, `/auth/nonce`, `/auth/google`, `/auth/refresh`, and logout requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected. Restore hints are tenant-scoped, so one shared-origin tenant does not trigger bootstrap probes for another.
+The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me` and `/auth/*` requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected. Restore hints are tenant-scoped, so one shared-origin tenant does not trigger bootstrap probes for another.
 
 ---
 
@@ -346,6 +349,31 @@ const result = await request.promptAsync({
 ```
 
 After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.mprlab.com`.
+
+### 5.4 Email/password login
+
+Email/password login is tenant-managed and login-only. Operators enable it per tenant and seed bcrypt hashes in config:
+
+```yaml
+password_auth:
+  enabled: true
+  users:
+    - email: "operator@example.com"
+      display_name: "Operator"
+      avatar_url: "https://example.com/operator.png"
+      password_hash: "$2a$10$..."
+```
+
+Client code can use the helper:
+
+```js
+const profile = await exchangePasswordCredential({
+  email: form.email.value,
+  password: form.password.value,
+});
+```
+
+Or call `POST /auth/password/login` directly with `credentials: "include"`. The response and cookies match Google login. When `allowed_users` is configured, the normalized email must also be in that allowlist.
 
 ---
 
@@ -443,6 +471,27 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
 
 - **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
 
+### 6.2c `POST /auth/password/login`
+
+Verifies a tenant-managed email/password credential and mints the standard session cookies.
+
+- **Request body**:
+
+  ```json
+  {
+    "email": "operator@example.com",
+    "password": "correct horse battery staple"
+  }
+  ```
+
+- **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
+
+- **Errors**:
+  - `404` with `error: "password_auth_not_configured"` when the tenant has not enabled password auth
+  - `400` with `error: "invalid_email"` or `error: "missing_password"` for malformed input
+  - `403` with `error: "user_not_allowed"` when `allowed_users` rejects the normalized email
+  - `401` with `error: "invalid_credentials"` for unknown users or wrong passwords
+
 ### 6.3 `GET /api/me`
 
 Returns the profile associated with the current session.
@@ -488,7 +537,7 @@ Clients should treat this as “signed out” regardless of prior state.
 Serves the browser helper described in section 4.
 
 - Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
-- Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `getAuthEndpoints`, `requestNonce`, `exchangeGoogleCredential`, `logout`, and `setAuthTenantId` on `window`.
+- Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `getAuthState`, `getAuthEndpoints`, `requestNonce`, `exchangeGoogleCredential`, `exchangePasswordCredential`, `logout`, and `setAuthTenantId` on `window`.
 - The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
 
 ## 6.7 Validating sessions from other Go services
