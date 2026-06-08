@@ -10,10 +10,13 @@
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
 - Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.
 - Masked password credential lookup timing by running a dummy bcrypt comparison when a normalized email has no stored credential.
+- Added `GET /auth/session` for browser bootstrap so stale restore hints return profile JSON or `204 No Content` instead of emitting expected `/me` or `/auth/refresh` 401s.
+- Require browser `/auth/google` ID tokens to carry a nonce claim matching the submitted TAuth nonce token or its opaque hash.
 
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
+- Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
 ## [v1.1.4] - 2026-05-14
 
