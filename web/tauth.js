@@ -12,6 +12,7 @@
    * @typedef {Object} AuthClientOptions
    * @property {string} baseUrl
    * @property {string} meEndpoint
+   * @property {string} sessionEndpoint
    * @property {string} nonceEndpoint
    * @property {string} googleEndpoint
    * @property {string} passwordEndpoint
@@ -28,6 +29,7 @@
    * @typedef {Object} AuthClientInitOptions
    * @property {string} baseUrl
    * @property {string=} meEndpoint
+   * @property {string=} sessionEndpoint
    * @property {string=} nonceEndpoint
    * @property {string=} googleEndpoint
    * @property {string=} passwordEndpoint
@@ -44,6 +46,7 @@
    * @typedef {Object} AuthEndpointMap
    * @property {string} baseUrl
    * @property {string} meUrl
+   * @property {string} sessionUrl
    * @property {string} nonceUrl
    * @property {string} googleUrl
    * @property {string} passwordUrl
@@ -74,6 +77,7 @@
   var defaultOptions = {
     baseUrl: "",
     meEndpoint: "/me",
+    sessionEndpoint: "/auth/session",
     nonceEndpoint: "/auth/nonce",
     googleEndpoint: "/auth/google",
     passwordEndpoint: "/auth/password/login",
@@ -375,6 +379,7 @@
     return {
       baseUrl: options.baseUrl,
       meUrl: joinUrl(options.baseUrl, options.meEndpoint),
+      sessionUrl: joinUrl(options.baseUrl, options.sessionEndpoint),
       nonceUrl: joinUrl(options.baseUrl, options.nonceEndpoint),
       googleUrl: joinUrl(options.baseUrl, options.googleEndpoint),
       passwordUrl: joinUrl(options.baseUrl, options.passwordEndpoint),
@@ -700,18 +705,19 @@
     var options = requireOptions();
     try {
       var response = await fetch(
-        joinUrl(options.baseUrl, options.meEndpoint),
+        joinUrl(options.baseUrl, options.sessionEndpoint),
         {
           method: "GET",
           credentials: "include",
           headers: withTenantHeader(),
         },
       );
+      if (response.status === 204 || response.status === 401) {
+        clearRestoreHint(options);
+        return { outcome: "unauthenticated", profile: null };
+      }
       if (response.ok) {
         return { outcome: "authenticated", profile: await response.json() };
-      }
-      if (response.status === 401) {
-        return { outcome: "unauthenticated", profile: null };
       }
       return {
         outcome: "error",
@@ -816,25 +822,11 @@
       var profileResult = await readCurrentProfile();
       if (profileResult.outcome === "authenticated") {
         applyAuthenticatedProfile(profileResult.profile);
+        broadcast(broadcastEventRefreshed);
         return;
       }
       if (profileResult.outcome === "error") {
         applyAuthError(profileResult.error);
-        return;
-      }
-      var refreshResult = await refreshSession();
-      if (refreshResult.outcome === "refreshed") {
-        var refreshedProfileResult = await readCurrentProfile();
-        if (refreshedProfileResult.outcome === "authenticated") {
-          applyAuthenticatedProfile(refreshedProfileResult.profile);
-          return;
-        }
-        if (refreshedProfileResult.outcome === "error") {
-          applyAuthError(refreshedProfileResult.error);
-          return;
-        }
-      } else if (refreshResult.outcome === "error") {
-        applyAuthError(refreshResult.error);
         return;
       }
       var peerResult = await waitForPeerRefresh();
