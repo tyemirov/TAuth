@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tyemirov/tauth/internal/web"
+	sessionvalidator "github.com/tyemirov/tauth/pkg/sessionvalidator"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
 )
@@ -227,6 +228,99 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 		contextGin.JSON(http.StatusOK, gin.H{"nonce": token})
+	})
+
+	router.GET("/auth/session", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		claims, validateSessionErr := validateSessionRequest(contextGin.Request, config)
+		if validateSessionErr == nil {
+			if strings.TrimSpace(claims.GetTenantID()) == tenantID {
+				contextGin.JSON(http.StatusOK, sessionProfilePayload(
+					claims.GetUserID(),
+					claims.GetUserEmail(),
+					claims.GetUserDisplayName(),
+					claims.GetUserAvatarURL(),
+					claims.GetUserRoles(),
+					claims.GetExpiresAt(),
+				))
+				return
+			}
+			contextGin.Status(http.StatusNoContent)
+			return
+		}
+
+		refreshCookieValues := refreshCookieCandidates(contextGin.Request, config.RefreshCookieName)
+		if len(refreshCookieValues) == 0 {
+			contextGin.Status(http.StatusNoContent)
+			return
+		}
+
+		var applicationUserID string
+		var currentTokenID string
+		validationSucceeded := false
+		for _, cookieValue := range refreshCookieValues {
+			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, cookieValue)
+			if validateErr == nil {
+				applicationUserID = candidateUserID
+				currentTokenID = candidateTokenID
+				validationSucceeded = true
+				break
+			}
+			if errors.Is(validateErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(validateErr) {
+				continue
+			}
+			logAuthError("auth.session.refresh_validate", validateErr, zap.Int("cookie_candidates", len(refreshCookieValues)))
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if !validationSucceeded {
+			contextGin.Status(http.StatusNoContent)
+			return
+		}
+
+		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+		if profileErr != nil {
+			logAuthError("auth.session.profile", profileErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		if mintErr != nil {
+			logAuthError("auth.session.mint_jwt", mintErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+
+		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
+		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
+		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
+			logAuthError("auth.session.issue_refresh", issueErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if revokeErr := refreshTokens.Revoke(contextGin, tenantID, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
+			logAuthError("auth.session.revoke_previous", revokeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+
+		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
+		writeRefreshCookie(contextGin, config, newOpaque, refreshDeadline)
+		contextGin.JSON(http.StatusOK, sessionProfilePayload(
+			applicationUserID,
+			userEmail,
+			userDisplayName,
+			userAvatarURL,
+			userRoles,
+			sessionExpiresAt,
+		))
 	})
 
 	router.GET("/auth/google/native/config", func(contextGin *gin.Context) {
@@ -856,19 +950,42 @@ func readBoolClaim(payload *idtoken.Payload, claim string) bool {
 	return value
 }
 
+func validateSessionRequest(request *http.Request, config ServerConfig) (*sessionvalidator.Claims, error) {
+	validator, validatorErr := sessionvalidator.New(sessionvalidator.Config{
+		SigningKey: config.AppJWTSigningKey,
+		Issuer:     config.AppJWTIssuer,
+		CookieName: config.SessionCookieName,
+	})
+	if validatorErr != nil {
+		return nil, validatorErr
+	}
+	return validator.ValidateRequest(request)
+}
+
+func sessionProfilePayload(userID string, userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, expiresAt time.Time) gin.H {
+	return gin.H{
+		"user_id":    userID,
+		"user_email": userEmail,
+		"display":    userDisplayName,
+		"avatar_url": userAvatarURL,
+		"roles":      userRoles,
+		"expires":    expiresAt,
+	}
+}
+
 func consumeBrowserNonce(contextGin *gin.Context, nonces NonceStore, tenantID string, nonceToken string, payload *idtoken.Payload) error {
-	nonceClaim := readStringClaim(payload, "nonce")
+	nonceClaim := strings.TrimSpace(readStringClaim(payload, "nonce"))
+	issuedNonceToken := strings.TrimSpace(nonceToken)
 	if nonceClaim == "" {
-		return nonces.Consume(contextGin, tenantID, nonceToken)
+		return fmt.Errorf("%w: missing google nonce claim", ErrNonceNotFound)
 	}
-	expectedHashedNonce := hashOpaque(nonceToken)
-	nonceMatchesInbound := nonceClaim == nonceToken
+	expectedHashedNonce := hashOpaque(issuedNonceToken)
+	nonceMatchesInbound := nonceClaim == issuedNonceToken
 	nonceMatchesHashed := nonceClaim == expectedHashedNonce
-	tokenToConsume := nonceToken
 	if !nonceMatchesInbound && !nonceMatchesHashed {
-		tokenToConsume = nonceClaim
+		return fmt.Errorf("%w: google nonce claim mismatch", ErrNonceNotFound)
 	}
-	return nonces.Consume(contextGin, tenantID, tokenToConsume)
+	return nonces.Consume(contextGin, tenantID, issuedNonceToken)
 }
 
 func finalizeGoogleLogin(

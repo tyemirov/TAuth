@@ -1241,7 +1241,7 @@ func TestAuthGoogleAcceptsHashedNonceClaim(t *testing.T) {
 	}
 }
 
-func TestAuthGoogleAcceptsMissingNonceClaim(t *testing.T) {
+func TestAuthGoogleRejectsMissingNonceClaim(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	payload := &idtoken.Payload{Claims: map[string]interface{}{
@@ -1279,8 +1279,8 @@ func TestAuthGoogleAcceptsMissingNonceClaim(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("expected 200 when google omits nonce claim, got %d", response.Code)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when google omits nonce claim, got %d", response.Code)
 	}
 }
 
