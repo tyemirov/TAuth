@@ -200,6 +200,26 @@ func (store *controlledNonceStore) Consume(ctx context.Context, tenantID string,
 	return nil
 }
 
+type revokeFailureRefreshStore struct {
+	delegate  RefreshTokenStore
+	revokeErr error
+}
+
+func (store revokeFailureRefreshStore) Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+	return store.delegate.Issue(ctx, tenantID, applicationUserID, expiresUnix, previousTokenID)
+}
+
+func (store revokeFailureRefreshStore) Validate(ctx context.Context, tenantID string, tokenOpaque string) (string, string, int64, error) {
+	return store.delegate.Validate(ctx, tenantID, tokenOpaque)
+}
+
+func (store revokeFailureRefreshStore) Revoke(ctx context.Context, tenantID string, tokenID string) error {
+	if store.revokeErr != nil {
+		return store.revokeErr
+	}
+	return store.delegate.Revoke(ctx, tenantID, tokenID)
+}
+
 func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
 	configA := base
 	configA.TenantID = "tenant-a"
@@ -426,6 +446,200 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	}
 	if metrics.Count(metricAuthLogoutSuccess) == 0 {
 		t.Fatalf("expected auth.logout.success metric increment")
+	}
+}
+
+func TestHTTPSessionStatusReturnsProfileOrNoContentWithoutUnauthorizedNoise(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"session-status-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-session-status",
+					"email":          "session@example.com",
+					"email_verified": true,
+					"name":           "Session Status User",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	refreshStore := NewMemoryRefreshTokenStore()
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	anonymousRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/session", nil)
+	if err != nil {
+		t.Fatalf("build anonymous session request: %v", err)
+	}
+	anonymousResponse, err := client.Do(anonymousRequest)
+	if err != nil {
+		t.Fatalf("anonymous session request failed: %v", err)
+	}
+	if anonymousResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 for anonymous session probe, got %d", anonymousResponse.StatusCode)
+	}
+	_ = anonymousResponse.Body.Close()
+
+	loginResponse, _ := loginWithNonce(t, client, server.URL, validator, "session-status-token")
+	if loginResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from login, got %d", loginResponse.StatusCode)
+	}
+	state := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
+	_ = loginResponse.Body.Close()
+	if state.session == "" || state.refresh == "" {
+		t.Fatalf("expected session and refresh cookies after login")
+	}
+
+	sessionRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/session", nil)
+	if err != nil {
+		t.Fatalf("build authenticated session request: %v", err)
+	}
+	applyAuthCookies(sessionRequest, state, config)
+	sessionResponse, err := client.Do(sessionRequest)
+	if err != nil {
+		t.Fatalf("authenticated session request failed: %v", err)
+	}
+	if sessionResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated session probe, got %d", sessionResponse.StatusCode)
+	}
+	var sessionProfile map[string]interface{}
+	if decodeErr := json.NewDecoder(sessionResponse.Body).Decode(&sessionProfile); decodeErr != nil {
+		t.Fatalf("decode session profile: %v", decodeErr)
+	}
+	_ = sessionResponse.Body.Close()
+	if sessionProfile["user_id"] != "google:sub-session-status" || sessionProfile["user_email"] != "session@example.com" {
+		t.Fatalf("unexpected session profile: %#v", sessionProfile)
+	}
+
+	state.session = "tampered-session"
+	restoredRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/session", nil)
+	if err != nil {
+		t.Fatalf("build restored session request: %v", err)
+	}
+	applyAuthCookies(restoredRequest, state, config)
+	restoredResponse, err := client.Do(restoredRequest)
+	if err != nil {
+		t.Fatalf("restored session request failed: %v", err)
+	}
+	if restoredResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 after refresh-backed session probe, got %d", restoredResponse.StatusCode)
+	}
+	state = captureAuthCookies(state, restoredResponse.Cookies(), config)
+	var restoredProfile map[string]interface{}
+	if decodeErr := json.NewDecoder(restoredResponse.Body).Decode(&restoredProfile); decodeErr != nil {
+		t.Fatalf("decode restored profile: %v", decodeErr)
+	}
+	_ = restoredResponse.Body.Close()
+	if restoredProfile["user_id"] != "google:sub-session-status" {
+		t.Fatalf("unexpected restored profile: %#v", restoredProfile)
+	}
+	if state.session == "" || state.session == "tampered-session" {
+		t.Fatalf("expected session probe to issue a fresh session cookie")
+	}
+
+	state.session = "tampered-session"
+	state.refresh = "tampered-refresh"
+	expiredRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/session", nil)
+	if err != nil {
+		t.Fatalf("build expired session request: %v", err)
+	}
+	applyAuthCookies(expiredRequest, state, config)
+	expiredResponse, err := client.Do(expiredRequest)
+	if err != nil {
+		t.Fatalf("expired session request failed: %v", err)
+	}
+	if expiredResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 for expired session probe, got %d", expiredResponse.StatusCode)
+	}
+	_ = expiredResponse.Body.Close()
+}
+
+func TestHTTPSessionStatusRevokeFailureReturnsInternalServerError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	validator := &fakeGoogleValidator{results: map[string]validatorResult{
+		"session-revoke-token": {
+			payload: &idtoken.Payload{
+				Claims: map[string]interface{}{
+					"iss":            "https://accounts.google.com",
+					"sub":            "sub-session-revoke",
+					"email":          "revoke@example.com",
+					"email_verified": true,
+					"name":           "Session Revoke User",
+					"nonce":          "",
+				},
+			},
+			expectedAudience: "client-id",
+		},
+	}}
+
+	clock := &controllableClock{current: time.Now().UTC()}
+	ProvideGoogleTokenValidator(validator)
+	defer ProvideGoogleTokenValidator(nil)
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+	ProvideLogger(zaptest.NewLogger(t))
+	defer ProvideLogger(nil)
+
+	config := newTestServerConfig()
+	registry := NewSingleTenantRegistry(config)
+	refreshStore := revokeFailureRefreshStore{
+		delegate:  NewMemoryRefreshTokenStore(),
+		revokeErr: errors.New("refresh_store.revoke.injected"),
+	}
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+
+	loginResponse, _ := loginWithNonce(t, client, server.URL, validator, "session-revoke-token")
+	if loginResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from login, got %d", loginResponse.StatusCode)
+	}
+	state := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
+	_ = loginResponse.Body.Close()
+	if state.session == "" || state.refresh == "" {
+		t.Fatalf("expected session and refresh cookies after login")
+	}
+
+	state.session = "tampered-session"
+	sessionRequest, err := http.NewRequest(http.MethodGet, server.URL+"/auth/session", nil)
+	if err != nil {
+		t.Fatalf("build session request: %v", err)
+	}
+	applyAuthCookies(sessionRequest, state, config)
+	sessionResponse, err := client.Do(sessionRequest)
+	if err != nil {
+		t.Fatalf("session request failed: %v", err)
+	}
+	defer sessionResponse.Body.Close()
+	if sessionResponse.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when session restore cannot revoke previous refresh token, got %d", sessionResponse.StatusCode)
+	}
+	emittedState := captureAuthCookies(authCookieState{}, sessionResponse.Cookies(), config)
+	if emittedState.session != "" || emittedState.refresh != "" {
+		t.Fatalf("expected failed session restore to avoid writing rotated cookies")
 	}
 }
 
@@ -2939,7 +3153,7 @@ func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
 	}
 }
 
-func TestHTTPAuthLoginResynchronizesNonceToken(t *testing.T) {
+func TestHTTPAuthLoginRejectsPreviousNonceClaim(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	validator := &fakeGoogleValidator{results: map[string]validatorResult{
@@ -3002,12 +3216,12 @@ func TestHTTPAuthLoginResynchronizesNonceToken(t *testing.T) {
 		t.Fatalf("login request failed: %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 when google nonce matches previously issued token, got %d", response.StatusCode)
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when google nonce differs from submitted nonce, got %d", response.StatusCode)
 	}
 }
 
-func TestHTTPAuthLoginAcceptsEmptyGoogleNonce(t *testing.T) {
+func TestHTTPAuthLoginRejectsEmptyGoogleNonce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	validator := &fakeGoogleValidator{results: map[string]validatorResult{
@@ -3066,8 +3280,8 @@ func TestHTTPAuthLoginAcceptsEmptyGoogleNonce(t *testing.T) {
 		t.Fatalf("login request failed: %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 when google omits nonce claim, got %d", response.StatusCode)
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when google omits nonce claim, got %d", response.StatusCode)
 	}
 }
 

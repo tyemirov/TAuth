@@ -70,6 +70,15 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [TA-444] (P0) Require browser Google ID tokens to carry the issued nonce claim.
+  Summary: The current browser `/auth/google` path accepts an issued `nonce_token` even when Google omits the ID-token `nonce` claim. That protects replay of the same TAuth exchange body, but it does not cryptographically bind the Google ID token to the nonce-bearing sign-in attempt. Shared browser UI now needs TAuth to reject missing or mismatched Google nonce claims so downstream apps cannot rely on a weaker no-GIS-nonce contract.
+  Expected: `/auth/google` accepts only ID tokens whose `nonce` claim equals the submitted TAuth nonce or its opaque hash; missing or mismatched nonce claims return `401 {"error":"invalid_nonce"}` without finalizing login.
+  Resolved 2026-06-07: browser nonce consumption now requires the Google ID-token `nonce` claim to equal the submitted TAuth nonce or its opaque hash before the issued nonce is consumed. Missing, empty, stale, or mismatched nonce claims return invalid nonce responses without finalizing login. Replaced permissive tests with strict missing/empty/stale nonce rejection coverage. Tests: focused `go test ./internal/authkit ...`; `make ci`.
+
+- [x] [TA-443] Console-clean background session restore for stale browser hints.
+  Public apps that embed TAuth through shared UI can keep a prior-session restore hint after cookies expire. Current restore flows probe `/me` and `/auth/refresh`, producing browser-visible 401 resource errors for an expected anonymous state before the client can classify it. Add a non-error session status endpoint that returns profile JSON for valid/restored sessions and `204 No Content` for anonymous or expired sessions, so UI bootstrap does not use protected-endpoint failures as control flow.
+  Resolved: added `GET /auth/session` for profile-or-204 session status, including refresh-cookie restoration without browser-visible expected 401s; updated `tauth.js` hinted restore to call that endpoint and clear stale hints from 204 responses. Added HTTP and browser-client regressions for anonymous, authenticated, refresh-backed, and expired hinted sessions. Validation passed with `make ci`.
+
 - [x] [TA-442] Avoid logged-out bootstrap 401 noise in `tauth.js`.
   Public shared-header loads currently call `/me` and then `/auth/refresh` immediately, so anonymous visitors produce browser console 401s even though logged-out state is expected. Change the browser helper to restore only when a non-secret prior-session hint exists, preserve an eager compatibility mode, and keep protected endpoint 401s meaningful for real authorization boundaries.
   Resolved: `tauth.js` now defaults to restore-if-hinted bootstrap, stores a non-secret restore hint after successful auth/refresh, skips `/me` and `/auth/refresh` on fresh anonymous loads, exposes `getAuthState()` and `onAuthError`, preserves `bootstrapMode: "eager"`/`"passive"`, and keeps `apiFetch` refresh-on-401 for protected app calls. Validation passed with `npm run verify`, `npm test -- auth-client.test.js`, and `make ci`.

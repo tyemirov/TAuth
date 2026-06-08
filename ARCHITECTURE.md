@@ -34,6 +34,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
+| GET    | `/auth/session` | Return current/restored session profile for browser bootstrap | `200` JSON or `204 No Content` when anonymous |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
@@ -174,12 +175,12 @@ Nonce handling rules:
 
 - Tracks client auth state as `unknown`, `anonymous`, `restoring`, `authenticated`, or `error`.
 - Defaults `initAuthClient` to `bootstrapMode: "restore-if-hinted"` so a fresh anonymous page load reports `onUnauthenticated()` without calling protected endpoints. Successful login, profile restore, and refresh set a non-secret local restore hint keyed by `baseUrl` and tenant id.
-- Restores hinted sessions by calling `/me`; if the access cookie is expired, it tries `/auth/refresh` once and then re-reads `/me`.
+- Restores hinted sessions by calling `/auth/session`, which returns profile JSON for valid or refresh-restored cookies and `204 No Content` for anonymous or expired browsers without emitting expected 401s.
 - Preserves `bootstrapMode: "eager"` for legacy probe-first integrations and `bootstrapMode: "passive"` for public surfaces that should never restore on load.
 - Keeps `apiFetch` refresh-on-401 behavior for protected application requests, then retries the original request once on refresh success.
 - Exposes `exchangePasswordCredential({ email, password })` for tenants that enable the password provider; the helper posts to `/auth/password/login`, applies the authenticated profile, and leaves the raw password out of client state.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`, `onAuthError`) plus `getCurrentUser()` and `getAuthState()`.
-- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
+- Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/auth/session`, `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
 
 ### 4.5 Interfaces and extension points
 
@@ -289,9 +290,9 @@ Tenant resolution & runtime:
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of origins.
 - Native clients without a browser `Origin` header must send `X-TAuth-Tenant`; mobile clients additionally use `platform` to select iOS or Android audiences. If `platform` is omitted, `/auth/google/native` accepts any configured native Google audience for the tenant.
-- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
+- Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/auth/session`, `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
-- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
+- Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/auth/session`, `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
 
 ## 6. Persistence Model
 
@@ -381,7 +382,8 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 
 ## 11. Troubleshooting Playbook
 
-- **401 on `/me` but refresh succeeds** – Access cookie expired; the client will refresh on next call.
+- **204 on `/auth/session`** – No current or refresh-restorable browser session; prompt the user to sign in.
+- **401 on `/me` but refresh succeeds** – Access cookie expired on a protected profile route; the client will refresh on the next protected API retry.
 - **401 on `/auth/refresh`** – Refresh cookie missing/expired/revoked; prompt user to sign in again.
 - **Cookies missing** – Verify the tenant’s `cookie_domain`, HTTPS usage, and CORS settings.
 - **Google token rejection** – Confirm OAuth client type (Web) and that `aud` matches configured client ID.
@@ -392,7 +394,7 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 
 The following surface area is considered stable across releases:
 
-- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/refresh`, `/auth/logout`, `/me`.
+- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/session`, `/auth/refresh`, `/auth/logout`, `/me`.
 - Cookie names: `app_session`, `app_refresh`.
 - JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `roles`, `expires`).
 
