@@ -18,6 +18,34 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.5] - 2026-06-08
+
+### Features ✨
+- Added `GET /auth/session` endpoint for browser bootstrap to return current or refreshed session profile or `204 No Content` for anonymous/expired sessions.
+- Enforced Google ID token nonce claim requirement on `/auth/google` to cryptographically bind sign-in attempts.
+- Added nonce enforcement and clean session restore in the authkit.
+
+### Improvements ⚙️
+- Updated `tauth.js` to use `/auth/session` for hinted session restore, avoiding browser-visible 401 errors.
+- Refactored to replace `meEndpoint` with `sessionEndpoint` for session fetch in the auth client.
+- Updated deployment make target in `deploy.sh` for backend deployment.
+- Added local `make release`, `make publish`, and `make deploy` wrappers to satisfy shared MPR workflows.
+- Updated documentation and README to reflect new `/auth/session` endpoint and bootstrap behavior.
+
+### Bug Fixes 🐛
+- Fixed branch refresh command in release script to use `sync` instead of `cd`.
+- Required Google ID tokens to carry valid nonce claims, rejecting missing or mismatched nonces with `401 invalid_nonce`.
+- Cleaned session restore flow to avoid console noise from expected 401 errors during stale session restoration.
+
+### Testing 🧪
+- Updated auth client tests to use `/auth/session` endpoint.
+- Added HTTP and browser-client regression tests for anonymous, authenticated, refresh-backed, and expired session states.
+
+### Docs 📚
+- Updated usage and API documentation for the new `/auth/session` endpoint.
+- Documented client session flow changes and nonce enforcement.
+- Updated README to reflect `/auth/session` usage and bootstrap behavior.
+
 ## [v1.1.4] - 2026-05-14
 
 ### Features ✨
