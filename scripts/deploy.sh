@@ -199,7 +199,7 @@ fi
 
 if [[ "${SKIP_BACKEND}" != "true" ]]; then
   echo "==> [deploy] Deploying TAuth through mprlab-gateway"
-  timeout --foreground -k 1200s -s SIGKILL 1200s make -C "${GATEWAY_DIR}" deploy TARGET=tauth
+  timeout --foreground -k 1200s -s SIGKILL 1200s make -C "${GATEWAY_DIR}" deploy-tauth-backend
 fi
 
 echo "TAuth deploy complete"
