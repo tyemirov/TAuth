@@ -197,7 +197,7 @@ test("auth client treats first logged-out visit as anonymous without auth probes
   assert.equal(fetch.calls.length, 0);
 });
 
-test("auth client restores from /me when a restore hint exists", async () => {
+test("auth client restores from /auth/session when a restore hint exists", async () => {
   const profile = {
     user_id: "hinted-user",
     user_email: "hinted@example.com",
@@ -225,7 +225,7 @@ test("auth client restores from /me when a restore hint exists", async () => {
   assert.deepEqual(authenticatedProfile, profile);
   assert.equal(context.getAuthState(), "authenticated");
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], "1");
 });
 
@@ -255,18 +255,14 @@ test("auth client passive bootstrap preserves restore hints for later pages", as
   assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], "1");
 });
 
-test("auth client refreshes hinted expired sessions once", async () => {
+test("auth client restores hinted expired sessions through session status", async () => {
   const profile = {
     user_id: "refresh-user",
     user_email: "refresh@example.com",
     display: "Refresh User",
     roles: ["user"],
   };
-  const fetch = createFetchWithQueue([
-    { status: 401, body: {} },
-    { status: 204, body: {} },
-    { status: 200, body: profile },
-  ]);
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
   const events = [];
   const context = await loadAuthClient(fetch, events, {
     storage: {
@@ -283,18 +279,13 @@ test("auth client refreshes hinted expired sessions once", async () => {
   });
 
   assert.equal(context.getAuthState(), "authenticated");
-  assert.equal(fetch.calls.length, 3);
-  assert.equal(fetch.calls[0].url, "https://example.com/me");
-  assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
-  assert.equal(fetch.calls[2].url, "https://example.com/me");
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assert.deepEqual(events, ["refreshed"]);
 });
 
-test("auth client clears restore hints when hinted refresh is unauthenticated", async () => {
-  const fetch = createFetchWithQueue([
-    { status: 401, body: {} },
-    { status: 401, body: {} },
-  ]);
+test("auth client clears restore hints when hinted session status is unauthenticated", async () => {
+  const fetch = createFetchWithQueue([{ status: 204, body: {} }]);
   const context = await loadAuthClient(fetch, [], {
     storage: {
       [restoreHintKey("https://example.com")]: "1",
@@ -314,11 +305,12 @@ test("auth client clears restore hints when hinted refresh is unauthenticated", 
 
   assert.equal(unauthenticatedCount, 1);
   assert.equal(context.getAuthState(), "anonymous");
-  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assert.equal(context.__localStorageData[restoreHintKey("https://example.com")], undefined);
 });
 
-test("auth client reports hinted profile service errors", async () => {
+test("auth client reports hinted session service errors", async () => {
   const fetch = createFetchWithQueue([{ status: 403, body: {} }]);
   const context = await loadAuthClient(fetch, [], {
     storage: {
@@ -347,7 +339,7 @@ test("auth client reports hinted profile service errors", async () => {
   assert.equal(errors[0].status, 403);
 });
 
-test("auth client authenticates when /me succeeds", async () => {
+test("auth client authenticates when /auth/session succeeds", async () => {
   const profile = {
     user_id: "user-123",
     user_email: "user@example.com",
@@ -375,23 +367,19 @@ test("auth client authenticates when /me succeeds", async () => {
   assert.deepEqual(authenticatedProfile, profile);
   assert.equal(unauthenticatedCount, 0);
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].url, "https://example.com/me");
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assertMissingHeader(fetch.calls[0], "X-Client");
-  assert.deepEqual(events, []);
+  assert.deepEqual(events, ["refreshed"]);
 });
 
-test("auth client attempts refresh before authenticating", async () => {
+test("auth client accepts refresh-backed session status before authenticating", async () => {
   const profile = {
     user_id: "user-456",
     user_email: "second@example.com",
     display: "Second User",
     roles: ["user"],
   };
-  const fetch = createFetchWithQueue([
-    { status: 401, body: {} },
-    { status: 204, body: {} },
-    { status: 200, body: profile },
-  ]);
+  const fetch = createFetchWithQueue([{ status: 200, body: profile }]);
   const events = [];
   const context = await loadAuthClient(fetch, events);
 
@@ -408,21 +396,14 @@ test("auth client attempts refresh before authenticating", async () => {
   });
 
   assert.deepEqual(authenticatedProfile, profile);
-  assert.equal(fetch.calls.length, 3);
-  assert.equal(fetch.calls[0].url, "https://example.com/me");
-  assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
-  assert.equal(fetch.calls[2].url, "https://example.com/me");
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assertMissingHeader(fetch.calls[0], "X-Client");
-  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
-  assertMissingHeader(fetch.calls[2], "X-Client");
   assert.deepEqual(events, ["refreshed"]);
 });
 
-test("auth client surfaces unauthenticated when refresh fails", async () => {
-  const fetch = createFetchWithQueue([
-    { status: 401, body: {} },
-    { status: 401, body: {} },
-  ]);
+test("auth client surfaces unauthenticated when session status is anonymous", async () => {
+  const fetch = createFetchWithQueue([{ status: 204, body: {} }]);
   const events = [];
   const context = await loadAuthClient(fetch, events);
 
@@ -442,15 +423,13 @@ test("auth client surfaces unauthenticated when refresh fails", async () => {
 
   assert.equal(authenticatedCount, 0);
   assert.equal(unauthenticatedCount, 1);
-  assert.equal(fetch.calls.length, 2);
-  assert.equal(fetch.calls[0].url, "https://example.com/me");
-  assert.equal(fetch.calls[1].url, "https://example.com/auth/refresh");
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
   assertMissingHeader(fetch.calls[0], "X-Client");
-  assertHeader(fetch.calls[1], "X-Requested-With", "XMLHttpRequest");
   assert.deepEqual(events, []);
 });
 
-test("auth client clears cached profile when session refresh fails", async () => {
+test("auth client clears cached profile when session status becomes anonymous", async () => {
   const profile = {
     user_id: "cached-user",
     user_email: "cached@example.com",
@@ -459,8 +438,7 @@ test("auth client clears cached profile when session refresh fails", async () =>
   };
   const fetch = createFetchWithQueue([
     { status: 200, body: profile },
-    { status: 401, body: {} },
-    { status: 401, body: {} },
+    { status: 204, body: {} },
   ]);
   const context = await loadAuthClient(fetch, []);
 
@@ -488,16 +466,12 @@ test("auth client clears cached profile when session refresh fails", async () =>
 
   assert.equal(unauthenticatedCount, 1);
   assert.equal(context.getCurrentUser(), null);
-  assert.equal(fetch.calls.length, 3);
-  assert.equal(fetch.calls[1].url, "https://example.com/me");
-  assert.equal(fetch.calls[2].url, "https://example.com/auth/refresh");
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls[1].url, "https://example.com/auth/session");
 });
 
 test("auth client omits tenant header when tenant id is unset", async () => {
-  const fetch = createFetchWithQueue([
-    { status: 401, body: {} },
-    { status: 401, body: {} },
-  ]);
+  const fetch = createFetchWithQueue([{ status: 204, body: {} }]);
   const events = [];
   const context = await loadAuthClient(fetch, events, {
     locationOrigin: "http://ui-origin.localhost",
@@ -510,9 +484,8 @@ test("auth client omits tenant header when tenant id is unset", async () => {
     onUnauthenticated() {},
   });
 
-  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls.length, 1);
   assertMissingHeader(fetch.calls[0], "X-TAuth-Tenant");
-  assertMissingHeader(fetch.calls[1], "X-TAuth-Tenant");
 });
 
 test("auth client rejects missing baseUrl", async () => {
@@ -553,6 +526,7 @@ test("auth client exposes endpoint map for core routes", async () => {
   const expected = {
     baseUrl: "https://auth.example.com",
     meUrl: "https://auth.example.com/me",
+    sessionUrl: "https://auth.example.com/auth/session",
     refreshUrl: "https://auth.example.com/auth/refresh",
     logoutUrl: "https://auth.example.com/auth/logout",
     nonceUrl: "https://auth.example.com/auth/nonce",
@@ -831,8 +805,7 @@ test("initAuthClient attaches tenant override header when configured", async () 
 
 test("apiFetch sends tenant header during refresh cycle only", async () => {
   const fetch = createFetchWithQueue([
-    { status: 401, body: {} }, // init /me
-    { status: 401, body: {} }, // init refresh
+    { status: 204, body: {} }, // init /auth/session
     { status: 401, body: {} }, // apiFetch initial attempt
     { status: 204, body: {} }, // refresh
     { status: 200, body: {} }, // retry
@@ -980,38 +953,9 @@ test("auth client syncs profile on refreshed broadcast", async () => {
   assert.equal(fetch.calls.length, 2);
 });
 
-test("auth client clears state when peer refresh lacks a profile", async () => {
-  const fetchResponses = [
-    { status: 401, body: {} },
-    { status: 401, body: {} },
-    { status: 401, body: {} },
-  ];
-  const fetchCalls = [];
-  let dispatchBroadcast = function () {};
-  let callCount = 0;
-  const fetch = async (requestUrl, options = {}) => {
-    callCount += 1;
-    fetchCalls.push({
-      url: requestUrl,
-      method: options.method || "GET",
-      headers: options.headers || {},
-      credentials: options.credentials,
-    });
-    const response = fetchResponses[callCount - 1];
-    if (!response) {
-      throw new Error("unexpected fetch call in test");
-    }
-    if (callCount === 2) {
-      setTimeout(function () {
-        dispatchBroadcast("refreshed");
-      }, 0);
-    }
-    return createResponse(response.status, response.body);
-  };
+test("auth client clears state when session status lacks a profile", async () => {
+  const fetch = createFetchWithQueue([{ status: 204, body: {} }]);
   const context = await loadAuthClient(fetch);
-  dispatchBroadcast = function (message) {
-    context.__dispatchBroadcast(message);
-  };
 
   let unauthenticatedCount = 0;
   await context.initAuthClient({
@@ -1027,7 +971,8 @@ test("auth client clears state when peer refresh lacks a profile", async () => {
 
   assert.equal(unauthenticatedCount, 1);
   assert.equal(context.getCurrentUser(), null);
-  assert.equal(fetchCalls.length, 3);
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].url, "https://example.com/auth/session");
 });
 
 test("auth client clears state on logged_out broadcast", async () => {
