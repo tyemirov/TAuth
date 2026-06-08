@@ -214,10 +214,10 @@ Behaviour:
 
 - With the default `bootstrapMode: "restore-if-hinted"`, a first anonymous visit calls `onUnauthenticated()` without making `/me` or `/auth/refresh` requests.
 - After a successful login, profile restore, or refresh, the helper writes a non-secret restore hint keyed by `baseUrl` and tenant id.
-- When that hint exists, startup calls `GET /me`; if the access cookie is expired, it attempts `POST /auth/refresh` once, then re-reads `/me`.
+- When that hint exists, startup calls `GET /auth/session`. The endpoint returns profile JSON for valid or refresh-restored cookies and `204 No Content` for anonymous/expired browsers without browser-visible 401s.
 - `bootstrapMode: "eager"` preserves the legacy probe-first behavior. `bootstrapMode: "passive"` always starts anonymous and never restores on load.
-- `401` from `/me` or `/auth/refresh` during hinted restore means the browser is signed out and clears the hint. `403`, `404`, network failures, and `5xx` responses call `onAuthError(error)`.
-- The `profile` object matches the `/me` response (see section 6.3).
+- `204` from `/auth/session` clears the restore hint. `403`, `404`, network failures, and `5xx` responses call `onAuthError(error)`.
+- The `profile` object matches the `/me` response (see section 6.4).
 
 ### 4.3 Calling your own APIs with `apiFetch`
 
@@ -261,7 +261,7 @@ The helper:
 
 ### 4.5 Selecting a tenant explicitly
 
-Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/me` and `/auth/*` calls only when you explicitly supply a `tenantId`. You can pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
+Most deployments rely on the request `Origin` header to resolve tenants. When multiple tenants intentionally share the same origin (for example, several apps pointing at `http://localhost:8080`) or when requests omit `Origin` (non-browser clients), enable the TAuth server’s header override (`--enable_tenant_header_override`). Once enabled, the helper tags `/auth/session`, `/me`, and `/auth/*` calls only when you explicitly supply a `tenantId`. You can pin a specific tenant explicitly by passing `tenantId` to `initAuthClient`:
 
 ```js
 initAuthClient({
@@ -272,7 +272,7 @@ initAuthClient({
 });
 ```
 
-The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/me` and `/auth/*` requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected. Restore hints are tenant-scoped, so one shared-origin tenant does not trigger bootstrap probes for another.
+The helper automatically attaches `X-TAuth-Tenant: team-blue` to `/auth/session`, `/me`, and `/auth/*` requests while leaving your own API traffic alone. Switch tenants by reinitialising with a different `tenantId` (or prefer separate origins when possible). The override still resolves against the configured tenant list, so unknown tenant IDs or origins are rejected. Restore hints are tenant-scoped, so one shared-origin tenant does not trigger bootstrap probes for another.
 
 ---
 
@@ -492,7 +492,16 @@ Verifies a tenant-managed email/password credential and mints the standard sessi
   - `403` with `error: "user_not_allowed"` when `allowed_users` rejects the normalized email
   - `401` with `error: "invalid_credentials"` for unknown users or wrong passwords
 
-### 6.3 `GET /api/me`
+### 6.3 `GET /auth/session`
+
+Returns the current browser session profile for startup/bootstrap without using 401 as an expected signed-out signal.
+
+- **Auth**: optional `app_session` and `app_refresh` cookies.
+- **Response**: `200 OK` with the same profile payload as `/api/me` when the session is valid or refresh-restorable. Sets rotated cookies if the refresh cookie restores the session.
+- **Anonymous response**: `204 No Content` when no valid session can be restored.
+- **Errors**: `5xx` only for unexpected server/store failures.
+
+### 6.4 `GET /api/me`
 
 Returns the profile associated with the current session.
 
@@ -512,7 +521,7 @@ Returns the profile associated with the current session.
 
 - **Errors**: `401` when the access cookie is missing, expired, or invalid.
 
-### 6.4 `POST /auth/refresh`
+### 6.5 `POST /auth/refresh`
 
 Rotates the refresh token and mints a new access cookie.
 
@@ -522,7 +531,7 @@ Rotates the refresh token and mints a new access cookie.
 
 After a successful refresh, call `/api/me` again or rely on `tauth.js` to hydrate the profile.
 
-### 6.5 `POST /auth/logout`
+### 6.6 `POST /auth/logout`
 
 Revokes the refresh token and clears cookies.
 
@@ -532,7 +541,7 @@ Revokes the refresh token and clears cookies.
 
 Clients should treat this as “signed out” regardless of prior state.
 
-### 6.6 `GET /tauth.js`
+### 6.7 `GET /tauth.js`
 
 Serves the browser helper described in section 4.
 
@@ -540,12 +549,12 @@ Serves the browser helper described in section 4.
 - Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `getAuthState`, `getAuthEndpoints`, `requestNonce`, `exchangeGoogleCredential`, `exchangePasswordCredential`, `logout`, and `setAuthTenantId` on `window`.
 - The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
 
-## 6.7 Validating sessions from other Go services
+## 6.8 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
 If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
 
-### 6.7.1 Basic validator setup
+### 6.8.1 Basic validator setup
 
 Add the module to your Go service and construct a validator at startup:
 
@@ -574,7 +583,7 @@ The configuration mirrors your TAuth deployment:
 
 The constructor validates configuration up front and returns a typed error if required fields are missing.
 
-### 6.7.2 Gin middleware integration
+### 6.8.2 Gin middleware integration
 
 For Gin-based services, use the built-in middleware to protect routes and attach claims to the context:
 
