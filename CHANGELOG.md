@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- Added full tenant-gated account management for first-party email/password accounts, including signup, email verification, reset, password change, Google/password linking, unlinking, account disablement, stable account IDs, and account-level refresh revocation.
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
