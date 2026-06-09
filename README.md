@@ -1,11 +1,11 @@
 # TAuth
 
-*Google Sign-In, email/password account management, and JWT sessions for single-origin apps*
+*Google Sign-In, Sign in with Apple, email/password account management, and JWT sessions for single-origin apps*
 
-TAuth lets product teams accept Google Sign-In or tenant-managed email/password accounts, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
+TAuth lets product teams accept Google Sign-In, Sign in with Apple, or tenant-managed email/password accounts, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
-TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google API access/refresh tokens.
+TAuth is authentication-only: it validates provider identity tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs, Apple APIs, or other provider APIs and does not manage provider API access/refresh tokens.
 
 ---
 
@@ -13,7 +13,7 @@ TAuth is authentication-only: it validates Google ID tokens and issues first-par
 
 - **Own the session lifecycle** – verify an identity once, then rely on short-lived access cookies and rotating refresh tokens.
 - **Zero tokens in JavaScript** – the client handles hydration, silent refresh, and logout notifications without touching `localStorage`.
-- **Minutes to value** – a single binary with predictable defaults, powered by Gin and Google’s official identity SDK.
+- **Minutes to value** – a single binary with predictable defaults, powered by Gin and OpenID Connect provider integrations.
 - **Designed for growth** – plug in Postgres or SQLite to persist refresh tokens, and extend the web hook points to fit your product.
 
 ---
@@ -44,6 +44,13 @@ tenants:
         client_id: "your_android_client_id.apps.googleusercontent.com"
         redirect_uris:
           - "com.example.app:/oauth2redirect/google"
+    apple_oauth:
+      enabled: true
+      client_id: "com.example.web"
+      team_id: "APPLETEAMID"
+      key_id: "APPLEKEYID"
+      private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
+      redirect_uri: "https://tauth.mprlab.com/auth/apple/callback"
     password_auth:
       enabled: true
       users:
@@ -76,11 +83,12 @@ Each entry defines:
 - `display_name` – friendly label surfaced in logs and the demo UI.
 - `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header to select a tenant, and can optionally accept an `X-TAuth-Tenant` override when you enable it for shared-origin or non-browser clients.
 - `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
-- `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
+- `google_web_client_id` – optional OAuth Web client configured in Google Cloud Console for this tenant’s origins. Omit it for Apple-only, password-only, or native-Google-only tenants.
 - `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
 - `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
+- `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`, configure an Apple Services ID as `client_id`, Apple `team_id`, Sign in with Apple `key_id`, either PKCS8 ECDSA `private_key` or one-line `private_key_base64`, and an HTTPS `redirect_uri` that points at `/auth/apple/callback` on your TAuth origin.
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
-- `account_management` – optional first-party account lifecycle. Set `enabled: true` to use stable `account:<id>` session subjects for password and Google identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
+- `account_management` – optional first-party account lifecycle. Set `enabled: true` to use stable `account:<id>` session subjects for password, Google, and Apple identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
@@ -107,6 +115,13 @@ tenants:
     tenant_origins: ["https://gravity.mprlab.com"]
     google_web_client_id: "gravity-client.apps.googleusercontent.com"
     google_native_client_id: "gravity-native.apps.googleusercontent.com"
+    apple_oauth:
+      enabled: true
+      client_id: "com.gravity.web"
+      team_id: "APPLETEAMID"
+      key_id: "APPLEKEYID"
+      private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
+      redirect_uri: "https://tauth.mprlab.com/auth/apple/callback"
     jwt_signing_key: "replace-with-gravity-signing-key"
     cookie_domain: ".mprlab.com"
     session_cookie_name: "app_session_gravity"
@@ -167,23 +182,26 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
       renderDashboard(profile);
     },
     onUnauthenticated() {
-      showGoogleButton();
+      showSignInButtons();
     }
   });
 </script>
 
 <div id="googleSignIn"></div>
+<button type="button" onclick="startAppleLogin()">Sign in with Apple</button>
 ```
 
 The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `docs/` site and copies `web/tauth.js` into the site root, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/auth/session` recovery without browser-visible 401s. Use `bootstrapMode: "eager"` only when you intentionally want a startup session check, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 
-### 4. Prepare and exchange Google credentials across origins
+### 4. Prepare and exchange provider credentials across origins
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
 
-For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. When `account_management.enabled` is also true, verified password and Google identities resolve to stable `account:<id>` subjects. The helper also exposes signup, email verification, reset, password change, identity linking/unlinking, and disable-account methods for the full account lifecycle.
+For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control that calls `startAppleLogin()` or navigates to `getAppleLoginUrl()`. The helper builds `/auth/apple/start`, includes the configured tenant id when needed, and adds the current page as `return_to` so the callback can return to the product after cookies are minted. `startAppleLogin()` also records the non-secret restore hint before leaving the page, letting the returned app restore through `/auth/session`. TAuth validates Apple’s ID token and nonce, then mints the same cookies and profile payload used by Google and password login.
+
+For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. When `account_management.enabled` is also true, verified provider and password identities resolve to stable `account:<id>` subjects. The helper also exposes signup, email verification, reset, password change, identity linking/unlinking, and disable-account methods for the full account lifecycle.
 
 ### Configure Google Identity Services (popup flow)
 
@@ -207,6 +225,15 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
 - Call `/api/me` and verify it returns the signed-in profile.
 
 > **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/tauth-demo/.env.tauth`. Replace it with your own value before sharing the stack beyond local testing.
+
+### Configure Sign in with Apple
+
+1. Create a Sign in with Apple key in Apple Developer and keep the Key ID, Team ID, and downloaded private key PEM.
+2. Create or reuse a Services ID for the web client, then add your TAuth callback URL, for example `https://tauth.mprlab.com/auth/apple/callback`.
+3. Add the matching `apple_oauth` block to the tenant config and keep `private_key` or `private_key_base64` in an environment variable or secret manager.
+4. Point your UI button at `startAppleLogin()` from `tauth.js` or the URL returned by `getAppleLoginUrl()`.
+
+Apple redirects back to TAuth with an authorization code. TAuth posts that code to Apple’s token endpoint with an ES256 client secret, validates the returned ID token through Apple JWKS, checks the original nonce, enforces `allowed_users`, issues the standard first-party cookies, and redirects to the signed `return_to` URL when it was provided. Apple access tokens are not returned to the browser or stored.
 
 ### Native desktop and mobile login (system browser + PKCE)
 
@@ -260,6 +287,13 @@ tenants:
       - platform: "android"
         client_id: "demo-android.apps.googleusercontent.com"
         redirect_uris: ["com.demo.app:/oauth2redirect/google"]
+    apple_oauth:
+      enabled: true
+      client_id: "com.demo.web"
+      team_id: "APPLETEAMID"
+      key_id: "APPLEKEYID"
+      private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
+      redirect_uri: "https://auth.demo.example.com/auth/apple/callback"
     password_auth:
       enabled: true
       users:
@@ -291,9 +325,9 @@ Rules enforced by the loader:
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 - Unlisted users are rejected during `/auth/google`, `/auth/google/native`, and `/auth/password/login` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
-- `google_web_client_id` and each TTL must be present and non-empty. `google_native_client_id` and `google_native_clients` are optional and enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
+- Each tenant must configure at least one auth provider: browser Google via `google_web_client_id`, native Google via `google_native_client_id`/`google_native_clients`, Apple via `apple_oauth.enabled`, or password login via `password_auth.enabled`. `google_native_client_id` and `google_native_clients` enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. `apple_oauth.enabled` gates `GET /auth/apple/start` plus `GET`/`POST /auth/apple/callback`; enabled Apple providers require a Services ID client, Team ID, Key ID, PKCS8 ECDSA private key supplied as `private_key` or `private_key_base64`, and HTTPS callback URI. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
-- `account_management.enabled` enables stable account IDs, password signup/verification/reset flows, authenticated password changes, Google/password linking, unlinking, and account disablement. `password_signup.enabled` requires account management to be enabled. Challenge tokens are hashed at rest and single-use; production deployments should keep `return_challenge_tokens` false and deliver tokens through an email adapter or trusted delivery path.
+- `account_management.enabled` enables stable account IDs, password signup/verification/reset flows, authenticated password changes, provider/password linking, unlinking, and account disablement. `password_signup.enabled` requires account management to be enabled. Challenge tokens are hashed at rest and single-use; production deployments should keep `return_challenge_tokens` false and deliver tokens through an email adapter or trusted delivery path.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
