@@ -1,7 +1,7 @@
 {
   "name": "tauth",
   "version": "1.0.0",
-  "description": "*Google Sign-In + JWT sessions for single-origin apps*",
+  "description": "*Google, Apple, and password auth with JWT sessions for single-origin apps*",
   "main": "index.js",
   "directories": {
     "doc": "docs"
