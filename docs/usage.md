@@ -11,12 +11,13 @@ For a deep dive into internal architecture and implementation details, see `ARCH
 TAuth sits between identity providers and your product UI:
 
 - Verifies Google ID tokens issued by Google OAuth Web clients and optional Desktop/installed-app clients.
+- Completes Sign in with Apple authorization-code redirects and validates Apple ID tokens.
 - Verifies tenant-managed email/password credentials when `password_auth.enabled` is configured.
-- Manages first-party password accounts when `account_management.enabled` is configured, including signup, email verification, reset, password change, linking, unlinking, and disablement.
+- Manages first-party accounts when `account_management.enabled` is configured, including signup, email verification, reset, password change, provider linking, unlinking, and disablement.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
-- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc), MFA/passkeys, organization membership, public profile editing, or third-party token custody.
+- Does not implement OAuth2 authorization for Google or Apple APIs, MFA/passkeys, organization membership, public profile editing, or third-party token custody.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 
@@ -55,7 +56,8 @@ Key notes:
 - **Shared origins**: If multiple tenants run on the same machine, add each distinct frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `tenant_origins` so TAuth can resolve the tenant from the request `Origin` header. Only enable `enable_tenant_header_override` (and send `X-TAuth-Tenant`) when tenants intentionally share the exact same origin or when non-browser clients omit `Origin`.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
-- **Account management**: Set `account_management.enabled: true` inside a tenant to use stable `account:<id>` session subjects across password and Google identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
+- **Apple OAuth**: Set `apple_oauth.enabled: true` inside a tenant to expose `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and an HTTPS `redirect_uri` registered with Apple.
+- **Account management**: Set `account_management.enabled: true` inside a tenant to use stable `account:<id>` session subjects across password, Google, and Apple identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
 ### 2.3 Example: hosted deployment
@@ -93,6 +95,13 @@ tenants:
         client_id: "your_android_client_id.apps.googleusercontent.com"
         redirect_uris:
           - "com.example.app:/oauth2redirect/google"
+    apple_oauth:
+      enabled: true
+      client_id: "com.example.web"
+      team_id: "APPLETEAMID"
+      key_id: "APPLEKEYID"
+      private_key: "${APPLE_PRIVATE_KEY_PEM}"
+      redirect_uri: "https://auth.example.com/auth/apple/callback"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".example.com"
     session_cookie_name: "app_session_prod"
@@ -173,6 +182,8 @@ The simplest way to use TAuth from the browser is through the helper served at `
 - `getAuthEndpoints()` – returns the resolved URL map for `/me` and `/auth/*`.
 - `requestNonce()` – fetches a one-time nonce for Google Identity Services.
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
+- `getAppleLoginUrl()` – returns the tenant-aware `/auth/apple/start` URL for a Sign in with Apple button or link, including the current page as `return_to` when `window.location` is available.
+- `startAppleLogin()` – records a non-secret restore hint, navigates the browser to the Apple login start URL, and returns that URL for instrumentation.
 - `exchangePasswordCredential({ email, password })` – exchanges a tenant-managed password credential for cookies and updates the profile.
 - `signupPasswordCredential({ email, password, displayName, avatarUrl })` – starts account signup and returns the accepted verification challenge metadata.
 - `verifyPasswordEmail({ token })` – verifies a signup challenge, mints cookies, and updates the profile.
@@ -361,7 +372,35 @@ const result = await request.promptAsync({
 
 After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.mprlab.com`.
 
-### 5.4 Email/password accounts
+### 5.4 Sign in with Apple
+
+Apple login is a browser redirect flow. TAuth owns the state, nonce, Apple client-secret JWT, token exchange, and session issuance:
+
+```yaml
+apple_oauth:
+  enabled: true
+  client_id: "com.example.web"
+  team_id: "APPLETEAMID"
+  key_id: "APPLEKEYID"
+  private_key: "${APPLE_PRIVATE_KEY_PEM}"
+  redirect_uri: "https://auth.example.com/auth/apple/callback"
+```
+
+Create a Sign in with Apple key in Apple Developer, register the callback URL on the Services ID, and keep the private key in an environment variable or secret manager. The callback URI must point at `/auth/apple/callback` on the public TAuth origin and must be HTTPS outside local insecure mode.
+
+Browser integrations can use the helper directly:
+
+```js
+document.querySelector("#appleSignIn").addEventListener("click", () => {
+  startAppleLogin();
+});
+```
+
+For custom links, call `getAppleLoginUrl()` and assign the returned URL to your button or anchor. When `tenantId` is configured in `initAuthClient`, the helper appends `tenant_id` to `/auth/apple/start` because the provider redirect itself will not include the product origin. The helper also appends the current browser URL as `return_to`; TAuth signs that value into Apple state only when its origin matches the resolved tenant’s configured `tenant_origins`.
+
+The server redirects the browser to Apple with `response_type=code`, `response_mode=form_post`, `scope=openid email name`, a signed state JWT, and a nonce stored in TAuth. Apple returns an authorization code to `/auth/apple/callback`; TAuth exchanges it at Apple’s token endpoint, validates the returned ID token against Apple JWKS, checks the nonce, enforces `allowed_users`, and mints the same `app_session` / `app_refresh` cookies as Google and password login. When state contains a validated `return_to`, the callback responds with `303 See Other` to that product URL after setting cookies; otherwise it returns the profile JSON directly. `startAppleLogin()` records the restore hint before leaving the product page so the returned page restores through `/auth/session`. Apple access tokens are not exposed to JavaScript or stored by TAuth.
+
+### 5.5 Email/password accounts
 
 Operators enable password authentication per tenant. Seeded credentials continue to work for operator-managed accounts, while `account_management.enabled` adds public signup, verification, reset, account-level session subjects, and identity linking:
 
@@ -507,7 +546,37 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
 
 - **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
 
-### 6.2c `POST /auth/password/login`
+### 6.2c `GET /auth/apple/start`
+
+Starts a Sign in with Apple redirect for a tenant that enables `apple_oauth`.
+
+- **Query**: optional `tenant_id` when no browser `Origin` can uniquely resolve the tenant; optional `return_to` absolute URL whose origin must match the resolved tenant’s `tenant_origins`.
+- **Response**: `302 Found` to Apple’s authorization endpoint.
+- **Errors**:
+  - `404` with `error: "apple_login_not_configured"` when the tenant has not enabled Apple login
+  - `400` with `error: "missing_tenant"` when neither `Origin`, tenant override, nor `tenant_id` can resolve a tenant
+  - `400` with `error: "invalid_return_to"` when `return_to` is not an absolute URL for the resolved tenant
+  - `400` with `error: "https_required"` when the tenant disallows insecure HTTP and the start request is not HTTPS
+
+### 6.2d `GET` or `POST /auth/apple/callback`
+
+Completes the Sign in with Apple authorization-code flow and mints the standard session cookies.
+
+- **Inbound fields**: Apple returns `code` and `state` as either form fields (`response_mode=form_post`) or query parameters.
+- **Validation**:
+  - the signed state must resolve to a known tenant and unexpired nonce
+  - the Apple token response must contain an ID token signed by Apple
+  - issuer must be Apple and audience must match `apple_oauth.client_id`
+  - the ID token `nonce` claim must match the nonce issued at `/auth/apple/start`
+  - the ID token must include a verified email and pass any `allowed_users` allowlist
+- **Response**: `303 See Other` to the signed `return_to` URL after setting cookies when the flow was started by `tauth.js`; otherwise `200 OK` with the same profile payload and cookies as `POST /auth/google`.
+- **Errors**:
+  - `400` with `error: "invalid_apple_callback"` for missing callback fields
+  - `401` with `error: "invalid_state"` for invalid state
+  - `401` with `error: "invalid_apple_token"` for token exchange or ID-token validation failures
+  - `403` with `error: "user_not_allowed"` when `allowed_users` rejects the Apple email
+
+### 6.2e `POST /auth/password/login`
 
 Verifies a tenant-managed email/password credential and mints the standard session cookies.
 
@@ -529,7 +598,7 @@ Verifies a tenant-managed email/password credential and mints the standard sessi
   - `401` with `error: "invalid_credentials"` for unknown users or wrong passwords
   - `403` with `error: "account_not_active"` when account management is enabled and the signup has not been verified
 
-### 6.2d `POST /auth/password/signup`
+### 6.2f `POST /auth/password/signup`
 
 Starts a password signup when `account_management.enabled` and `account_management.password_signup.enabled` are both true.
 
@@ -561,7 +630,7 @@ Starts a password signup when `account_management.enabled` and `account_manageme
   - `404` with `error: "password_signup_not_configured"` when public signup is disabled
   - `409` with `error: "account_exists"` when the password identity is already linked
 
-### 6.2e `POST /auth/password/verify-email`
+### 6.2g `POST /auth/password/verify-email`
 
 Consumes a signup verification challenge, activates the account, mints cookies, and returns the account profile.
 
@@ -574,7 +643,7 @@ Consumes a signup verification challenge, activates the account, mints cookies, 
 - **Response**: `200 OK` with the same profile payload as `POST /auth/google`; `user_id` is the stable `account:<id>`.
 - **Errors**: `401` with `error: "invalid_challenge"` for missing, expired, reused, or wrong-tenant tokens.
 
-### 6.2f `POST /auth/password/reset/start`
+### 6.2h `POST /auth/password/reset/start`
 
 Starts password reset. The response shape is intentionally the same for known and unknown emails.
 
@@ -586,7 +655,7 @@ Starts password reset. The response shape is intentionally the same for known an
 
 - **Response**: `202 Accepted` with `status`, `account_id` when known, and `expires_unix`. When `return_challenge_tokens: true`, known accounts receive `reset_token`.
 
-### 6.2g `POST /auth/password/reset/complete`
+### 6.2i `POST /auth/password/reset/complete`
 
 Consumes a reset challenge, rotates the password hash, revokes existing account refresh sessions, mints cookies, and returns the account profile.
 
@@ -602,7 +671,7 @@ Consumes a reset challenge, rotates the password hash, revokes existing account 
 - **Response**: `200 OK` with the account profile.
 - **Errors**: `401` with `error: "invalid_challenge"` for invalid reset tokens.
 
-### 6.2h Authenticated account endpoints
+### 6.2j Authenticated account endpoints
 
 All `/auth/account/*` endpoints require the current `app_session` cookie and only accept stable `account:<id>` session subjects.
 
@@ -612,7 +681,7 @@ All `/auth/account/*` endpoints require the current `app_session` cookie and onl
 | `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` verification challenge metadata |
 | `POST` | `/auth/account/password/link/verify` | `{ "token": "..." }` | `200` profile |
 | `POST` | `/auth/account/google/link` | `{ "google_id_token": "...", "nonce_token": "..." }` | `200` profile |
-| `POST` | `/auth/account/unlink` | `{ "provider": "password|google", "provider_id": "..." }` | `200` profile, refresh sessions revoked and reissued |
+| `POST` | `/auth/account/unlink` | `{ "provider": "password|google|apple", "provider_id": "..." }` | `200` profile, refresh sessions revoked and reissued |
 | `POST` | `/auth/account/disable` | empty body | `204 No Content`, cookies cleared and refresh sessions revoked |
 
 Common account errors include `403 account_not_active`, `403 account_disabled`, `409 last_identity`, `409 account_exists`, and `401 invalid_challenge`.
@@ -671,7 +740,7 @@ Clients should treat this as “signed out” regardless of prior state.
 Serves the browser helper described in section 4.
 
 - Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
-- Exposes the helper globals listed in section 4, including Google/password login, password signup, verification, reset, password change, identity linking/unlinking, disable-account, logout, and tenant selection.
+- Exposes the helper globals listed in section 4, including Google/password login, Apple login start, password signup, verification, reset, password change, identity linking/unlinking, disable-account, logout, and tenant selection.
 - The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
 
 ## 6.8 Validating sessions from other Go services
@@ -783,11 +852,10 @@ Using the shared validator keeps your services aligned with TAuth’s JWT format
 
 ### 7.1 First sign‑in
 
-1. User clicks “Sign in with Google”.
-2. UI calls `/auth/nonce`, configures GIS with the nonce, and shows the popup.
-3. GIS returns a credential; UI posts it to `/auth/google`.
-4. TAuth validates the token, issues cookies, returns profile JSON.
-5. UI renders signed‑in state and begins using `apiFetch` for protected calls.
+1. User clicks “Sign in with Google”, “Sign in with Apple”, or submits a password login form.
+2. Google UI calls `/auth/nonce`, configures GIS with the nonce, and posts the returned credential to `/auth/google`; Apple UI navigates to `/auth/apple/start` and returns through `/auth/apple/callback`; password UI posts credentials to `/auth/password/login`.
+3. TAuth validates the provider token or password credential, issues cookies, and returns profile JSON.
+4. UI renders signed‑in state and begins using `apiFetch` for protected calls.
 
 ### 7.2 Silent refresh
 
@@ -821,6 +889,8 @@ Use this checklist when integrating:
   - `tenantresolver.ambiguous_origin` – multiple tenants share the origin; provide `X-TAuth-Tenant`.
   - `tenantresolver.override_mismatch` or `tenantresolver.unknown_tenant_id` – header override does not match a configured tenant.
 - **403 from `/auth/google` with `user_not_allowed`** – The email is not listed under the tenant’s `allowed_users` allowlist (or the list is empty).
+- **404 from `/auth/apple/start` with `apple_login_not_configured`** – Add an enabled `apple_oauth` block to the resolved tenant.
+- **401 from `/auth/apple/callback` with `invalid_state` or `invalid_apple_token`** – Confirm the callback URL matches the Apple Services ID, the tenant has the correct Services ID client, Team ID, Key ID, and private key, and the user completed the original `/auth/apple/start` redirect without reusing an old URL.
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.

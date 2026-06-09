@@ -14,9 +14,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="TAuth verifies Google tokens, mints first-party JWT cookies, and keeps refresh rotation server-side for single-origin apps."
+      content="TAuth verifies Google and Apple sign-ins, mints first-party JWT cookies, and keeps refresh rotation server-side for single-origin apps."
     />
-    <title>TAuth | Own your Google Sign-In sessions</title>
+    <title>TAuth | Own your provider sign-in sessions</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -513,12 +513,13 @@
       <main id="main">
         <section class="hero">
           <div class="hero-copy reveal delay-1">
-            <div class="eyebrow">Google Identity Services, owned sessions</div>
+            <div class="eyebrow">Google, Apple, and owned sessions</div>
             <h1>Own the session. Keep tokens off the browser.</h1>
             <p class="lead">
-              TAuth verifies Google credentials, mints first-party JWT cookies,
-              and rotates refresh tokens server-side. One origin, zero token
-              storage, and a multi-tenant config your platform team can trust.
+              TAuth verifies Google and Apple sign-ins, mints first-party JWT
+              cookies, and rotates refresh tokens server-side. One origin, zero
+              token storage, and a multi-tenant config your platform team can
+              trust.
             </p>
             <div class="hero-actions">
               <a class="cta cta-primary" href="usage.html">Get started</a>
@@ -549,8 +550,9 @@
                 <span class="terminal-dot" style="background: #7aa6ff"></span>
                 launch
               </div>
-              <pre><code>$ tauth --config=config.yaml
+<pre><code>$ tauth --config=config.yaml
 /auth/nonce  -> /auth/google
+/auth/apple/start -> /auth/apple/callback
 /auth/refresh -> /auth/logout
 /me -> profile
 </code></pre>
@@ -598,8 +600,8 @@
             </svg>
             <h3>Drop-in client</h3>
             <p>
-              Use hosted tauth.js for nonce exchange, refresh retries, and logout
-              state without custom wiring.
+              Use hosted tauth.js for provider login, refresh retries, and
+              logout state without custom wiring.
             </p>
           </article>
         </section>
@@ -629,16 +631,17 @@
         <section id="deep-dive" class="section">
           <div class="split">
             <div class="reveal delay-1">
-              <h2>Nonce to cookie exchange</h2>
+              <h2>Provider to cookie exchange</h2>
               <p class="section-copy">
-                Clients request a nonce, post the Google credential, then rely
-                on the signed cookie for everything else. Refresh and logout
-                stay server-only.
+                Clients complete the provider handshake, then rely on the
+                signed cookie for everything else. Refresh and logout stay
+                server-only.
               </p>
             </div>
             <div class="code-card reveal delay-2">
-              <pre><code>POST /auth/nonce
+<pre><code>POST /auth/nonce
 POST /auth/google
+GET  /auth/apple/start
 POST /auth/refresh
 POST /auth/logout
 GET  /me
@@ -674,7 +677,8 @@ GET  /me
               <h2>Tenant config as a contract</h2>
               <p class="section-copy">
                 One YAML file defines tenant origins, cookie names, and TTLs.
-                Resolve by Origin or explicit header when you share an origin.
+                Resolve by Origin, explicit header, or signed provider state
+                when a redirect returns from Apple.
               </p>
             </div>
             <div class="code-card reveal delay-2">
@@ -682,6 +686,9 @@ GET  /me
   - id: "notes"
     tenant_origins: ["https://notes.localhost"]
     google_web_client_id: "..."
+    apple_oauth:
+      enabled: true
+      client_id: "..."
     jwt_signing_key: "..."
     session_cookie_name: "app_session_notes"
 </code></pre>
