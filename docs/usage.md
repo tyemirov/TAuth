@@ -12,10 +12,11 @@ TAuth sits between identity providers and your product UI:
 
 - Verifies Google ID tokens issued by Google OAuth Web clients and optional Desktop/installed-app clients.
 - Verifies tenant-managed email/password credentials when `password_auth.enabled` is configured.
+- Manages first-party password accounts when `account_management.enabled` is configured, including signup, email verification, reset, password change, linking, unlinking, and disablement.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
-- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc), public signup, email verification, password reset, or account linking.
+- Does not implement OAuth2 authorization for Google APIs (YouTube/Drive/etc), MFA/passkeys, organization membership, public profile editing, or third-party token custody.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 
@@ -54,6 +55,7 @@ Key notes:
 - **Shared origins**: If multiple tenants run on the same machine, add each distinct frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `tenant_origins` so TAuth can resolve the tenant from the request `Origin` header. Only enable `enable_tenant_header_override` (and send `X-TAuth-Tenant`) when tenants intentionally share the exact same origin or when non-browser clients omit `Origin`.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
+- **Account management**: Set `account_management.enabled: true` inside a tenant to use stable `account:<id>` session subjects across password and Google identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
 ### 2.3 Example: hosted deployment
@@ -162,7 +164,7 @@ Your product should:
 
 ## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports ten globals:
+The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports these globals:
 
 - `initAuthClient(options)` – initializes client auth state and restores prior sessions when appropriate.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
@@ -172,6 +174,15 @@ The simplest way to use TAuth from the browser is through the helper served at `
 - `requestNonce()` – fetches a one-time nonce for Google Identity Services.
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
 - `exchangePasswordCredential({ email, password })` – exchanges a tenant-managed password credential for cookies and updates the profile.
+- `signupPasswordCredential({ email, password, displayName, avatarUrl })` – starts account signup and returns the accepted verification challenge metadata.
+- `verifyPasswordEmail({ token })` – verifies a signup challenge, mints cookies, and updates the profile.
+- `startPasswordReset({ email })` – starts a reset challenge using the same accepted response shape for known and unknown emails.
+- `completePasswordReset({ token, password })` – completes reset, revokes existing refresh sessions, mints cookies, and updates the profile.
+- `changePassword({ currentPassword, newPassword })` – rotates the authenticated account password and refresh sessions.
+- `startPasswordLink({ email, password, displayName, avatarUrl })` / `verifyPasswordLink({ token })` – add a password identity to the current account after email proof.
+- `linkGoogleCredential({ credential, nonceToken })` – links a verified Google identity to the current account.
+- `unlinkAccountIdentity({ provider, providerId })` – removes a login identity unless it is the last remaining method.
+- `disableAccount()` – disables the current account, clears local profile state, and broadcasts logout.
 - `logout()` – revokes the refresh token and clears client state.
 - `setAuthTenantId(tenantId)` – sets the tenant override for subsequent requests.
 
@@ -350,9 +361,9 @@ const result = await request.promptAsync({
 
 After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.mprlab.com`.
 
-### 5.4 Email/password login
+### 5.4 Email/password accounts
 
-Email/password login is tenant-managed and login-only. Operators enable it per tenant and seed bcrypt hashes in config:
+Operators enable password authentication per tenant. Seeded credentials continue to work for operator-managed accounts, while `account_management.enabled` adds public signup, verification, reset, account-level session subjects, and identity linking:
 
 ```yaml
 password_auth:
@@ -362,9 +373,16 @@ password_auth:
       display_name: "Operator"
       avatar_url: "https://example.com/operator.png"
       password_hash: "$2a$10$..."
+account_management:
+  enabled: true
+  password_signup:
+    enabled: true
+  return_challenge_tokens: false
+  email_verification_ttl: "30m"
+  password_reset_ttl: "15m"
 ```
 
-Client code can use the helper:
+Existing seeded users can use the login helper:
 
 ```js
 const profile = await exchangePasswordCredential({
@@ -374,6 +392,24 @@ const profile = await exchangePasswordCredential({
 ```
 
 Or call `POST /auth/password/login` directly with `credentials: "include"`. The response and cookies match Google login. When `allowed_users` is configured, the normalized email must also be in that allowlist.
+
+Public signup and reset flows use one-time challenge tokens. Tokens are tenant-scoped, TTL-bound, single-use, and stored only as hashes. Production deployments should keep `return_challenge_tokens: false`; tests or trusted integrations may enable it to receive the token in the JSON response.
+
+```js
+const signup = await signupPasswordCredential({
+  email: form.email.value,
+  password: form.password.value,
+  displayName: form.displayName.value,
+});
+
+const profile = await verifyPasswordEmail({ token: signup.verification_token });
+
+await startPasswordReset({ email: form.email.value });
+const resetProfile = await completePasswordReset({
+  token: resetTokenFromDelivery,
+  password: form.newPassword.value,
+});
+```
 
 ---
 
@@ -491,6 +527,95 @@ Verifies a tenant-managed email/password credential and mints the standard sessi
   - `400` with `error: "invalid_email"` or `error: "missing_password"` for malformed input
   - `403` with `error: "user_not_allowed"` when `allowed_users` rejects the normalized email
   - `401` with `error: "invalid_credentials"` for unknown users or wrong passwords
+  - `403` with `error: "account_not_active"` when account management is enabled and the signup has not been verified
+
+### 6.2d `POST /auth/password/signup`
+
+Starts a password signup when `account_management.enabled` and `account_management.password_signup.enabled` are both true.
+
+- **Request body**:
+
+  ```json
+  {
+    "email": "new@example.com",
+    "password": "correct horse battery staple",
+    "display_name": "New User",
+    "avatar_url": "https://example.com/avatar.png"
+  }
+  ```
+
+- **Response**: `202 Accepted`
+
+  ```json
+  {
+    "status": "accepted",
+    "account_id": "account:...",
+    "expires_unix": 1760000000
+  }
+  ```
+
+  When `return_challenge_tokens: true`, the response also includes `verification_token`.
+
+- **Errors**:
+  - `404` with `error: "account_management_not_configured"` when account management is disabled
+  - `404` with `error: "password_signup_not_configured"` when public signup is disabled
+  - `409` with `error: "account_exists"` when the password identity is already linked
+
+### 6.2e `POST /auth/password/verify-email`
+
+Consumes a signup verification challenge, activates the account, mints cookies, and returns the account profile.
+
+- **Request body**:
+
+  ```json
+  { "token": "<verification_token>" }
+  ```
+
+- **Response**: `200 OK` with the same profile payload as `POST /auth/google`; `user_id` is the stable `account:<id>`.
+- **Errors**: `401` with `error: "invalid_challenge"` for missing, expired, reused, or wrong-tenant tokens.
+
+### 6.2f `POST /auth/password/reset/start`
+
+Starts password reset. The response shape is intentionally the same for known and unknown emails.
+
+- **Request body**:
+
+  ```json
+  { "email": "user@example.com" }
+  ```
+
+- **Response**: `202 Accepted` with `status`, `account_id` when known, and `expires_unix`. When `return_challenge_tokens: true`, known accounts receive `reset_token`.
+
+### 6.2g `POST /auth/password/reset/complete`
+
+Consumes a reset challenge, rotates the password hash, revokes existing account refresh sessions, mints cookies, and returns the account profile.
+
+- **Request body**:
+
+  ```json
+  {
+    "token": "<reset_token>",
+    "password": "new correct horse battery staple"
+  }
+  ```
+
+- **Response**: `200 OK` with the account profile.
+- **Errors**: `401` with `error: "invalid_challenge"` for invalid reset tokens.
+
+### 6.2h Authenticated account endpoints
+
+All `/auth/account/*` endpoints require the current `app_session` cookie and only accept stable `account:<id>` session subjects.
+
+| Method | Path | Body | Success |
+| --- | --- | --- | --- |
+| `POST` | `/auth/account/password/change` | `{ "current_password": "...", "new_password": "..." }` | `200` profile, refresh sessions revoked and reissued |
+| `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` verification challenge metadata |
+| `POST` | `/auth/account/password/link/verify` | `{ "token": "..." }` | `200` profile |
+| `POST` | `/auth/account/google/link` | `{ "google_id_token": "...", "nonce_token": "..." }` | `200` profile |
+| `POST` | `/auth/account/unlink` | `{ "provider": "password|google", "provider_id": "..." }` | `200` profile, refresh sessions revoked and reissued |
+| `POST` | `/auth/account/disable` | empty body | `204 No Content`, cookies cleared and refresh sessions revoked |
+
+Common account errors include `403 account_not_active`, `403 account_disabled`, `409 last_identity`, `409 account_exists`, and `401 invalid_challenge`.
 
 ### 6.3 `GET /auth/session`
 
@@ -546,7 +671,7 @@ Clients should treat this as “signed out” regardless of prior state.
 Serves the browser helper described in section 4.
 
 - Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
-- Exposes `initAuthClient`, `apiFetch`, `getCurrentUser`, `getAuthState`, `getAuthEndpoints`, `requestNonce`, `exchangeGoogleCredential`, `exchangePasswordCredential`, `logout`, and `setAuthTenantId` on `window`.
+- Exposes the helper globals listed in section 4, including Google/password login, password signup, verification, reset, password change, identity linking/unlinking, disable-account, logout, and tenant selection.
 - The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
 
 ## 6.8 Validating sessions from other Go services
@@ -702,6 +827,9 @@ Use this checklist when integrating:
   - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
 - **Native login returns `native_google_login_not_configured`** – Add `google_native_client_id` or `google_native_clients` to the tenant config and ensure the native app sends `X-TAuth-Tenant` when it has no browser `Origin` header.
 - **Native login returns `native_google_platform_not_configured`** – Add a matching `google_native_clients` entry for `platform: "ios"` or `platform: "android"`, or omit `platform` to accept any configured native client audience.
+- **Signup returns `password_signup_not_configured`** – Enable both `account_management.enabled` and `account_management.password_signup.enabled`.
+- **Password login returns `account_not_active`** – Complete email verification before logging in with a newly created account.
+- **Unlink returns `last_identity`** – Link another login method before removing the current account's only identity.
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
 - When multiple tenants share the same origin, list each frontend origin under `tenant_origins` so TAuth can resolve the tenant from the `Origin` header. You can override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper only sends `X-TAuth-Tenant` when you opt into an explicit override.
