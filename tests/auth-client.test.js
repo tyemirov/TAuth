@@ -32,6 +32,8 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   const resolvedTenantId = resolvedOptions.tenantId;
   const resolvedOrigin =
     resolvedOptions.locationOrigin || "https://ui.example.com";
+  const resolvedHref =
+    resolvedOptions.locationHref || `${resolvedOrigin}/current-page?view=auth`;
 
   const broadcastChannels = [];
   class BroadcastChannel {
@@ -92,7 +94,7 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
     Headers: global.Headers,
     BroadcastChannel,
   };
-  context.location = { origin: resolvedOrigin };
+  context.location = { origin: resolvedOrigin, href: resolvedHref };
   context.document = {
     currentScript: {
       getAttribute(attributeName) {
@@ -531,6 +533,7 @@ test("auth client exposes endpoint map for core routes", async () => {
     logoutUrl: "https://auth.example.com/auth/logout",
     nonceUrl: "https://auth.example.com/auth/nonce",
     googleUrl: "https://auth.example.com/auth/google",
+    appleStartUrl: "https://auth.example.com/auth/apple/start",
     passwordUrl: "https://auth.example.com/auth/password/login",
     passwordSignupUrl: "https://auth.example.com/auth/password/signup",
     passwordVerifyEmailUrl: "https://auth.example.com/auth/password/verify-email",
@@ -547,6 +550,38 @@ test("auth client exposes endpoint map for core routes", async () => {
   for (const [key, value] of Object.entries(expected)) {
     assert.equal(endpoints[key], value, `expected ${key} endpoint`);
   }
+});
+
+test("auth client builds tenant-aware Apple login URL", async () => {
+  const fetch = createFetchWithQueue([]);
+  const returnToUrl = "https://ui.example.com/library?mode=signin";
+  const context = await loadAuthClient(fetch, [], {
+    tenantId: "tenant-alpha",
+    locationHref: returnToUrl,
+  });
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    bootstrapMode: "passive",
+    onUnauthenticated() {},
+  });
+
+  const loginUrl = context.getAppleLoginUrl();
+  assert.equal(
+    loginUrl,
+    "https://auth.example.com/auth/apple/start?tenant_id=tenant-alpha&return_to=https%3A%2F%2Fui.example.com%2Flibrary%3Fmode%3Dsignin",
+  );
+
+  const navigatedUrl = context.startAppleLogin();
+  assert.equal(navigatedUrl, loginUrl);
+  assert.equal(context.location.href, loginUrl);
+  assert.equal(
+    context.__localStorageData[
+      restoreHintKey("https://auth.example.com", "tenant-alpha")
+    ],
+    "1",
+  );
+  assert.equal(fetch.calls.length, 0);
 });
 
 test("auth client requests nonce via helper", async () => {
