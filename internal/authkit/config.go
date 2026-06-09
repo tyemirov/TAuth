@@ -10,6 +10,7 @@ type ServerConfig struct {
 	GoogleWebClientID        string
 	GoogleNativeClientID     string
 	NativeGoogleClients      []NativeGoogleClientConfig
+	AppleOAuth               AppleOAuthConfig
 	PasswordAuthEnabled      bool
 	AccountManagementEnabled bool
 	PasswordSignupEnabled    bool
@@ -17,6 +18,7 @@ type ServerConfig struct {
 	AppJWTSigningKey         []byte
 	AppJWTIssuer             string
 	TenantID                 string
+	TenantOrigins            []string
 	CookieDomain             string
 	SessionCookieName        string
 	RefreshCookieName        string
@@ -35,4 +37,18 @@ type NativeGoogleClientConfig struct {
 	Platform     string
 	ClientID     string
 	RedirectURIs []string
+}
+
+// AppleOAuthConfig configures Sign in with Apple for one tenant.
+type AppleOAuthConfig struct {
+	Enabled               bool
+	ClientID              string
+	TeamID                string
+	KeyID                 string
+	PrivateKey            string
+	RedirectURI           string
+	Scopes                []string
+	AuthorizationEndpoint string
+	TokenEndpoint         string
+	JWKSURL               string
 }

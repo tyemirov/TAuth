@@ -297,6 +297,9 @@ func TestDatabaseUserStoreEnsuresSeededPasswordAccount(testContext *testing.T) {
 	if _, disableErr := store.DisableAccount(ctx, "tenant-a", expectedAccountID); disableErr != nil {
 		testContext.Fatalf("failed to disable account: %v", disableErr)
 	}
+	if _, disabledChangeErr := store.ChangePassword(ctx, "tenant-a", expectedAccountID, "correct horse battery staple", "disabled account password"); !errors.Is(disabledChangeErr, ErrAccountDisabled) {
+		testContext.Fatalf("expected disabled account password change rejection, got %v", disabledChangeErr)
+	}
 	if _, disabledErr := store.AuthenticatePassword(ctx, "tenant-a", "seeded@example.com", "correct horse battery staple"); !errors.Is(disabledErr, ErrAccountDisabled) {
 		testContext.Fatalf("expected disabled account password rejection, got %v", disabledErr)
 	}
@@ -364,6 +367,55 @@ func TestDatabaseUserStoreReconcilesPasswordCredentials(testContext *testing.T) 
 	}
 	if _, removedErr := store.AuthenticatePassword(context.Background(), "tenant-a", "kept@example.com", "correct horse battery staple"); !errors.Is(removedErr, ErrPasswordCredentialInvalid) {
 		testContext.Fatalf("expected empty config to remove kept credential, got %v", removedErr)
+	}
+}
+
+func TestDatabaseUserStoreReconcilePreservesSignupCredentials(testContext *testing.T) {
+	testContext.Parallel()
+	ctx := context.Background()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(ctx, databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+	expiresUnix := time.Now().UTC().Add(time.Hour).Unix()
+	challenge, signupErr := store.CreatePasswordSignup(ctx, "tenant-a", AccountPasswordRequest{
+		UserEmail:   "Signup@Example.com",
+		DisplayName: "Signup User",
+		Password:    "correct horse battery staple",
+	}, expiresUnix)
+	if signupErr != nil {
+		testContext.Fatalf("failed to create signup: %v", signupErr)
+	}
+	if _, verifyErr := store.VerifyEmailChallenge(ctx, "tenant-a", challenge.Token); verifyErr != nil {
+		testContext.Fatalf("failed to verify signup: %v", verifyErr)
+	}
+	passwordHash, hashErr := HashPassword("configured password value")
+	if hashErr != nil {
+		testContext.Fatalf("failed to hash configured password: %v", hashErr)
+	}
+	if seedErr := store.UpsertPasswordCredential(ctx, "tenant-a", PasswordCredentialSeed{
+		UserEmail:    "configured@example.com",
+		DisplayName:  "Configured User",
+		PasswordHash: passwordHash,
+	}); seedErr != nil {
+		testContext.Fatalf("failed to seed configured credential: %v", seedErr)
+	}
+
+	if reconcileErr := store.ReconcilePasswordCredentials(ctx, "tenant-a", []string{"configured@example.com"}); reconcileErr != nil {
+		testContext.Fatalf("failed to reconcile configured credentials: %v", reconcileErr)
+	}
+	if _, authErr := store.AuthenticatePassword(ctx, "tenant-a", "signup@example.com", "correct horse battery staple"); authErr != nil {
+		testContext.Fatalf("expected signup credential to survive reconcile: %v", authErr)
+	}
+	if reconcileErr := store.ReconcilePasswordCredentials(ctx, "tenant-a", nil); reconcileErr != nil {
+		testContext.Fatalf("failed to reconcile empty configured credentials: %v", reconcileErr)
+	}
+	if _, authErr := store.AuthenticatePassword(ctx, "tenant-a", "signup@example.com", "correct horse battery staple"); authErr != nil {
+		testContext.Fatalf("expected signup credential to survive empty reconcile: %v", authErr)
+	}
+	if _, configErr := store.AuthenticatePassword(ctx, "tenant-a", "configured@example.com", "configured password value"); !errors.Is(configErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected configured credential to be removed, got %v", configErr)
 	}
 }
 

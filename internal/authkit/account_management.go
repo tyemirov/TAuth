@@ -15,6 +15,7 @@ const (
 	accountStateDisabled               = "disabled"
 	accountProviderPassword            = "password"
 	accountProviderGoogle              = "google"
+	accountProviderApple               = "apple"
 	accountChallengeEmailVerification  = "email_verification"
 	accountChallengePasswordReset      = "password_reset"
 	accountChallengePasswordLink       = "password_link"
@@ -57,6 +58,15 @@ type AccountProfile struct {
 
 // GoogleAccountIdentity describes a verified Google identity.
 type GoogleAccountIdentity struct {
+	Subject     string
+	UserEmail   string
+	DisplayName string
+	AvatarURL   string
+}
+
+// AccountProviderIdentity describes a verified external provider identity.
+type AccountProviderIdentity struct {
+	Provider    string
 	Subject     string
 	UserEmail   string
 	DisplayName string
@@ -264,6 +274,9 @@ func (store *MemoryPasswordCredentialStore) ChangePassword(ctx context.Context, 
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
 	}
+	if account.state == accountStateDisabled {
+		return AccountProfile{}, ErrAccountDisabled
+	}
 	if account.state != accountStateActive {
 		return AccountProfile{}, ErrAccountNotActive
 	}
@@ -389,13 +402,18 @@ func (store *MemoryPasswordCredentialStore) VerifyPasswordLink(ctx context.Conte
 
 // AuthenticateGoogleAccount resolves an existing linked Google identity.
 func (store *MemoryPasswordCredentialStore) AuthenticateGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, bool, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.AuthenticateProviderAccount(ctx, tenantID, googleProviderIdentity(identity))
+}
+
+// AuthenticateProviderAccount resolves an existing linked external provider identity.
+func (store *MemoryPasswordCredentialStore) AuthenticateProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, bool, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, false, identityErr
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	linkedIdentity, exists := store.identities[tenantID][identityKey(accountProviderGoogle, normalizedIdentity.Subject)]
+	linkedIdentity, exists := store.identities[tenantID][identityKey(normalizedIdentity.Provider, normalizedIdentity.Subject)]
 	if !exists {
 		return AccountProfile{}, false, nil
 	}
@@ -414,14 +432,19 @@ func (store *MemoryPasswordCredentialStore) AuthenticateGoogleAccount(ctx contex
 
 // UpsertGoogleAccount creates or updates an account for a verified Google identity.
 func (store *MemoryPasswordCredentialStore) UpsertGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.UpsertProviderAccount(ctx, tenantID, googleProviderIdentity(identity))
+}
+
+// UpsertProviderAccount creates or updates an account for a verified external provider identity.
+func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, identityErr
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.ensureAccountMaps(tenantID)
-	identityKeyValue := identityKey(accountProviderGoogle, normalizedIdentity.Subject)
+	identityKeyValue := identityKey(normalizedIdentity.Provider, normalizedIdentity.Subject)
 	if linkedIdentity, exists := store.identities[tenantID][identityKeyValue]; exists {
 		account := store.accounts[tenantID][linkedIdentity.accountID]
 		if account == nil {
@@ -432,7 +455,7 @@ func (store *MemoryPasswordCredentialStore) UpsertGoogleAccount(ctx context.Cont
 		account.avatarURL = strings.TrimSpace(normalizedIdentity.AvatarURL)
 		return profileFromAccount(account), nil
 	}
-	accountID := accountIDForGoogle(tenantID, normalizedIdentity.Subject)
+	accountID := accountIDForProvider(tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject)
 	account := &accountRecord{
 		accountID:   accountID,
 		userEmail:   normalizedIdentity.UserEmail,
@@ -444,7 +467,7 @@ func (store *MemoryPasswordCredentialStore) UpsertGoogleAccount(ctx context.Cont
 	store.accounts[tenantID][accountID] = account
 	store.identities[tenantID][identityKeyValue] = accountIdentityRecord{
 		accountID:  accountID,
-		provider:   accountProviderGoogle,
+		provider:   normalizedIdentity.Provider,
 		providerID: normalizedIdentity.Subject,
 	}
 	return profileFromAccount(account), nil
@@ -452,7 +475,12 @@ func (store *MemoryPasswordCredentialStore) UpsertGoogleAccount(ctx context.Cont
 
 // LinkGoogleIdentity links a verified Google identity to an existing account.
 func (store *MemoryPasswordCredentialStore) LinkGoogleIdentity(ctx context.Context, tenantID string, accountID string, identity GoogleAccountIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.LinkProviderIdentity(ctx, tenantID, accountID, googleProviderIdentity(identity))
+}
+
+// LinkProviderIdentity links a verified external provider identity to an existing account.
+func (store *MemoryPasswordCredentialStore) LinkProviderIdentity(ctx context.Context, tenantID string, accountID string, identity AccountProviderIdentity) (AccountProfile, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, identityErr
 	}
@@ -463,13 +491,13 @@ func (store *MemoryPasswordCredentialStore) LinkGoogleIdentity(ctx context.Conte
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
 	}
-	key := identityKey(accountProviderGoogle, normalizedIdentity.Subject)
+	key := identityKey(normalizedIdentity.Provider, normalizedIdentity.Subject)
 	if existingIdentity, exists := store.identities[tenantID][key]; exists && existingIdentity.accountID != accountID {
 		return AccountProfile{}, ErrAccountExists
 	}
 	store.identities[tenantID][key] = accountIdentityRecord{
 		accountID:  accountID,
-		provider:   accountProviderGoogle,
+		provider:   normalizedIdentity.Provider,
 		providerID: normalizedIdentity.Subject,
 	}
 	return profileFromAccount(account), nil
@@ -592,16 +620,31 @@ func buildAccountPasswordCredential(request AccountPasswordRequest) (passwordCre
 	}, nil
 }
 
-func normalizeGoogleAccountIdentity(identity GoogleAccountIdentity) (GoogleAccountIdentity, error) {
+func googleProviderIdentity(identity GoogleAccountIdentity) AccountProviderIdentity {
+	return AccountProviderIdentity{
+		Provider:    accountProviderGoogle,
+		Subject:     identity.Subject,
+		UserEmail:   identity.UserEmail,
+		DisplayName: identity.DisplayName,
+		AvatarURL:   identity.AvatarURL,
+	}
+}
+
+func normalizeAccountProviderIdentity(identity AccountProviderIdentity) (AccountProviderIdentity, error) {
+	provider := strings.ToLower(strings.TrimSpace(identity.Provider))
+	if provider == "" {
+		return AccountProviderIdentity{}, errors.New("account.provider.missing_provider")
+	}
 	subject := strings.TrimSpace(identity.Subject)
 	if subject == "" {
-		return GoogleAccountIdentity{}, errors.New("account.google.missing_subject")
+		return AccountProviderIdentity{}, errors.New("account.provider.missing_subject")
 	}
 	normalizedEmail, emailErr := normalizePasswordEmail(identity.UserEmail)
 	if emailErr != nil {
-		return GoogleAccountIdentity{}, emailErr
+		return AccountProviderIdentity{}, emailErr
 	}
-	return GoogleAccountIdentity{
+	return AccountProviderIdentity{
+		Provider:    provider,
 		Subject:     subject,
 		UserEmail:   normalizedEmail,
 		DisplayName: defaultDisplayName(identity.DisplayName, normalizedEmail),
@@ -627,8 +670,8 @@ func accountIDForEmail(tenantID string, email string) string {
 	return accountIDPrefix + hashFragment(tenantID+"|email|"+email)
 }
 
-func accountIDForGoogle(tenantID string, subject string) string {
-	return accountIDPrefix + hashFragment(tenantID+"|google|"+subject)
+func accountIDForProvider(tenantID string, provider string, subject string) string {
+	return accountIDPrefix + hashFragment(tenantID+"|"+strings.ToLower(strings.TrimSpace(provider))+"|"+strings.TrimSpace(subject))
 }
 
 func hashFragment(value string) string {

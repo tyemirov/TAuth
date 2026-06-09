@@ -40,12 +40,13 @@ type PasswordCredentialProfile struct {
 }
 
 type passwordCredential struct {
-	accountID    string
-	userEmail    string
-	displayName  string
-	avatarURL    string
-	passwordHash string
-	verified     bool
+	accountID       string
+	userEmail       string
+	displayName     string
+	avatarURL       string
+	passwordHash    string
+	verified        bool
+	managedByConfig bool
 }
 
 type passwordHashComparer func(hashedPassword []byte, password []byte) error
@@ -107,7 +108,10 @@ func (store *MemoryPasswordCredentialStore) ReconcilePasswordCredentials(ctx con
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	tenantCredentials := store.tenants[tenantID]
-	for credentialEmail := range tenantCredentials {
+	for credentialEmail, credential := range tenantCredentials {
+		if !credential.managedByConfig {
+			continue
+		}
 		if _, exists := configuredEmailSet[credentialEmail]; !exists {
 			delete(tenantCredentials, credentialEmail)
 		}
@@ -130,6 +134,13 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	store.mu.RLock()
 	tenantCredentials := store.tenants[tenantID]
 	credential, exists := tenantCredentials[normalizedEmail]
+	accountState := ""
+	if exists && credential.accountID != "" {
+		account := store.accounts[tenantID][credential.accountID]
+		if account != nil {
+			accountState = account.state
+		}
+	}
 	store.mu.RUnlock()
 	if !exists {
 		_ = store.passwordHashComparer([]byte(passwordCredentialTimingHash), []byte(password))
@@ -141,16 +152,11 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	if !credential.verified {
 		return PasswordCredentialProfile{}, ErrAccountNotActive
 	}
-	if credential.accountID != "" {
-		account := store.accounts[tenantID][credential.accountID]
-		if account != nil {
-			if account.state == accountStateDisabled {
-				return PasswordCredentialProfile{}, ErrAccountDisabled
-			}
-			if account.state != accountStateActive {
-				return PasswordCredentialProfile{}, ErrAccountNotActive
-			}
-		}
+	if accountState == accountStateDisabled {
+		return PasswordCredentialProfile{}, ErrAccountDisabled
+	}
+	if accountState != "" && accountState != accountStateActive {
+		return PasswordCredentialProfile{}, ErrAccountNotActive
 	}
 	return PasswordCredentialProfile{
 		AccountID:   credential.accountID,
@@ -177,11 +183,12 @@ func normalizePasswordCredentialSeed(credential PasswordCredentialSeed) (passwor
 		displayName = normalizedEmail
 	}
 	return passwordCredential{
-		userEmail:    normalizedEmail,
-		displayName:  displayName,
-		avatarURL:    strings.TrimSpace(credential.AvatarURL),
-		passwordHash: passwordHash,
-		verified:     true,
+		userEmail:       normalizedEmail,
+		displayName:     displayName,
+		avatarURL:       strings.TrimSpace(credential.AvatarURL),
+		passwordHash:    passwordHash,
+		verified:        true,
+		managedByConfig: true,
 	}, nil
 }
 

@@ -19,7 +19,6 @@ const (
 	userProfileTableName        = "user_profiles"
 	passwordCredentialTableName = "password_credentials"
 	defaultUserRole             = "user"
-	googleUserIDPrefix          = "google:"
 )
 
 var errUserStoreRolesScanType = errors.New("user_store.roles.scan_type")
@@ -112,6 +111,7 @@ type passwordCredentialRecord struct {
 	UserAvatarURL   string `gorm:"column:user_avatar_url;not null"`
 	PasswordHash    string `gorm:"column:password_hash;not null"`
 	EmailVerified   bool   `gorm:"column:email_verified;not null;default:true"`
+	ManagedByConfig bool   `gorm:"column:managed_by_config;not null;default:true"`
 	CreatedAtUnix   int64  `gorm:"column:created_at_unix;not null"`
 	LastUpdatedUnix int64  `gorm:"column:last_updated_unix;not null"`
 }
@@ -183,7 +183,17 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 
 // UpsertGoogleUser inserts or updates a Google-authenticated user profile.
 func (store *DatabaseUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	applicationUserID := googleUserIDPrefix + googleSub
+	return store.UpsertProviderUser(ctx, tenantID, "google", googleSub, userEmail, userDisplayName, userAvatarURL)
+}
+
+// UpsertProviderUser inserts or updates an external-provider user profile.
+func (store *DatabaseUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
+	normalizedProviderID := strings.TrimSpace(providerID)
+	if normalizedProvider == "" || normalizedProviderID == "" {
+		return "", nil, fmt.Errorf("%s.upsert_provider.%s: invalid_provider_identity", userStoreErrorPrefix, store.driverLabel)
+	}
+	applicationUserID := normalizedProvider + ":" + normalizedProviderID
 	return store.upsertUserProfile(ctx, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL)
 }
 
@@ -257,6 +267,7 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 		UserAvatarURL:   normalizedCredential.avatarURL,
 		PasswordHash:    normalizedCredential.passwordHash,
 		EmailVerified:   normalizedCredential.verified,
+		ManagedByConfig: normalizedCredential.managedByConfig,
 		CreatedAtUnix:   now.Unix(),
 		LastUpdatedUnix: now.Unix(),
 	}
@@ -272,6 +283,7 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 			"user_avatar_url",
 			"password_hash",
 			"email_verified",
+			"managed_by_config",
 			"last_updated_unix",
 		}),
 	}).Create(&record).Error
@@ -291,7 +303,7 @@ func (store *DatabaseUserStore) ReconcilePasswordCredentials(ctx context.Context
 	for configuredEmail := range configuredEmailSet {
 		configuredEmailList = append(configuredEmailList, configuredEmail)
 	}
-	deleteQuery := store.db.WithContext(ctx).Where("tenant_id = ?", tenantID)
+	deleteQuery := store.db.WithContext(ctx).Where("tenant_id = ? AND managed_by_config = ?", tenantID, true)
 	if len(configuredEmailList) > 0 {
 		deleteQuery = deleteQuery.Where("user_email NOT IN ?", configuredEmailList)
 	}
@@ -414,6 +426,7 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 			UserAvatarURL:   credential.avatarURL,
 			PasswordHash:    credential.passwordHash,
 			EmailVerified:   false,
+			ManagedByConfig: false,
 			CreatedAtUnix:   now,
 			LastUpdatedUnix: now,
 		}
@@ -422,7 +435,7 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 		}
 		if updateErr := tx.Model(&passwordCredentialRecord{}).
 			Where("tenant_id = ? AND user_email = ?", tenantID, credential.userEmail).
-			Update("email_verified", false).Error; updateErr != nil {
+			Updates(map[string]interface{}{"email_verified": false, "managed_by_config": false}).Error; updateErr != nil {
 			return updateErr
 		}
 		challenge := databaseAccountChallengeRecord{
@@ -568,6 +581,16 @@ func (store *DatabaseUserStore) ChangePassword(ctx context.Context, tenantID str
 	if hashErr != nil {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
+	accountProfile, profileErr := store.ResolveAccountProfile(ctx, tenantID, accountID)
+	if profileErr != nil {
+		return AccountProfile{}, profileErr
+	}
+	if accountProfile.State == accountStateDisabled {
+		return AccountProfile{}, ErrAccountDisabled
+	}
+	if accountProfile.State != accountStateActive {
+		return AccountProfile{}, ErrAccountNotActive
+	}
 	var record passwordCredentialRecord
 	queryErr := store.db.WithContext(ctx).Where("tenant_id = ? AND account_id = ? AND email_verified = ?", tenantID, accountID, true).Take(&record).Error
 	if queryErr != nil {
@@ -584,7 +607,7 @@ func (store *DatabaseUserStore) ChangePassword(ctx context.Context, tenantID str
 		Updates(map[string]interface{}{"password_hash": passwordHash, "last_updated_unix": store.now().UTC().Unix()}).Error; updateErr != nil {
 		return AccountProfile{}, fmt.Errorf("%s.account_change_password.%s: %w", userStoreErrorPrefix, store.driverLabel, updateErr)
 	}
-	return store.ResolveAccountProfile(ctx, tenantID, accountID)
+	return accountProfile, nil
 }
 
 // EnsurePasswordAccount links a verified seeded password credential to an account.
@@ -748,10 +771,11 @@ func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID
 			UserAvatarURL:   challenge.UserAvatarURL,
 			PasswordHash:    challenge.PasswordHash,
 			EmailVerified:   true,
+			ManagedByConfig: false,
 			CreatedAtUnix:   now,
 			LastUpdatedUnix: now,
 		}
-		if createErr := tx.Create(&credential).Error; createErr != nil {
+		if createErr := tx.Select("*").Create(&credential).Error; createErr != nil {
 			return createErr
 		}
 		accountProfile, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID)
@@ -769,17 +793,22 @@ func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID
 
 // AuthenticateGoogleAccount resolves an existing linked Google identity.
 func (store *DatabaseUserStore) AuthenticateGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, bool, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.AuthenticateProviderAccount(ctx, tenantID, googleProviderIdentity(identity))
+}
+
+// AuthenticateProviderAccount resolves an existing linked external provider identity.
+func (store *DatabaseUserStore) AuthenticateProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, bool, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, false, identityErr
 	}
 	var identityRecord databaseAccountIdentityRecord
-	queryErr := store.db.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, accountProviderGoogle, normalizedIdentity.Subject).Take(&identityRecord).Error
+	queryErr := store.db.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject).Take(&identityRecord).Error
 	if queryErr != nil {
 		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 			return AccountProfile{}, false, nil
 		}
-		return AccountProfile{}, false, fmt.Errorf("%s.account_google_lookup.%s: %w", userStoreErrorPrefix, store.driverLabel, queryErr)
+		return AccountProfile{}, false, fmt.Errorf("%s.account_provider_lookup.%s: %w", userStoreErrorPrefix, store.driverLabel, queryErr)
 	}
 	profile, profileErr := store.ResolveAccountProfile(ctx, tenantID, identityRecord.AccountID)
 	if profileErr != nil {
@@ -796,11 +825,16 @@ func (store *DatabaseUserStore) AuthenticateGoogleAccount(ctx context.Context, t
 
 // UpsertGoogleAccount creates or updates an account for a verified Google identity.
 func (store *DatabaseUserStore) UpsertGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.UpsertProviderAccount(ctx, tenantID, googleProviderIdentity(identity))
+}
+
+// UpsertProviderAccount creates or updates an account for a verified external provider identity.
+func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, identityErr
 	}
-	accountID := accountIDForGoogle(tenantID, normalizedIdentity.Subject)
+	accountID := accountIDForProvider(tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject)
 	now := store.now().UTC().Unix()
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		account := databaseAccountRecord{
@@ -827,7 +861,7 @@ func (store *DatabaseUserStore) UpsertGoogleAccount(ctx context.Context, tenantI
 		}
 		identityRecord := databaseAccountIdentityRecord{
 			TenantID:        tenantID,
-			Provider:        accountProviderGoogle,
+			Provider:        normalizedIdentity.Provider,
 			ProviderID:      normalizedIdentity.Subject,
 			AccountID:       accountID,
 			CreatedAtUnix:   now,
@@ -839,14 +873,19 @@ func (store *DatabaseUserStore) UpsertGoogleAccount(ctx context.Context, tenantI
 		}).Create(&identityRecord).Error
 	})
 	if err != nil {
-		return AccountProfile{}, fmt.Errorf("%s.account_google_upsert.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
+		return AccountProfile{}, fmt.Errorf("%s.account_provider_upsert.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
 	return store.ResolveAccountProfile(ctx, tenantID, accountID)
 }
 
 // LinkGoogleIdentity links a verified Google identity to an existing account.
 func (store *DatabaseUserStore) LinkGoogleIdentity(ctx context.Context, tenantID string, accountID string, identity GoogleAccountIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeGoogleAccountIdentity(identity)
+	return store.LinkProviderIdentity(ctx, tenantID, accountID, googleProviderIdentity(identity))
+}
+
+// LinkProviderIdentity links a verified external provider identity to an existing account.
+func (store *DatabaseUserStore) LinkProviderIdentity(ctx context.Context, tenantID string, accountID string, identity AccountProviderIdentity) (AccountProfile, error) {
+	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
 	if identityErr != nil {
 		return AccountProfile{}, identityErr
 	}
@@ -856,7 +895,7 @@ func (store *DatabaseUserStore) LinkGoogleIdentity(ctx context.Context, tenantID
 			return profileErr
 		}
 		var existing databaseAccountIdentityRecord
-		queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, accountProviderGoogle, normalizedIdentity.Subject).Take(&existing).Error
+		queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject).Take(&existing).Error
 		if queryErr == nil && existing.AccountID != accountID {
 			return ErrAccountExists
 		}
@@ -865,7 +904,7 @@ func (store *DatabaseUserStore) LinkGoogleIdentity(ctx context.Context, tenantID
 		}
 		identityRecord := databaseAccountIdentityRecord{
 			TenantID:        tenantID,
-			Provider:        accountProviderGoogle,
+			Provider:        normalizedIdentity.Provider,
 			ProviderID:      normalizedIdentity.Subject,
 			AccountID:       accountID,
 			CreatedAtUnix:   now,
@@ -877,7 +916,7 @@ func (store *DatabaseUserStore) LinkGoogleIdentity(ctx context.Context, tenantID
 		}).Create(&identityRecord).Error
 	})
 	if err != nil {
-		return AccountProfile{}, fmt.Errorf("%s.account_link_google.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
+		return AccountProfile{}, fmt.Errorf("%s.account_link_provider.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
 	return store.ResolveAccountProfile(ctx, tenantID, accountID)
 }

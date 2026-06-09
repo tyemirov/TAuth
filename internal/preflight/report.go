@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v4"
+	reportSchemaVersion        = "tauth.preflight.v5"
 	endpointContractVersion    = "tauth.http.v1"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
@@ -48,33 +48,43 @@ type serverPayload struct {
 }
 
 type tenantPayload struct {
-	TenantID                 string                      `json:"tenant_id"`
-	DisplayName              string                      `json:"display_name"`
-	TenantOrigins            []string                    `json:"tenant_origins,omitempty"`
-	TenantOriginsRedacted    bool                        `json:"tenant_origins_redacted"`
-	TenantOriginsCount       int                         `json:"tenant_origins_count"`
-	TenantOriginHashes       []string                    `json:"tenant_origin_hashes,omitempty"`
-	GoogleWebClientID        string                      `json:"google_web_client_id"`
-	GoogleNativeClientID     string                      `json:"google_native_client_id"`
-	GoogleNativeClientIDs    []string                    `json:"google_native_client_ids,omitempty"`
-	GoogleNativeClients      []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
-	PasswordAuthEnabled      bool                        `json:"password_auth_enabled"`
-	PasswordUserCount        int                         `json:"password_user_count"`
-	AccountManagementEnabled bool                        `json:"account_management_enabled"`
-	PasswordSignupEnabled    bool                        `json:"password_signup_enabled"`
-	ReturnChallengeTokens    bool                        `json:"return_challenge_tokens"`
-	EmailVerificationTTL     string                      `json:"email_verification_ttl"`
-	PasswordResetTTL         string                      `json:"password_reset_ttl"`
-	CookieDomain             string                      `json:"cookie_domain"`
-	SessionCookieName        string                      `json:"session_cookie_name"`
-	RefreshCookieName        string                      `json:"refresh_cookie_name"`
-	SessionTTL               string                      `json:"session_ttl"`
-	RefreshTTL               string                      `json:"refresh_ttl"`
-	NonceTTL                 string                      `json:"nonce_ttl"`
-	AllowInsecureHTTP        bool                        `json:"allow_insecure_http"`
-	SameSiteMode             string                      `json:"same_site_mode"`
-	JWTIssuer                string                      `json:"jwt_issuer"`
-	JWTSigningKeyFingerprint string                      `json:"jwt_signing_key_fingerprint"`
+	TenantID                   string                      `json:"tenant_id"`
+	DisplayName                string                      `json:"display_name"`
+	TenantOrigins              []string                    `json:"tenant_origins,omitempty"`
+	TenantOriginsRedacted      bool                        `json:"tenant_origins_redacted"`
+	TenantOriginsCount         int                         `json:"tenant_origins_count"`
+	TenantOriginHashes         []string                    `json:"tenant_origin_hashes,omitempty"`
+	GoogleWebClientID          string                      `json:"google_web_client_id"`
+	GoogleNativeClientID       string                      `json:"google_native_client_id"`
+	GoogleNativeClientIDs      []string                    `json:"google_native_client_ids,omitempty"`
+	GoogleNativeClients        []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
+	AppleOAuthEnabled          bool                        `json:"apple_oauth_enabled"`
+	AppleClientID              string                      `json:"apple_client_id,omitempty"`
+	AppleTeamID                string                      `json:"apple_team_id,omitempty"`
+	AppleKeyID                 string                      `json:"apple_key_id,omitempty"`
+	ApplePrivateKeyFingerprint string                      `json:"apple_private_key_fingerprint,omitempty"`
+	AppleRedirectURI           string                      `json:"apple_redirect_uri,omitempty"`
+	AppleScopes                []string                    `json:"apple_scopes,omitempty"`
+	AppleAuthorizationEndpoint string                      `json:"apple_authorization_endpoint,omitempty"`
+	AppleTokenEndpoint         string                      `json:"apple_token_endpoint,omitempty"`
+	AppleJWKSURL               string                      `json:"apple_jwks_url,omitempty"`
+	PasswordAuthEnabled        bool                        `json:"password_auth_enabled"`
+	PasswordUserCount          int                         `json:"password_user_count"`
+	AccountManagementEnabled   bool                        `json:"account_management_enabled"`
+	PasswordSignupEnabled      bool                        `json:"password_signup_enabled"`
+	ReturnChallengeTokens      bool                        `json:"return_challenge_tokens"`
+	EmailVerificationTTL       string                      `json:"email_verification_ttl"`
+	PasswordResetTTL           string                      `json:"password_reset_ttl"`
+	CookieDomain               string                      `json:"cookie_domain"`
+	SessionCookieName          string                      `json:"session_cookie_name"`
+	RefreshCookieName          string                      `json:"refresh_cookie_name"`
+	SessionTTL                 string                      `json:"session_ttl"`
+	RefreshTTL                 string                      `json:"refresh_ttl"`
+	NonceTTL                   string                      `json:"nonce_ttl"`
+	AllowInsecureHTTP          bool                        `json:"allow_insecure_http"`
+	SameSiteMode               string                      `json:"same_site_mode"`
+	JWTIssuer                  string                      `json:"jwt_issuer"`
+	JWTSigningKeyFingerprint   string                      `json:"jwt_signing_key_fingerprint"`
 }
 
 type nativeGoogleClientPayload struct {
@@ -181,32 +191,44 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 		sort.Strings(originHashes)
 
 		payload := tenantPayload{
-			TenantID:                 tenantID,
-			DisplayName:              tenant.DisplayName(),
-			TenantOriginsRedacted:    mode == preflight.RedactionModeRedacted,
-			TenantOriginsCount:       len(origins),
-			TenantOriginHashes:       originHashes,
-			GoogleWebClientID:        tenant.GoogleWebClientID(),
-			GoogleNativeClientID:     tenant.GoogleNativeClientID(),
-			GoogleNativeClientIDs:    tenant.NativeGoogleClientIDs(),
-			GoogleNativeClients:      buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
-			PasswordAuthEnabled:      tenant.PasswordAuthEnabled(),
-			PasswordUserCount:        len(tenant.PasswordUsers()),
-			AccountManagementEnabled: tenant.AccountManagement().Enabled(),
-			PasswordSignupEnabled:    tenant.AccountManagement().PasswordSignupEnabled(),
-			ReturnChallengeTokens:    tenant.AccountManagement().ReturnChallengeTokens(),
-			EmailVerificationTTL:     tenant.AccountManagement().EmailVerificationTTL().String(),
-			PasswordResetTTL:         tenant.AccountManagement().PasswordResetTTL().String(),
-			CookieDomain:             tenant.CookieDomain(),
-			SessionCookieName:        tenant.SessionCookieName(),
-			RefreshCookieName:        tenant.RefreshCookieName(),
-			SessionTTL:               tenant.SessionTTL().String(),
-			RefreshTTL:               tenant.RefreshTTL().String(),
-			NonceTTL:                 tenant.NonceTTL().String(),
-			AllowInsecureHTTP:        tenant.AllowInsecureHTTP(),
-			SameSiteMode:             formatSameSiteMode(serverConfig.SameSiteMode),
-			JWTIssuer:                serverConfig.AppJWTIssuer,
-			JWTSigningKeyFingerprint: preflight.HashSHA256Hex(tenant.SigningKey()),
+			TenantID:                   tenantID,
+			DisplayName:                tenant.DisplayName(),
+			TenantOriginsRedacted:      mode == preflight.RedactionModeRedacted,
+			TenantOriginsCount:         len(origins),
+			TenantOriginHashes:         originHashes,
+			GoogleWebClientID:          tenant.GoogleWebClientID(),
+			GoogleNativeClientID:       tenant.GoogleNativeClientID(),
+			GoogleNativeClientIDs:      tenant.NativeGoogleClientIDs(),
+			GoogleNativeClients:        buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
+			AppleOAuthEnabled:          tenant.AppleOAuth().Enabled(),
+			AppleClientID:              tenant.AppleOAuth().ClientID(),
+			AppleTeamID:                tenant.AppleOAuth().TeamID(),
+			AppleKeyID:                 tenant.AppleOAuth().KeyID(),
+			AppleRedirectURI:           tenant.AppleOAuth().RedirectURI(),
+			AppleScopes:                tenant.AppleOAuth().Scopes(),
+			AppleAuthorizationEndpoint: tenant.AppleOAuth().AuthorizationEndpoint(),
+			AppleTokenEndpoint:         tenant.AppleOAuth().TokenEndpoint(),
+			AppleJWKSURL:               tenant.AppleOAuth().JWKSURL(),
+			PasswordAuthEnabled:        tenant.PasswordAuthEnabled(),
+			PasswordUserCount:          len(tenant.PasswordUsers()),
+			AccountManagementEnabled:   tenant.AccountManagement().Enabled(),
+			PasswordSignupEnabled:      tenant.AccountManagement().PasswordSignupEnabled(),
+			ReturnChallengeTokens:      tenant.AccountManagement().ReturnChallengeTokens(),
+			EmailVerificationTTL:       tenant.AccountManagement().EmailVerificationTTL().String(),
+			PasswordResetTTL:           tenant.AccountManagement().PasswordResetTTL().String(),
+			CookieDomain:               tenant.CookieDomain(),
+			SessionCookieName:          tenant.SessionCookieName(),
+			RefreshCookieName:          tenant.RefreshCookieName(),
+			SessionTTL:                 tenant.SessionTTL().String(),
+			RefreshTTL:                 tenant.RefreshTTL().String(),
+			NonceTTL:                   tenant.NonceTTL().String(),
+			AllowInsecureHTTP:          tenant.AllowInsecureHTTP(),
+			SameSiteMode:               formatSameSiteMode(serverConfig.SameSiteMode),
+			JWTIssuer:                  serverConfig.AppJWTIssuer,
+			JWTSigningKeyFingerprint:   preflight.HashSHA256Hex(tenant.SigningKey()),
+		}
+		if tenant.AppleOAuth().Enabled() {
+			payload.ApplePrivateKeyFingerprint = preflight.HashSHA256Hex([]byte(tenant.AppleOAuth().PrivateKey()))
 		}
 
 		if mode == preflight.RedactionModeFull {

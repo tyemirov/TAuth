@@ -1,6 +1,12 @@
 package tenants
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -252,6 +258,94 @@ func TestLoadConfigParsesAccountManagement(testingHandle *testing.T) {
 	}
 	if settings.EmailVerificationTTL() != 45*time.Minute || settings.PasswordResetTTL() != 20*time.Minute {
 		testingHandle.Fatalf("unexpected account management ttls")
+	}
+}
+
+func TestLoadConfigParsesAppleOAuth(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AppleOAuth = FileAppleOAuth{
+		Enabled:               true,
+		ClientID:              "com.example.web",
+		TeamID:                "TEAMID1234",
+		KeyID:                 "KEYID12345",
+		PrivateKey:            generateTestApplePrivateKeyPEM(testingHandle),
+		RedirectURI:           "https://tauth.example.com/auth/apple/callback",
+		Scopes:                []string{"openid", "email"},
+		AuthorizationEndpoint: "https://appleid.example.test/auth/authorize",
+		TokenEndpoint:         "https://appleid.example.test/auth/token",
+		JWKSURL:               "https://appleid.example.test/auth/keys",
+	}
+	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	appleConfig := loadedTenant.AppleOAuth()
+	if !appleConfig.Enabled() {
+		testingHandle.Fatalf("expected Apple OAuth to be enabled")
+	}
+	if appleConfig.ClientID() != "com.example.web" || appleConfig.TeamID() != "TEAMID1234" || appleConfig.KeyID() != "KEYID12345" {
+		testingHandle.Fatalf("unexpected Apple identifiers: %#v", appleConfig)
+	}
+	if appleConfig.RedirectURI() != "https://tauth.example.com/auth/apple/callback" {
+		testingHandle.Fatalf("unexpected redirect URI: %s", appleConfig.RedirectURI())
+	}
+	if !sameStringSlices(appleConfig.Scopes(), []string{"openid", "email"}) {
+		testingHandle.Fatalf("unexpected scopes: %#v", appleConfig.Scopes())
+	}
+	if appleConfig.AuthorizationEndpoint() != "https://appleid.example.test/auth/authorize" {
+		testingHandle.Fatalf("unexpected authorization endpoint: %s", appleConfig.AuthorizationEndpoint())
+	}
+}
+
+func TestLoadConfigParsesAppleOAuthPrivateKeyBase64AndAllowsAppleOnlyTenant(testingHandle *testing.T) {
+	privateKey := generateTestApplePrivateKeyPEM(testingHandle)
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.GoogleWebClientID = ""
+	tenant.AppleOAuth = FileAppleOAuth{
+		Enabled:          true,
+		ClientID:         "com.example.web",
+		TeamID:           "TEAMID1234",
+		KeyID:            "KEYID12345",
+		PrivateKeyBase64: base64.StdEncoding.EncodeToString([]byte(privateKey)),
+		RedirectURI:      "https://tauth.example.com/auth/apple/callback",
+	}
+	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	if loadedTenant.GoogleWebClientID() != "" {
+		testingHandle.Fatalf("expected empty Google web client id, got %s", loadedTenant.GoogleWebClientID())
+	}
+	appleConfig := loadedTenant.AppleOAuth()
+	if !appleConfig.Enabled() || appleConfig.PrivateKey() != strings.TrimSpace(privateKey) {
+		testingHandle.Fatalf("unexpected Apple OAuth config")
+	}
+}
+
+func TestLoadConfigRejectsInvalidApplePrivateKey(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AppleOAuth = FileAppleOAuth{
+		Enabled:     true,
+		ClientID:    "com.example.web",
+		TeamID:      "TEAMID1234",
+		KeyID:       "KEYID12345",
+		PrivateKey:  "not-a-pem-key",
+		RedirectURI: "https://tauth.example.com/auth/apple/callback",
+	}
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr == nil {
+		testingHandle.Fatalf("expected invalid Apple private key error")
+	}
+	if !containsStableCode(loadErr, errorCodeInvalidApplePrivateKey) {
+		testingHandle.Fatalf("expected error code %s, got %v", errorCodeInvalidApplePrivateKey, loadErr)
 	}
 }
 
@@ -692,7 +786,7 @@ func TestBuildTenantErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "missing google client",
+			name: "missing auth provider",
 			tenant: FileTenant{
 				ID:                "demo",
 				DisplayName:       "Demo",
@@ -706,7 +800,7 @@ func TestBuildTenantErrors(t *testing.T) {
 				NonceTTL:          "5m",
 				AllowInsecureHTTP: true,
 			},
-			wantErr: errorCodeInvalidGoogleID,
+			wantErr: errorCodeMissingAuthProvider,
 		},
 		{
 			name: "invalid session ttl",
@@ -1146,6 +1240,19 @@ func buildTestTenant(tenantID string, tenantOrigins []string, cookieDomain strin
 		SessionTTL:        testSessionTTL,
 		RefreshTTL:        testRefreshTTL,
 	}
+}
+
+func generateTestApplePrivateKeyPEM(testingHandle *testing.T) string {
+	testingHandle.Helper()
+	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		testingHandle.Fatalf("generate test Apple private key: %v", keyErr)
+	}
+	encodedKey, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal test Apple private key: %v", marshalErr)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedKey}))
 }
 
 func sameStringSlices(a, b []string) bool {

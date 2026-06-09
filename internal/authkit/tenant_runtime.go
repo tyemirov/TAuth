@@ -60,6 +60,12 @@ func (registry TenantRegistry) Config(tenantID string) ServerConfig {
 	return registry.configs[registry.defaultTenantID]
 }
 
+// ConfigByID resolves a tenant configuration without falling back.
+func (registry TenantRegistry) ConfigByID(tenantID string) (ServerConfig, bool) {
+	config, exists := registry.configs[strings.TrimSpace(tenantID)]
+	return config, exists
+}
+
 func resolveTenantID(context *gin.Context, registry TenantRegistry) string {
 	if context != nil {
 		if tenant, ok := tenants.TenantFromContext(context); ok {

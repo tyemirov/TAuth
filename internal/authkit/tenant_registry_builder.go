@@ -45,9 +45,11 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 	for _, tenant := range tenantList {
 		tenantServerConfig := base
 		tenantServerConfig.TenantID = string(tenant.ID())
+		tenantServerConfig.TenantOrigins = tenant.Origins()
 		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
 		tenantServerConfig.GoogleNativeClientID = tenant.GoogleNativeClientID()
 		tenantServerConfig.NativeGoogleClients = buildNativeGoogleClientConfigs(tenant.NativeGoogleClients())
+		tenantServerConfig.AppleOAuth = buildAppleOAuthConfig(tenant.AppleOAuth())
 		tenantServerConfig.PasswordAuthEnabled = tenant.PasswordAuthEnabled()
 		accountManagement := tenant.AccountManagement()
 		tenantServerConfig.AccountManagementEnabled = accountManagement.Enabled()
@@ -69,6 +71,21 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 	}
 	defaultTenantID := string(tenantList[0].ID())
 	return NewTenantRegistryFromMap(defaultTenantID, configs), nil
+}
+
+func buildAppleOAuthConfig(settings tenants.AppleOAuth) AppleOAuthConfig {
+	return AppleOAuthConfig{
+		Enabled:               settings.Enabled(),
+		ClientID:              settings.ClientID(),
+		TeamID:                settings.TeamID(),
+		KeyID:                 settings.KeyID(),
+		PrivateKey:            settings.PrivateKey(),
+		RedirectURI:           settings.RedirectURI(),
+		Scopes:                settings.Scopes(),
+		AuthorizationEndpoint: settings.AuthorizationEndpoint(),
+		TokenEndpoint:         settings.TokenEndpoint(),
+		JWKSURL:               settings.JWKSURL(),
+	}
 }
 
 func buildNativeGoogleClientConfigs(clients []tenants.NativeGoogleClient) []NativeGoogleClientConfig {

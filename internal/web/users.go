@@ -45,7 +45,17 @@ func NewInMemoryUsers() *InMemoryUsers {
 
 // UpsertGoogleUser inserts or updates a user based on Google sub.
 func (store *InMemoryUsers) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	applicationUserID := "google:" + googleSub
+	return store.UpsertProviderUser(ctx, tenantID, "google", googleSub, userEmail, userDisplayName, userAvatarURL)
+}
+
+// UpsertProviderUser inserts or updates a user based on an external provider subject.
+func (store *InMemoryUsers) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
+	normalizedProviderID := strings.TrimSpace(providerID)
+	if normalizedProvider == "" || normalizedProviderID == "" {
+		return "", nil, fmt.Errorf("web.user.invalid_provider_identity")
+	}
+	applicationUserID := normalizedProvider + ":" + normalizedProviderID
 	return store.upsertUserProfile(tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL)
 }
 

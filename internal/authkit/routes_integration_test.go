@@ -76,7 +76,11 @@ func singleTenantRegistry(config ServerConfig) TenantRegistry {
 }
 
 func (store *testUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	applicationUserID := "google:" + googleSub
+	return store.UpsertProviderUser(ctx, tenantID, "google", googleSub, userEmail, userDisplayName, userAvatarURL)
+}
+
+func (store *testUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	applicationUserID := strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.TrimSpace(providerID)
 	profile := testUserProfile{
 		email:   userEmail,
 		display: userDisplayName,
@@ -144,6 +148,10 @@ type failingUserStore struct {
 }
 
 func (store *failingUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	return "", nil, store.upsertErr
+}
+
+func (store *failingUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	return "", nil, store.upsertErr
 }
 
@@ -392,6 +400,33 @@ func TestAuthLifecycle(t *testing.T) {
 	router.ServeHTTP(postLogoutResponse, postLogoutRequest)
 	if postLogoutResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after logout, got %d", postLogoutResponse.Code)
+	}
+}
+
+func TestGoogleLoginReturnsNotConfiguredWhenTenantHasNoGoogleWebClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.GoogleWebClientID = ""
+	registry := singleTenantRegistry(config)
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"token","nonce_token":"nonce"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginResponse := httptest.NewRecorder()
+	router.ServeHTTP(loginResponse, loginRequest)
+
+	if loginResponse.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 from Google login, got %d", loginResponse.Code)
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(loginResponse.Body).Decode(&payload); decodeErr != nil {
+		t.Fatalf("decode response: %v", decodeErr)
+	}
+	if payload["error"] != errorGoogleLoginNotConfigured {
+		t.Fatalf("expected %s, got %s", errorGoogleLoginNotConfigured, payload["error"])
 	}
 }
 
@@ -672,6 +707,22 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 	router.ServeHTTP(disableResponse, disableRequest)
 	if disableResponse.Code != http.StatusNoContent {
 		testingHandle.Fatalf("expected disable 204, got %d: %s", disableResponse.Code, disableResponse.Body.String())
+	}
+
+	staleChangeResponse := httptest.NewRecorder()
+	staleChangeRequest := httptest.NewRequest(http.MethodPost, "/auth/account/password/change", bytes.NewBuffer([]byte(`{"current_password":"new correct horse battery staple","new_password":"disabled account password"}`)))
+	staleChangeRequest.Header.Set("Content-Type", "application/json")
+	addCookies(staleChangeRequest, changedCookies, config.SessionCookieName)
+	router.ServeHTTP(staleChangeResponse, staleChangeRequest)
+	if staleChangeResponse.Code != http.StatusForbidden {
+		testingHandle.Fatalf("expected stale disabled-account password change 403, got %d: %s", staleChangeResponse.Code, staleChangeResponse.Body.String())
+	}
+	var staleChangePayload map[string]string
+	if decodeErr := json.NewDecoder(staleChangeResponse.Body).Decode(&staleChangePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode stale change payload: %v", decodeErr)
+	}
+	if staleChangePayload["error"] != errorAccountDisabled {
+		testingHandle.Fatalf("expected disabled account error, got %#v", staleChangePayload)
 	}
 
 	disabledLoginResponse := httptest.NewRecorder()
