@@ -34,6 +34,16 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
+| POST   | `/auth/password/signup` | Start a first-party password signup when account management and signup are enabled | `202` JSON challenge metadata |
+| POST   | `/auth/password/verify-email` | Verify a signup challenge, activate the account, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/password/reset/start` | Start a password reset with a timing-masked accepted response | `202` JSON challenge metadata |
+| POST   | `/auth/password/reset/complete` | Complete reset, rotate password, revoke account refresh sessions, issue cookies | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/password/change` | Authenticated password rotation for stable account sessions | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/password/link/start` | Start linking a password identity to the current account | `202` JSON challenge metadata |
+| POST   | `/auth/account/password/link/verify` | Complete password identity linking | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/google/link` | Link a verified Google identity to the current account | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/unlink` | Remove a linked identity unless it is the last login method | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/disable` | Disable the current account, revoke refresh sessions, clear cookies | `204 No Content` |
 | GET    | `/auth/session` | Return current/restored session profile for browser bootstrap | `200` JSON or `204 No Content` when anonymous |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
@@ -77,17 +87,17 @@ Installed apps such as PromptDew use the same session issuance path without embe
 TAuth still does not receive Google authorization codes or store Google refresh tokens.
 TAuth also does not return mobile bearer tokens in the response body. Mobile apps persist the issued `HttpOnly` cookies in the platform cookie jar; downstream API hosts under the same configured `cookie_domain` validate `app_session` with `pkg/sessionvalidator`.
 
-### 3.5 Email/password login
+### 3.5 Email/password accounts
 
-Password login is an additional tenant-enabled identity provider. Operators opt in with `password_auth.enabled: true` and seed bcrypt-hashed users in `config.yaml`.
+Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a stable tenant-scoped `account:<id>` as the session subject and stores provider identities separately.
 
-1. The browser posts `{ "email": "...", "password": "..." }` to `POST /auth/password/login`.
-2. `MountAuthRoutesWithPassword` enforces tenant resolution, HTTPS unless `AllowInsecureHTTP` is enabled, and any tenant `allowed_users` allowlist.
-3. `PasswordCredentialStore.AuthenticatePassword` normalizes the email, verifies the bcrypt hash, and returns the trusted profile for that credential.
-4. `UserStore.UpsertPasswordUser` ensures the standard profile store has the `email:<normalized-email>` user record.
-5. TAuth mints the same `app_session` and `app_refresh` cookies and returns the same profile payload used by Google flows.
-
-This first slice is login-only. It does not provide public signup, email verification, password reset, or account linking between `google:<sub>` and `email:<address>` users.
+1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>` for compatibility. With account management, verified credentials return their linked `account:<id>`.
+2. Public signup is gated by `account_management.password_signup.enabled`. `POST /auth/password/signup` creates a pending account, stores only the bcrypt password hash, and creates a single-use email verification challenge whose raw token is never stored.
+3. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard access and refresh cookies.
+4. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified password accounts receive a reset challenge; unknown accounts receive a synthetic accepted response.
+5. `POST /auth/password/reset/complete` consumes the reset challenge, rotates the bcrypt hash, revokes all account refresh sessions, and issues fresh cookies.
+6. Authenticated `/auth/account/*` endpoints require an `account:<id>` session. They support password change, password link verification, Google identity linking, unlinking with last-identity rejection, and account disablement.
+7. Google login also participates in account management when enabled: a linked `google:<sub>` resolves to the account, and a first Google login creates an active account with a Google identity.
 
 ### 3.6 Browser helper handshake
 
@@ -179,6 +189,7 @@ Nonce handling rules:
 - Preserves `bootstrapMode: "eager"` for legacy probe-first integrations and `bootstrapMode: "passive"` for public surfaces that should never restore on load.
 - Keeps `apiFetch` refresh-on-401 behavior for protected application requests, then retries the original request once on refresh success.
 - Exposes `exchangePasswordCredential({ email, password })` for tenants that enable the password provider; the helper posts to `/auth/password/login`, applies the authenticated profile, and leaves the raw password out of client state.
+- Exposes account-management helpers for `signupPasswordCredential`, `verifyPasswordEmail`, `startPasswordReset`, `completePasswordReset`, `changePassword`, `startPasswordLink`, `verifyPasswordLink`, `linkGoogleCredential`, `unlinkAccountIdentity`, and `disableAccount`. These helpers use cookie credentials, tenant override headers, and local variables only; they do not persist raw passwords or challenge tokens in client state.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`, `onAuthError`) plus `getCurrentUser()` and `getAuthState()`.
 - Accepts an optional `tenantId` when calling `initAuthClient`; when present the helper attaches `X-TAuth-Tenant` to `/auth/session`, `/me`, `/auth/*`, and logout requests so multiple tenants can share an origin in development. When you omit `tenantId`, the helper relies on the browser `Origin` header for tenant resolution and does not send overrides.
 
@@ -188,6 +199,7 @@ Nonce handling rules:
 type UserStore interface {
     UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+    UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
 
@@ -195,16 +207,36 @@ type RefreshTokenStore interface {
     Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (tokenID string, tokenOpaque string, err error)
     Validate(ctx context.Context, tenantID string, tokenOpaque string) (applicationUserID string, tokenID string, expiresUnix int64, err error)
     Revoke(ctx context.Context, tenantID string, tokenID string) error
+    RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error
 }
 
 type PasswordCredentialStore interface {
     UpsertPasswordCredential(ctx context.Context, tenantID string, credential PasswordCredentialSeed) error
     AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error)
 }
+
+type AccountManagementStore interface {
+    CreatePasswordSignup(ctx context.Context, tenantID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error)
+    VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error)
+    StartPasswordReset(ctx context.Context, tenantID string, userEmail string, expiresUnix int64) (AccountChallenge, error)
+    CompletePasswordReset(ctx context.Context, tenantID string, token string, password string) (AccountProfile, error)
+    ChangePassword(ctx context.Context, tenantID string, accountID string, currentPassword string, newPassword string) (AccountProfile, error)
+    EnsurePasswordAccount(ctx context.Context, tenantID string, userEmail string) (AccountProfile, error)
+    CreatePasswordLink(ctx context.Context, tenantID string, accountID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error)
+    VerifyPasswordLink(ctx context.Context, tenantID string, accountID string, token string) (AccountProfile, error)
+    AuthenticateGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, bool, error)
+    UpsertGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, error)
+    LinkGoogleIdentity(ctx context.Context, tenantID string, accountID string, identity GoogleAccountIdentity) (AccountProfile, error)
+    UnlinkIdentity(ctx context.Context, tenantID string, accountID string, provider string, providerID string) (AccountProfile, error)
+    DisableAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+    ReactivateAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+    ResolveAccountProfile(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+}
 ```
 
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - `PasswordCredentialStore` stores bcrypt hashes separately from refresh tokens while returning profiles that flow into the same session finalizer.
+- `AccountManagementStore` owns stable account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
 
@@ -262,6 +294,13 @@ tenants:
           display_name: "Operator"
           avatar_url: "https://demo.example.com/operator.png"
           password_hash: "$2a$10$..."
+    account_management:
+      enabled: true
+      password_signup:
+        enabled: true
+      return_challenge_tokens: false
+      email_verification_ttl: "30m"
+      password_reset_ttl: "15m"
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
     session_cookie_name: "app_session_demo"
@@ -279,7 +318,7 @@ Validation rules baked into the loader:
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates stable account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 
@@ -296,7 +335,7 @@ Tenant resolution & runtime:
 
 ## 6. Persistence Model
 
-The persistent store manages refresh tokens, user profiles, and optional password credentials (automigrated via GORM). Refresh tokens live in the `refresh_tokens` table:
+The persistent store manages refresh tokens, user profiles, optional password credentials, account records, identity links, and account challenges (automigrated via GORM). Refresh tokens live in the `refresh_tokens` table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -322,14 +361,60 @@ CREATE TABLE IF NOT EXISTS password_credentials (
     tenant_id TEXT NOT NULL,
     user_email TEXT NOT NULL,
     user_id TEXT NOT NULL,
+    account_id TEXT,
     user_display_name TEXT NOT NULL,
     user_avatar_url TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    email_verified BOOLEAN NOT NULL DEFAULT TRUE,
     created_at_unix BIGINT NOT NULL,
     last_updated_unix BIGINT NOT NULL,
     PRIMARY KEY (tenant_id, user_email)
 );
 ```
+
+When account management is enabled, account state and identity links live in separate tables:
+
+```sql
+CREATE TABLE IF NOT EXISTS accounts (
+    tenant_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    user_display_name TEXT NOT NULL,
+    user_avatar_url TEXT NOT NULL,
+    account_state TEXT NOT NULL,
+    user_roles TEXT NOT NULL,
+    created_at_unix BIGINT NOT NULL,
+    last_updated_unix BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_identities (
+    tenant_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    created_at_unix BIGINT NOT NULL,
+    last_updated_unix BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, provider, provider_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_challenges (
+    tenant_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    challenge_kind TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    user_display_name TEXT NOT NULL,
+    user_avatar_url TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    expires_unix BIGINT NOT NULL,
+    consumed_at_unix BIGINT NOT NULL DEFAULT 0,
+    created_at_unix BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, token_hash)
+);
+```
+
+Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, expire by `expires_unix`, and are consumed once by setting `consumed_at_unix`.
 
 `DatabaseRefreshTokenStore` and `DatabaseUserStore` parse the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silence default logging, auto-migrate their schemas, and tag errors with context (`refresh_store.*` / `user_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
@@ -338,9 +423,9 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 - Always run behind HTTPS in production; set a tenant’s `allow_insecure_http` to `true` only for local development.
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.
 - Validate Google tokens strictly: issuer, audience, expiry, issued-at.
-- Rate limit `/auth/google`, `/auth/password/login`, and `/auth/refresh` and monitor failures via zap logs.
+- Rate limit `/auth/google`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/reset/start`, and `/auth/refresh` and monitor failures via zap logs.
 - Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
-- Store only bcrypt password hashes; generate them outside the runtime config and rotate credentials by updating the configured hash.
+- Store only bcrypt password hashes and hashed one-time challenge tokens. Raw passwords and raw challenge tokens should exist only at HTTP/delivery edges.
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
 - Serve browser code through `/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
@@ -389,13 +474,16 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 - **Google token rejection** – Confirm OAuth client type (Web) and that `aud` matches configured client ID.
 - **Password login returns `password_auth_not_configured`** – Enable `password_auth.enabled` for the resolved tenant.
 - **Password login returns `invalid_credentials`** – The email/password pair did not match a seeded bcrypt credential; the same response is used for unknown users and wrong passwords.
+- **Signup returns `password_signup_not_configured`** – Enable both `account_management.enabled` and `account_management.password_signup.enabled`.
+- **Password login returns `account_not_active`** – Complete email verification before password login on a newly created account.
+- **Unlink returns `last_identity`** – Link another login method before removing the current account's only identity.
 
 ## 12. Versioning Contract
 
 The following surface area is considered stable across releases:
 
-- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/session`, `/auth/refresh`, `/auth/logout`, `/me`.
+- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/verify-email`, `/auth/password/reset/start`, `/auth/password/reset/complete`, `/auth/account/password/change`, `/auth/account/password/link/start`, `/auth/account/password/link/verify`, `/auth/account/google/link`, `/auth/account/unlink`, `/auth/account/disable`, `/auth/session`, `/auth/refresh`, `/auth/logout`, `/me`.
 - Cookie names: `app_session`, `app_refresh`.
-- JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `roles`, `expires`).
+- JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`, and `state` for account-management profile responses).
 
 Update the embedded client and bump the service version together when changing these contracts.
