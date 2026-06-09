@@ -1,8 +1,8 @@
 # TAuth
 
-*Google Sign-In, email/password login, and JWT sessions for single-origin apps*
+*Google Sign-In, email/password account management, and JWT sessions for single-origin apps*
 
-TAuth lets product teams accept Google Sign-In or tenant-managed email/password credentials, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
+TAuth lets product teams accept Google Sign-In or tenant-managed email/password accounts, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
 TAuth is authentication-only: it validates Google ID tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs (YouTube/Drive/etc) and does not manage Google API access/refresh tokens.
@@ -50,6 +50,13 @@ tenants:
         - email: "operator@example.com"
           display_name: "Operator"
           password_hash: "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
+    account_management:
+      enabled: true
+      password_signup:
+        enabled: true
+      return_challenge_tokens: false
+      email_verification_ttl: "30m"
+      password_reset_ttl: "15m"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
     cookie_domain: ".mprlab.com"
     session_cookie_name: "app_session_prod"
@@ -72,7 +79,8 @@ Each entry defines:
 - `google_web_client_id` – OAuth Web client configured in Google Cloud Console for this tenant’s origins.
 - `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
 - `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
-- `password_auth` – optional email/password provider. Set `enabled: true` and seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values. The first supported slice is login-only; signup, verification, reset-password, and account linking are intentionally outside this flow.
+- `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
+- `account_management` – optional first-party account lifecycle. Set `enabled: true` to use stable `account:<id>` session subjects for password and Google identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
@@ -175,7 +183,7 @@ The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes t
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
 
-For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. The response, `HttpOnly` cookies, refresh behavior, and `/me` profile shape are identical to Google login.
+For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. When `account_management.enabled` is also true, verified password and Google identities resolve to stable `account:<id>` subjects. The helper also exposes signup, email verification, reset, password change, identity linking/unlinking, and disable-account methods for the full account lifecycle.
 
 ### Configure Google Identity Services (popup flow)
 
@@ -259,6 +267,12 @@ tenants:
           display_name: "Example User"
           avatar_url: "https://example.com/avatar.png"
           password_hash: "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
+    account_management:
+      enabled: true
+      password_signup:
+        enabled: true
+      email_verification_ttl: "30m"
+      password_reset_ttl: "15m"
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
     session_cookie_name: "app_session_demo"
@@ -279,6 +293,7 @@ Rules enforced by the loader:
 - Unlisted users are rejected during `/auth/google`, `/auth/google/native`, and `/auth/password/login` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
 - `google_web_client_id` and each TTL must be present and non-empty. `google_native_client_id` and `google_native_clients` are optional and enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
+- `account_management.enabled` enables stable account IDs, password signup/verification/reset flows, authenticated password changes, Google/password linking, unlinking, and account disablement. `password_signup.enabled` requires account management to be enabled. Challenge tokens are hashed at rest and single-use; production deployments should keep `return_challenge_tokens` false and deliver tokens through an email adapter or trusted delivery path.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
