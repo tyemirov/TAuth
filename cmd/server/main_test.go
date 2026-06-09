@@ -617,9 +617,14 @@ func TestOriginGateMiddlewareRequiresOriginForSharedOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
+	resolver, resolverErr := tenants.NewResolver(config)
+	if resolverErr != nil {
+		t.Fatalf("failed to build resolver: %v", resolverErr)
+	}
 
 	router := gin.New()
 	router.Use(originGateMiddleware(config, false))
+	router.Use(tenantMiddleware(resolver, http.StatusNotFound))
 	router.GET("/ping", func(context *gin.Context) {
 		context.Status(http.StatusNoContent)
 	})
@@ -648,6 +653,69 @@ func TestOriginGateMiddlewareRequiresOriginForSharedOrigins(t *testing.T) {
 	router.ServeHTTP(unknownOriginRecorder, unknownOrigin)
 	if unknownOriginRecorder.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for unknown origin, got %d", unknownOriginRecorder.Code)
+	}
+}
+
+func TestOriginGateMiddlewareAllowsAppleProviderRedirectsWithoutOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	document := tenants.FileDocument{
+		Tenants: []tenants.FileTenant{
+			{
+				ID:                "notes",
+				DisplayName:       "Notes",
+				TenantOrigins:     []string{"https://notes.localhost"},
+				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
+				JWTSigningKey:     "notes-key",
+				CookieDomain:      "",
+				SessionCookieName: "app_session_notes",
+				RefreshCookieName: "app_refresh_notes",
+				SessionTTL:        "15m",
+				RefreshTTL:        "720h",
+				NonceTTL:          "5m",
+			},
+		},
+	}
+	config, err := tenants.LoadConfigFromDocument(document)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	resolver, resolverErr := tenants.NewResolver(config)
+	if resolverErr != nil {
+		t.Fatalf("failed to build resolver: %v", resolverErr)
+	}
+
+	router := gin.New()
+	router.Use(originGateMiddleware(config, false))
+	router.Use(tenantMiddleware(resolver, http.StatusNotFound))
+	router.GET("/auth/apple/start", func(context *gin.Context) {
+		context.Status(http.StatusNoContent)
+	})
+	router.POST("/auth/apple/callback", func(context *gin.Context) {
+		context.Status(http.StatusNoContent)
+	})
+	router.GET("/auth/nonce", func(context *gin.Context) {
+		context.Status(http.StatusNoContent)
+	})
+
+	startRequest := httptest.NewRequest(http.MethodGet, "/auth/apple/start?tenant_id=notes", nil)
+	startRecorder := httptest.NewRecorder()
+	router.ServeHTTP(startRecorder, startRequest)
+	if startRecorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for originless Apple start, got %d", startRecorder.Code)
+	}
+
+	callbackRequest := httptest.NewRequest(http.MethodPost, "/auth/apple/callback", nil)
+	callbackRecorder := httptest.NewRecorder()
+	router.ServeHTTP(callbackRecorder, callbackRequest)
+	if callbackRecorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for originless Apple callback, got %d", callbackRecorder.Code)
+	}
+
+	nonceRequest := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
+	nonceRecorder := httptest.NewRecorder()
+	router.ServeHTTP(nonceRecorder, nonceRequest)
+	if nonceRecorder.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for ordinary originless auth request, got %d", nonceRecorder.Code)
 	}
 }
 
