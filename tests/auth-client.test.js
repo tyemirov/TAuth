@@ -531,6 +531,17 @@ test("auth client exposes endpoint map for core routes", async () => {
     logoutUrl: "https://auth.example.com/auth/logout",
     nonceUrl: "https://auth.example.com/auth/nonce",
     googleUrl: "https://auth.example.com/auth/google",
+    passwordUrl: "https://auth.example.com/auth/password/login",
+    passwordSignupUrl: "https://auth.example.com/auth/password/signup",
+    passwordVerifyEmailUrl: "https://auth.example.com/auth/password/verify-email",
+    passwordResetStartUrl: "https://auth.example.com/auth/password/reset/start",
+    passwordResetCompleteUrl: "https://auth.example.com/auth/password/reset/complete",
+    passwordChangeUrl: "https://auth.example.com/auth/account/password/change",
+    passwordLinkStartUrl: "https://auth.example.com/auth/account/password/link/start",
+    passwordLinkVerifyUrl: "https://auth.example.com/auth/account/password/link/verify",
+    googleLinkUrl: "https://auth.example.com/auth/account/google/link",
+    accountUnlinkUrl: "https://auth.example.com/auth/account/unlink",
+    accountDisableUrl: "https://auth.example.com/auth/account/disable",
   };
 
   for (const [key, value] of Object.entries(expected)) {
@@ -716,6 +727,256 @@ test("auth client exchanges password credentials and updates profile", async () 
     email: "user@example.com",
     password: "correct horse battery staple",
   });
+});
+
+test("auth client account management helpers post expected requests", async () => {
+  const verifiedProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "New User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const resetProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "Reset User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const changedProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "Changed User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const linkedProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "Linked User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const googleLinkedProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "Google Linked User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const unlinkedProfile = {
+    user_id: "account:verified",
+    user_email: "new@example.com",
+    display: "Unlinked User",
+    avatar_url: "https://example.com/avatar.png",
+    roles: ["user"],
+    state: "active",
+  };
+  const fetch = createFetchWithQueue([
+    {
+      status: 202,
+      body: {
+        status: "accepted",
+        account_id: "account:verified",
+        verification_token: "verify-token",
+        expires_unix: 123,
+      },
+    },
+    { status: 200, body: verifiedProfile },
+    {
+      status: 202,
+      body: {
+        status: "accepted",
+        account_id: "account:verified",
+        reset_token: "reset-token",
+        expires_unix: 456,
+      },
+    },
+    { status: 200, body: resetProfile },
+    { status: 200, body: changedProfile },
+    {
+      status: 202,
+      body: {
+        status: "accepted",
+        account_id: "account:verified",
+        verification_token: "link-token",
+        expires_unix: 789,
+      },
+    },
+    { status: 200, body: linkedProfile },
+    { status: 200, body: googleLinkedProfile },
+    { status: 200, body: unlinkedProfile },
+  ]);
+  const context = await loadAuthClient(fetch, [], {
+    tenantId: "tenant-alpha",
+  });
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+  });
+
+  const signupPayload = await context.signupPasswordCredential({
+    email: "New@Example.com",
+    password: "correct horse battery staple",
+    displayName: "New User",
+    avatarUrl: "https://example.com/avatar.png",
+  });
+  const verifyProfile = await context.verifyPasswordEmail({
+    token: "verify-token",
+  });
+  const resetPayload = await context.startPasswordReset({
+    email: "new@example.com",
+  });
+  const completedResetProfile = await context.completePasswordReset({
+    token: "reset-token",
+    password: "new correct horse battery staple",
+  });
+  const changedPasswordProfile = await context.changePassword({
+    currentPassword: "new correct horse battery staple",
+    newPassword: "newer correct horse battery staple",
+  });
+  const linkPayload = await context.startPasswordLink({
+    email: "second@example.com",
+    password: "second correct horse battery staple",
+    displayName: "Second Email",
+  });
+  const verifiedLinkProfile = await context.verifyPasswordLink({
+    token: "link-token",
+  });
+  const googleProfile = await context.linkGoogleCredential({
+    credential: "google-token",
+    nonceToken: "nonce-token",
+  });
+  const unlinked = await context.unlinkAccountIdentity({
+    provider: "password",
+    providerId: "second@example.com",
+  });
+
+  assert.equal(signupPayload.verification_token, "verify-token");
+  assert.deepEqual(verifyProfile, verifiedProfile);
+  assert.equal(resetPayload.reset_token, "reset-token");
+  assert.deepEqual(completedResetProfile, resetProfile);
+  assert.deepEqual(changedPasswordProfile, changedProfile);
+  assert.equal(linkPayload.verification_token, "link-token");
+  assert.deepEqual(verifiedLinkProfile, linkedProfile);
+  assert.deepEqual(googleProfile, googleLinkedProfile);
+  assert.deepEqual(unlinked, unlinkedProfile);
+  assert.deepEqual(context.getCurrentUser(), unlinkedProfile);
+
+  const expectedCalls = [
+    [
+      "https://auth.example.com/auth/password/signup",
+      {
+        email: "New@Example.com",
+        password: "correct horse battery staple",
+        display_name: "New User",
+        avatar_url: "https://example.com/avatar.png",
+      },
+    ],
+    [
+      "https://auth.example.com/auth/password/verify-email",
+      { token: "verify-token" },
+    ],
+    [
+      "https://auth.example.com/auth/password/reset/start",
+      { email: "new@example.com" },
+    ],
+    [
+      "https://auth.example.com/auth/password/reset/complete",
+      {
+        token: "reset-token",
+        password: "new correct horse battery staple",
+      },
+    ],
+    [
+      "https://auth.example.com/auth/account/password/change",
+      {
+        current_password: "new correct horse battery staple",
+        new_password: "newer correct horse battery staple",
+      },
+    ],
+    [
+      "https://auth.example.com/auth/account/password/link/start",
+      {
+        email: "second@example.com",
+        password: "second correct horse battery staple",
+        display_name: "Second Email",
+        avatar_url: "",
+      },
+    ],
+    [
+      "https://auth.example.com/auth/account/password/link/verify",
+      { token: "link-token" },
+    ],
+    [
+      "https://auth.example.com/auth/account/google/link",
+      {
+        google_id_token: "google-token",
+        nonce_token: "nonce-token",
+      },
+    ],
+    [
+      "https://auth.example.com/auth/account/unlink",
+      {
+        provider: "password",
+        provider_id: "second@example.com",
+      },
+    ],
+  ];
+
+  assert.equal(fetch.calls.length, expectedCalls.length);
+  expectedCalls.forEach(([url, body], callIndex) => {
+    const call = fetch.calls[callIndex];
+    assert.equal(call.url, url);
+    assert.equal(call.method, "POST");
+    assertHeader(call, "Content-Type", "application/json");
+    assertHeader(call, "X-Requested-With", "XMLHttpRequest");
+    assertHeader(call, "X-TAuth-Tenant", "tenant-alpha");
+    assert.deepEqual(JSON.parse(call.body), body);
+  });
+});
+
+test("auth client disable account helper clears profile and broadcasts logout", async () => {
+  const profile = {
+    user_id: "account:disable",
+    user_email: "disable@example.com",
+    display: "Disable User",
+    roles: ["user"],
+    state: "active",
+  };
+  const fetch = createFetchWithQueue([
+    { status: 200, body: profile },
+    { status: 204, body: {} },
+  ]);
+  const events = [];
+  const context = await loadAuthClient(fetch, events, {
+    tenantId: "tenant-alpha",
+  });
+
+  await context.initAuthClient({
+    baseUrl: "https://auth.example.com",
+    bootstrapMode: "eager",
+    onAuthenticated() {},
+  });
+  events.length = 0;
+
+  await context.disableAccount();
+
+  assert.equal(context.getCurrentUser(), null);
+  assert.equal(context.getAuthState(), "anonymous");
+  assert.deepEqual(events, ["logged_out"]);
+  assert.equal(fetch.calls.length, 2);
+  const disableCall = fetch.calls[1];
+  assert.equal(disableCall.url, "https://auth.example.com/auth/account/disable");
+  assert.equal(disableCall.method, "POST");
+  assertHeader(disableCall, "X-Requested-With", "XMLHttpRequest");
+  assertHeader(disableCall, "X-TAuth-Tenant", "tenant-alpha");
 });
 
 test("auth client exchange helper surfaces server error codes", async () => {
