@@ -15,6 +15,7 @@
    * @property {string} sessionEndpoint
    * @property {string} nonceEndpoint
    * @property {string} googleEndpoint
+   * @property {string} appleStartEndpoint
    * @property {string} passwordEndpoint
    * @property {string} passwordSignupEndpoint
    * @property {string} passwordVerifyEmailEndpoint
@@ -42,6 +43,7 @@
    * @property {string=} sessionEndpoint
    * @property {string=} nonceEndpoint
    * @property {string=} googleEndpoint
+   * @property {string=} appleStartEndpoint
    * @property {string=} passwordEndpoint
    * @property {string=} passwordSignupEndpoint
    * @property {string=} passwordVerifyEmailEndpoint
@@ -69,6 +71,7 @@
    * @property {string} sessionUrl
    * @property {string} nonceUrl
    * @property {string} googleUrl
+   * @property {string} appleStartUrl
    * @property {string} passwordUrl
    * @property {string} passwordSignupUrl
    * @property {string} passwordVerifyEmailUrl
@@ -150,6 +153,7 @@
     sessionEndpoint: "/auth/session",
     nonceEndpoint: "/auth/nonce",
     googleEndpoint: "/auth/google",
+    appleStartEndpoint: "/auth/apple/start",
     passwordEndpoint: "/auth/password/login",
     passwordSignupEndpoint: "/auth/password/signup",
     passwordVerifyEmailEndpoint: "/auth/password/verify-email",
@@ -562,6 +566,7 @@
       sessionUrl: joinUrl(options.baseUrl, options.sessionEndpoint),
       nonceUrl: joinUrl(options.baseUrl, options.nonceEndpoint),
       googleUrl: joinUrl(options.baseUrl, options.googleEndpoint),
+      appleStartUrl: joinUrl(options.baseUrl, options.appleStartEndpoint),
       passwordUrl: joinUrl(options.baseUrl, options.passwordEndpoint),
       passwordSignupUrl: joinUrl(options.baseUrl, options.passwordSignupEndpoint),
       passwordVerifyEmailUrl: joinUrl(
@@ -710,6 +715,60 @@
     }
     applyAuthenticatedProfile(payload);
     return payload;
+  }
+
+  /**
+   * @returns {string}
+   */
+  function currentReturnToUrl() {
+    if (typeof window === "undefined" || !window.location) {
+      return "";
+    }
+    if (typeof window.location.href === "string" && window.location.href) {
+      return window.location.href;
+    }
+    if (
+      typeof window.location.origin === "string" &&
+      window.location.origin
+    ) {
+      return window.location.origin;
+    }
+    return "";
+  }
+
+  /**
+   * @returns {string}
+   */
+  function getAppleLoginUrl() {
+    var endpoints = getAuthEndpoints();
+    var loginUrl = new URL(endpoints.appleStartUrl);
+    var tenantValue = currentTenantId();
+    if (tenantValue) {
+      loginUrl.searchParams.set("tenant_id", tenantValue);
+    }
+    var returnToUrl = currentReturnToUrl();
+    if (returnToUrl) {
+      loginUrl.searchParams.set("return_to", returnToUrl);
+    }
+    return loginUrl.toString();
+  }
+
+  /**
+   * @returns {string}
+   */
+  function startAppleLogin() {
+    var loginUrl = getAppleLoginUrl();
+    rememberRestoreHint();
+    if (
+      typeof window !== "undefined" &&
+      window.location &&
+      typeof window.location.assign === "function"
+    ) {
+      window.location.assign(loginUrl);
+    } else if (typeof window !== "undefined" && window.location) {
+      window.location.href = loginUrl;
+    }
+    return loginUrl;
   }
 
   /**
@@ -1366,6 +1425,8 @@
     window["getAuthEndpoints"] = getAuthEndpoints;
     window["requestNonce"] = requestNonce;
     window["exchangeGoogleCredential"] = exchangeGoogleCredential;
+    window["getAppleLoginUrl"] = getAppleLoginUrl;
+    window["startAppleLogin"] = startAppleLogin;
     window["exchangePasswordCredential"] = exchangePasswordCredential;
     window["signupPasswordCredential"] = signupPasswordCredential;
     window["verifyPasswordEmail"] = verifyPasswordEmail;
