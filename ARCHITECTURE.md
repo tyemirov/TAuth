@@ -2,10 +2,11 @@
 
 ## 1. System Overview
 
-TAuth is a single-origin authentication service that sits between identity providers and your product UI. It verifies Google ID tokens or tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
+TAuth is a single-origin authentication service that sits between identity providers and your product UI. It verifies Google ID tokens, completes Sign in with Apple redirects, or checks tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
 
 ```
 Browser ──(Google ID token)──────────────> TAuth ──(verify)──> Google Identity Services
+Browser ──(Apple auth code)──────────────> TAuth ──(exchange/verify)──> Apple ID
 Browser ──(email/password credential)────> TAuth ──(bcrypt)──> PasswordCredentialStore
 Browser <─(HttpOnly cookies)───────────── TAuth ──(refresh token persistence)──> Database
 ```
@@ -33,6 +34,8 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, ... }` |
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
+| GET    | `/auth/apple/start` | Start a Sign in with Apple redirect for the resolved tenant | `302` to Apple authorization endpoint |
+| GET/POST | `/auth/apple/callback` | Complete Apple code exchange, validate Apple ID token, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/password/signup` | Start a first-party password signup when account management and signup are enabled | `202` JSON challenge metadata |
 | POST   | `/auth/password/verify-email` | Verify a signup challenge, activate the account, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
@@ -87,7 +90,22 @@ Installed apps such as PromptDew use the same session issuance path without embe
 TAuth still does not receive Google authorization codes or store Google refresh tokens.
 TAuth also does not return mobile bearer tokens in the response body. Mobile apps persist the issued `HttpOnly` cookies in the platform cookie jar; downstream API hosts under the same configured `cookie_domain` validate `app_session` with `pkg/sessionvalidator`.
 
-### 3.5 Email/password accounts
+### 3.5 Sign in with Apple exchange
+
+Apple login is tenant-enabled with `apple_oauth.enabled: true`. It uses a provider redirect because Apple returns authorization codes to the service, not browser-visible ID tokens to the product UI.
+
+1. The browser navigates to `GET /auth/apple/start`. TAuth resolves the tenant from `Origin`, a permitted tenant override, or the optional `tenant_id` query parameter used by `tauth.js` for shared-origin setups.
+2. TAuth issues a one-time nonce, signs a short-lived state JWT with the tenant signing key, and redirects to Apple’s authorization endpoint with `response_type=code`, `response_mode=form_post`, `scope=openid email name`, `state`, and `nonce`.
+3. Apple posts or redirects back to `/auth/apple/callback` with `code` and `state`. The server-level origin and tenant middlewares bypass this exact provider callback path; the route validates signed state before doing any tenant-scoped work.
+4. TAuth signs an ES256 Apple client-secret JWT using the configured Team ID, Key ID, Services ID, and PKCS8 ECDSA private key, then exchanges the authorization code at Apple’s token endpoint.
+5. The returned Apple ID token is validated against Apple JWKS, issuer `https://appleid.apple.com`, tenant `client_id` audience, expiration, verified email, and the nonce stored at `/auth/apple/start`.
+6. `allowed_users` applies to the Apple email the same way it applies to Google and password login.
+7. Without account management, the session subject is `apple:<sub>` and the application user profile is upserted through `UserStore.UpsertProviderUser`. With account management, `apple:<sub>` resolves through the generic provider-identity store and first login creates an active account.
+8. Session JWT and refresh cookie issuance then uses the same finalizer as other login methods.
+
+TAuth does not expose Apple access tokens to JavaScript and does not store Apple API refresh tokens.
+
+### 3.6 Email/password accounts
 
 Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a stable tenant-scoped `account:<id>` as the session subject and stores provider identities separately.
 
@@ -96,10 +114,10 @@ Password authentication is tenant-enabled with `password_auth.enabled: true`. Ac
 3. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard access and refresh cookies.
 4. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified password accounts receive a reset challenge; unknown accounts receive a synthetic accepted response.
 5. `POST /auth/password/reset/complete` consumes the reset challenge, rotates the bcrypt hash, revokes all account refresh sessions, and issues fresh cookies.
-6. Authenticated `/auth/account/*` endpoints require an `account:<id>` session. They support password change, password link verification, Google identity linking, unlinking with last-identity rejection, and account disablement.
-7. Google login also participates in account management when enabled: a linked `google:<sub>` resolves to the account, and a first Google login creates an active account with a Google identity.
+6. Authenticated `/auth/account/*` endpoints require an `account:<id>` session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
+7. Google and Apple login also participate in account management when enabled: linked `google:<sub>` and `apple:<sub>` identities resolve to the account, and a first provider login creates an active account with that provider identity.
 
-### 3.6 Browser helper handshake
+### 3.7 Browser helper handshake
 
 `web/tauth.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
 
@@ -152,6 +170,8 @@ Nonce handling rules:
 - Fetch a fresh nonce for every sign-in attempt. Nonces are invalidated once consumed and cannot be reused.
 - The default helper (`tauth.js`) already implements these invariants; custom UIs should mirror the same flow when wiring auth state.
 
+For Apple, custom UIs do not fetch or manage a nonce themselves. Use `getAppleLoginUrl()` to render a tenant-aware link or call `startAppleLogin()` from a click handler. TAuth creates and validates the nonce/state pair around the Apple redirect.
+
 ## 4. Components
 
 ### 4.1 `cmd/server`
@@ -166,7 +186,7 @@ Nonce handling rules:
 ### 4.2 `internal/authkit`
 
 - `ServerConfig`: cookie + session settings.
-- `MountAuthRoutesWithPassword`: installs `/auth/*` handlers and binds user, refresh, nonce, and optional password credential stores. `MountAuthRoutes` remains the Google-only compatibility wrapper for tests and embedding code that do not configure password auth.
+- `MountAuthRoutesWithPassword`: installs `/auth/*` handlers and binds user, refresh, nonce, and optional password credential stores. `MountAuthRoutes` remains the compatibility wrapper for tests and embedding code that do not configure password auth.
 - JWT helpers: signing, validation, claims modeling.
 - Refresh token stores:
   - Memory implementation for tests/dev.
@@ -176,7 +196,7 @@ Nonce handling rules:
 
 ### 4.3 `internal/web`
 
-- `NewInMemoryUsers`: placeholder application user store (maps Google `sub` to a profile).
+- `NewInMemoryUsers`: placeholder application user store (maps provider subjects or password emails to profiles).
 - `PermissiveCORS`: development-only CORS middleware.
 - `ServeEmbeddedStaticJS`: serves `tauth.js` from the embedded FS.
 - `HandleWhoAmI`: returns profile data for `/api/me`.
@@ -188,6 +208,7 @@ Nonce handling rules:
 - Restores hinted sessions by calling `/auth/session`, which returns profile JSON for valid or refresh-restored cookies and `204 No Content` for anonymous or expired browsers without emitting expected 401s.
 - Preserves `bootstrapMode: "eager"` for legacy probe-first integrations and `bootstrapMode: "passive"` for public surfaces that should never restore on load.
 - Keeps `apiFetch` refresh-on-401 behavior for protected application requests, then retries the original request once on refresh success.
+- Exposes `getAppleLoginUrl()` and `startAppleLogin()` for tenants that enable Sign in with Apple. These helpers navigate to `/auth/apple/start` and append the configured tenant id when shared-origin setups need explicit tenant selection.
 - Exposes `exchangePasswordCredential({ email, password })` for tenants that enable the password provider; the helper posts to `/auth/password/login`, applies the authenticated profile, and leaves the raw password out of client state.
 - Exposes account-management helpers for `signupPasswordCredential`, `verifyPasswordEmail`, `startPasswordReset`, `completePasswordReset`, `changePassword`, `startPasswordLink`, `verifyPasswordLink`, `linkGoogleCredential`, `unlinkAccountIdentity`, and `disableAccount`. These helpers use cookie credentials, tenant override headers, and local variables only; they do not persist raw passwords or challenge tokens in client state.
 - Provides hooks for UI callbacks (`onAuthenticated`, `onUnauthenticated`, `onAuthError`) plus `getCurrentUser()` and `getAuthState()`.
@@ -198,6 +219,7 @@ Nonce handling rules:
 ```go
 type UserStore interface {
     UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
+    UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
     GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
@@ -212,6 +234,7 @@ type RefreshTokenStore interface {
 
 type PasswordCredentialStore interface {
     UpsertPasswordCredential(ctx context.Context, tenantID string, credential PasswordCredentialSeed) error
+    ReconcilePasswordCredentials(ctx context.Context, tenantID string, configuredEmails []string) error
     AuthenticatePassword(ctx context.Context, tenantID string, userEmail string, password string) (PasswordCredentialProfile, error)
 }
 
@@ -224,9 +247,9 @@ type AccountManagementStore interface {
     EnsurePasswordAccount(ctx context.Context, tenantID string, userEmail string) (AccountProfile, error)
     CreatePasswordLink(ctx context.Context, tenantID string, accountID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error)
     VerifyPasswordLink(ctx context.Context, tenantID string, accountID string, token string) (AccountProfile, error)
-    AuthenticateGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, bool, error)
-    UpsertGoogleAccount(ctx context.Context, tenantID string, identity GoogleAccountIdentity) (AccountProfile, error)
-    LinkGoogleIdentity(ctx context.Context, tenantID string, accountID string, identity GoogleAccountIdentity) (AccountProfile, error)
+    AuthenticateProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, bool, error)
+    UpsertProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, error)
+    LinkProviderIdentity(ctx context.Context, tenantID string, accountID string, identity AccountProviderIdentity) (AccountProfile, error)
     UnlinkIdentity(ctx context.Context, tenantID string, accountID string, provider string, providerID string) (AccountProfile, error)
     DisableAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
     ReactivateAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
@@ -236,7 +259,7 @@ type AccountManagementStore interface {
 
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - `PasswordCredentialStore` stores bcrypt hashes separately from refresh tokens while returning profiles that flow into the same session finalizer.
-- `AccountManagementStore` owns stable account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model.
+- `AccountManagementStore` owns stable account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model. Provider identities use explicit `provider` plus `provider_id` pairs such as `google:<sub>` and `apple:<sub>`.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
 
@@ -258,13 +281,13 @@ type AccountManagementStore interface {
 | `cors_allowed_origins` | List of allowed origins when CORS is enabled (include GIS) | `["https://app.example.com","https://accounts.google.com"]` |
 | `cors_allowed_origin_exceptions` | Non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/testing) | `true`                                     |
-| `tenants`              | Array of tenant entries (id, tenant_origins, web/native client IDs, TTLs) | See README §5 |
+| `tenants`              | Array of tenant entries (id, tenant_origins, web/native/Apple clients, TTLs) | See README §5 |
 
 Configuration is loaded from a single YAML file (`config.yaml` by default, override via `tauth --config=/path/to/file` or `TAUTH_CONFIG_FILE`).
 
 ### 5.1 Multi-tenant configuration file
 
-Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, Google Web client, and cookie/scheduling knobs:
+Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, identity-provider clients, and cookie/scheduling knobs:
 
 ```yaml
 tenants:
@@ -287,6 +310,13 @@ tenants:
         client_id: "demo-android.apps.googleusercontent.com"
         redirect_uris:
           - "com.demo.app:/oauth2redirect/google"
+    apple_oauth:
+      enabled: true
+      client_id: "com.demo.web"
+      team_id: "APPLETEAMID"
+      key_id: "APPLEKEYID"
+      private_key: "${APPLE_PRIVATE_KEY_PEM}"
+      redirect_uri: "https://auth.demo.example.com/auth/apple/callback"
     password_auth:
       enabled: true
       users:
@@ -318,7 +348,9 @@ Validation rules baked into the loader:
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants. `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates stable account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants.
+- `apple_oauth.enabled` gates `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and HTTPS `redirect_uri`. Optional endpoint overrides are validated as absolute HTTP(S) URLs for local provider mocks and must use HTTPS unless `allow_insecure_http` is true.
+- `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates stable account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 
@@ -329,6 +361,7 @@ Tenant resolution & runtime:
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
 - Multi-tenant mode is always enabled via the `tenants` array inside `config.yaml`. Launch TAuth with `tauth --config=/path/to/config.yaml` (or set `TAUTH_CONFIG_FILE`). Use `enable_tenant_header_override: true` in local/testing environments when you need to override tenants via headers instead of origins.
 - Native clients without a browser `Origin` header must send `X-TAuth-Tenant`; mobile clients additionally use `platform` to select iOS or Android audiences. If `platform` is omitted, `/auth/google/native` accepts any configured native Google audience for the tenant.
+- Apple start requests can include `tenant_id` when the initiating page configured a tenant explicitly. Apple callbacks do not rely on `Origin`; the signed state token identifies the tenant after the provider redirect.
 - Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/auth/session`, `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
 - All per-tenant server configs live inside `authkit.TenantRegistry`, which backs `MountAuthRoutes` and `RequireSession` so cookies, TTLs, and SameSite/AllowInsecure decisions reflect the resolved tenant.
 - Refresh token stores, nonce pools, and in-memory user stores are keyed by tenant ID, and JWT sessions embed a `tenant_id` claim that `RequireSession` verifies against the resolved tenant to prevent cross-tenant cookie replay. Front-end clients normally rely on origins, but when multiple tenants share the same origin (local dev boxes, automation rigs) you can enable the header override and pass `tenantId` to `initAuthClient`. The helper adds `X-TAuth-Tenant` to `/auth/session`, `/me`, `/auth/*`, and logout requests without touching product APIs so you can switch tenants without DNS changes.
@@ -422,9 +455,9 @@ Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, ex
 
 - Always run behind HTTPS in production; set a tenant’s `allow_insecure_http` to `true` only for local development.
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.
-- Validate Google tokens strictly: issuer, audience, expiry, issued-at.
-- Rate limit `/auth/google`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/reset/start`, and `/auth/refresh` and monitor failures via zap logs.
-- Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and treat missing or mismatched nonces as unauthorized.
+- Validate provider tokens strictly: issuer, audience, expiry, signature, and nonce where applicable.
+- Rate limit `/auth/google`, `/auth/apple/start`, `/auth/apple/callback`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/reset/start`, and `/auth/refresh` and monitor failures via zap logs.
+- Require nonce tokens from `/auth/nonce` for every Google Sign-In exchange and signed state-backed nonces for every Apple redirect exchange; treat missing or mismatched nonces as unauthorized.
 - Store only bcrypt password hashes and hashed one-time challenge tokens. Raw passwords and raw challenge tokens should exist only at HTTP/delivery edges.
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
