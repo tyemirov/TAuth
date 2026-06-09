@@ -60,6 +60,11 @@ type tenantPayload struct {
 	GoogleNativeClients      []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
 	PasswordAuthEnabled      bool                        `json:"password_auth_enabled"`
 	PasswordUserCount        int                         `json:"password_user_count"`
+	AccountManagementEnabled bool                        `json:"account_management_enabled"`
+	PasswordSignupEnabled    bool                        `json:"password_signup_enabled"`
+	ReturnChallengeTokens    bool                        `json:"return_challenge_tokens"`
+	EmailVerificationTTL     string                      `json:"email_verification_ttl"`
+	PasswordResetTTL         string                      `json:"password_reset_ttl"`
 	CookieDomain             string                      `json:"cookie_domain"`
 	SessionCookieName        string                      `json:"session_cookie_name"`
 	RefreshCookieName        string                      `json:"refresh_cookie_name"`
@@ -187,6 +192,11 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			GoogleNativeClients:      buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
 			PasswordAuthEnabled:      tenant.PasswordAuthEnabled(),
 			PasswordUserCount:        len(tenant.PasswordUsers()),
+			AccountManagementEnabled: tenant.AccountManagement().Enabled(),
+			PasswordSignupEnabled:    tenant.AccountManagement().PasswordSignupEnabled(),
+			ReturnChallengeTokens:    tenant.AccountManagement().ReturnChallengeTokens(),
+			EmailVerificationTTL:     tenant.AccountManagement().EmailVerificationTTL().String(),
+			PasswordResetTTL:         tenant.AccountManagement().PasswordResetTTL().String(),
 			CookieDomain:             tenant.CookieDomain(),
 			SessionCookieName:        tenant.SessionCookieName(),
 			RefreshCookieName:        tenant.RefreshCookieName(),

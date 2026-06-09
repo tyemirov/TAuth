@@ -227,6 +227,48 @@ func TestLoadConfigRejectsInvalidPasswordAuthHash(testingHandle *testing.T) {
 	}
 }
 
+func TestLoadConfigParsesAccountManagement(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AccountManagement = FileAccountManagement{
+		Enabled: true,
+		PasswordSignup: FilePasswordSignup{
+			Enabled: true,
+		},
+		ReturnChallengeTokens: true,
+		EmailVerificationTTL:  "45m",
+		PasswordResetTTL:      "20m",
+	}
+	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	settings := loadedTenant.AccountManagement()
+	if !settings.Enabled() || !settings.PasswordSignupEnabled() || !settings.ReturnChallengeTokens() {
+		testingHandle.Fatalf("unexpected account management booleans: %#v", settings)
+	}
+	if settings.EmailVerificationTTL() != 45*time.Minute || settings.PasswordResetTTL() != 20*time.Minute {
+		testingHandle.Fatalf("unexpected account management ttls")
+	}
+}
+
+func TestLoadConfigRejectsPasswordSignupWithoutAccountManagement(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AccountManagement = FileAccountManagement{
+		PasswordSignup: FilePasswordSignup{Enabled: true},
+	}
+	_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr == nil {
+		testingHandle.Fatalf("expected account management disabled error")
+	}
+	if !containsStableCode(loadErr, errorCodeAccountManagementDisabled) {
+		testingHandle.Fatalf("expected error code %s, got %v", errorCodeAccountManagementDisabled, loadErr)
+	}
+}
+
 func TestLoadConfigRejectsInvalidAllowedUser(testingHandle *testing.T) {
 	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
 	tenant.AllowedUsers = []string{"not-an-email"}

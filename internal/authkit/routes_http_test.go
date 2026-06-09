@@ -169,6 +169,13 @@ func (store *mutableUserStore) UpsertPasswordUser(ctx context.Context, tenantID 
 	return store.inner.UpsertPasswordUser(ctx, tenantID, userEmail, userDisplayName, userAvatarURL)
 }
 
+func (store *mutableUserStore) UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	if store.upsertErr != nil {
+		return "", nil, store.upsertErr
+	}
+	return store.inner.UpsertAccountUser(ctx, tenantID, accountID, userEmail, userDisplayName, userAvatarURL)
+}
+
 func (store *mutableUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
 	if store.profileErr != nil {
 		return "", "", "", nil, store.profileErr
@@ -218,6 +225,10 @@ func (store revokeFailureRefreshStore) Revoke(ctx context.Context, tenantID stri
 		return store.revokeErr
 	}
 	return store.delegate.Revoke(ctx, tenantID, tokenID)
+}
+
+func (store revokeFailureRefreshStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	return store.delegate.RevokeUser(ctx, tenantID, applicationUserID)
 }
 
 func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
@@ -1405,6 +1416,10 @@ func (store validateFailureRefreshStore) Validate(ctx context.Context, tenantID 
 
 func (store validateFailureRefreshStore) Revoke(ctx context.Context, tenantID string, tokenID string) error {
 	return store.delegate.Revoke(ctx, tenantID, tokenID)
+}
+
+func (store validateFailureRefreshStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	return store.delegate.RevokeUser(ctx, tenantID, applicationUserID)
 }
 
 func TestHTTPAuthRefreshValidateInternalErrorReturns500(t *testing.T) {

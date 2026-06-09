@@ -92,6 +92,11 @@ type testTenantPayload struct {
 	GoogleNativeClients      []testNativeGoogleClientPayload `json:"google_native_clients"`
 	PasswordAuthEnabled      bool                            `json:"password_auth_enabled"`
 	PasswordUserCount        int                             `json:"password_user_count"`
+	AccountManagementEnabled bool                            `json:"account_management_enabled"`
+	PasswordSignupEnabled    bool                            `json:"password_signup_enabled"`
+	ReturnChallengeTokens    bool                            `json:"return_challenge_tokens"`
+	EmailVerificationTTL     string                          `json:"email_verification_ttl"`
+	PasswordResetTTL         string                          `json:"password_reset_ttl"`
 	CookieDomain             string                          `json:"cookie_domain"`
 	SessionCookieName        string                          `json:"session_cookie_name"`
 	RefreshCookieName        string                          `json:"refresh_cookie_name"`
@@ -167,6 +172,12 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	}
 	if tenant.PasswordAuthEnabled || tenant.PasswordUserCount != 0 {
 		testingHandle.Fatalf("unexpected password auth report fields")
+	}
+	if tenant.AccountManagementEnabled || tenant.PasswordSignupEnabled || tenant.ReturnChallengeTokens {
+		testingHandle.Fatalf("unexpected account management report fields")
+	}
+	if tenant.EmailVerificationTTL == "" || tenant.PasswordResetTTL == "" {
+		testingHandle.Fatalf("expected account management TTL fields")
 	}
 }
 

@@ -123,6 +123,185 @@ func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
 	}
 }
 
+func TestDatabaseUserStoreAccountManagementLifecycle(testContext *testing.T) {
+	testContext.Parallel()
+	ctx := context.Background()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(ctx, databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+
+	expiresUnix := time.Now().UTC().Add(time.Hour).Unix()
+	challenge, signupErr := store.CreatePasswordSignup(ctx, "tenant-a", AccountPasswordRequest{
+		UserEmail:   "Account@Example.com",
+		DisplayName: "Account User",
+		AvatarURL:   "https://example.com/account.png",
+		Password:    "correct horse battery staple",
+	}, expiresUnix)
+	if signupErr != nil {
+		testContext.Fatalf("failed to start signup: %v", signupErr)
+	}
+	expectedAccountID := accountIDForEmail("tenant-a", "account@example.com")
+	if challenge.AccountID != expectedAccountID || challenge.Token == "" || challenge.ExpiresUnix != expiresUnix {
+		testContext.Fatalf("unexpected signup challenge: %#v", challenge)
+	}
+
+	if _, authErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "correct horse battery staple"); !errors.Is(authErr, ErrAccountNotActive) {
+		testContext.Fatalf("expected unverified account to reject login, got %v", authErr)
+	}
+
+	profile, verifyErr := store.VerifyEmailChallenge(ctx, "tenant-a", challenge.Token)
+	if verifyErr != nil {
+		testContext.Fatalf("failed to verify email: %v", verifyErr)
+	}
+	if profile.AccountID != expectedAccountID || profile.UserEmail != "account@example.com" || profile.State != accountStateActive {
+		testContext.Fatalf("unexpected verified profile: %#v", profile)
+	}
+	if _, reuseErr := store.VerifyEmailChallenge(ctx, "tenant-a", challenge.Token); !errors.Is(reuseErr, ErrAccountChallengeInvalid) {
+		testContext.Fatalf("expected consumed challenge to be rejected, got %v", reuseErr)
+	}
+
+	passwordProfile, passwordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "correct horse battery staple")
+	if passwordErr != nil {
+		testContext.Fatalf("expected verified password login: %v", passwordErr)
+	}
+	if passwordProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected password account id: %#v", passwordProfile)
+	}
+
+	resetChallenge, resetStartErr := store.StartPasswordReset(ctx, "tenant-a", "account@example.com", expiresUnix)
+	if resetStartErr != nil {
+		testContext.Fatalf("failed to start reset: %v", resetStartErr)
+	}
+	resetProfile, resetCompleteErr := store.CompletePasswordReset(ctx, "tenant-a", resetChallenge.Token, "new correct horse battery staple")
+	if resetCompleteErr != nil {
+		testContext.Fatalf("failed to complete reset: %v", resetCompleteErr)
+	}
+	if resetProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected reset profile: %#v", resetProfile)
+	}
+	if _, oldPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "correct horse battery staple"); !errors.Is(oldPasswordErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected old password to be rejected, got %v", oldPasswordErr)
+	}
+
+	changeProfile, changeErr := store.ChangePassword(ctx, "tenant-a", expectedAccountID, "new correct horse battery staple", "changed correct horse battery staple")
+	if changeErr != nil {
+		testContext.Fatalf("failed to change password: %v", changeErr)
+	}
+	if changeProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected change profile: %#v", changeProfile)
+	}
+	if _, newPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "changed correct horse battery staple"); newPasswordErr != nil {
+		testContext.Fatalf("expected changed password to authenticate: %v", newPasswordErr)
+	}
+
+	googleProfile, linkErr := store.LinkGoogleIdentity(ctx, "tenant-a", expectedAccountID, GoogleAccountIdentity{
+		Subject:     "google-subject",
+		UserEmail:   "google@example.com",
+		DisplayName: "Google User",
+		AvatarURL:   "https://example.com/google.png",
+	})
+	if linkErr != nil {
+		testContext.Fatalf("failed to link google identity: %v", linkErr)
+	}
+	if googleProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected linked google profile: %#v", googleProfile)
+	}
+	googleAuthProfile, found, googleAuthErr := store.AuthenticateGoogleAccount(ctx, "tenant-a", GoogleAccountIdentity{
+		Subject:   "google-subject",
+		UserEmail: "google@example.com",
+	})
+	if googleAuthErr != nil || !found {
+		testContext.Fatalf("expected linked google auth, found=%t err=%v", found, googleAuthErr)
+	}
+	if googleAuthProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected google auth profile: %#v", googleAuthProfile)
+	}
+
+	unlinkedProfile, unlinkErr := store.UnlinkIdentity(ctx, "tenant-a", expectedAccountID, accountProviderPassword, "account@example.com")
+	if unlinkErr != nil {
+		testContext.Fatalf("failed to unlink password identity: %v", unlinkErr)
+	}
+	if unlinkedProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected unlinked profile: %#v", unlinkedProfile)
+	}
+	if _, unlinkedPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "changed correct horse battery staple"); !errors.Is(unlinkedPasswordErr, ErrPasswordCredentialInvalid) {
+		testContext.Fatalf("expected unlinked password to be rejected, got %v", unlinkedPasswordErr)
+	}
+
+	disabledProfile, disableErr := store.DisableAccount(ctx, "tenant-a", expectedAccountID)
+	if disableErr != nil {
+		testContext.Fatalf("failed to disable account: %v", disableErr)
+	}
+	if disabledProfile.State != accountStateDisabled {
+		testContext.Fatalf("expected disabled state, got %#v", disabledProfile)
+	}
+	if _, _, disabledAuthErr := store.AuthenticateGoogleAccount(ctx, "tenant-a", GoogleAccountIdentity{Subject: "google-subject", UserEmail: "google@example.com"}); !errors.Is(disabledAuthErr, ErrAccountDisabled) {
+		testContext.Fatalf("expected disabled google auth error, got %v", disabledAuthErr)
+	}
+	reactivatedProfile, reactivateErr := store.ReactivateAccount(ctx, "tenant-a", expectedAccountID)
+	if reactivateErr != nil {
+		testContext.Fatalf("failed to reactivate account: %v", reactivateErr)
+	}
+	if reactivatedProfile.State != accountStateActive {
+		testContext.Fatalf("expected active state after reactivation, got %#v", reactivatedProfile)
+	}
+}
+
+func TestDatabaseUserStoreEnsuresSeededPasswordAccount(testContext *testing.T) {
+	testContext.Parallel()
+	ctx := context.Background()
+	databaseURL := sqliteDatabaseURL(testContext)
+	store, err := NewDatabaseUserStore(ctx, databaseURL)
+	if err != nil {
+		testContext.Fatalf("failed to create store: %v", err)
+	}
+	passwordHash, hashErr := HashPassword("correct horse battery staple")
+	if hashErr != nil {
+		testContext.Fatalf("failed to hash password: %v", hashErr)
+	}
+	if credentialErr := store.UpsertPasswordCredential(ctx, "tenant-a", PasswordCredentialSeed{
+		UserEmail:    "Seeded@Example.com",
+		DisplayName:  "Seeded User",
+		AvatarURL:    "https://example.com/seeded.png",
+		PasswordHash: passwordHash,
+	}); credentialErr != nil {
+		testContext.Fatalf("failed to seed credential: %v", credentialErr)
+	}
+
+	legacyProfile, legacyAuthErr := store.AuthenticatePassword(ctx, "tenant-a", "seeded@example.com", "correct horse battery staple")
+	if legacyAuthErr != nil {
+		testContext.Fatalf("expected seeded credential to authenticate: %v", legacyAuthErr)
+	}
+	if legacyProfile.AccountID != "" {
+		testContext.Fatalf("expected seeded credential to remain legacy before account ensure, got %#v", legacyProfile)
+	}
+
+	expectedAccountID := accountIDForEmail("tenant-a", "seeded@example.com")
+	accountProfile, ensureErr := store.EnsurePasswordAccount(ctx, "tenant-a", "seeded@example.com")
+	if ensureErr != nil {
+		testContext.Fatalf("failed to ensure account: %v", ensureErr)
+	}
+	if accountProfile.AccountID != expectedAccountID || accountProfile.State != accountStateActive {
+		testContext.Fatalf("unexpected ensured account profile: %#v", accountProfile)
+	}
+	accountPasswordProfile, accountPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "seeded@example.com", "correct horse battery staple")
+	if accountPasswordErr != nil {
+		testContext.Fatalf("expected account credential to authenticate: %v", accountPasswordErr)
+	}
+	if accountPasswordProfile.AccountID != expectedAccountID {
+		testContext.Fatalf("unexpected account credential profile: %#v", accountPasswordProfile)
+	}
+
+	if _, disableErr := store.DisableAccount(ctx, "tenant-a", expectedAccountID); disableErr != nil {
+		testContext.Fatalf("failed to disable account: %v", disableErr)
+	}
+	if _, disabledErr := store.AuthenticatePassword(ctx, "tenant-a", "seeded@example.com", "correct horse battery staple"); !errors.Is(disabledErr, ErrAccountDisabled) {
+		testContext.Fatalf("expected disabled account password rejection, got %v", disabledErr)
+	}
+}
+
 func TestDatabaseUserStoreMasksUnknownPasswordCredentialLookup(testContext *testing.T) {
 	testContext.Parallel()
 	databaseURL := sqliteDatabaseURL(testContext)

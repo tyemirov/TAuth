@@ -34,6 +34,7 @@ type Tenant struct {
 	nativeGoogleClients  []NativeGoogleClient
 	passwordAuthEnabled  bool
 	passwordUsers        []PasswordUser
+	accountManagement    AccountManagement
 	jwtSigningKey        []byte
 	cookieDomain         string
 	sessionCookieName    string
@@ -62,6 +63,15 @@ type PasswordUser struct {
 	passwordHash string
 }
 
+// AccountManagement represents tenant-level account lifecycle settings.
+type AccountManagement struct {
+	enabled               bool
+	passwordSignupEnabled bool
+	returnChallengeTokens bool
+	emailVerificationTTL  time.Duration
+	passwordResetTTL      time.Duration
+}
+
 type tenantCookieScope struct {
 	tenantID          TenantID
 	cookieDomain      string
@@ -74,46 +84,51 @@ type tenantCookieScope struct {
 var ErrInvalidTenantConfig = errors.New("tenantconfig.invalid")
 
 const (
-	tenantIDPattern                     = "^[a-z0-9][a-z0-9_-]{1,63}$"
-	nativeGooglePlatformPattern         = "^[a-z][a-z0-9_-]{1,31}$"
-	defaultNonceTTL                     = 5 * time.Minute
-	defaultNativeGooglePlatform         = "desktop"
-	errorCodeInvalidPath                = "tenant.invalid_path"
-	errorCodeMissingTenants             = "tenant.missing_records"
-	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
-	errorCodeInvalidID                  = "tenant.invalid_id"
-	errorCodeMissingOrigins             = "tenant.missing_origins"
-	errorCodeInvalidOrigin              = "tenant.invalid_origin"
-	errorCodeDuplicateOrigin            = "tenant.duplicate_origin"
-	errorCodeInvalidAllowedUser         = "tenant.invalid_allowed_user"
-	errorCodeDuplicateAllowedUser       = "tenant.duplicate_allowed_user"
-	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
-	errorCodeInvalidNativeGoogleID      = "tenant.invalid_native_google_client_id"
-	errorCodeInvalidNativePlatform      = "tenant.invalid_native_google_platform"
-	errorCodeInvalidNativeRedirectURI   = "tenant.invalid_native_redirect_uri"
-	errorCodeDuplicateNativeGoogleID    = "tenant.duplicate_native_google_client_id"
-	errorCodePasswordAuthDisabled       = "tenant.password_auth_disabled"
-	errorCodeInvalidPasswordUser        = "tenant.invalid_password_user"
-	errorCodeDuplicatePasswordUser      = "tenant.duplicate_password_user"
-	errorCodeInvalidPasswordHash        = "tenant.invalid_password_hash"
-	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
-	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
-	errorCodeInvalidNonceTTL            = "tenant.invalid_nonce_ttl"
-	errorCodeMissingSigningKey          = "tenant.missing_signing_key"
-	errorCodeMissingSessionCookieName   = "tenant.missing_session_cookie_name"
-	errorCodeMissingRefreshCookieName   = "tenant.missing_refresh_cookie_name"
-	errorCodeDuplicateSessionCookieName = "tenant.duplicate_session_cookie_name"
-	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
-	errorCodeDuplicateCookieNameCross   = "tenant.duplicate_cookie_name_cross_type"
-	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
-	originSchemeHTTP                    = "http"
-	originSchemeHTTPS                   = "https"
-	originExpectation                   = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
-	originReasonMissingScheme           = "missing scheme"
-	originReasonUnsupportedScheme       = "unsupported scheme"
-	originReasonMissingHost             = "missing host"
-	originReasonUnexpectedPath          = "origin must not include path, query, or fragment"
-	originReasonInvalidURL              = "invalid url"
+	tenantIDPattern                      = "^[a-z0-9][a-z0-9_-]{1,63}$"
+	nativeGooglePlatformPattern          = "^[a-z][a-z0-9_-]{1,31}$"
+	defaultNonceTTL                      = 5 * time.Minute
+	defaultEmailVerificationTTL          = 30 * time.Minute
+	defaultPasswordResetTTL              = 15 * time.Minute
+	defaultNativeGooglePlatform          = "desktop"
+	errorCodeInvalidPath                 = "tenant.invalid_path"
+	errorCodeMissingTenants              = "tenant.missing_records"
+	errorCodeDuplicateTenantID           = "tenant.duplicate_id"
+	errorCodeInvalidID                   = "tenant.invalid_id"
+	errorCodeMissingOrigins              = "tenant.missing_origins"
+	errorCodeInvalidOrigin               = "tenant.invalid_origin"
+	errorCodeDuplicateOrigin             = "tenant.duplicate_origin"
+	errorCodeInvalidAllowedUser          = "tenant.invalid_allowed_user"
+	errorCodeDuplicateAllowedUser        = "tenant.duplicate_allowed_user"
+	errorCodeInvalidGoogleID             = "tenant.invalid_google_client_id"
+	errorCodeInvalidNativeGoogleID       = "tenant.invalid_native_google_client_id"
+	errorCodeInvalidNativePlatform       = "tenant.invalid_native_google_platform"
+	errorCodeInvalidNativeRedirectURI    = "tenant.invalid_native_redirect_uri"
+	errorCodeDuplicateNativeGoogleID     = "tenant.duplicate_native_google_client_id"
+	errorCodePasswordAuthDisabled        = "tenant.password_auth_disabled"
+	errorCodeInvalidPasswordUser         = "tenant.invalid_password_user"
+	errorCodeDuplicatePasswordUser       = "tenant.duplicate_password_user"
+	errorCodeInvalidPasswordHash         = "tenant.invalid_password_hash"
+	errorCodeAccountManagementDisabled   = "tenant.account_management_disabled"
+	errorCodeInvalidEmailVerificationTTL = "tenant.invalid_email_verification_ttl"
+	errorCodeInvalidPasswordResetTTL     = "tenant.invalid_password_reset_ttl"
+	errorCodeInvalidSessionTTL           = "tenant.invalid_session_ttl"
+	errorCodeInvalidRefreshTTL           = "tenant.invalid_refresh_ttl"
+	errorCodeInvalidNonceTTL             = "tenant.invalid_nonce_ttl"
+	errorCodeMissingSigningKey           = "tenant.missing_signing_key"
+	errorCodeMissingSessionCookieName    = "tenant.missing_session_cookie_name"
+	errorCodeMissingRefreshCookieName    = "tenant.missing_refresh_cookie_name"
+	errorCodeDuplicateSessionCookieName  = "tenant.duplicate_session_cookie_name"
+	errorCodeDuplicateRefreshCookieName  = "tenant.duplicate_refresh_cookie_name"
+	errorCodeDuplicateCookieNameCross    = "tenant.duplicate_cookie_name_cross_type"
+	errorCodeInvalidCookieScope          = "tenant.invalid_cookie_scope"
+	originSchemeHTTP                     = "http"
+	originSchemeHTTPS                    = "https"
+	originExpectation                    = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
+	originReasonMissingScheme            = "missing scheme"
+	originReasonUnsupportedScheme        = "unsupported scheme"
+	originReasonMissingHost              = "missing host"
+	originReasonUnexpectedPath           = "origin must not include path, query, or fragment"
+	originReasonInvalidURL               = "invalid url"
 )
 
 const (
@@ -335,6 +350,36 @@ func (tenant Tenant) PasswordUsers() []PasswordUser {
 	return users
 }
 
+// AccountManagement returns the account lifecycle settings for the tenant.
+func (tenant Tenant) AccountManagement() AccountManagement {
+	return tenant.accountManagement
+}
+
+// Enabled indicates whether full account management is available.
+func (settings AccountManagement) Enabled() bool {
+	return settings.enabled
+}
+
+// PasswordSignupEnabled indicates whether public password signup is available.
+func (settings AccountManagement) PasswordSignupEnabled() bool {
+	return settings.passwordSignupEnabled
+}
+
+// ReturnChallengeTokens indicates whether challenge tokens are returned in HTTP responses.
+func (settings AccountManagement) ReturnChallengeTokens() bool {
+	return settings.returnChallengeTokens
+}
+
+// EmailVerificationTTL returns the email-verification challenge lifetime.
+func (settings AccountManagement) EmailVerificationTTL() time.Duration {
+	return settings.emailVerificationTTL
+}
+
+// PasswordResetTTL returns the password-reset challenge lifetime.
+func (settings AccountManagement) PasswordResetTTL() time.Duration {
+	return settings.passwordResetTTL
+}
+
 // Platform returns the native platform label.
 func (client NativeGoogleClient) Platform() string {
 	return client.platform
@@ -441,6 +486,10 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if passwordAuthErr != nil {
 		return Tenant{}, nil, passwordAuthErr
 	}
+	accountManagement, accountManagementErr := parseAccountManagement(raw.AccountManagement, tenantID)
+	if accountManagementErr != nil {
+		return Tenant{}, nil, accountManagementErr
+	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
@@ -488,6 +537,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		nativeGoogleClients:  nativeGoogleClients,
 		passwordAuthEnabled:  passwordAuthEnabled,
 		passwordUsers:        passwordUsers,
+		accountManagement:    accountManagement,
 		jwtSigningKey:        signingKey,
 		cookieDomain:         cookieDomain,
 		sessionCookieName:    sessionCookieName,
@@ -687,6 +737,37 @@ func parsePasswordUser(raw FilePasswordUser, tenantID TenantID) (PasswordUser, e
 		displayName:  displayName,
 		avatarURL:    strings.TrimSpace(raw.AvatarURL),
 		passwordHash: passwordHash,
+	}, nil
+}
+
+func parseAccountManagement(raw FileAccountManagement, tenantID TenantID) (AccountManagement, error) {
+	enabled := bool(raw.Enabled)
+	passwordSignupEnabled := bool(raw.PasswordSignup.Enabled)
+	if !enabled && passwordSignupEnabled {
+		return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeAccountManagementDisabled, tenantID)
+	}
+	emailVerificationTTL := defaultEmailVerificationTTL
+	if strings.TrimSpace(raw.EmailVerificationTTL) != "" {
+		parsedTTL, ttlErr := parseDuration(raw.EmailVerificationTTL)
+		if ttlErr != nil || parsedTTL <= 0 {
+			return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidEmailVerificationTTL, tenantID)
+		}
+		emailVerificationTTL = parsedTTL
+	}
+	passwordResetTTL := defaultPasswordResetTTL
+	if strings.TrimSpace(raw.PasswordResetTTL) != "" {
+		parsedTTL, ttlErr := parseDuration(raw.PasswordResetTTL)
+		if ttlErr != nil || parsedTTL <= 0 {
+			return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordResetTTL, tenantID)
+		}
+		passwordResetTTL = parsedTTL
+	}
+	return AccountManagement{
+		enabled:               enabled,
+		passwordSignupEnabled: passwordSignupEnabled,
+		returnChallengeTokens: bool(raw.ReturnChallengeTokens),
+		emailVerificationTTL:  emailVerificationTTL,
+		passwordResetTTL:      passwordResetTTL,
 	}, nil
 }
 
@@ -1011,6 +1092,8 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.PasswordAuth.Users[index].AvatarURL = os.ExpandEnv(tenant.PasswordAuth.Users[index].AvatarURL)
 		tenant.PasswordAuth.Users[index].PasswordHash = expandPasswordHashEnv(tenant.PasswordAuth.Users[index].PasswordHash)
 	}
+	tenant.AccountManagement.EmailVerificationTTL = os.ExpandEnv(tenant.AccountManagement.EmailVerificationTTL)
+	tenant.AccountManagement.PasswordResetTTL = os.ExpandEnv(tenant.AccountManagement.PasswordResetTTL)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -1050,6 +1133,7 @@ type FileTenant struct {
 	GoogleNativeClientID string                   `json:"google_native_client_id" yaml:"google_native_client_id"`
 	GoogleNativeClients  []FileNativeGoogleClient `json:"google_native_clients" yaml:"google_native_clients"`
 	PasswordAuth         FilePasswordAuth         `json:"password_auth" yaml:"password_auth"`
+	AccountManagement    FileAccountManagement    `json:"account_management" yaml:"account_management"`
 	JWTSigningKey        string                   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain         string                   `json:"cookie_domain" yaml:"cookie_domain"`
 	SessionCookieName    string                   `json:"session_cookie_name" yaml:"session_cookie_name"`
@@ -1079,6 +1163,20 @@ type FilePasswordUser struct {
 	DisplayName  string `json:"display_name" yaml:"display_name"`
 	AvatarURL    string `json:"avatar_url" yaml:"avatar_url"`
 	PasswordHash string `json:"password_hash" yaml:"password_hash"`
+}
+
+// FileAccountManagement represents the raw account-management tenant block.
+type FileAccountManagement struct {
+	Enabled               yamlBool           `json:"enabled" yaml:"enabled"`
+	PasswordSignup        FilePasswordSignup `json:"password_signup" yaml:"password_signup"`
+	ReturnChallengeTokens yamlBool           `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
+	EmailVerificationTTL  string             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	PasswordResetTTL      string             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+}
+
+// FilePasswordSignup represents the raw public signup toggle.
+type FilePasswordSignup struct {
+	Enabled yamlBool `json:"enabled" yaml:"enabled"`
 }
 
 type yamlBool bool

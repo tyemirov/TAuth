@@ -107,6 +107,21 @@ func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tenantID strin
 	return nil
 }
 
+// RevokeUser marks all refresh tokens for an application user as revoked.
+func (store *MemoryRefreshTokenStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	nowUnix := time.Now().UTC().Unix()
+	for _, record := range store.byID {
+		if record == nil || record.TenantID != tenantID || record.UserID != applicationUserID || record.RevokedAtUnix != 0 {
+			continue
+		}
+		record.RevokedAtUnix = nowUnix
+	}
+	return nil
+}
+
 func (store *MemoryRefreshTokenStore) nextID() string {
 	store.sequenceID++
 	timestampID := newRefreshTokenID(time.Now().UTC())

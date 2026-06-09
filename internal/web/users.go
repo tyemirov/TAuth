@@ -55,6 +55,11 @@ func (store *InMemoryUsers) UpsertPasswordUser(ctx context.Context, tenantID str
 	return store.upsertUserProfile(tenantID, applicationUserID, strings.ToLower(strings.TrimSpace(userEmail)), userDisplayName, userAvatarURL)
 }
 
+// UpsertAccountUser inserts or updates a canonical account profile.
+func (store *InMemoryUsers) UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	return store.upsertUserProfile(tenantID, accountID, strings.ToLower(strings.TrimSpace(userEmail)), userDisplayName, userAvatarURL)
+}
+
 func (store *InMemoryUsers) upsertUserProfile(tenantID string, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	record := UserProfile{
 		Email:     userEmail,

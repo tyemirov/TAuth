@@ -33,16 +33,19 @@ type PasswordCredentialSeed struct {
 
 // PasswordCredentialProfile is the trusted profile returned after password verification.
 type PasswordCredentialProfile struct {
+	AccountID   string
 	UserEmail   string
 	DisplayName string
 	AvatarURL   string
 }
 
 type passwordCredential struct {
+	accountID    string
 	userEmail    string
 	displayName  string
 	avatarURL    string
 	passwordHash string
+	verified     bool
 }
 
 type passwordHashComparer func(hashedPassword []byte, password []byte) error
@@ -51,6 +54,9 @@ type passwordHashComparer func(hashedPassword []byte, password []byte) error
 type MemoryPasswordCredentialStore struct {
 	mu                   sync.RWMutex
 	tenants              map[string]map[string]passwordCredential
+	accounts             map[string]map[string]*accountRecord
+	identities           map[string]map[string]accountIdentityRecord
+	challenges           map[string]map[string]*accountChallengeRecord
 	passwordHashComparer passwordHashComparer
 }
 
@@ -58,6 +64,9 @@ type MemoryPasswordCredentialStore struct {
 func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 	return &MemoryPasswordCredentialStore{
 		tenants:              make(map[string]map[string]passwordCredential),
+		accounts:             make(map[string]map[string]*accountRecord),
+		identities:           make(map[string]map[string]accountIdentityRecord),
+		challenges:           make(map[string]map[string]*accountChallengeRecord),
 		passwordHashComparer: bcrypt.CompareHashAndPassword,
 	}
 }
@@ -129,7 +138,22 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	if compareErr := store.passwordHashComparer([]byte(credential.passwordHash), []byte(password)); compareErr != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 	}
+	if !credential.verified {
+		return PasswordCredentialProfile{}, ErrAccountNotActive
+	}
+	if credential.accountID != "" {
+		account := store.accounts[tenantID][credential.accountID]
+		if account != nil {
+			if account.state == accountStateDisabled {
+				return PasswordCredentialProfile{}, ErrAccountDisabled
+			}
+			if account.state != accountStateActive {
+				return PasswordCredentialProfile{}, ErrAccountNotActive
+			}
+		}
+	}
 	return PasswordCredentialProfile{
+		AccountID:   credential.accountID,
 		UserEmail:   credential.userEmail,
 		DisplayName: credential.displayName,
 		AvatarURL:   credential.avatarURL,
@@ -157,6 +181,7 @@ func normalizePasswordCredentialSeed(credential PasswordCredentialSeed) (passwor
 		displayName:  displayName,
 		avatarURL:    strings.TrimSpace(credential.AvatarURL),
 		passwordHash: passwordHash,
+		verified:     true,
 	}, nil
 }
 
