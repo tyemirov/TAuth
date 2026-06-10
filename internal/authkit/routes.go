@@ -285,14 +285,19 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		claims, validateSessionErr := validateSessionRequest(contextGin.Request, config)
 		if validateSessionErr == nil {
 			if strings.TrimSpace(claims.GetTenantID()) == tenantID {
-				contextGin.JSON(http.StatusOK, sessionProfilePayload(
-					claims.GetUserID(),
-					claims.GetUserEmail(),
-					claims.GetUserDisplayName(),
-					claims.GetUserAvatarURL(),
-					claims.GetUserRoles(),
-					claims.GetExpiresAt(),
-				))
+				payload, activeErr := activeSessionPayloadForClaims(contextGin, config, accountStore, tenantID, claims)
+				if activeErr != nil {
+					if isInactiveAccountSessionError(activeErr) {
+						clearCookie(contextGin, config, config.SessionCookieName, "/")
+						clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+						contextGin.Status(http.StatusNoContent)
+						return
+					}
+					logAuthError("auth.session.account_state", activeErr)
+					contextGin.AbortWithStatus(http.StatusInternalServerError)
+					return
+				}
+				contextGin.JSON(http.StatusOK, payload)
 				return
 			}
 			contextGin.Status(http.StatusNoContent)
@@ -328,14 +333,31 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+		sessionProfile, profileErr := activeSessionProfileForUser(contextGin, users, config, accountStore, tenantID, applicationUserID)
 		if profileErr != nil {
+			if isInactiveAccountSessionError(profileErr) {
+				clearCookie(contextGin, config, config.SessionCookieName, "/")
+				clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+				contextGin.Status(http.StatusNoContent)
+				return
+			}
 			logAuthError("auth.session.profile", profileErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
+			clock,
+			tenantID,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
+			config.AppJWTIssuer,
+			config.AppJWTSigningKey,
+			config.SessionTTL,
+		)
 		if mintErr != nil {
 			logAuthError("auth.session.mint_jwt", mintErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -358,11 +380,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
 		writeRefreshCookie(contextGin, config, newOpaque, refreshDeadline)
 		contextGin.JSON(http.StatusOK, sessionProfilePayload(
-			applicationUserID,
-			userEmail,
-			userDisplayName,
-			userAvatarURL,
-			userRoles,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
 			sessionExpiresAt,
 		))
 	})
@@ -793,6 +815,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, resetErr)
 			return
 		}
+		if !isAllowedUser(profile.UserEmail, config.AllowedUsers) {
+			logAuthWarning("auth.account.reset_user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
 		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
 			logAuthError("auth.account.reset_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -1128,15 +1155,32 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+		sessionProfile, profileErr := activeSessionProfileForUser(contextGin, users, config, accountStore, tenantID, applicationUserID)
 		if profileErr != nil {
 			recordMetric(metricAuthRefreshFailure)
+			if isInactiveAccountSessionError(profileErr) {
+				clearCookie(contextGin, config, config.SessionCookieName, "/")
+				clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+				contextGin.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
 			logAuthError("auth.refresh.profile", profileErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
+			clock,
+			tenantID,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
+			config.AppJWTIssuer,
+			config.AppJWTSigningKey,
+			config.SessionTTL,
+		)
 		if mintErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.mint_jwt", mintErr)
@@ -1353,6 +1397,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 
 	whoAmI := router.Group("/")
 	whoAmI.Use(RequireSession(registry))
+	whoAmI.Use(RequireActiveAccountSession(registry, accountStore))
 	whoAmI.GET("/me", web.HandleWhoAmI(configuredLogger))
 }
 
@@ -1721,6 +1766,79 @@ func requireAccountManagementStore(contextGin *gin.Context, config ServerConfig,
 		return nil, false
 	}
 	return accountStore, true
+}
+
+func activeSessionPayloadForClaims(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, claims *JwtCustomClaims) (gin.H, error) {
+	if isAccountSessionID(claims.GetUserID()) {
+		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID())
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		return sessionProfilePayload(profile.AccountID, profile.UserEmail, profile.DisplayName, profile.AvatarURL, profile.Roles, claims.GetExpiresAt()), nil
+	}
+	return sessionProfilePayload(
+		claims.GetUserID(),
+		claims.GetUserEmail(),
+		claims.GetUserDisplayName(),
+		claims.GetUserAvatarURL(),
+		claims.GetUserRoles(),
+		claims.GetExpiresAt(),
+	), nil
+}
+
+func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, config ServerConfig, accountStore AccountManagementStore, tenantID string, applicationUserID string) (authenticatedSessionProfile, error) {
+	if isAccountSessionID(applicationUserID) {
+		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, applicationUserID)
+		if profileErr != nil {
+			return authenticatedSessionProfile{}, profileErr
+		}
+		return authenticatedSessionProfile{
+			applicationUserID: profile.AccountID,
+			userEmail:         profile.UserEmail,
+			userDisplayName:   profile.DisplayName,
+			userAvatarURL:     profile.AvatarURL,
+			userRoles:         profile.Roles,
+		}, nil
+	}
+	userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+	if profileErr != nil {
+		return authenticatedSessionProfile{}, profileErr
+	}
+	return authenticatedSessionProfile{
+		applicationUserID: applicationUserID,
+		userEmail:         userEmail,
+		userDisplayName:   userDisplayName,
+		userAvatarURL:     userAvatarURL,
+		userRoles:         userRoles,
+	}, nil
+}
+
+func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, accountID string) (AccountProfile, error) {
+	if !config.AccountManagementEnabled {
+		return AccountProfile{}, ErrAccountNotActive
+	}
+	if accountStore == nil {
+		return AccountProfile{}, fmt.Errorf("auth.account.store_missing")
+	}
+	profile, profileErr := accountStore.ResolveAccountProfile(contextGin, tenantID, accountID)
+	if profileErr != nil {
+		return AccountProfile{}, profileErr
+	}
+	if profile.State == accountStateDisabled {
+		return AccountProfile{}, ErrAccountDisabled
+	}
+	if profile.State != accountStateActive {
+		return AccountProfile{}, ErrAccountNotActive
+	}
+	return profile, nil
+}
+
+func isAccountSessionID(applicationUserID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(applicationUserID), accountIDPrefix)
+}
+
+func isInactiveAccountSessionError(err error) bool {
+	return errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrAccountNotFound)
 }
 
 func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {

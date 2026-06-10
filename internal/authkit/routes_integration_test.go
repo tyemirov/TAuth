@@ -649,6 +649,87 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	}
 }
 
+func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	allowedUsers := map[string]struct{}{"new@example.com": {}}
+	config := newTestServerConfig()
+	config.PasswordAuthEnabled = true
+	config.AccountManagementEnabled = true
+	config.PasswordSignupEnabled = true
+	config.ReturnChallengeTokens = true
+	config.EmailVerificationTTL = time.Minute
+	config.PasswordResetTTL = time.Minute
+	config.AllowedUsers = allowedUsers
+	registry := singleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	accountStore := NewMemoryPasswordCredentialStore()
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore)
+
+	signupResponse := httptest.NewRecorder()
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"New@Example.com","password":"correct horse battery staple"}`)))
+	signupRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(signupResponse, signupRequest)
+	if signupResponse.Code != http.StatusAccepted {
+		testingHandle.Fatalf("expected signup 202, got %d: %s", signupResponse.Code, signupResponse.Body.String())
+	}
+	var signupPayload map[string]interface{}
+	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
+		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
+	}
+	verificationToken, _ := signupPayload["verification_token"].(string)
+	if verificationToken == "" {
+		testingHandle.Fatalf("expected verification token, got %#v", signupPayload)
+	}
+
+	verifyResponse := httptest.NewRecorder()
+	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/password/verify-email", bytes.NewBuffer([]byte(`{"token":"`+verificationToken+`"}`)))
+	verifyRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(verifyResponse, verifyRequest)
+	if verifyResponse.Code != http.StatusOK {
+		testingHandle.Fatalf("expected verify 200, got %d: %s", verifyResponse.Code, verifyResponse.Body.String())
+	}
+
+	resetStartResponse := httptest.NewRecorder()
+	resetStartRequest := httptest.NewRequest(http.MethodPost, "/auth/password/reset/start", bytes.NewBuffer([]byte(`{"email":"new@example.com"}`)))
+	resetStartRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resetStartResponse, resetStartRequest)
+	if resetStartResponse.Code != http.StatusAccepted {
+		testingHandle.Fatalf("expected reset start 202, got %d: %s", resetStartResponse.Code, resetStartResponse.Body.String())
+	}
+	var resetStartPayload map[string]interface{}
+	if decodeErr := json.NewDecoder(resetStartResponse.Body).Decode(&resetStartPayload); decodeErr != nil {
+		testingHandle.Fatalf("decode reset start payload: %v", decodeErr)
+	}
+	resetToken, _ := resetStartPayload["reset_token"].(string)
+	if resetToken == "" {
+		testingHandle.Fatalf("expected reset token, got %#v", resetStartPayload)
+	}
+
+	delete(allowedUsers, "new@example.com")
+
+	resetCompleteResponse := httptest.NewRecorder()
+	resetCompleteRequest := httptest.NewRequest(http.MethodPost, "/auth/password/reset/complete", bytes.NewBuffer([]byte(`{"token":"`+resetToken+`","password":"new correct horse battery staple"}`)))
+	resetCompleteRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resetCompleteResponse, resetCompleteRequest)
+	if resetCompleteResponse.Code != http.StatusForbidden {
+		testingHandle.Fatalf("expected reset complete 403, got %d: %s", resetCompleteResponse.Code, resetCompleteResponse.Body.String())
+	}
+	var resetCompletePayload map[string]string
+	if decodeErr := json.NewDecoder(resetCompleteResponse.Body).Decode(&resetCompletePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode reset complete payload: %v", decodeErr)
+	}
+	if resetCompletePayload["error"] != errorUserNotAllowed {
+		testingHandle.Fatalf("expected user_not_allowed payload, got %#v", resetCompletePayload)
+	}
+	resetCookies := collectCookies(resetCompleteResponse.Result().Cookies())
+	if resetCookies[config.SessionCookieName] != nil || resetCookies[config.RefreshCookieName] != nil {
+		testingHandle.Fatalf("expected no session cookies for disallowed reset completion, got %#v", resetCookies)
+	}
+}
+
 func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -723,6 +804,33 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 	}
 	if staleChangePayload["error"] != errorAccountDisabled {
 		testingHandle.Fatalf("expected disabled account error, got %#v", staleChangePayload)
+	}
+
+	staleProfileResponse := httptest.NewRecorder()
+	staleProfileRequest := httptest.NewRequest(http.MethodGet, "/me", nil)
+	addCookies(staleProfileRequest, changedCookies, config.SessionCookieName)
+	router.ServeHTTP(staleProfileResponse, staleProfileRequest)
+	if staleProfileResponse.Code != http.StatusForbidden {
+		testingHandle.Fatalf("expected stale disabled-account profile 403, got %d: %s", staleProfileResponse.Code, staleProfileResponse.Body.String())
+	}
+	var staleProfilePayload map[string]string
+	if decodeErr := json.NewDecoder(staleProfileResponse.Body).Decode(&staleProfilePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode stale profile payload: %v", decodeErr)
+	}
+	if staleProfilePayload["error"] != errorAccountDisabled {
+		testingHandle.Fatalf("expected disabled account profile error, got %#v", staleProfilePayload)
+	}
+
+	sessionStatusResponse := httptest.NewRecorder()
+	sessionStatusRequest := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	addCookies(sessionStatusRequest, changedCookies, config.SessionCookieName, config.RefreshCookieName)
+	router.ServeHTTP(sessionStatusResponse, sessionStatusRequest)
+	if sessionStatusResponse.Code != http.StatusNoContent {
+		testingHandle.Fatalf("expected disabled account session status 204, got %d: %s", sessionStatusResponse.Code, sessionStatusResponse.Body.String())
+	}
+	sessionStatusCookies := collectCookies(sessionStatusResponse.Result().Cookies())
+	if sessionStatusCookies[config.SessionCookieName] == nil || sessionStatusCookies[config.RefreshCookieName] == nil {
+		testingHandle.Fatalf("expected disabled account session status to clear auth cookies")
 	}
 
 	disabledLoginResponse := httptest.NewRecorder()
