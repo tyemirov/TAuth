@@ -263,7 +263,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
-	tenantRouter.Use(tenants.TenantMiddleware(tenantResolver, http.StatusNotFound))
+	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
 
 	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
 
@@ -347,12 +347,37 @@ func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
 
 func originGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.HandlerFunc {
 	return func(context *gin.Context) {
+		if appleOAuthBypassPath(context.Request) {
+			context.Next()
+			return
+		}
 		if !originAllowed(context.Request, config, allowHeaderOverride) {
 			context.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		context.Next()
 	}
+}
+
+func tenantMiddleware(resolver *tenants.Resolver, rejectionStatus int) gin.HandlerFunc {
+	delegate := tenants.TenantMiddleware(resolver, rejectionStatus)
+	return func(context *gin.Context) {
+		if appleOAuthBypassPath(context.Request) {
+			context.Next()
+			return
+		}
+		delegate(context)
+	}
+}
+
+func appleOAuthBypassPath(request *http.Request) bool {
+	if request == nil || request.URL == nil {
+		return false
+	}
+	if request.URL.Path == "/auth/apple/callback" {
+		return true
+	}
+	return request.URL.Path == "/auth/apple/start" && strings.TrimSpace(request.Header.Get("Origin")) == ""
 }
 
 func originAllowed(request *http.Request, config tenants.Config, allowHeaderOverride bool) bool {

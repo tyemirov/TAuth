@@ -103,11 +103,24 @@ const (
 	metricAuthRefreshFailure               = "auth.refresh.failure"
 	metricAuthLogoutSuccess                = "auth.logout.success"
 	errorUserNotAllowed                    = "user_not_allowed"
+	errorGoogleLoginNotConfigured          = "google_login_not_configured"
 	errorNativeGoogleLoginNotConfigured    = "native_google_login_not_configured"
 	errorNativeGooglePlatformNotConfigured = "native_google_platform_not_configured"
 	errorNativeGoogleRedirectURIInvalid    = "invalid_redirect_uri"
+	errorAppleLoginNotConfigured           = "apple_login_not_configured"
+	errorAppleCallbackInvalid              = "invalid_apple_callback"
+	errorAppleStateInvalid                 = "invalid_state"
+	errorAppleReturnToInvalid              = "invalid_return_to"
+	errorAppleTokenInvalid                 = "invalid_apple_token"
 	errorPasswordAuthNotConfigured         = "password_auth_not_configured"
 	errorPasswordCredentialInvalid         = "invalid_credentials"
+	errorAccountManagementNotConfigured    = "account_management_not_configured"
+	errorPasswordSignupNotConfigured       = "password_signup_not_configured"
+	errorAccountExists                     = "account_exists"
+	errorAccountChallengeInvalid           = "invalid_challenge"
+	errorAccountNotActive                  = "account_not_active"
+	errorAccountDisabled                   = "account_disabled"
+	errorAccountLastIdentity               = "last_identity"
 	googleIssuerHTTPS                      = "https://accounts.google.com"
 	googleIssuerLegacy                     = "accounts.google.com"
 	googleAuthorizationEndpoint            = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -129,6 +142,36 @@ type googleLoginInbound struct {
 type passwordLoginInbound struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type passwordSignupInbound struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
+type challengeTokenInbound struct {
+	Token string `json:"token"`
+}
+
+type passwordResetStartInbound struct {
+	Email string `json:"email"`
+}
+
+type passwordResetCompleteInbound struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
+}
+
+type passwordChangeInbound struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+type accountUnlinkInbound struct {
+	Provider   string `json:"provider"`
+	ProviderID string `json:"provider_id"`
 }
 
 type authenticatedSessionProfile struct {
@@ -208,6 +251,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 	if clock == nil {
 		clock = NewSystemClock()
 	}
+	accountStore, _ := passwordCredentials.(AccountManagementStore)
 	if nonces == nil {
 		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
 			return registry.Config(tenantID).NonceTTL
@@ -241,14 +285,19 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		claims, validateSessionErr := validateSessionRequest(contextGin.Request, config)
 		if validateSessionErr == nil {
 			if strings.TrimSpace(claims.GetTenantID()) == tenantID {
-				contextGin.JSON(http.StatusOK, sessionProfilePayload(
-					claims.GetUserID(),
-					claims.GetUserEmail(),
-					claims.GetUserDisplayName(),
-					claims.GetUserAvatarURL(),
-					claims.GetUserRoles(),
-					claims.GetExpiresAt(),
-				))
+				payload, activeErr := activeSessionPayloadForClaims(contextGin, config, accountStore, tenantID, claims)
+				if activeErr != nil {
+					if isInactiveAccountSessionError(activeErr) {
+						clearCookie(contextGin, config, config.SessionCookieName, "/")
+						clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+						contextGin.Status(http.StatusNoContent)
+						return
+					}
+					logAuthError("auth.session.account_state", activeErr)
+					contextGin.AbortWithStatus(http.StatusInternalServerError)
+					return
+				}
+				contextGin.JSON(http.StatusOK, payload)
 				return
 			}
 			contextGin.Status(http.StatusNoContent)
@@ -284,14 +333,31 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+		sessionProfile, profileErr := activeSessionProfileForUser(contextGin, users, config, accountStore, tenantID, applicationUserID)
 		if profileErr != nil {
+			if isInactiveAccountSessionError(profileErr) {
+				clearCookie(contextGin, config, config.SessionCookieName, "/")
+				clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+				contextGin.Status(http.StatusNoContent)
+				return
+			}
 			logAuthError("auth.session.profile", profileErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
+			clock,
+			tenantID,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
+			config.AppJWTIssuer,
+			config.AppJWTSigningKey,
+			config.SessionTTL,
+		)
 		if mintErr != nil {
 			logAuthError("auth.session.mint_jwt", mintErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -314,11 +380,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
 		writeRefreshCookie(contextGin, config, newOpaque, refreshDeadline)
 		contextGin.JSON(http.StatusOK, sessionProfilePayload(
-			applicationUserID,
-			userEmail,
-			userDisplayName,
-			userAvatarURL,
-			userRoles,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
 			sessionExpiresAt,
 		))
 	})
@@ -359,6 +425,171 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			CodeChallengeMethodsSupported: codeChallengeMethods,
 		})
 	})
+
+	router.GET("/auth/apple/start", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveAppleStartTenantID(contextGin, registry)
+		if !resolved {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.missing_tenant", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_tenant"})
+			return
+		}
+		config := registry.Config(tenantID)
+		if !config.AppleOAuth.Enabled {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAppleLoginNotConfigured})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.insecure_http", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		nonceToken, nonceErr := nonces.Issue(contextGin, tenantID)
+		if nonceErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.apple.nonce", nonceErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		returnTo, returnToErr := validateAppleOAuthReturnTo(config, contextGin.Query("return_to"))
+		if returnToErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.invalid_return_to", returnToErr)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorAppleReturnToInvalid})
+			return
+		}
+		stateToken, stateErr := createAppleOAuthState(clock, config, tenantID, nonceToken, returnTo)
+		if stateErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.apple.state", stateErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		redirectURL, redirectErr := buildAppleAuthorizationRedirect(config.AppleOAuth, stateToken, nonceToken)
+		if redirectErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.apple.redirect", redirectErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		contextGin.Redirect(http.StatusFound, redirectURL)
+	})
+
+	handleAppleCallback := func(contextGin *gin.Context) {
+		code, state, inboundOK := bindAppleCallbackInbound(contextGin)
+		if !inboundOK {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorAppleCallbackInvalid})
+			return
+		}
+		config, statePayload, stateErr := validateAppleOAuthState(registry, state)
+		if stateErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.invalid_state", stateErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleStateInvalid})
+			return
+		}
+		if !config.AppleOAuth.Enabled {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAppleLoginNotConfigured})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.callback.insecure_http", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		tokenResponse, tokenErr := exchangeAppleAuthorizationCode(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, clock, code)
+		if tokenErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.token", tokenErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
+			return
+		}
+		identity, identityErr := validateAppleIDToken(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, tokenResponse.IDToken)
+		if identityErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.id_token", identityErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
+			return
+		}
+		if strings.TrimSpace(identity.Nonce) == "" || identity.Nonce != statePayload.Nonce {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.nonce_mismatch", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if consumeErr := nonces.Consume(contextGin, statePayload.TenantID, statePayload.Nonce); consumeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.invalid_nonce_token", consumeErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if identity.Subject == "" || identity.Email == "" || !identity.EmailVerified {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.unverified_identity", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
+			return
+		}
+		if !isAllowedUser(identity.Email, config.AllowedUsers) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		if config.AccountManagementEnabled {
+			if accountStore == nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.account_store_missing", nil)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			providerIdentity := AccountProviderIdentity{
+				Provider:    accountProviderApple,
+				Subject:     identity.Subject,
+				UserEmail:   identity.Email,
+				DisplayName: identity.DisplayName,
+			}
+			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
+			if accountErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if !found {
+				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
+				if accountErr != nil {
+					recordMetric(metricAuthLoginFailure)
+					writeAccountError(contextGin, accountErr)
+					return
+				}
+			}
+			responsePayload, finalizeErr := finalizeAccountLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProfile)
+			if finalizeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.account_finalize", finalizeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			writeAppleCallbackSuccess(contextGin, statePayload, responsePayload)
+			recordMetric(metricAuthLoginSuccess)
+			return
+		}
+		responsePayload, finalizeErr := finalizeProviderLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProviderApple, identity.Subject, identity.Email, identity.DisplayName, "")
+		if finalizeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.apple.finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		writeAppleCallbackSuccess(contextGin, statePayload, responsePayload)
+		recordMetric(metricAuthLoginSuccess)
+	}
+	router.GET("/auth/apple/callback", handleAppleCallback)
+	router.POST("/auth/apple/callback", handleAppleCallback)
 
 	router.POST("/auth/password/login", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
@@ -420,8 +651,33 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorPasswordCredentialInvalid})
 				return
 			}
+			if errors.Is(authErr, ErrAccountNotActive) || errors.Is(authErr, ErrAccountDisabled) {
+				writeAccountError(contextGin, authErr)
+				return
+			}
 			logAuthError("auth.login.password.authenticate", authErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if config.AccountManagementEnabled {
+			store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+			if !ok {
+				recordMetric(metricAuthLoginFailure)
+				return
+			}
+			accountProfile, ensureErr := store.EnsurePasswordAccount(contextGin, tenantID, profile.UserEmail)
+			if ensureErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				writeAccountError(contextGin, ensureErr)
+				return
+			}
+			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.password.account_finalize", finalizeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			recordMetric(metricAuthLoginSuccess)
 			return
 		}
 		if finalizeErr := finalizePasswordLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
@@ -433,6 +689,148 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		recordMetric(metricAuthLoginSuccess)
 	})
 
+	router.POST("/auth/password/signup", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+		if !ok {
+			return
+		}
+		if !config.PasswordSignupEnabled {
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorPasswordSignupNotConfigured})
+			return
+		}
+		inbound, ok := bindPasswordSignupInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		normalizedEmail, emailErr := normalizePasswordEmail(inbound.Email)
+		if emailErr != nil {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_email"})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		if !isAllowedUser(normalizedEmail, config.AllowedUsers) {
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		challenge, signupErr := store.CreatePasswordSignup(contextGin, tenantID, AccountPasswordRequest{
+			UserEmail:   normalizedEmail,
+			Password:    inbound.Password,
+			DisplayName: inbound.DisplayName,
+			AvatarURL:   inbound.AvatarURL,
+		}, clock.Now().UTC().Add(effectiveDuration(config.EmailVerificationTTL, 30*time.Minute)).Unix())
+		if signupErr != nil {
+			writeAccountError(contextGin, signupErr)
+			return
+		}
+		contextGin.JSON(http.StatusAccepted, challengePayload(config, "verification_token", challenge))
+	})
+
+	router.POST("/auth/password/verify-email", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindChallengeTokenInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		profile, verifyErr := store.VerifyEmailChallenge(contextGin, tenantID, inbound.Token)
+		if verifyErr != nil {
+			writeAccountError(contextGin, verifyErr)
+			return
+		}
+		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			logAuthError("auth.account.verify.finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+		}
+	})
+
+	router.POST("/auth/password/reset/start", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindPasswordResetStartInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		challenge, resetErr := store.StartPasswordReset(contextGin, tenantID, inbound.Email, clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute)).Unix())
+		if resetErr != nil {
+			if !errors.Is(resetErr, ErrAccountNotFound) && !errors.Is(resetErr, ErrPasswordCredentialInvalid) {
+				logAuthError("auth.account.reset_start", resetErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			challenge = fakeChallenge(clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute)).Unix())
+		}
+		contextGin.JSON(http.StatusAccepted, challengePayload(config, "reset_token", challenge))
+	})
+
+	router.POST("/auth/password/reset/complete", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindPasswordResetCompleteInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		profile, resetErr := store.CompletePasswordReset(contextGin, tenantID, inbound.Token, inbound.Password)
+		if resetErr != nil {
+			writeAccountError(contextGin, resetErr)
+			return
+		}
+		if !isAllowedUser(profile.UserEmail, config.AllowedUsers) {
+			logAuthWarning("auth.account.reset_user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+			logAuthError("auth.account.reset_revoke", revokeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			logAuthError("auth.account.reset_finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+		}
+	})
+
 	router.POST("/auth/google", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
 		if !resolved {
@@ -442,6 +840,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 		config := registry.Config(tenantID)
+		if strings.TrimSpace(config.GoogleWebClientID) == "" {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorGoogleLoginNotConfigured})
+			return
+		}
 		inbound, ok := bindGoogleLoginInbound(contextGin)
 		if !ok {
 			recordMetric(metricAuthLoginFailure)
@@ -499,6 +902,44 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.user_not_allowed", nil)
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+
+		if config.AccountManagementEnabled {
+			if accountStore == nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.account_store_missing", nil)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			providerIdentity := AccountProviderIdentity{
+				Provider:    accountProviderGoogle,
+				Subject:     identity.Sub,
+				UserEmail:   identity.Email,
+				DisplayName: identity.DisplayName,
+				AvatarURL:   identity.AvatarURL,
+			}
+			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			if accountErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if !found {
+				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+				if accountErr != nil {
+					recordMetric(metricAuthLoginFailure)
+					writeAccountError(contextGin, accountErr)
+					return
+				}
+			}
+			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.account_finalize", finalizeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			recordMetric(metricAuthLoginSuccess)
 			return
 		}
 
@@ -614,6 +1055,43 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
+		if config.AccountManagementEnabled {
+			if accountStore == nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.native.account_store_missing", nil)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			providerIdentity := AccountProviderIdentity{
+				Provider:    accountProviderGoogle,
+				Subject:     identity.Sub,
+				UserEmail:   identity.Email,
+				DisplayName: identity.DisplayName,
+				AvatarURL:   identity.AvatarURL,
+			}
+			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			if accountErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if !found {
+				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+				if accountErr != nil {
+					recordMetric(metricAuthLoginFailure)
+					writeAccountError(contextGin, accountErr)
+					return
+				}
+			}
+			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.native.account_finalize", finalizeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			recordMetric(metricAuthLoginSuccess)
+			return
+		}
 		if finalizeErr := finalizeGoogleLogin(contextGin, users, refreshTokens, clock, config, tenantID, identity); finalizeErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			switch {
@@ -677,15 +1155,32 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+		sessionProfile, profileErr := activeSessionProfileForUser(contextGin, users, config, accountStore, tenantID, applicationUserID)
 		if profileErr != nil {
 			recordMetric(metricAuthRefreshFailure)
+			if isInactiveAccountSessionError(profileErr) {
+				clearCookie(contextGin, config, config.SessionCookieName, "/")
+				clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+				contextGin.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
 			logAuthError("auth.refresh.profile", profileErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(clock, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL, userRoles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
+			clock,
+			tenantID,
+			sessionProfile.applicationUserID,
+			sessionProfile.userEmail,
+			sessionProfile.userDisplayName,
+			sessionProfile.userAvatarURL,
+			sessionProfile.userRoles,
+			config.AppJWTIssuer,
+			config.AppJWTSigningKey,
+			config.SessionTTL,
+		)
 		if mintErr != nil {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.mint_jwt", mintErr)
@@ -738,8 +1233,171 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		recordMetric(metricAuthLogoutSuccess)
 	})
 
+	accountRoutes := router.Group("/auth/account")
+	accountRoutes.Use(RequireSession(registry))
+	accountRoutes.POST("/password/change", func(contextGin *gin.Context) {
+		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindPasswordChangeInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		profile, changeErr := store.ChangePassword(contextGin, tenantID, accountID, inbound.CurrentPassword, inbound.NewPassword)
+		if changeErr != nil {
+			writeAccountError(contextGin, changeErr)
+			return
+		}
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+			logAuthError("auth.account.change_password_revoke", revokeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			logAuthError("auth.account.change_password_finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+		}
+	})
+
+	accountRoutes.POST("/password/link/start", func(contextGin *gin.Context) {
+		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindPasswordSignupInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		challenge, linkErr := store.CreatePasswordLink(contextGin, tenantID, accountID, AccountPasswordRequest{
+			UserEmail:   inbound.Email,
+			Password:    inbound.Password,
+			DisplayName: inbound.DisplayName,
+			AvatarURL:   inbound.AvatarURL,
+		}, clock.Now().UTC().Add(effectiveDuration(config.EmailVerificationTTL, 30*time.Minute)).Unix())
+		if linkErr != nil {
+			writeAccountError(contextGin, linkErr)
+			return
+		}
+		contextGin.JSON(http.StatusAccepted, challengePayload(config, "verification_token", challenge))
+	})
+
+	accountRoutes.POST("/password/link/verify", func(contextGin *gin.Context) {
+		tenantID, _, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindChallengeTokenInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		profile, linkErr := store.VerifyPasswordLink(contextGin, tenantID, accountID, inbound.Token)
+		if linkErr != nil {
+			writeAccountError(contextGin, linkErr)
+			return
+		}
+		contextGin.JSON(http.StatusOK, accountProfilePayload(profile))
+	})
+
+	accountRoutes.POST("/google/link", func(contextGin *gin.Context) {
+		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindGoogleLoginInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		if strings.TrimSpace(inbound.NonceToken) == "" {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
+			return
+		}
+		validator, validatorErr := resolveGoogleValidator(context.Background())
+		if validatorErr != nil {
+			logAuthError("auth.account.link_google.validator_init", validatorErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		payload, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
+		if validateErr != nil {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_google_token"})
+			return
+		}
+		if consumeErr := consumeBrowserNonce(contextGin, nonces, tenantID, inbound.NonceToken, payload); consumeErr != nil {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if identity.Sub == "" || identity.Email == "" || !identity.EmailVerified {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
+			return
+		}
+		profile, linkErr := store.LinkProviderIdentity(contextGin, tenantID, accountID, AccountProviderIdentity{
+			Provider:    accountProviderGoogle,
+			Subject:     identity.Sub,
+			UserEmail:   identity.Email,
+			DisplayName: identity.DisplayName,
+			AvatarURL:   identity.AvatarURL,
+		})
+		if linkErr != nil {
+			writeAccountError(contextGin, linkErr)
+			return
+		}
+		contextGin.JSON(http.StatusOK, accountProfilePayload(profile))
+	})
+
+	accountRoutes.POST("/unlink", func(contextGin *gin.Context) {
+		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		inbound, ok := bindAccountUnlinkInbound(contextGin)
+		if !ok {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		profile, unlinkErr := store.UnlinkIdentity(contextGin, tenantID, accountID, inbound.Provider, inbound.ProviderID)
+		if unlinkErr != nil {
+			writeAccountError(contextGin, unlinkErr)
+			return
+		}
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+			logAuthError("auth.account.unlink_revoke", revokeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			logAuthError("auth.account.unlink_finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+		}
+	})
+
+	accountRoutes.POST("/disable", func(contextGin *gin.Context) {
+		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		if !ok {
+			return
+		}
+		profile, disableErr := store.DisableAccount(contextGin, tenantID, accountID)
+		if disableErr != nil {
+			writeAccountError(contextGin, disableErr)
+			return
+		}
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+			logAuthError("auth.account.disable_revoke", revokeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		clearCookie(contextGin, config, config.SessionCookieName, "/")
+		clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
+		contextGin.Status(http.StatusNoContent)
+	})
+
 	whoAmI := router.Group("/")
 	whoAmI.Use(RequireSession(registry))
+	whoAmI.Use(RequireActiveAccountSession(registry, accountStore))
 	whoAmI.GET("/me", web.HandleWhoAmI(configuredLogger))
 }
 
@@ -754,10 +1412,96 @@ func bindGoogleLoginInbound(contextGin *gin.Context) (googleLoginInbound, bool) 
 	return inbound, true
 }
 
+func bindAppleCallbackInbound(contextGin *gin.Context) (string, string, bool) {
+	if contextGin.Request.Method == http.MethodPost {
+		if err := contextGin.Request.ParseForm(); err != nil {
+			return "", "", false
+		}
+	}
+	code := strings.TrimSpace(contextGin.Query("code"))
+	state := strings.TrimSpace(contextGin.Query("state"))
+	if code == "" {
+		code = strings.TrimSpace(contextGin.Request.FormValue("code"))
+	}
+	if state == "" {
+		state = strings.TrimSpace(contextGin.Request.FormValue("state"))
+	}
+	if code == "" || state == "" {
+		return "", "", false
+	}
+	return code, state, true
+}
+
 func bindPasswordLoginInbound(contextGin *gin.Context) (passwordLoginInbound, bool) {
 	var inbound passwordLoginInbound
 	if err := contextGin.BindJSON(&inbound); err != nil {
 		return passwordLoginInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindPasswordSignupInbound(contextGin *gin.Context) (passwordSignupInbound, bool) {
+	var inbound passwordSignupInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return passwordSignupInbound{}, false
+	}
+	if strings.TrimSpace(inbound.Email) == "" || strings.TrimSpace(inbound.Password) == "" {
+		return passwordSignupInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindChallengeTokenInbound(contextGin *gin.Context) (challengeTokenInbound, bool) {
+	var inbound challengeTokenInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return challengeTokenInbound{}, false
+	}
+	if strings.TrimSpace(inbound.Token) == "" {
+		return challengeTokenInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindPasswordResetStartInbound(contextGin *gin.Context) (passwordResetStartInbound, bool) {
+	var inbound passwordResetStartInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return passwordResetStartInbound{}, false
+	}
+	if strings.TrimSpace(inbound.Email) == "" {
+		return passwordResetStartInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindPasswordResetCompleteInbound(contextGin *gin.Context) (passwordResetCompleteInbound, bool) {
+	var inbound passwordResetCompleteInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return passwordResetCompleteInbound{}, false
+	}
+	if strings.TrimSpace(inbound.Token) == "" || strings.TrimSpace(inbound.Password) == "" {
+		return passwordResetCompleteInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindPasswordChangeInbound(contextGin *gin.Context) (passwordChangeInbound, bool) {
+	var inbound passwordChangeInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return passwordChangeInbound{}, false
+	}
+	if strings.TrimSpace(inbound.CurrentPassword) == "" || strings.TrimSpace(inbound.NewPassword) == "" {
+		return passwordChangeInbound{}, false
+	}
+	return inbound, true
+}
+
+func bindAccountUnlinkInbound(contextGin *gin.Context) (accountUnlinkInbound, bool) {
+	var inbound accountUnlinkInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return accountUnlinkInbound{}, false
+	}
+	if strings.TrimSpace(inbound.Provider) == "" || strings.TrimSpace(inbound.ProviderID) == "" {
+		return accountUnlinkInbound{}, false
 	}
 	return inbound, true
 }
@@ -973,6 +1717,205 @@ func sessionProfilePayload(userID string, userEmail string, userDisplayName stri
 	}
 }
 
+func accountProfilePayload(profile AccountProfile) gin.H {
+	return gin.H{
+		"user_id":    profile.AccountID,
+		"user_email": profile.UserEmail,
+		"display":    profile.DisplayName,
+		"avatar_url": profile.AvatarURL,
+		"roles":      profile.Roles,
+		"state":      profile.State,
+	}
+}
+
+func challengePayload(config ServerConfig, tokenField string, challenge AccountChallenge) gin.H {
+	payload := gin.H{
+		"status":       "accepted",
+		"account_id":   challenge.AccountID,
+		"expires_unix": challenge.ExpiresUnix,
+	}
+	if config.ReturnChallengeTokens {
+		payload[tokenField] = challenge.Token
+	}
+	return payload
+}
+
+func fakeChallenge(expiresUnix int64) AccountChallenge {
+	token, _, tokenErr := generateRefreshOpaque()
+	if tokenErr != nil {
+		token = "accepted"
+	}
+	return AccountChallenge{Token: token, ExpiresUnix: expiresUnix}
+}
+
+func effectiveDuration(value time.Duration, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func requireAccountManagementStore(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore) (AccountManagementStore, bool) {
+	if !config.AccountManagementEnabled {
+		contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAccountManagementNotConfigured})
+		return nil, false
+	}
+	if accountStore == nil {
+		logAuthError("auth.account.store_missing", nil)
+		contextGin.AbortWithStatus(http.StatusInternalServerError)
+		return nil, false
+	}
+	return accountStore, true
+}
+
+func activeSessionPayloadForClaims(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, claims *JwtCustomClaims) (gin.H, error) {
+	if isAccountSessionID(claims.GetUserID()) {
+		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID())
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		return sessionProfilePayload(profile.AccountID, profile.UserEmail, profile.DisplayName, profile.AvatarURL, profile.Roles, claims.GetExpiresAt()), nil
+	}
+	return sessionProfilePayload(
+		claims.GetUserID(),
+		claims.GetUserEmail(),
+		claims.GetUserDisplayName(),
+		claims.GetUserAvatarURL(),
+		claims.GetUserRoles(),
+		claims.GetExpiresAt(),
+	), nil
+}
+
+func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, config ServerConfig, accountStore AccountManagementStore, tenantID string, applicationUserID string) (authenticatedSessionProfile, error) {
+	if isAccountSessionID(applicationUserID) {
+		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, applicationUserID)
+		if profileErr != nil {
+			return authenticatedSessionProfile{}, profileErr
+		}
+		return authenticatedSessionProfile{
+			applicationUserID: profile.AccountID,
+			userEmail:         profile.UserEmail,
+			userDisplayName:   profile.DisplayName,
+			userAvatarURL:     profile.AvatarURL,
+			userRoles:         profile.Roles,
+		}, nil
+	}
+	userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+	if profileErr != nil {
+		return authenticatedSessionProfile{}, profileErr
+	}
+	return authenticatedSessionProfile{
+		applicationUserID: applicationUserID,
+		userEmail:         userEmail,
+		userDisplayName:   userDisplayName,
+		userAvatarURL:     userAvatarURL,
+		userRoles:         userRoles,
+	}, nil
+}
+
+func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, accountID string) (AccountProfile, error) {
+	if !config.AccountManagementEnabled {
+		return AccountProfile{}, ErrAccountNotActive
+	}
+	if accountStore == nil {
+		return AccountProfile{}, fmt.Errorf("auth.account.store_missing")
+	}
+	profile, profileErr := accountStore.ResolveAccountProfile(contextGin, tenantID, accountID)
+	if profileErr != nil {
+		return AccountProfile{}, profileErr
+	}
+	if profile.State == accountStateDisabled {
+		return AccountProfile{}, ErrAccountDisabled
+	}
+	if profile.State != accountStateActive {
+		return AccountProfile{}, ErrAccountNotActive
+	}
+	return profile, nil
+}
+
+func isAccountSessionID(applicationUserID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(applicationUserID), accountIDPrefix)
+}
+
+func isInactiveAccountSessionError(err error) bool {
+	return errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrAccountNotFound)
+}
+
+func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {
+	tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+	if !resolved {
+		contextGin.AbortWithStatus(http.StatusInternalServerError)
+		return "", ServerConfig{}, "", nil, false
+	}
+	config := registry.Config(tenantID)
+	store, ok := requireAccountManagementStore(contextGin, config, accountStore)
+	if !ok {
+		return "", ServerConfig{}, "", nil, false
+	}
+	claimsValue, exists := contextGin.Get("auth_claims")
+	if !exists {
+		contextGin.AbortWithStatus(http.StatusUnauthorized)
+		return "", ServerConfig{}, "", nil, false
+	}
+	claims, ok := claimsValue.(*JwtCustomClaims)
+	if !ok {
+		contextGin.AbortWithStatus(http.StatusUnauthorized)
+		return "", ServerConfig{}, "", nil, false
+	}
+	accountID := strings.TrimSpace(claims.GetUserID())
+	if !strings.HasPrefix(accountID, accountIDPrefix) {
+		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
+		return "", ServerConfig{}, "", nil, false
+	}
+	profile, profileErr := store.ResolveAccountProfile(contextGin, tenantID, accountID)
+	if profileErr != nil {
+		writeAccountError(contextGin, profileErr)
+		return "", ServerConfig{}, "", nil, false
+	}
+	if profile.State == accountStateDisabled {
+		writeAccountError(contextGin, ErrAccountDisabled)
+		return "", ServerConfig{}, "", nil, false
+	}
+	if profile.State != accountStateActive {
+		writeAccountError(contextGin, ErrAccountNotActive)
+		return "", ServerConfig{}, "", nil, false
+	}
+	return tenantID, config, accountID, store, true
+}
+
+func resolveAppleStartTenantID(contextGin *gin.Context, registry TenantRegistry) (string, bool) {
+	queryTenantID := strings.TrimSpace(contextGin.Query("tenant_id"))
+	if queryTenantID != "" {
+		if _, exists := registry.ConfigByID(queryTenantID); exists {
+			return queryTenantID, true
+		}
+		return "", false
+	}
+	return resolveTenantIDRequired(contextGin, registry)
+}
+
+func writeAccountError(contextGin *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrAccountExists):
+		contextGin.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": errorAccountExists})
+	case errors.Is(err, ErrAccountChallengeInvalid):
+		contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAccountChallengeInvalid})
+	case errors.Is(err, ErrAccountLastIdentity):
+		contextGin.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": errorAccountLastIdentity})
+	case errors.Is(err, ErrAccountDisabled):
+		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountDisabled})
+	case errors.Is(err, ErrAccountNotActive):
+		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
+	case errors.Is(err, ErrPasswordCredentialInvalid):
+		contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorPasswordCredentialInvalid})
+	case errors.Is(err, ErrAccountNotFound):
+		contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "account_not_found"})
+	default:
+		logAuthError("auth.account.error", err)
+		contextGin.AbortWithStatus(http.StatusInternalServerError)
+	}
+}
+
 func consumeBrowserNonce(contextGin *gin.Context, nonces NonceStore, tenantID string, nonceToken string, payload *idtoken.Payload) error {
 	nonceClaim := strings.TrimSpace(readStringClaim(payload, "nonce"))
 	issuedNonceToken := strings.TrimSpace(nonceToken)
@@ -997,25 +1940,63 @@ func finalizeGoogleLogin(
 	tenantID string,
 	identity googleIdentity,
 ) error {
-	applicationUserID, userRoles, upsertErr := users.UpsertGoogleUser(
+	return finalizeProviderLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProviderGoogle, identity.Sub, identity.Email, identity.DisplayName, identity.AvatarURL)
+}
+
+func finalizeProviderLogin(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	provider string,
+	providerID string,
+	userEmail string,
+	userDisplayName string,
+	userAvatarURL string,
+) error {
+	responsePayload, finalizeErr := finalizeProviderLoginPayload(contextGin, users, refreshTokens, clock, config, tenantID, provider, providerID, userEmail, userDisplayName, userAvatarURL)
+	if finalizeErr != nil {
+		return finalizeErr
+	}
+	writeAuthenticatedProfile(contextGin, responsePayload)
+	return nil
+}
+
+func finalizeProviderLoginPayload(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	provider string,
+	providerID string,
+	userEmail string,
+	userDisplayName string,
+	userAvatarURL string,
+) (gin.H, error) {
+	applicationUserID, userRoles, upsertErr := users.UpsertProviderUser(
 		contextGin,
 		tenantID,
-		identity.Sub,
-		identity.Email,
-		identity.DisplayName,
-		identity.AvatarURL,
+		provider,
+		providerID,
+		userEmail,
+		userDisplayName,
+		userAvatarURL,
 	)
 	if upsertErr != nil || applicationUserID == "" {
 		if upsertErr != nil {
-			return fmt.Errorf("%w: %w", errGoogleLoginUserStore, upsertErr)
+			return nil, fmt.Errorf("%w: %w", errGoogleLoginUserStore, upsertErr)
 		}
-		return fmt.Errorf("%w: empty_user_id", errGoogleLoginUserStore)
+		return nil, fmt.Errorf("%w: empty_user_id", errGoogleLoginUserStore)
 	}
-	return finalizeAuthenticatedSession(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
+	return finalizeAuthenticatedSessionPayload(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
 		applicationUserID: applicationUserID,
-		userEmail:         identity.Email,
-		userDisplayName:   identity.DisplayName,
-		userAvatarURL:     identity.AvatarURL,
+		userEmail:         userEmail,
+		userDisplayName:   userDisplayName,
+		userAvatarURL:     userAvatarURL,
 		userRoles:         userRoles,
 	})
 }
@@ -1029,6 +2010,16 @@ func finalizePasswordLogin(
 	tenantID string,
 	profile PasswordCredentialProfile,
 ) error {
+	if strings.TrimSpace(profile.AccountID) != "" {
+		return finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, AccountProfile{
+			AccountID:   profile.AccountID,
+			UserEmail:   profile.UserEmail,
+			DisplayName: profile.DisplayName,
+			AvatarURL:   profile.AvatarURL,
+			Roles:       []string{defaultUserRole},
+			State:       accountStateActive,
+		})
+	}
 	applicationUserID, userRoles, upsertErr := users.UpsertPasswordUser(
 		contextGin,
 		tenantID,
@@ -1051,6 +2042,61 @@ func finalizePasswordLogin(
 	})
 }
 
+func finalizeAccountLogin(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	profile AccountProfile,
+) error {
+	responsePayload, finalizeErr := finalizeAccountLoginPayload(contextGin, users, refreshTokens, clock, config, tenantID, profile)
+	if finalizeErr != nil {
+		return finalizeErr
+	}
+	writeAuthenticatedProfile(contextGin, responsePayload)
+	return nil
+}
+
+func finalizeAccountLoginPayload(
+	contextGin *gin.Context,
+	users UserStore,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	profile AccountProfile,
+) (gin.H, error) {
+	if profile.State == accountStateDisabled {
+		return nil, ErrAccountDisabled
+	}
+	if profile.State != accountStateActive {
+		return nil, ErrAccountNotActive
+	}
+	applicationUserID, userRoles, upsertErr := users.UpsertAccountUser(
+		contextGin,
+		tenantID,
+		profile.AccountID,
+		profile.UserEmail,
+		profile.DisplayName,
+		profile.AvatarURL,
+	)
+	if upsertErr != nil || applicationUserID == "" {
+		if upsertErr != nil {
+			return nil, fmt.Errorf("auth.login.account.user_store: %w", upsertErr)
+		}
+		return nil, fmt.Errorf("auth.login.account.user_store: empty_user_id")
+	}
+	return finalizeAuthenticatedSessionPayload(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
+		applicationUserID: applicationUserID,
+		userEmail:         profile.UserEmail,
+		userDisplayName:   profile.DisplayName,
+		userAvatarURL:     profile.AvatarURL,
+		userRoles:         userRoles,
+	})
+}
+
 func finalizeAuthenticatedSession(
 	contextGin *gin.Context,
 	refreshTokens RefreshTokenStore,
@@ -1059,6 +2105,22 @@ func finalizeAuthenticatedSession(
 	tenantID string,
 	profile authenticatedSessionProfile,
 ) error {
+	responsePayload, finalizeErr := finalizeAuthenticatedSessionPayload(contextGin, refreshTokens, clock, config, tenantID, profile)
+	if finalizeErr != nil {
+		return finalizeErr
+	}
+	writeAuthenticatedProfile(contextGin, responsePayload)
+	return nil
+}
+
+func finalizeAuthenticatedSessionPayload(
+	contextGin *gin.Context,
+	refreshTokens RefreshTokenStore,
+	clock Clock,
+	config ServerConfig,
+	tenantID string,
+	profile authenticatedSessionProfile,
+) (gin.H, error) {
 	sessionToken, sessionExpiresAt, mintErr := MintAppJWT(
 		clock,
 		tenantID,
@@ -1072,26 +2134,37 @@ func finalizeAuthenticatedSession(
 		config.SessionTTL,
 	)
 	if mintErr != nil {
-		return fmt.Errorf("%w: %w", errGoogleLoginMintJWT, mintErr)
+		return nil, fmt.Errorf("%w: %w", errGoogleLoginMintJWT, mintErr)
 	}
 	refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
 	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, profile.applicationUserID, refreshDeadline.Unix(), "")
 	if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
 		if issueErr != nil {
-			return fmt.Errorf("%w: %w", errGoogleLoginIssueRefresh, issueErr)
+			return nil, fmt.Errorf("%w: %w", errGoogleLoginIssueRefresh, issueErr)
 		}
-		return fmt.Errorf("%w: empty_token", errGoogleLoginIssueRefresh)
+		return nil, fmt.Errorf("%w: empty_token", errGoogleLoginIssueRefresh)
 	}
 	writeSessionCookie(contextGin, config, sessionToken, sessionExpiresAt)
 	writeRefreshCookie(contextGin, config, refreshOpaque, refreshDeadline)
-	contextGin.JSON(http.StatusOK, gin.H{
+	return gin.H{
 		"user_id":    profile.applicationUserID,
 		"user_email": profile.userEmail,
 		"display":    profile.userDisplayName,
 		"avatar_url": profile.userAvatarURL,
 		"roles":      profile.userRoles,
-	})
-	return nil
+	}, nil
+}
+
+func writeAuthenticatedProfile(contextGin *gin.Context, responsePayload gin.H) {
+	contextGin.JSON(http.StatusOK, responsePayload)
+}
+
+func writeAppleCallbackSuccess(contextGin *gin.Context, statePayload appleOAuthState, responsePayload gin.H) {
+	if strings.TrimSpace(statePayload.ReturnTo) != "" {
+		contextGin.Redirect(http.StatusSeeOther, statePayload.ReturnTo)
+		return
+	}
+	writeAuthenticatedProfile(contextGin, responsePayload)
 }
 
 func writeSessionCookie(contextGin *gin.Context, configuration ServerConfig, sessionToken string, expiresAt time.Time) {

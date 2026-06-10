@@ -45,6 +45,18 @@ tenants:
     tenant_origins: ["`+testTenantOrigin+`"]
     google_web_client_id: "demo-client.apps.googleusercontent.com"
     google_native_client_id: "demo-native.apps.googleusercontent.com"
+    apple_oauth:
+      enabled: true
+      client_id: "com.example.web"
+      team_id: "TEAMID1234"
+      key_id: "KEYID12345"
+      private_key: |
+        -----BEGIN PRIVATE KEY-----
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOtX4DboO+3EK3QiI
+        gcyd4R5kCEvi1tpUe/KUYMzR6aWhRANCAARPSwbYVpecI9G3UW5MFq+4gx/PkWAC
+        Y2c91Z0fHH9N5PRVUNFolUdxFmc8dR6Av/dpUVOicqcc0HT9DpQfIPeT
+        -----END PRIVATE KEY-----
+      redirect_uri: "https://tauth.example.com/auth/apple/callback"
     jwt_signing_key: "`+testSigningKey+`"
     cookie_domain: "demo.localhost"
     session_cookie_name: "`+testSessionCookieName+`"
@@ -80,28 +92,43 @@ type testServerPayload struct {
 }
 
 type testTenantPayload struct {
-	TenantID                 string                          `json:"tenant_id"`
-	DisplayName              string                          `json:"display_name"`
-	TenantOrigins            []string                        `json:"tenant_origins"`
-	TenantOriginsRedacted    bool                            `json:"tenant_origins_redacted"`
-	TenantOriginsCount       int                             `json:"tenant_origins_count"`
-	TenantOriginHashes       []string                        `json:"tenant_origin_hashes"`
-	GoogleWebClientID        string                          `json:"google_web_client_id"`
-	GoogleNativeClientID     string                          `json:"google_native_client_id"`
-	GoogleNativeClientIDs    []string                        `json:"google_native_client_ids"`
-	GoogleNativeClients      []testNativeGoogleClientPayload `json:"google_native_clients"`
-	PasswordAuthEnabled      bool                            `json:"password_auth_enabled"`
-	PasswordUserCount        int                             `json:"password_user_count"`
-	CookieDomain             string                          `json:"cookie_domain"`
-	SessionCookieName        string                          `json:"session_cookie_name"`
-	RefreshCookieName        string                          `json:"refresh_cookie_name"`
-	SessionTTL               string                          `json:"session_ttl"`
-	RefreshTTL               string                          `json:"refresh_ttl"`
-	NonceTTL                 string                          `json:"nonce_ttl"`
-	AllowInsecureHTTP        bool                            `json:"allow_insecure_http"`
-	SameSiteMode             string                          `json:"same_site_mode"`
-	JWTIssuer                string                          `json:"jwt_issuer"`
-	JWTSigningKeyFingerprint string                          `json:"jwt_signing_key_fingerprint"`
+	TenantID                   string                          `json:"tenant_id"`
+	DisplayName                string                          `json:"display_name"`
+	TenantOrigins              []string                        `json:"tenant_origins"`
+	TenantOriginsRedacted      bool                            `json:"tenant_origins_redacted"`
+	TenantOriginsCount         int                             `json:"tenant_origins_count"`
+	TenantOriginHashes         []string                        `json:"tenant_origin_hashes"`
+	GoogleWebClientID          string                          `json:"google_web_client_id"`
+	GoogleNativeClientID       string                          `json:"google_native_client_id"`
+	GoogleNativeClientIDs      []string                        `json:"google_native_client_ids"`
+	GoogleNativeClients        []testNativeGoogleClientPayload `json:"google_native_clients"`
+	AppleOAuthEnabled          bool                            `json:"apple_oauth_enabled"`
+	AppleClientID              string                          `json:"apple_client_id"`
+	AppleTeamID                string                          `json:"apple_team_id"`
+	AppleKeyID                 string                          `json:"apple_key_id"`
+	ApplePrivateKeyFingerprint string                          `json:"apple_private_key_fingerprint"`
+	AppleRedirectURI           string                          `json:"apple_redirect_uri"`
+	AppleScopes                []string                        `json:"apple_scopes"`
+	AppleAuthorizationEndpoint string                          `json:"apple_authorization_endpoint"`
+	AppleTokenEndpoint         string                          `json:"apple_token_endpoint"`
+	AppleJWKSURL               string                          `json:"apple_jwks_url"`
+	PasswordAuthEnabled        bool                            `json:"password_auth_enabled"`
+	PasswordUserCount          int                             `json:"password_user_count"`
+	AccountManagementEnabled   bool                            `json:"account_management_enabled"`
+	PasswordSignupEnabled      bool                            `json:"password_signup_enabled"`
+	ReturnChallengeTokens      bool                            `json:"return_challenge_tokens"`
+	EmailVerificationTTL       string                          `json:"email_verification_ttl"`
+	PasswordResetTTL           string                          `json:"password_reset_ttl"`
+	CookieDomain               string                          `json:"cookie_domain"`
+	SessionCookieName          string                          `json:"session_cookie_name"`
+	RefreshCookieName          string                          `json:"refresh_cookie_name"`
+	SessionTTL                 string                          `json:"session_ttl"`
+	RefreshTTL                 string                          `json:"refresh_ttl"`
+	NonceTTL                   string                          `json:"nonce_ttl"`
+	AllowInsecureHTTP          bool                            `json:"allow_insecure_http"`
+	SameSiteMode               string                          `json:"same_site_mode"`
+	JWTIssuer                  string                          `json:"jwt_issuer"`
+	JWTSigningKeyFingerprint   string                          `json:"jwt_signing_key_fingerprint"`
 }
 
 type testNativeGoogleClientPayload struct {
@@ -165,8 +192,20 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	if len(tenant.GoogleNativeClients) != 1 || tenant.GoogleNativeClients[0].Platform != "desktop" {
 		testingHandle.Fatalf("unexpected google_native_clients: %#v", tenant.GoogleNativeClients)
 	}
+	if !tenant.AppleOAuthEnabled || tenant.AppleClientID != "com.example.web" || tenant.AppleRedirectURI != "https://tauth.example.com/auth/apple/callback" {
+		testingHandle.Fatalf("unexpected Apple OAuth report fields: %#v", tenant)
+	}
+	if tenant.ApplePrivateKeyFingerprint == "" || len(tenant.AppleScopes) != 3 {
+		testingHandle.Fatalf("expected Apple private key fingerprint and default scopes")
+	}
 	if tenant.PasswordAuthEnabled || tenant.PasswordUserCount != 0 {
 		testingHandle.Fatalf("unexpected password auth report fields")
+	}
+	if tenant.AccountManagementEnabled || tenant.PasswordSignupEnabled || tenant.ReturnChallengeTokens {
+		testingHandle.Fatalf("unexpected account management report fields")
+	}
+	if tenant.EmailVerificationTTL == "" || tenant.PasswordResetTTL == "" {
+		testingHandle.Fatalf("expected account management TTL fields")
 	}
 }
 

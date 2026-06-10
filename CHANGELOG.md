@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Features
+- Added tenant-enabled Sign in with Apple using `/auth/apple/start` and `/auth/apple/callback`, including signed state, nonce validation, Apple client-secret JWT generation, JWKS-backed ID-token validation, allowlist enforcement, account-management support, and the `tauth.js` Apple login helpers.
+- Added full tenant-gated account management for first-party email/password accounts, including signup, email verification, reset, password change, Google/password linking, unlinking, account disablement, stable account IDs, and account-level refresh revocation.
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
@@ -15,6 +17,7 @@
 
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
+- Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestMemoryPasswordCredentialStoreAuthenticates(testingHandle *testing.T) {
@@ -89,5 +90,48 @@ func TestMemoryPasswordCredentialStoreReconcilesCredentials(testingHandle *testi
 	}
 	if _, removedErr := store.AuthenticatePassword(context.Background(), "tenant-a", "kept@example.com", "correct horse battery staple"); !errors.Is(removedErr, ErrPasswordCredentialInvalid) {
 		testingHandle.Fatalf("expected empty config to remove kept credential, got %v", removedErr)
+	}
+}
+
+func TestMemoryPasswordCredentialStoreReconcilePreservesSignupCredentials(testingHandle *testing.T) {
+	store := NewMemoryPasswordCredentialStore()
+	expiresUnix := time.Now().UTC().Add(time.Hour).Unix()
+	challenge, signupErr := store.CreatePasswordSignup(context.Background(), "tenant-a", AccountPasswordRequest{
+		UserEmail:   "Signup@Example.com",
+		DisplayName: "Signup User",
+		Password:    "correct horse battery staple",
+	}, expiresUnix)
+	if signupErr != nil {
+		testingHandle.Fatalf("failed to create signup: %v", signupErr)
+	}
+	if _, verifyErr := store.VerifyEmailChallenge(context.Background(), "tenant-a", challenge.Token); verifyErr != nil {
+		testingHandle.Fatalf("failed to verify signup: %v", verifyErr)
+	}
+	passwordHash, hashErr := HashPassword("configured password value")
+	if hashErr != nil {
+		testingHandle.Fatalf("failed to hash configured password: %v", hashErr)
+	}
+	if seedErr := store.UpsertPasswordCredential(context.Background(), "tenant-a", PasswordCredentialSeed{
+		UserEmail:    "configured@example.com",
+		DisplayName:  "Configured User",
+		PasswordHash: passwordHash,
+	}); seedErr != nil {
+		testingHandle.Fatalf("failed to seed configured credential: %v", seedErr)
+	}
+
+	if reconcileErr := store.ReconcilePasswordCredentials(context.Background(), "tenant-a", []string{"configured@example.com"}); reconcileErr != nil {
+		testingHandle.Fatalf("failed to reconcile configured credentials: %v", reconcileErr)
+	}
+	if _, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "signup@example.com", "correct horse battery staple"); authErr != nil {
+		testingHandle.Fatalf("expected signup credential to survive reconcile: %v", authErr)
+	}
+	if reconcileErr := store.ReconcilePasswordCredentials(context.Background(), "tenant-a", nil); reconcileErr != nil {
+		testingHandle.Fatalf("failed to reconcile empty configured credentials: %v", reconcileErr)
+	}
+	if _, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "signup@example.com", "correct horse battery staple"); authErr != nil {
+		testingHandle.Fatalf("expected signup credential to survive empty reconcile: %v", authErr)
+	}
+	if _, configErr := store.AuthenticatePassword(context.Background(), "tenant-a", "configured@example.com", "configured password value"); !errors.Is(configErr, ErrPasswordCredentialInvalid) {
+		testingHandle.Fatalf("expected configured credential to be removed, got %v", configErr)
 	}
 }

@@ -33,16 +33,20 @@ type PasswordCredentialSeed struct {
 
 // PasswordCredentialProfile is the trusted profile returned after password verification.
 type PasswordCredentialProfile struct {
+	AccountID   string
 	UserEmail   string
 	DisplayName string
 	AvatarURL   string
 }
 
 type passwordCredential struct {
-	userEmail    string
-	displayName  string
-	avatarURL    string
-	passwordHash string
+	accountID       string
+	userEmail       string
+	displayName     string
+	avatarURL       string
+	passwordHash    string
+	verified        bool
+	managedByConfig bool
 }
 
 type passwordHashComparer func(hashedPassword []byte, password []byte) error
@@ -51,6 +55,9 @@ type passwordHashComparer func(hashedPassword []byte, password []byte) error
 type MemoryPasswordCredentialStore struct {
 	mu                   sync.RWMutex
 	tenants              map[string]map[string]passwordCredential
+	accounts             map[string]map[string]*accountRecord
+	identities           map[string]map[string]accountIdentityRecord
+	challenges           map[string]map[string]*accountChallengeRecord
 	passwordHashComparer passwordHashComparer
 }
 
@@ -58,6 +65,9 @@ type MemoryPasswordCredentialStore struct {
 func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 	return &MemoryPasswordCredentialStore{
 		tenants:              make(map[string]map[string]passwordCredential),
+		accounts:             make(map[string]map[string]*accountRecord),
+		identities:           make(map[string]map[string]accountIdentityRecord),
+		challenges:           make(map[string]map[string]*accountChallengeRecord),
 		passwordHashComparer: bcrypt.CompareHashAndPassword,
 	}
 }
@@ -98,7 +108,10 @@ func (store *MemoryPasswordCredentialStore) ReconcilePasswordCredentials(ctx con
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	tenantCredentials := store.tenants[tenantID]
-	for credentialEmail := range tenantCredentials {
+	for credentialEmail, credential := range tenantCredentials {
+		if !credential.managedByConfig {
+			continue
+		}
 		if _, exists := configuredEmailSet[credentialEmail]; !exists {
 			delete(tenantCredentials, credentialEmail)
 		}
@@ -121,6 +134,13 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	store.mu.RLock()
 	tenantCredentials := store.tenants[tenantID]
 	credential, exists := tenantCredentials[normalizedEmail]
+	accountState := ""
+	if exists && credential.accountID != "" {
+		account := store.accounts[tenantID][credential.accountID]
+		if account != nil {
+			accountState = account.state
+		}
+	}
 	store.mu.RUnlock()
 	if !exists {
 		_ = store.passwordHashComparer([]byte(passwordCredentialTimingHash), []byte(password))
@@ -129,7 +149,17 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	if compareErr := store.passwordHashComparer([]byte(credential.passwordHash), []byte(password)); compareErr != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
 	}
+	if !credential.verified {
+		return PasswordCredentialProfile{}, ErrAccountNotActive
+	}
+	if accountState == accountStateDisabled {
+		return PasswordCredentialProfile{}, ErrAccountDisabled
+	}
+	if accountState != "" && accountState != accountStateActive {
+		return PasswordCredentialProfile{}, ErrAccountNotActive
+	}
 	return PasswordCredentialProfile{
+		AccountID:   credential.accountID,
 		UserEmail:   credential.userEmail,
 		DisplayName: credential.displayName,
 		AvatarURL:   credential.avatarURL,
@@ -153,10 +183,12 @@ func normalizePasswordCredentialSeed(credential PasswordCredentialSeed) (passwor
 		displayName = normalizedEmail
 	}
 	return passwordCredential{
-		userEmail:    normalizedEmail,
-		displayName:  displayName,
-		avatarURL:    strings.TrimSpace(credential.AvatarURL),
-		passwordHash: passwordHash,
+		userEmail:       normalizedEmail,
+		displayName:     displayName,
+		avatarURL:       strings.TrimSpace(credential.AvatarURL),
+		passwordHash:    passwordHash,
+		verified:        true,
+		managedByConfig: true,
 	}, nil
 }
 

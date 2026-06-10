@@ -123,3 +123,15 @@ func (store *DatabaseRefreshTokenStore) Revoke(ctx context.Context, tenantID str
 	}
 	return nil
 }
+
+// RevokeUser marks all active refresh tokens for an application user as revoked.
+func (store *DatabaseRefreshTokenStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	now := time.Now().UTC()
+	result := store.db.WithContext(ctx).Model(&refreshTokenRecord{}).
+		Where("tenant_id = ? AND user_id = ? AND revoked_at_unix = 0", tenantID, applicationUserID).
+		Update("revoked_at_unix", now.Unix())
+	if result.Error != nil {
+		return fmt.Errorf("refresh_store.revoke_user.%s: %w", store.driverLabel, result.Error)
+	}
+	return nil
+}

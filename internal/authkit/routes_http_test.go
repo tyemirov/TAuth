@@ -3,11 +3,19 @@ package authkit
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/pkg/sessionvalidator"
 	"go.uber.org/zap/zaptest"
@@ -162,11 +171,25 @@ func (store *mutableUserStore) UpsertGoogleUser(ctx context.Context, tenantID st
 	return store.inner.UpsertGoogleUser(ctx, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
 }
 
+func (store *mutableUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	if store.upsertErr != nil {
+		return "", nil, store.upsertErr
+	}
+	return store.inner.UpsertProviderUser(ctx, tenantID, provider, providerID, userEmail, userDisplayName, userAvatarURL)
+}
+
 func (store *mutableUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	if store.upsertErr != nil {
 		return "", nil, store.upsertErr
 	}
 	return store.inner.UpsertPasswordUser(ctx, tenantID, userEmail, userDisplayName, userAvatarURL)
+}
+
+func (store *mutableUserStore) UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	if store.upsertErr != nil {
+		return "", nil, store.upsertErr
+	}
+	return store.inner.UpsertAccountUser(ctx, tenantID, accountID, userEmail, userDisplayName, userAvatarURL)
 }
 
 func (store *mutableUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
@@ -218,6 +241,10 @@ func (store revokeFailureRefreshStore) Revoke(ctx context.Context, tenantID stri
 		return store.revokeErr
 	}
 	return store.delegate.Revoke(ctx, tenantID, tokenID)
+}
+
+func (store revokeFailureRefreshStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	return store.delegate.RevokeUser(ctx, tenantID, applicationUserID)
 }
 
 func buildMultiTenantRegistry(base ServerConfig) TenantRegistry {
@@ -1405,6 +1432,10 @@ func (store validateFailureRefreshStore) Validate(ctx context.Context, tenantID 
 
 func (store validateFailureRefreshStore) Revoke(ctx context.Context, tenantID string, tokenID string) error {
 	return store.delegate.Revoke(ctx, tenantID, tokenID)
+}
+
+func (store validateFailureRefreshStore) RevokeUser(ctx context.Context, tenantID string, applicationUserID string) error {
+	return store.delegate.RevokeUser(ctx, tenantID, applicationUserID)
 }
 
 func TestHTTPAuthRefreshValidateInternalErrorReturns500(t *testing.T) {
@@ -4089,6 +4120,208 @@ func TestHTTPAuthLoginAllowsListedUser(testingHandle *testing.T) {
 	}
 }
 
+func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rsaKey, keyErr := rsa.GenerateKey(rand.Reader, 2048)
+	if keyErr != nil {
+		testingHandle.Fatalf("generate mock Apple signing key: %v", keyErr)
+	}
+	appleKeyID := "apple-test-key"
+	expectedNonce := ""
+	var tokenRequest url.Values
+
+	appleRouter := http.NewServeMux()
+	appleRouter.HandleFunc("/auth/token", func(responseWriter http.ResponseWriter, request *http.Request) {
+		if parseErr := request.ParseForm(); parseErr != nil {
+			http.Error(responseWriter, parseErr.Error(), http.StatusBadRequest)
+			return
+		}
+		tokenRequest = request.PostForm
+		idToken := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.web", "apple-subject", "apple@example.com", "Apple User", expectedNonce)
+		responseWriter.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(responseWriter).Encode(map[string]interface{}{
+			"access_token":  "apple-access-token",
+			"expires_in":    3600,
+			"id_token":      idToken,
+			"refresh_token": "discarded-apple-refresh",
+			"token_type":    "Bearer",
+		})
+	})
+	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
+		responseWriter.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
+	})
+	appleServer := newInProcessServer(appleRouter, true)
+	defer appleServer.Close()
+
+	ProvideAppleOAuthHTTPClient(appleServer.Client())
+	defer ProvideAppleOAuthHTTPClient(nil)
+
+	config := newTestServerConfig()
+	config.TenantOrigins = []string{"https://product.example.com"}
+	config.AppleOAuth = AppleOAuthConfig{
+		Enabled:               true,
+		ClientID:              "com.example.web",
+		TeamID:                "TEAMID1234",
+		KeyID:                 "KEYID12345",
+		PrivateKey:            generateTestAppleClientPrivateKeyPEM(testingHandle),
+		RedirectURI:           "https://in-process.local/auth/apple/callback",
+		Scopes:                []string{"openid", "email", "name"},
+		AuthorizationEndpoint: appleServer.URL + "/auth/authorize",
+		TokenEndpoint:         appleServer.URL + "/auth/token",
+		JWKSURL:               appleServer.URL + "/auth/keys",
+	}
+	registry := NewSingleTenantRegistry(config)
+	userStore := newTestUserStore()
+	refreshStore := NewMemoryRefreshTokenStore()
+	clock := &controllableClock{current: time.Now().UTC()}
+	ProvideClock(clock)
+	defer ProvideClock(nil)
+
+	router := gin.New()
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	server := newInProcessServer(router, true)
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(request *http.Request, requests []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	startAppleAuthorization := func(startURL string) (url.Values, string) {
+		startRequest, startErr := http.NewRequest(http.MethodGet, startURL, nil)
+		if startErr != nil {
+			testingHandle.Fatalf("build Apple start request: %v", startErr)
+		}
+		startResponse, startErr := client.Do(startRequest)
+		if startErr != nil {
+			testingHandle.Fatalf("Apple start request failed: %v", startErr)
+		}
+		defer startResponse.Body.Close()
+		if startResponse.StatusCode != http.StatusFound {
+			testingHandle.Fatalf("expected Apple start redirect, got %d", startResponse.StatusCode)
+		}
+		authorizationURL, parseErr := url.Parse(startResponse.Header.Get("Location"))
+		if parseErr != nil {
+			testingHandle.Fatalf("parse Apple authorization redirect: %v", parseErr)
+		}
+		query := authorizationURL.Query()
+		state := query.Get("state")
+		nonce := query.Get("nonce")
+		if state == "" || nonce == "" {
+			testingHandle.Fatalf("expected state and nonce in Apple authorization redirect: %s", authorizationURL.String())
+		}
+		if query.Get("client_id") != "com.example.web" || query.Get("redirect_uri") != config.AppleOAuth.RedirectURI {
+			testingHandle.Fatalf("unexpected Apple authorization query: %s", authorizationURL.RawQuery)
+		}
+		return query, state
+	}
+
+	query, state := startAppleAuthorization(server.URL + "/auth/apple/start")
+	expectedNonce = query.Get("nonce")
+	callbackURL := server.URL + "/auth/apple/callback?code=apple-code&state=" + url.QueryEscape(state)
+	callbackRequest, callbackErr := http.NewRequest(http.MethodGet, callbackURL, nil)
+	if callbackErr != nil {
+		testingHandle.Fatalf("build Apple callback request: %v", callbackErr)
+	}
+	callbackResponse, callbackErr := client.Do(callbackRequest)
+	if callbackErr != nil {
+		testingHandle.Fatalf("Apple callback request failed: %v", callbackErr)
+	}
+	defer callbackResponse.Body.Close()
+	if callbackResponse.StatusCode != http.StatusOK {
+		testingHandle.Fatalf("expected Apple callback to mint a session, got %d", callbackResponse.StatusCode)
+	}
+	if tokenRequest.Get("client_id") != "com.example.web" || tokenRequest.Get("code") != "apple-code" || tokenRequest.Get("grant_type") != "authorization_code" {
+		testingHandle.Fatalf("unexpected Apple token request form: %#v", tokenRequest)
+	}
+	if tokenRequest.Get("redirect_uri") != config.AppleOAuth.RedirectURI || tokenRequest.Get("client_secret") == "" {
+		testingHandle.Fatalf("expected Apple token request redirect_uri and client_secret, got %#v", tokenRequest)
+	}
+	var profile map[string]interface{}
+	if decodeErr := json.NewDecoder(callbackResponse.Body).Decode(&profile); decodeErr != nil {
+		testingHandle.Fatalf("decode Apple callback profile: %v", decodeErr)
+	}
+	if profile["user_id"] != "apple:apple-subject" || profile["user_email"] != "apple@example.com" {
+		testingHandle.Fatalf("unexpected Apple profile: %#v", profile)
+	}
+	cookies := captureAuthCookies(authCookieState{}, callbackResponse.Cookies(), config)
+	if cookies.session == "" || cookies.refresh == "" {
+		testingHandle.Fatalf("expected Apple callback to set session and refresh cookies")
+	}
+
+	returnToURL := "https://product.example.com/library?login=apple"
+	returnQuery, returnState := startAppleAuthorization(server.URL + "/auth/apple/start?return_to=" + url.QueryEscape(returnToURL))
+	expectedNonce = returnQuery.Get("nonce")
+	redirectCallbackURL := server.URL + "/auth/apple/callback?code=apple-code-return&state=" + url.QueryEscape(returnState)
+	redirectCallbackRequest, redirectCallbackErr := http.NewRequest(http.MethodGet, redirectCallbackURL, nil)
+	if redirectCallbackErr != nil {
+		testingHandle.Fatalf("build Apple redirect callback request: %v", redirectCallbackErr)
+	}
+	redirectCallbackResponse, redirectCallbackErr := client.Do(redirectCallbackRequest)
+	if redirectCallbackErr != nil {
+		testingHandle.Fatalf("Apple redirect callback request failed: %v", redirectCallbackErr)
+	}
+	defer redirectCallbackResponse.Body.Close()
+	if redirectCallbackResponse.StatusCode != http.StatusSeeOther {
+		testingHandle.Fatalf("expected Apple callback to redirect to return_to, got %d", redirectCallbackResponse.StatusCode)
+	}
+	if redirectCallbackResponse.Header.Get("Location") != returnToURL {
+		testingHandle.Fatalf("expected return_to redirect %q, got %q", returnToURL, redirectCallbackResponse.Header.Get("Location"))
+	}
+	if tokenRequest.Get("code") != "apple-code-return" {
+		testingHandle.Fatalf("expected second Apple code exchange, got %#v", tokenRequest)
+	}
+	redirectCookies := captureAuthCookies(authCookieState{}, redirectCallbackResponse.Cookies(), config)
+	if redirectCookies.session == "" || redirectCookies.refresh == "" {
+		testingHandle.Fatalf("expected Apple redirect callback to set session and refresh cookies")
+	}
+}
+
+func TestHTTPAppleOAuthStartRejectsUnregisteredReturnTo(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.TenantOrigins = []string{"https://allowed.example.com"}
+	config.AppleOAuth = AppleOAuthConfig{
+		Enabled:               true,
+		ClientID:              "com.example.web",
+		TeamID:                "TEAMID1234",
+		KeyID:                 "KEYID12345",
+		PrivateKey:            generateTestAppleClientPrivateKeyPEM(testingHandle),
+		RedirectURI:           "https://in-process.local/auth/apple/callback",
+		Scopes:                []string{"openid", "email", "name"},
+		AuthorizationEndpoint: "https://appleid.apple.com/auth/authorize",
+		TokenEndpoint:         "https://appleid.apple.com/auth/token",
+		JWKSURL:               "https://appleid.apple.com/auth/keys",
+	}
+
+	router := gin.New()
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	server := newInProcessServer(router, true)
+	defer server.Close()
+
+	request, requestErr := http.NewRequest(http.MethodGet, server.URL+"/auth/apple/start?return_to="+url.QueryEscape("https://evil.example.com/app"), nil)
+	if requestErr != nil {
+		testingHandle.Fatalf("build Apple start request: %v", requestErr)
+	}
+	response, responseErr := server.Client().Do(request)
+	if responseErr != nil {
+		testingHandle.Fatalf("Apple start request failed: %v", responseErr)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		testingHandle.Fatalf("expected invalid return_to rejection, got %d", response.StatusCode)
+	}
+	var payload map[string]interface{}
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		testingHandle.Fatalf("decode invalid return_to response: %v", decodeErr)
+	}
+	if payload["error"] != errorAppleReturnToInvalid {
+		testingHandle.Fatalf("expected invalid_return_to, got %#v", payload)
+	}
+}
+
 func issueNonceViaClient(t *testing.T, client *http.Client, baseURL string) string {
 	return issueNonceViaClientWithHeaders(t, client, baseURL, nil)
 }
@@ -4167,4 +4400,65 @@ func loginWithTenantHeader(t *testing.T, client *http.Client, baseURL string, va
 		headers[testHostHeader] = host
 	}
 	return loginWithNonceAndHeaders(t, client, baseURL, validator, token, headers)
+}
+
+func generateTestAppleClientPrivateKeyPEM(testingHandle *testing.T) string {
+	testingHandle.Helper()
+	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		testingHandle.Fatalf("generate Apple client private key: %v", keyErr)
+	}
+	encodedKey, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal Apple client private key: %v", marshalErr)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedKey}))
+}
+
+func mintMockAppleIDToken(testingHandle *testing.T, privateKey *rsa.PrivateKey, keyID string, audience string, subject string, email string, displayName string, nonce string) string {
+	testingHandle.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss":            appleIssuer,
+		"aud":            audience,
+		"sub":            subject,
+		"email":          email,
+		"email_verified": "true",
+		"name":           displayName,
+		"nonce":          nonce,
+		"iat":            time.Now().UTC().Unix(),
+		"exp":            time.Now().UTC().Add(time.Minute).Unix(),
+	})
+	token.Header["kid"] = keyID
+	signedToken, signErr := token.SignedString(privateKey)
+	if signErr != nil {
+		testingHandle.Fatalf("sign mock Apple ID token: %v", signErr)
+	}
+	return signedToken
+}
+
+func mockAppleJWKS(privateKey *rsa.PrivateKey, keyID string) map[string]interface{} {
+	publicKey := privateKey.PublicKey
+	return map[string]interface{}{
+		"keys": []map[string]string{
+			{
+				"kty": "RSA",
+				"kid": keyID,
+				"use": "sig",
+				"alg": "RS256",
+				"n":   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(bigEndianExponent(publicKey.E)),
+			},
+		},
+	}
+}
+
+func bigEndianExponent(value int) []byte {
+	if value == 0 {
+		return []byte{0}
+	}
+	bytesValue := []byte{}
+	for remaining := value; remaining > 0; remaining >>= 8 {
+		bytesValue = append([]byte{byte(remaining & 0xff)}, bytesValue...)
+	}
+	return bytesValue
 }

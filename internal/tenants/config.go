@@ -1,8 +1,13 @@
 package tenants
 
 import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
 	"os"
@@ -32,8 +37,10 @@ type Tenant struct {
 	googleWebClientID    string
 	googleNativeClientID string
 	nativeGoogleClients  []NativeGoogleClient
+	appleOAuth           AppleOAuth
 	passwordAuthEnabled  bool
 	passwordUsers        []PasswordUser
+	accountManagement    AccountManagement
 	jwtSigningKey        []byte
 	cookieDomain         string
 	sessionCookieName    string
@@ -54,12 +61,35 @@ type NativeGoogleClient struct {
 	redirectURIs []string
 }
 
+// AppleOAuth represents tenant-level Sign in with Apple settings.
+type AppleOAuth struct {
+	enabled               bool
+	clientID              string
+	teamID                string
+	keyID                 string
+	privateKey            string
+	redirectURI           string
+	scopes                []string
+	authorizationEndpoint string
+	tokenEndpoint         string
+	jwksURL               string
+}
+
 // PasswordUser represents one configured email/password user.
 type PasswordUser struct {
 	email        string
 	displayName  string
 	avatarURL    string
 	passwordHash string
+}
+
+// AccountManagement represents tenant-level account lifecycle settings.
+type AccountManagement struct {
+	enabled               bool
+	passwordSignupEnabled bool
+	returnChallengeTokens bool
+	emailVerificationTTL  time.Duration
+	passwordResetTTL      time.Duration
 }
 
 type tenantCookieScope struct {
@@ -74,47 +104,65 @@ type tenantCookieScope struct {
 var ErrInvalidTenantConfig = errors.New("tenantconfig.invalid")
 
 const (
-	tenantIDPattern                     = "^[a-z0-9][a-z0-9_-]{1,63}$"
-	nativeGooglePlatformPattern         = "^[a-z][a-z0-9_-]{1,31}$"
-	defaultNonceTTL                     = 5 * time.Minute
-	defaultNativeGooglePlatform         = "desktop"
-	errorCodeInvalidPath                = "tenant.invalid_path"
-	errorCodeMissingTenants             = "tenant.missing_records"
-	errorCodeDuplicateTenantID          = "tenant.duplicate_id"
-	errorCodeInvalidID                  = "tenant.invalid_id"
-	errorCodeMissingOrigins             = "tenant.missing_origins"
-	errorCodeInvalidOrigin              = "tenant.invalid_origin"
-	errorCodeDuplicateOrigin            = "tenant.duplicate_origin"
-	errorCodeInvalidAllowedUser         = "tenant.invalid_allowed_user"
-	errorCodeDuplicateAllowedUser       = "tenant.duplicate_allowed_user"
-	errorCodeInvalidGoogleID            = "tenant.invalid_google_client_id"
-	errorCodeInvalidNativeGoogleID      = "tenant.invalid_native_google_client_id"
-	errorCodeInvalidNativePlatform      = "tenant.invalid_native_google_platform"
-	errorCodeInvalidNativeRedirectURI   = "tenant.invalid_native_redirect_uri"
-	errorCodeDuplicateNativeGoogleID    = "tenant.duplicate_native_google_client_id"
-	errorCodePasswordAuthDisabled       = "tenant.password_auth_disabled"
-	errorCodeInvalidPasswordUser        = "tenant.invalid_password_user"
-	errorCodeDuplicatePasswordUser      = "tenant.duplicate_password_user"
-	errorCodeInvalidPasswordHash        = "tenant.invalid_password_hash"
-	errorCodeInvalidSessionTTL          = "tenant.invalid_session_ttl"
-	errorCodeInvalidRefreshTTL          = "tenant.invalid_refresh_ttl"
-	errorCodeInvalidNonceTTL            = "tenant.invalid_nonce_ttl"
-	errorCodeMissingSigningKey          = "tenant.missing_signing_key"
-	errorCodeMissingSessionCookieName   = "tenant.missing_session_cookie_name"
-	errorCodeMissingRefreshCookieName   = "tenant.missing_refresh_cookie_name"
-	errorCodeDuplicateSessionCookieName = "tenant.duplicate_session_cookie_name"
-	errorCodeDuplicateRefreshCookieName = "tenant.duplicate_refresh_cookie_name"
-	errorCodeDuplicateCookieNameCross   = "tenant.duplicate_cookie_name_cross_type"
-	errorCodeInvalidCookieScope         = "tenant.invalid_cookie_scope"
-	originSchemeHTTP                    = "http"
-	originSchemeHTTPS                   = "https"
-	originExpectation                   = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
-	originReasonMissingScheme           = "missing scheme"
-	originReasonUnsupportedScheme       = "unsupported scheme"
-	originReasonMissingHost             = "missing host"
-	originReasonUnexpectedPath          = "origin must not include path, query, or fragment"
-	originReasonInvalidURL              = "invalid url"
+	tenantIDPattern                      = "^[a-z0-9][a-z0-9_-]{1,63}$"
+	nativeGooglePlatformPattern          = "^[a-z][a-z0-9_-]{1,31}$"
+	defaultNonceTTL                      = 5 * time.Minute
+	defaultEmailVerificationTTL          = 30 * time.Minute
+	defaultPasswordResetTTL              = 15 * time.Minute
+	defaultNativeGooglePlatform          = "desktop"
+	errorCodeInvalidPath                 = "tenant.invalid_path"
+	errorCodeMissingTenants              = "tenant.missing_records"
+	errorCodeDuplicateTenantID           = "tenant.duplicate_id"
+	errorCodeInvalidID                   = "tenant.invalid_id"
+	errorCodeMissingOrigins              = "tenant.missing_origins"
+	errorCodeInvalidOrigin               = "tenant.invalid_origin"
+	errorCodeDuplicateOrigin             = "tenant.duplicate_origin"
+	errorCodeInvalidAllowedUser          = "tenant.invalid_allowed_user"
+	errorCodeDuplicateAllowedUser        = "tenant.duplicate_allowed_user"
+	errorCodeMissingAuthProvider         = "tenant.missing_auth_provider"
+	errorCodeInvalidNativeGoogleID       = "tenant.invalid_native_google_client_id"
+	errorCodeInvalidNativePlatform       = "tenant.invalid_native_google_platform"
+	errorCodeInvalidNativeRedirectURI    = "tenant.invalid_native_redirect_uri"
+	errorCodeDuplicateNativeGoogleID     = "tenant.duplicate_native_google_client_id"
+	errorCodeAppleOAuthDisabled          = "tenant.apple_oauth_disabled"
+	errorCodeInvalidAppleClientID        = "tenant.invalid_apple_client_id"
+	errorCodeInvalidAppleTeamID          = "tenant.invalid_apple_team_id"
+	errorCodeInvalidAppleKeyID           = "tenant.invalid_apple_key_id"
+	errorCodeInvalidApplePrivateKey      = "tenant.invalid_apple_private_key"
+	errorCodeInvalidAppleRedirectURI     = "tenant.invalid_apple_redirect_uri"
+	errorCodeInvalidAppleScope           = "tenant.invalid_apple_scope"
+	errorCodeInvalidAppleEndpoint        = "tenant.invalid_apple_endpoint"
+	errorCodePasswordAuthDisabled        = "tenant.password_auth_disabled"
+	errorCodeInvalidPasswordUser         = "tenant.invalid_password_user"
+	errorCodeDuplicatePasswordUser       = "tenant.duplicate_password_user"
+	errorCodeInvalidPasswordHash         = "tenant.invalid_password_hash"
+	errorCodeAccountManagementDisabled   = "tenant.account_management_disabled"
+	errorCodeInvalidEmailVerificationTTL = "tenant.invalid_email_verification_ttl"
+	errorCodeInvalidPasswordResetTTL     = "tenant.invalid_password_reset_ttl"
+	errorCodeInvalidSessionTTL           = "tenant.invalid_session_ttl"
+	errorCodeInvalidRefreshTTL           = "tenant.invalid_refresh_ttl"
+	errorCodeInvalidNonceTTL             = "tenant.invalid_nonce_ttl"
+	errorCodeMissingSigningKey           = "tenant.missing_signing_key"
+	errorCodeMissingSessionCookieName    = "tenant.missing_session_cookie_name"
+	errorCodeMissingRefreshCookieName    = "tenant.missing_refresh_cookie_name"
+	errorCodeDuplicateSessionCookieName  = "tenant.duplicate_session_cookie_name"
+	errorCodeDuplicateRefreshCookieName  = "tenant.duplicate_refresh_cookie_name"
+	errorCodeDuplicateCookieNameCross    = "tenant.duplicate_cookie_name_cross_type"
+	errorCodeInvalidCookieScope          = "tenant.invalid_cookie_scope"
+	originSchemeHTTP                     = "http"
+	originSchemeHTTPS                    = "https"
+	originExpectation                    = "expected schemeful origin (http/https) with host[:port] and no path/query/fragment"
+	originReasonMissingScheme            = "missing scheme"
+	originReasonUnsupportedScheme        = "unsupported scheme"
+	originReasonMissingHost              = "missing host"
+	originReasonUnexpectedPath           = "origin must not include path, query, or fragment"
+	originReasonInvalidURL               = "invalid url"
+	defaultAppleAuthorizationEndpoint    = "https://appleid.apple.com/auth/authorize"
+	defaultAppleTokenEndpoint            = "https://appleid.apple.com/auth/token"
+	defaultAppleJWKSURL                  = "https://appleid.apple.com/auth/keys"
 )
+
+var defaultAppleScopes = []string{"openid", "email", "name"}
 
 const (
 	cookieDomainSeparator          = "."
@@ -320,6 +368,63 @@ func (tenant Tenant) NativeGoogleClientIDs() []string {
 	return clientIDs
 }
 
+// AppleOAuth returns the Sign in with Apple settings for this tenant.
+func (tenant Tenant) AppleOAuth() AppleOAuth {
+	config := tenant.appleOAuth
+	config.scopes = append([]string(nil), tenant.appleOAuth.scopes...)
+	return config
+}
+
+// Enabled indicates whether Sign in with Apple is available.
+func (settings AppleOAuth) Enabled() bool {
+	return settings.enabled
+}
+
+// ClientID returns the Apple Services ID or app client identifier.
+func (settings AppleOAuth) ClientID() string {
+	return settings.clientID
+}
+
+// TeamID returns the Apple Developer Team ID.
+func (settings AppleOAuth) TeamID() string {
+	return settings.teamID
+}
+
+// KeyID returns the Apple private key identifier.
+func (settings AppleOAuth) KeyID() string {
+	return settings.keyID
+}
+
+// PrivateKey returns the PEM-encoded Apple private key.
+func (settings AppleOAuth) PrivateKey() string {
+	return settings.privateKey
+}
+
+// RedirectURI returns the configured Apple callback URI.
+func (settings AppleOAuth) RedirectURI() string {
+	return settings.redirectURI
+}
+
+// Scopes returns the configured Apple OAuth scopes.
+func (settings AppleOAuth) Scopes() []string {
+	return append([]string(nil), settings.scopes...)
+}
+
+// AuthorizationEndpoint returns the Sign in with Apple authorization endpoint.
+func (settings AppleOAuth) AuthorizationEndpoint() string {
+	return settings.authorizationEndpoint
+}
+
+// TokenEndpoint returns the Sign in with Apple token endpoint.
+func (settings AppleOAuth) TokenEndpoint() string {
+	return settings.tokenEndpoint
+}
+
+// JWKSURL returns the Apple JWKS endpoint.
+func (settings AppleOAuth) JWKSURL() string {
+	return settings.jwksURL
+}
+
 // PasswordAuthEnabled indicates whether password login is available for the tenant.
 func (tenant Tenant) PasswordAuthEnabled() bool {
 	return tenant.passwordAuthEnabled
@@ -333,6 +438,36 @@ func (tenant Tenant) PasswordUsers() []PasswordUser {
 	users := make([]PasswordUser, len(tenant.passwordUsers))
 	copy(users, tenant.passwordUsers)
 	return users
+}
+
+// AccountManagement returns the account lifecycle settings for the tenant.
+func (tenant Tenant) AccountManagement() AccountManagement {
+	return tenant.accountManagement
+}
+
+// Enabled indicates whether full account management is available.
+func (settings AccountManagement) Enabled() bool {
+	return settings.enabled
+}
+
+// PasswordSignupEnabled indicates whether public password signup is available.
+func (settings AccountManagement) PasswordSignupEnabled() bool {
+	return settings.passwordSignupEnabled
+}
+
+// ReturnChallengeTokens indicates whether challenge tokens are returned in HTTP responses.
+func (settings AccountManagement) ReturnChallengeTokens() bool {
+	return settings.returnChallengeTokens
+}
+
+// EmailVerificationTTL returns the email-verification challenge lifetime.
+func (settings AccountManagement) EmailVerificationTTL() time.Duration {
+	return settings.emailVerificationTTL
+}
+
+// PasswordResetTTL returns the password-reset challenge lifetime.
+func (settings AccountManagement) PasswordResetTTL() time.Duration {
+	return settings.passwordResetTTL
 }
 
 // Platform returns the native platform label.
@@ -428,18 +563,27 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if allowedUsersErr != nil {
 		return Tenant{}, nil, allowedUsersErr
 	}
-	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
-	if googleWebClientID == "" {
-		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidGoogleID, tenantID)
-	}
 	nativeGoogleClients, nativeGoogleClientErr := parseNativeGoogleClients(raw, tenantID)
 	if nativeGoogleClientErr != nil {
 		return Tenant{}, nil, nativeGoogleClientErr
 	}
 	googleNativeClientID := firstNativeGoogleClientID(nativeGoogleClients)
+	allowInsecureHTTP := bool(raw.AllowInsecureHTTP)
+	appleOAuth, appleOAuthErr := parseAppleOAuth(raw.AppleOAuth, tenantID, allowInsecureHTTP)
+	if appleOAuthErr != nil {
+		return Tenant{}, nil, appleOAuthErr
+	}
 	passwordAuthEnabled, passwordUsers, passwordAuthErr := parsePasswordAuth(raw.PasswordAuth, tenantID)
 	if passwordAuthErr != nil {
 		return Tenant{}, nil, passwordAuthErr
+	}
+	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
+	if !tenantHasAuthProvider(googleWebClientID, nativeGoogleClients, appleOAuth, passwordAuthEnabled) {
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingAuthProvider, tenantID)
+	}
+	accountManagement, accountManagementErr := parseAccountManagement(raw.AccountManagement, tenantID)
+	if accountManagementErr != nil {
+		return Tenant{}, nil, accountManagementErr
 	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
@@ -486,8 +630,10 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		googleWebClientID:    googleWebClientID,
 		googleNativeClientID: googleNativeClientID,
 		nativeGoogleClients:  nativeGoogleClients,
+		appleOAuth:           appleOAuth,
 		passwordAuthEnabled:  passwordAuthEnabled,
 		passwordUsers:        passwordUsers,
+		accountManagement:    accountManagement,
 		jwtSigningKey:        signingKey,
 		cookieDomain:         cookieDomain,
 		sessionCookieName:    sessionCookieName,
@@ -495,7 +641,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		sessionTTL:           sessionTTL,
 		refreshTTL:           refreshTTL,
 		nonceTTL:             nonceTTL,
-		allowInsecureHTTP:    bool(raw.AllowInsecureHTTP),
+		allowInsecureHTTP:    allowInsecureHTTP,
 	}, origins, nil
 }
 
@@ -589,6 +735,193 @@ func firstNativeGoogleClientID(clients []NativeGoogleClient) string {
 		return ""
 	}
 	return clients[0].clientID
+}
+
+func tenantHasAuthProvider(googleWebClientID string, nativeGoogleClients []NativeGoogleClient, appleOAuth AppleOAuth, passwordAuthEnabled bool) bool {
+	return strings.TrimSpace(googleWebClientID) != "" ||
+		len(nativeGoogleClients) > 0 ||
+		appleOAuth.Enabled() ||
+		passwordAuthEnabled
+}
+
+func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bool) (AppleOAuth, error) {
+	enabled := bool(raw.Enabled)
+	if !enabled {
+		if appleOAuthBlockHasFields(raw) {
+			return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeAppleOAuthDisabled, tenantID)
+		}
+		return AppleOAuth{}, nil
+	}
+	clientID := strings.TrimSpace(raw.ClientID)
+	if clientID == "" {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleClientID, tenantID)
+	}
+	teamID := strings.TrimSpace(raw.TeamID)
+	if teamID == "" {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleTeamID, tenantID)
+	}
+	keyID := strings.TrimSpace(raw.KeyID)
+	if keyID == "" {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleKeyID, tenantID)
+	}
+	privateKey, privateKeyErr := parseApplePrivateKey(raw, tenantID)
+	if privateKeyErr != nil {
+		return AppleOAuth{}, privateKeyErr
+	}
+	redirectURI, redirectErr := normalizeAppleRedirectURI(raw.RedirectURI, allowInsecureHTTP)
+	if redirectErr != nil {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s redirect_uri=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleRedirectURI, tenantID, strings.TrimSpace(raw.RedirectURI), redirectErr)
+	}
+	scopes, scopeErr := parseAppleScopes(raw.Scopes, tenantID)
+	if scopeErr != nil {
+		return AppleOAuth{}, scopeErr
+	}
+	authorizationEndpoint, authorizationErr := parseAppleEndpoint(raw.AuthorizationEndpoint, defaultAppleAuthorizationEndpoint, allowInsecureHTTP)
+	if authorizationErr != nil {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s endpoint=authorization reason=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleEndpoint, tenantID, authorizationErr)
+	}
+	tokenEndpoint, tokenErr := parseAppleEndpoint(raw.TokenEndpoint, defaultAppleTokenEndpoint, allowInsecureHTTP)
+	if tokenErr != nil {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s endpoint=token reason=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleEndpoint, tenantID, tokenErr)
+	}
+	jwksURL, jwksErr := parseAppleEndpoint(raw.JWKSURL, defaultAppleJWKSURL, allowInsecureHTTP)
+	if jwksErr != nil {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s endpoint=jwks reason=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleEndpoint, tenantID, jwksErr)
+	}
+	return AppleOAuth{
+		enabled:               true,
+		clientID:              clientID,
+		teamID:                teamID,
+		keyID:                 keyID,
+		privateKey:            privateKey,
+		redirectURI:           redirectURI,
+		scopes:                scopes,
+		authorizationEndpoint: authorizationEndpoint,
+		tokenEndpoint:         tokenEndpoint,
+		jwksURL:               jwksURL,
+	}, nil
+}
+
+func parseApplePrivateKey(raw FileAppleOAuth, tenantID TenantID) (string, error) {
+	privateKey := strings.TrimSpace(raw.PrivateKey)
+	privateKeyBase64 := strings.Join(strings.Fields(strings.TrimSpace(raw.PrivateKeyBase64)), "")
+	if privateKey != "" && privateKeyBase64 != "" {
+		return "", fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidApplePrivateKey, tenantID)
+	}
+	if privateKeyBase64 != "" {
+		decodedPrivateKey, decodeErr := base64.StdEncoding.DecodeString(privateKeyBase64)
+		if decodeErr != nil {
+			return "", fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidApplePrivateKey, tenantID)
+		}
+		privateKey = strings.TrimSpace(string(decodedPrivateKey))
+	}
+	if privateKey == "" || !applePrivateKeyPEMValid(privateKey) {
+		return "", fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidApplePrivateKey, tenantID)
+	}
+	return privateKey, nil
+}
+
+func appleOAuthBlockHasFields(raw FileAppleOAuth) bool {
+	return strings.TrimSpace(raw.ClientID) != "" ||
+		strings.TrimSpace(raw.TeamID) != "" ||
+		strings.TrimSpace(raw.KeyID) != "" ||
+		strings.TrimSpace(raw.PrivateKey) != "" ||
+		strings.TrimSpace(raw.PrivateKeyBase64) != "" ||
+		strings.TrimSpace(raw.RedirectURI) != "" ||
+		len(raw.Scopes) > 0 ||
+		strings.TrimSpace(raw.AuthorizationEndpoint) != "" ||
+		strings.TrimSpace(raw.TokenEndpoint) != "" ||
+		strings.TrimSpace(raw.JWKSURL) != ""
+}
+
+func applePrivateKeyPEMValid(value string) bool {
+	block, _ := pem.Decode([]byte(value))
+	if block == nil {
+		return false
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return false
+	}
+	_, ok := key.(*ecdsa.PrivateKey)
+	return ok
+}
+
+func normalizeAppleRedirectURI(rawRedirectURI string, allowInsecureHTTP bool) (string, error) {
+	trimmed := strings.TrimSpace(rawRedirectURI)
+	parsedURI, parseErr := url.Parse(trimmed)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if parsedURI.Scheme == "" {
+		return "", fmt.Errorf("missing scheme")
+	}
+	if parsedURI.Host == "" {
+		return "", fmt.Errorf("missing host")
+	}
+	if parsedURI.Fragment != "" {
+		return "", fmt.Errorf("fragment is not allowed")
+	}
+	if parsedURI.Scheme != originSchemeHTTPS {
+		if !allowInsecureHTTP || parsedURI.Scheme != originSchemeHTTP {
+			return "", fmt.Errorf("https required")
+		}
+	}
+	if !allowInsecureHTTP {
+		host := parsedURI.Hostname()
+		if strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil {
+			return "", fmt.Errorf("public domain required")
+		}
+	}
+	return trimmed, nil
+}
+
+func parseAppleScopes(rawScopes []string, tenantID TenantID) ([]string, error) {
+	if len(rawScopes) == 0 {
+		return append([]string(nil), defaultAppleScopes...), nil
+	}
+	allowedScopes := map[string]struct{}{
+		"openid": {},
+		"email":  {},
+		"name":   {},
+	}
+	scopes := make([]string, 0, len(rawScopes))
+	seenScopes := make(map[string]struct{}, len(rawScopes))
+	for _, rawScope := range rawScopes {
+		scope := strings.ToLower(strings.TrimSpace(rawScope))
+		if _, allowed := allowedScopes[scope]; !allowed {
+			return nil, fmt.Errorf("%w: %s tenant=%s scope=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleScope, tenantID, scope)
+		}
+		if _, exists := seenScopes[scope]; exists {
+			continue
+		}
+		seenScopes[scope] = struct{}{}
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
+}
+
+func parseAppleEndpoint(rawEndpoint string, fallback string, allowInsecureHTTP bool) (string, error) {
+	endpoint := strings.TrimSpace(rawEndpoint)
+	if endpoint == "" {
+		endpoint = fallback
+	}
+	parsedEndpoint, parseErr := url.Parse(endpoint)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if parsedEndpoint.Scheme == "" || parsedEndpoint.Host == "" {
+		return "", fmt.Errorf("absolute url required")
+	}
+	if parsedEndpoint.Scheme != originSchemeHTTPS {
+		if !allowInsecureHTTP || parsedEndpoint.Scheme != originSchemeHTTP {
+			return "", fmt.Errorf("https required")
+		}
+	}
+	if parsedEndpoint.Fragment != "" {
+		return "", fmt.Errorf("fragment is not allowed")
+	}
+	return endpoint, nil
 }
 
 func parseTenantID(raw string) (TenantID, error) {
@@ -687,6 +1020,37 @@ func parsePasswordUser(raw FilePasswordUser, tenantID TenantID) (PasswordUser, e
 		displayName:  displayName,
 		avatarURL:    strings.TrimSpace(raw.AvatarURL),
 		passwordHash: passwordHash,
+	}, nil
+}
+
+func parseAccountManagement(raw FileAccountManagement, tenantID TenantID) (AccountManagement, error) {
+	enabled := bool(raw.Enabled)
+	passwordSignupEnabled := bool(raw.PasswordSignup.Enabled)
+	if !enabled && passwordSignupEnabled {
+		return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeAccountManagementDisabled, tenantID)
+	}
+	emailVerificationTTL := defaultEmailVerificationTTL
+	if strings.TrimSpace(raw.EmailVerificationTTL) != "" {
+		parsedTTL, ttlErr := parseDuration(raw.EmailVerificationTTL)
+		if ttlErr != nil || parsedTTL <= 0 {
+			return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidEmailVerificationTTL, tenantID)
+		}
+		emailVerificationTTL = parsedTTL
+	}
+	passwordResetTTL := defaultPasswordResetTTL
+	if strings.TrimSpace(raw.PasswordResetTTL) != "" {
+		parsedTTL, ttlErr := parseDuration(raw.PasswordResetTTL)
+		if ttlErr != nil || parsedTTL <= 0 {
+			return AccountManagement{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordResetTTL, tenantID)
+		}
+		passwordResetTTL = parsedTTL
+	}
+	return AccountManagement{
+		enabled:               enabled,
+		passwordSignupEnabled: passwordSignupEnabled,
+		returnChallengeTokens: bool(raw.ReturnChallengeTokens),
+		emailVerificationTTL:  emailVerificationTTL,
+		passwordResetTTL:      passwordResetTTL,
 	}, nil
 }
 
@@ -1005,12 +1369,24 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.GoogleNativeClients[index].ClientID = os.ExpandEnv(tenant.GoogleNativeClients[index].ClientID)
 		tenant.GoogleNativeClients[index].RedirectURIs = expandEnvSlice(tenant.GoogleNativeClients[index].RedirectURIs)
 	}
+	tenant.AppleOAuth.ClientID = os.ExpandEnv(tenant.AppleOAuth.ClientID)
+	tenant.AppleOAuth.TeamID = os.ExpandEnv(tenant.AppleOAuth.TeamID)
+	tenant.AppleOAuth.KeyID = os.ExpandEnv(tenant.AppleOAuth.KeyID)
+	tenant.AppleOAuth.PrivateKey = os.ExpandEnv(tenant.AppleOAuth.PrivateKey)
+	tenant.AppleOAuth.PrivateKeyBase64 = os.ExpandEnv(tenant.AppleOAuth.PrivateKeyBase64)
+	tenant.AppleOAuth.RedirectURI = os.ExpandEnv(tenant.AppleOAuth.RedirectURI)
+	tenant.AppleOAuth.Scopes = expandEnvSlice(tenant.AppleOAuth.Scopes)
+	tenant.AppleOAuth.AuthorizationEndpoint = os.ExpandEnv(tenant.AppleOAuth.AuthorizationEndpoint)
+	tenant.AppleOAuth.TokenEndpoint = os.ExpandEnv(tenant.AppleOAuth.TokenEndpoint)
+	tenant.AppleOAuth.JWKSURL = os.ExpandEnv(tenant.AppleOAuth.JWKSURL)
 	for index := range tenant.PasswordAuth.Users {
 		tenant.PasswordAuth.Users[index].Email = os.ExpandEnv(tenant.PasswordAuth.Users[index].Email)
 		tenant.PasswordAuth.Users[index].DisplayName = os.ExpandEnv(tenant.PasswordAuth.Users[index].DisplayName)
 		tenant.PasswordAuth.Users[index].AvatarURL = os.ExpandEnv(tenant.PasswordAuth.Users[index].AvatarURL)
 		tenant.PasswordAuth.Users[index].PasswordHash = expandPasswordHashEnv(tenant.PasswordAuth.Users[index].PasswordHash)
 	}
+	tenant.AccountManagement.EmailVerificationTTL = os.ExpandEnv(tenant.AccountManagement.EmailVerificationTTL)
+	tenant.AccountManagement.PasswordResetTTL = os.ExpandEnv(tenant.AccountManagement.PasswordResetTTL)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -1049,7 +1425,9 @@ type FileTenant struct {
 	GoogleWebClientID    string                   `json:"google_web_client_id" yaml:"google_web_client_id"`
 	GoogleNativeClientID string                   `json:"google_native_client_id" yaml:"google_native_client_id"`
 	GoogleNativeClients  []FileNativeGoogleClient `json:"google_native_clients" yaml:"google_native_clients"`
+	AppleOAuth           FileAppleOAuth           `json:"apple_oauth" yaml:"apple_oauth"`
 	PasswordAuth         FilePasswordAuth         `json:"password_auth" yaml:"password_auth"`
+	AccountManagement    FileAccountManagement    `json:"account_management" yaml:"account_management"`
 	JWTSigningKey        string                   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain         string                   `json:"cookie_domain" yaml:"cookie_domain"`
 	SessionCookieName    string                   `json:"session_cookie_name" yaml:"session_cookie_name"`
@@ -1067,6 +1445,21 @@ type FileNativeGoogleClient struct {
 	RedirectURIs []string `json:"redirect_uris" yaml:"redirect_uris"`
 }
 
+// FileAppleOAuth represents the raw Sign in with Apple tenant block.
+type FileAppleOAuth struct {
+	Enabled               yamlBool `json:"enabled" yaml:"enabled"`
+	ClientID              string   `json:"client_id" yaml:"client_id"`
+	TeamID                string   `json:"team_id" yaml:"team_id"`
+	KeyID                 string   `json:"key_id" yaml:"key_id"`
+	PrivateKey            string   `json:"private_key" yaml:"private_key"`
+	PrivateKeyBase64      string   `json:"private_key_base64" yaml:"private_key_base64"`
+	RedirectURI           string   `json:"redirect_uri" yaml:"redirect_uri"`
+	Scopes                []string `json:"scopes" yaml:"scopes"`
+	AuthorizationEndpoint string   `json:"authorization_endpoint" yaml:"authorization_endpoint"`
+	TokenEndpoint         string   `json:"token_endpoint" yaml:"token_endpoint"`
+	JWKSURL               string   `json:"jwks_url" yaml:"jwks_url"`
+}
+
 // FilePasswordAuth represents the raw password-auth tenant block.
 type FilePasswordAuth struct {
 	Enabled yamlBool           `json:"enabled" yaml:"enabled"`
@@ -1079,6 +1472,20 @@ type FilePasswordUser struct {
 	DisplayName  string `json:"display_name" yaml:"display_name"`
 	AvatarURL    string `json:"avatar_url" yaml:"avatar_url"`
 	PasswordHash string `json:"password_hash" yaml:"password_hash"`
+}
+
+// FileAccountManagement represents the raw account-management tenant block.
+type FileAccountManagement struct {
+	Enabled               yamlBool           `json:"enabled" yaml:"enabled"`
+	PasswordSignup        FilePasswordSignup `json:"password_signup" yaml:"password_signup"`
+	ReturnChallengeTokens yamlBool           `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
+	EmailVerificationTTL  string             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	PasswordResetTTL      string             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+}
+
+// FilePasswordSignup represents the raw public signup toggle.
+type FilePasswordSignup struct {
+	Enabled yamlBool `json:"enabled" yaml:"enabled"`
 }
 
 type yamlBool bool

@@ -192,9 +192,12 @@ func validateTenantConfig(tenant tenants.Tenant, result *DiagnosticResult) {
 		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: jwt_signing_key is required", tenantID))
 	}
 
-	if tenant.GoogleWebClientID() == "" {
+	if tenant.GoogleWebClientID() == "" && len(tenant.NativeGoogleClients()) == 0 && !tenant.AppleOAuth().Enabled() && !tenant.PasswordAuthEnabled() {
 		result.Valid = false
-		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: google_web_client_id is required", tenantID))
+		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: at least one auth provider is required", tenantID))
+	}
+	if tenant.GoogleWebClientID() == "" {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_web_client_id is not configured; browser Google login will return 404", tenantID))
 	}
 	if len(tenant.NativeGoogleClients()) == 0 {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_native_client_id/google_native_clients is not configured; native login will return 404", tenantID))
