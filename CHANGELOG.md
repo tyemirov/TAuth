@@ -21,6 +21,36 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.6] - 2026-06-09
+
+### Features ✨
+- Add tenant-enabled Sign in with Apple support, including OAuth provider, start and callback routes, and session handling.
+- Implement full tenant-gated account management for email/password accounts with signup, verification, reset, change, linking, unlinking, and disable endpoints.
+- Enforce active account sessions and restrict password reset by allowed users.
+
+### Improvements ⚙️
+- Unify external provider handling in authkit for Apple OAuth support.
+- Allow Apple OAuth paths to bypass origin and tenant middleware for proper callback handling.
+- Update package description and documentation to include Apple and password authentication features.
+- Enhance tauth.js with Apple login helpers and account management support.
+- Preserve self-service password credentials across config reconciliation and recheck live account state for account-management routes.
+
+### Bug Fixes 🐛
+- Fix password reset completion to recheck allowed users before revoking sessions or minting new cookies, returning 403 when user is not allowed.
+- Reject disabled account sessions on `/me`, treat as anonymous on `/auth/session`, and prevent refresh into fresh JWTs.
+- Post-review fixes for Apple login flow to carry validated return URLs, redirect properly after cookie minting, and record helper restore hints.
+
+### Testing 🧪
+- Add comprehensive tests for tenant-aware Apple login URL, account management helpers, and disable account helper.
+- Cover stale disabled-account sessions and persistent credential reconciliation with regression tests.
+- Black-box HTTP regression coverage for Apple routes and password reset flows.
+- Validate with focused authkit tests, black-box memory/persistent store coverage, and full CI runs.
+
+### Docs 📚
+- Update documentation with Sign in with Apple support, configuration details, and account management HTTP API endpoints.
+- Add detailed planning and resolution notes for account management features (TA-500).
+- Update README and ISSUES.md with Apple Sign-in and account management fixes and feature details.
+
 ## [v1.1.5] - 2026-06-08
 
 ### Features ✨
