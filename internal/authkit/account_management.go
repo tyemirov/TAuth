@@ -9,17 +9,15 @@ import (
 )
 
 const (
-	accountIDPrefix                    = "account:"
-	accountStatePendingVerification    = "pending_verification"
-	accountStateActive                 = "active"
-	accountStateDisabled               = "disabled"
-	accountProviderPassword            = "password"
-	accountProviderGoogle              = "google"
-	accountProviderApple               = "apple"
-	accountChallengeEmailVerification  = "email_verification"
-	accountChallengePasswordReset      = "password_reset"
-	accountChallengePasswordLink       = "password_link"
-	accountChallengeAccountIDHashBytes = 22
+	accountStatePendingVerification   = "pending_verification"
+	accountStateActive                = "active"
+	accountStateDisabled              = "disabled"
+	accountProviderPassword           = "password"
+	accountProviderGoogle             = "google"
+	accountProviderApple              = "apple"
+	accountChallengeEmailVerification = "email_verification"
+	accountChallengePasswordReset     = "password_reset"
+	accountChallengePasswordLink      = "password_link"
 )
 
 var (
@@ -130,7 +128,6 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Con
 	if credentialErr != nil {
 		return AccountChallenge{}, credentialErr
 	}
-	accountID := accountIDForEmail(tenantID, credential.userEmail)
 	token, tokenHash, tokenErr := generateRefreshOpaque()
 	if tokenErr != nil {
 		return AccountChallenge{}, fmt.Errorf("account.signup.token: %w", tokenErr)
@@ -139,14 +136,15 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Con
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.ensureAccountMaps(tenantID)
-	if _, exists := store.accounts[tenantID][accountID]; exists {
-		return AccountChallenge{}, ErrAccountExists
-	}
 	if _, exists := store.tenants[tenantID][credential.userEmail]; exists {
 		return AccountChallenge{}, ErrAccountExists
 	}
 	if _, exists := store.identities[tenantID][identityKey(accountProviderPassword, credential.userEmail)]; exists {
 		return AccountChallenge{}, ErrAccountExists
+	}
+	accountID, accountIDErr := store.newOpaqueAccountIDLocked(tenantID)
+	if accountIDErr != nil {
+		return AccountChallenge{}, accountIDErr
 	}
 	store.accounts[tenantID][accountID] = &accountRecord{
 		accountID:   accountID,
@@ -308,7 +306,13 @@ func (store *MemoryPasswordCredentialStore) EnsurePasswordAccount(ctx context.Co
 	}
 	accountID := credential.accountID
 	if accountID == "" {
-		accountID = accountIDForEmail(tenantID, normalizedEmail)
+		generatedAccountID, accountIDErr := store.newOpaqueAccountIDLocked(tenantID)
+		if accountIDErr != nil {
+			return AccountProfile{}, accountIDErr
+		}
+		accountID = generatedAccountID
+	} else if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
+		return AccountProfile{}, validateErr
 	}
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
@@ -455,7 +459,10 @@ func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Co
 		account.avatarURL = strings.TrimSpace(normalizedIdentity.AvatarURL)
 		return profileFromAccount(account), nil
 	}
-	accountID := accountIDForProvider(tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject)
+	accountID, accountIDErr := store.newOpaqueAccountIDLocked(tenantID)
+	if accountIDErr != nil {
+		return AccountProfile{}, accountIDErr
+	}
 	account := &accountRecord{
 		accountID:   accountID,
 		userEmail:   normalizedIdentity.UserEmail,
@@ -561,6 +568,9 @@ func (store *MemoryPasswordCredentialStore) ReactivateAccount(ctx context.Contex
 
 // ResolveAccountProfile returns an account profile by account ID.
 func (store *MemoryPasswordCredentialStore) ResolveAccountProfile(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
+	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
+		return AccountProfile{}, validateErr
+	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	account := store.accounts[tenantID][accountID]
@@ -601,6 +611,19 @@ func (store *MemoryPasswordCredentialStore) identityCountForAccountLocked(tenant
 		}
 	}
 	return count
+}
+
+func (store *MemoryPasswordCredentialStore) newOpaqueAccountIDLocked(tenantID string) (string, error) {
+	for attempt := 0; attempt < accountIDGenerationAttempts; attempt++ {
+		accountID, accountIDErr := newOpaqueAccountID()
+		if accountIDErr != nil {
+			return "", accountIDErr
+		}
+		if _, exists := store.accounts[tenantID][accountID]; !exists {
+			return accountID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: collision", ErrAccountInvalidID)
 }
 
 func buildAccountPasswordCredential(request AccountPasswordRequest) (passwordCredential, error) {
@@ -664,22 +687,6 @@ func profileFromAccount(account *accountRecord) AccountProfile {
 		Roles:       append([]string(nil), account.roles...),
 		State:       account.state,
 	}
-}
-
-func accountIDForEmail(tenantID string, email string) string {
-	return accountIDPrefix + hashFragment(tenantID+"|email|"+email)
-}
-
-func accountIDForProvider(tenantID string, provider string, subject string) string {
-	return accountIDPrefix + hashFragment(tenantID+"|"+strings.ToLower(strings.TrimSpace(provider))+"|"+strings.TrimSpace(subject))
-}
-
-func hashFragment(value string) string {
-	hash := hashOpaque(value)
-	if len(hash) <= accountChallengeAccountIDHashBytes {
-		return hash
-	}
-	return hash[:accountChallengeAccountIDHashBytes]
 }
 
 func identityKey(provider string, providerID string) string {

@@ -24,7 +24,7 @@ const (
 	schemaMigrationLookupByName  = "store_name = ?"
 	schemaErrorFormat            = "%s.schema.%s: %w"
 	refreshStoreSchemaVersion    = 1
-	userStoreSchemaVersion       = 4
+	userStoreSchemaVersion       = 5
 	nonceStoreSchemaVersion      = 1
 )
 

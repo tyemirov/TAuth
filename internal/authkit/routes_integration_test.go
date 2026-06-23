@@ -766,9 +766,10 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 	if decodeErr := json.NewDecoder(loginResponse.Body).Decode(&loginPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode seeded login payload: %v", decodeErr)
 	}
-	expectedAccountID := accountIDForEmail(config.TenantID, "seeded@example.com")
-	if loginPayload["user_id"] != expectedAccountID {
-		testingHandle.Fatalf("expected account user id %s, got %#v", expectedAccountID, loginPayload)
+	userID, _ := loginPayload["user_id"].(string)
+	expectedAccountID := assertOpaqueAccountID(testingHandle, userID)
+	if loginPayload["user_email"] != "seeded@example.com" {
+		testingHandle.Fatalf("unexpected seeded account login payload: %#v", loginPayload)
 	}
 	cookies := collectCookies(loginResponse.Result().Cookies())
 
@@ -779,6 +780,13 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 	router.ServeHTTP(changeResponse, changeRequest)
 	if changeResponse.Code != http.StatusOK {
 		testingHandle.Fatalf("expected seeded account password change 200, got %d: %s", changeResponse.Code, changeResponse.Body.String())
+	}
+	var changePayload map[string]interface{}
+	if decodeErr := json.NewDecoder(changeResponse.Body).Decode(&changePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode change payload: %v", decodeErr)
+	}
+	if changePayload["user_id"] != expectedAccountID {
+		testingHandle.Fatalf("expected changed account user id %s, got %#v", expectedAccountID, changePayload)
 	}
 	changedCookies := collectCookies(changeResponse.Result().Cookies())
 
@@ -839,6 +847,37 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 	router.ServeHTTP(disabledLoginResponse, disabledLoginRequest)
 	if disabledLoginResponse.Code != http.StatusForbidden {
 		testingHandle.Fatalf("expected disabled password login 403, got %d: %s", disabledLoginResponse.Code, disabledLoginResponse.Body.String())
+	}
+}
+
+func TestAccountManagementRejectsMalformedAccountSession(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.AccountManagementEnabled = true
+	registry := singleTenantRegistry(config)
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	sessionToken, _, tokenErr := MintAppJWT(NewSystemClock(), config.TenantID, "account:not-opaque", "account@example.com", "Account User", "https://example.com/account.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+	if tokenErr != nil {
+		testingHandle.Fatalf("failed to mint malformed account session: %v", tokenErr)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/auth/account/password/change", bytes.NewBuffer([]byte(`{"current_password":"current password","new_password":"new password value"}`)))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: config.SessionCookieName, Value: sessionToken})
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		testingHandle.Fatalf("expected malformed account session 403, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload map[string]string
+	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+		testingHandle.Fatalf("decode malformed account session payload: %v", decodeErr)
+	}
+	if payload["error"] != errorAccountNotActive {
+		testingHandle.Fatalf("expected account_not_active payload, got %#v", payload)
 	}
 }
 
