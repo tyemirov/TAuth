@@ -74,6 +74,10 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [TA-445] (P0) Generate opaque persisted account IDs for account-management sessions.
+  Account management currently creates deterministic account subjects from tenant/provider/email identity material even though the public contract is an opaque account user id. Replace deterministic account ID construction with persisted 128-bit base64url values for password signup, seeded password account enablement, and provider-created accounts. Remove the deterministic helpers and reject non-opaque account subjects at runtime; do not keep backward-compatible account-id fallbacks. Account-management session `user_id` must be the persisted bare opaque account ID across login, refresh, `/auth/session`, and `/me`.
+  Resolved 2026-06-23: account management now generates persisted bare opaque 128-bit base64url account IDs, reuses stored IDs through password/provider identity records, migrates existing database account references once, revokes refresh tokens tied to old account subjects, and rejects malformed account session subjects at account-route boundaries. Updated README, ARCHITECTURE, docs/usage, and CHANGELOG. Tests: focused `go test ./internal/authkit`; `make ci`.
+
 - [x] [TA-444] (P0) Require browser Google ID tokens to carry the issued nonce claim.
   Summary: The current browser `/auth/google` path accepts an issued `nonce_token` even when Google omits the ID-token `nonce` claim. That protects replay of the same TAuth exchange body, but it does not cryptographically bind the Google ID token to the nonce-bearing sign-in attempt. Shared browser UI now needs TAuth to reject missing or mismatched Google nonce claims so downstream apps cannot rely on a weaker no-GIS-nonce contract.
   Expected: `/auth/google` accepts only ID tokens whose `nonce` claim equals the submitted TAuth nonce or its opaque hash; missing or mismatched nonce claims return `401 {"error":"invalid_nonce"}` without finalizing login.

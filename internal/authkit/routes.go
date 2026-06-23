@@ -1817,6 +1817,9 @@ func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig
 	if !config.AccountManagementEnabled {
 		return AccountProfile{}, ErrAccountNotActive
 	}
+	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
+		return AccountProfile{}, validateErr
+	}
 	if accountStore == nil {
 		return AccountProfile{}, fmt.Errorf("auth.account.store_missing")
 	}
@@ -1834,11 +1837,11 @@ func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig
 }
 
 func isAccountSessionID(applicationUserID string) bool {
-	return strings.HasPrefix(strings.TrimSpace(applicationUserID), accountIDPrefix)
+	return validateOpaqueAccountID(applicationUserID) == nil
 }
 
 func isInactiveAccountSessionError(err error) bool {
-	return errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrAccountNotFound)
+	return errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrAccountInvalidID)
 }
 
 func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {
@@ -1862,8 +1865,8 @@ func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, acc
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
 		return "", ServerConfig{}, "", nil, false
 	}
-	accountID := strings.TrimSpace(claims.GetUserID())
-	if !strings.HasPrefix(accountID, accountIDPrefix) {
+	accountID := claims.GetUserID()
+	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
 		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
 		return "", ServerConfig{}, "", nil, false
 	}
@@ -1905,6 +1908,8 @@ func writeAccountError(contextGin *gin.Context, err error) {
 	case errors.Is(err, ErrAccountDisabled):
 		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountDisabled})
 	case errors.Is(err, ErrAccountNotActive):
+		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
+	case errors.Is(err, ErrAccountInvalidID):
 		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
 	case errors.Is(err, ErrPasswordCredentialInvalid):
 		contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorPasswordCredentialInvalid})
@@ -2073,6 +2078,9 @@ func finalizeAccountLoginPayload(
 	}
 	if profile.State != accountStateActive {
 		return nil, ErrAccountNotActive
+	}
+	if validateErr := validateOpaqueAccountID(profile.AccountID); validateErr != nil {
+		return nil, validateErr
 	}
 	applicationUserID, userRoles, upsertErr := users.UpsertAccountUser(
 		contextGin,
