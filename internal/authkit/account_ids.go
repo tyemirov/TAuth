@@ -6,16 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 )
 
 const (
-	accountIDPrefix              = "account:"
 	accountIDOpaqueByteLength    = 16
 	accountIDOpaqueStringLength  = 22
 	accountIDGenerationAttempts  = 8
 	accountIDMigrationRecordName = "user_store.opaque_account_ids"
-	accountIDMigrationVersion    = 1
+	accountIDMigrationVersion    = 2
 )
 
 var (
@@ -28,28 +26,21 @@ func newOpaqueAccountID() (string, error) {
 	if randomErr != nil {
 		return "", randomErr
 	}
-	return accountIDPrefix + opaqueValue, nil
+	return opaqueValue, nil
 }
 
 func validateOpaqueAccountID(rawAccountID string) error {
-	if rawAccountID != strings.TrimSpace(rawAccountID) {
-		return fmt.Errorf("%w: whitespace", ErrAccountInvalidID)
-	}
-	if !strings.HasPrefix(rawAccountID, accountIDPrefix) {
-		return fmt.Errorf("%w: missing_prefix", ErrAccountInvalidID)
-	}
-	encodedValue := strings.TrimPrefix(rawAccountID, accountIDPrefix)
-	if len(encodedValue) != accountIDOpaqueStringLength {
+	if len(rawAccountID) != accountIDOpaqueStringLength {
 		return fmt.Errorf("%w: length", ErrAccountInvalidID)
 	}
-	decodedValue, decodeErr := base64.RawURLEncoding.DecodeString(encodedValue)
+	decodedValue, decodeErr := base64.RawURLEncoding.DecodeString(rawAccountID)
 	if decodeErr != nil {
 		return fmt.Errorf("%w: base64url", ErrAccountInvalidID)
 	}
 	if len(decodedValue) != accountIDOpaqueByteLength {
 		return fmt.Errorf("%w: entropy", ErrAccountInvalidID)
 	}
-	if base64.RawURLEncoding.EncodeToString(decodedValue) != encodedValue {
+	if base64.RawURLEncoding.EncodeToString(decodedValue) != rawAccountID {
 		return fmt.Errorf("%w: canonical", ErrAccountInvalidID)
 	}
 	return nil

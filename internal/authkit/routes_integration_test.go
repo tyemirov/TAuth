@@ -576,9 +576,10 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	}
 	verificationToken, _ := signupPayload["verification_token"].(string)
 	accountID, _ := signupPayload["account_id"].(string)
-	if verificationToken == "" || !strings.HasPrefix(accountID, accountIDPrefix) {
+	if verificationToken == "" {
 		testingHandle.Fatalf("expected verification token and account id, got %#v", signupPayload)
 	}
+	assertOpaqueAccountID(testingHandle, accountID)
 
 	unverifiedLogin := httptest.NewRecorder()
 	loginBody := []byte(`{"email":"new@example.com","password":"correct horse battery staple"}`)
@@ -853,31 +854,38 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 func TestAccountManagementRejectsMalformedAccountSession(testingHandle *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	config := newTestServerConfig()
-	config.AccountManagementEnabled = true
-	registry := singleTenantRegistry(config)
-	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
-	sessionToken, _, tokenErr := MintAppJWT(NewSystemClock(), config.TenantID, "account:not-opaque", "account@example.com", "Account User", "https://example.com/account.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
-	if tokenErr != nil {
-		testingHandle.Fatalf("failed to mint malformed account session: %v", tokenErr)
-	}
+	for _, sessionSubject := range []string{
+		"account:U6fYpCTyBv0qcDKw9d0o2g",
+		"account:not-opaque",
+		" U6fYpCTyBv0qcDKw9d0o2g",
+		"U6fYpCTyBv0qcDKw9d0o2g ",
+	} {
+		config := newTestServerConfig()
+		config.AccountManagementEnabled = true
+		registry := singleTenantRegistry(config)
+		router := gin.New()
+		MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+		sessionToken, _, tokenErr := MintAppJWT(NewSystemClock(), config.TenantID, sessionSubject, "account@example.com", "Account User", "https://example.com/account.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
+		if tokenErr != nil {
+			testingHandle.Fatalf("failed to mint malformed account session: %v", tokenErr)
+		}
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/auth/account/password/change", bytes.NewBuffer([]byte(`{"current_password":"current password","new_password":"new password value"}`)))
-	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: config.SessionCookieName, Value: sessionToken})
-	router.ServeHTTP(response, request)
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/auth/account/password/change", bytes.NewBuffer([]byte(`{"current_password":"current password","new_password":"new password value"}`)))
+		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(&http.Cookie{Name: config.SessionCookieName, Value: sessionToken})
+		router.ServeHTTP(response, request)
 
-	if response.Code != http.StatusForbidden {
-		testingHandle.Fatalf("expected malformed account session 403, got %d: %s", response.Code, response.Body.String())
-	}
-	var payload map[string]string
-	if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
-		testingHandle.Fatalf("decode malformed account session payload: %v", decodeErr)
-	}
-	if payload["error"] != errorAccountNotActive {
-		testingHandle.Fatalf("expected account_not_active payload, got %#v", payload)
+		if response.Code != http.StatusForbidden {
+			testingHandle.Fatalf("expected malformed account session 403 for %q, got %d: %s", sessionSubject, response.Code, response.Body.String())
+		}
+		var payload map[string]string
+		if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+			testingHandle.Fatalf("decode malformed account session payload: %v", decodeErr)
+		}
+		if payload["error"] != errorAccountNotActive {
+			testingHandle.Fatalf("expected account_not_active payload for %q, got %#v", sessionSubject, payload)
+		}
 	}
 }
 

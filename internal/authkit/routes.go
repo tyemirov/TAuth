@@ -1837,7 +1837,7 @@ func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig
 }
 
 func isAccountSessionID(applicationUserID string) bool {
-	return strings.HasPrefix(strings.TrimSpace(applicationUserID), accountIDPrefix)
+	return validateOpaqueAccountID(applicationUserID) == nil
 }
 
 func isInactiveAccountSessionError(err error) bool {
@@ -1865,11 +1865,7 @@ func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, acc
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
 		return "", ServerConfig{}, "", nil, false
 	}
-	accountID := strings.TrimSpace(claims.GetUserID())
-	if !strings.HasPrefix(accountID, accountIDPrefix) {
-		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
-		return "", ServerConfig{}, "", nil, false
-	}
+	accountID := claims.GetUserID()
 	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
 		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
 		return "", ServerConfig{}, "", nil, false

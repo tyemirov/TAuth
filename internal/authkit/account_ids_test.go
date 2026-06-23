@@ -36,12 +36,13 @@ func TestNewOpaqueAccountIDReturnsRandomSourceErrors(testingHandle *testing.T) {
 func TestValidateOpaqueAccountIDRejectsMalformedValues(testingHandle *testing.T) {
 	malformedAccountIDs := []string{
 		"",
-		" account:U6fYpCTyBv0qcDKw9d0o2g",
-		"account:U6fYpCTyBv0qcDKw9d0o2g ",
+		" U6fYpCTyBv0qcDKw9d0o2g",
+		"U6fYpCTyBv0qcDKw9d0o2g ",
 		"email:user@example.com",
-		"account:short",
-		"account:U6fYpCTyBv0qcDKw9d0o2!",
-		"account:AAAAAAAAAAAAAAAAAAAAAAA",
+		"account:U6fYpCTyBv0qcDKw9d0o2g",
+		"short",
+		"U6fYpCTyBv0qcDKw9d0o2!",
+		"AAAAAAAAAAAAAAAAAAAAAAA",
 	}
 	for _, accountID := range malformedAccountIDs {
 		if validateErr := validateOpaqueAccountID(accountID); !errors.Is(validateErr, ErrAccountInvalidID) {
