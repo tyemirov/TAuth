@@ -41,7 +41,7 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/password/verify-email` | Verify a signup challenge, activate the account, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/password/reset/start` | Start a password reset with a timing-masked accepted response | `202` JSON challenge metadata |
 | POST   | `/auth/password/reset/complete` | Complete reset, rotate password, revoke account refresh sessions, issue cookies | `200` JSON `{ user_id, user_email, ... }` |
-| POST   | `/auth/account/password/change` | Authenticated password rotation for stable account sessions | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/password/change` | Authenticated password rotation for opaque account sessions | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/password/link/start` | Start linking a password identity to the current account | `202` JSON challenge metadata |
 | POST   | `/auth/account/password/link/verify` | Complete password identity linking | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/google/link` | Link a verified Google identity to the current account | `200` JSON `{ user_id, user_email, ... }` |
@@ -107,14 +107,14 @@ TAuth does not expose Apple access tokens to JavaScript and does not store Apple
 
 ### 3.6 Email/password accounts
 
-Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a stable tenant-scoped `account:<id>` as the session subject and stores provider identities separately.
+Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a persisted tenant-scoped opaque `account:<random-base64url-128bit>` as the session subject and stores provider identities separately.
 
-1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>` for compatibility. With account management, verified credentials return their linked `account:<id>`.
+1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>`. With account management, verified credentials return their linked `account:<random-base64url-128bit>`.
 2. Public signup is gated by `account_management.password_signup.enabled`. `POST /auth/password/signup` creates a pending account, stores only the bcrypt password hash, and creates a single-use email verification challenge whose raw token is never stored.
 3. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard access and refresh cookies.
 4. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified password accounts receive a reset challenge; unknown accounts receive a synthetic accepted response.
 5. `POST /auth/password/reset/complete` consumes the reset challenge, rotates the bcrypt hash, revokes all account refresh sessions, and issues fresh cookies.
-6. Authenticated `/auth/account/*` endpoints require an `account:<id>` session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
+6. Authenticated `/auth/account/*` endpoints require an opaque `account:<random-base64url-128bit>` session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
 7. Google and Apple login also participate in account management when enabled: linked `google:<sub>` and `apple:<sub>` identities resolve to the account, and a first provider login creates an active account with that provider identity.
 
 ### 3.7 Browser helper handshake
@@ -259,7 +259,7 @@ type AccountManagementStore interface {
 
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - `PasswordCredentialStore` stores bcrypt hashes separately from refresh tokens while returning profiles that flow into the same session finalizer.
-- `AccountManagementStore` owns stable account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model. Provider identities use explicit `provider` plus `provider_id` pairs such as `google:<sub>` and `apple:<sub>`.
+- `AccountManagementStore` owns persisted opaque account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model. Provider identities use explicit `provider` plus `provider_id` pairs such as `google:<sub>` and `apple:<sub>`.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
 
@@ -350,7 +350,7 @@ Validation rules baked into the loader:
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 - `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants.
 - `apple_oauth.enabled` gates `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and HTTPS `redirect_uri`. Optional endpoint overrides are validated as absolute HTTP(S) URLs for local provider mocks and must use HTTPS unless `allow_insecure_http` is true.
-- `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates stable account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates persisted opaque account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 
@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 );
 ```
 
-When account management is enabled, account state and identity links live in separate tables:
+When account management is enabled, account state and identity links live in separate tables. `accounts.account_id` is generated once as `account:<random-base64url-128bit>` and is never derived from tenant, email, provider, or provider subject material.
 
 ```sql
 CREATE TABLE IF NOT EXISTS accounts (
