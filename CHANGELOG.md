@@ -4,7 +4,7 @@
 
 ### Features
 - Added tenant-enabled Sign in with Apple using `/auth/apple/start` and `/auth/apple/callback`, including signed state, nonce validation, Apple client-secret JWT generation, JWKS-backed ID-token validation, allowlist enforcement, account-management support, and the `tauth.js` Apple login helpers.
-- Added full tenant-gated account management for first-party email/password accounts, including signup, email verification, reset, password change, Google/password linking, unlinking, account disablement, stable account IDs, and account-level refresh revocation.
+- Added full tenant-gated account management for first-party email/password accounts, including signup, email verification, reset, password change, Google/password linking, unlinking, account disablement, persisted opaque account IDs, and account-level refresh revocation.
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
@@ -14,6 +14,7 @@
 - Masked password credential lookup timing by running a dummy bcrypt comparison when a normalized email has no stored credential.
 - Added `GET /auth/session` for browser bootstrap so stale restore hints return profile JSON or `204 No Content` instead of emitting expected `/me` or `/auth/refresh` 401s.
 - Require browser `/auth/google` ID tokens to carry a nonce claim matching the submitted TAuth nonce token or its opaque hash.
+- Generate persisted opaque `account:<random-base64url-128bit>` account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
