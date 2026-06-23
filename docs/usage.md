@@ -57,7 +57,7 @@ Key notes:
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
 - **Apple OAuth**: Set `apple_oauth.enabled: true` inside a tenant to expose `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and an HTTPS `redirect_uri` registered with Apple.
-- **Account management**: Set `account_management.enabled: true` inside a tenant to use stable `account:<id>` session subjects across password, Google, and Apple identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
+- **Account management**: Set `account_management.enabled: true` inside a tenant to use persisted opaque `account:<random-base64url-128bit>` session subjects across password, Google, and Apple identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 
 ### 2.3 Example: hosted deployment
@@ -618,7 +618,7 @@ Starts a password signup when `account_management.enabled` and `account_manageme
   ```json
   {
     "status": "accepted",
-    "account_id": "account:...",
+    "account_id": "account:U6fYpCTyBv0qcDKw9d0o2g",
     "expires_unix": 1760000000
   }
   ```
@@ -640,7 +640,7 @@ Consumes a signup verification challenge, activates the account, mints cookies, 
   { "token": "<verification_token>" }
   ```
 
-- **Response**: `200 OK` with the same profile payload as `POST /auth/google`; `user_id` is the stable `account:<id>`.
+- **Response**: `200 OK` with the same profile payload as `POST /auth/google`; `user_id` is the persisted opaque `account:<random-base64url-128bit>`.
 - **Errors**: `401` with `error: "invalid_challenge"` for missing, expired, reused, or wrong-tenant tokens.
 
 ### 6.2h `POST /auth/password/reset/start`
@@ -673,7 +673,7 @@ Consumes a reset challenge, rotates the password hash, revokes existing account 
 
 ### 6.2j Authenticated account endpoints
 
-All `/auth/account/*` endpoints require the current `app_session` cookie and only accept stable `account:<id>` session subjects.
+All `/auth/account/*` endpoints require the current `app_session` cookie and only accept persisted opaque `account:<random-base64url-128bit>` session subjects.
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |
