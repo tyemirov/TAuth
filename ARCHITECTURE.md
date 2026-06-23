@@ -107,14 +107,14 @@ TAuth does not expose Apple access tokens to JavaScript and does not store Apple
 
 ### 3.6 Email/password accounts
 
-Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a persisted tenant-scoped opaque `account:<random-base64url-128bit>` as the session subject and stores provider identities separately.
+Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a persisted tenant-scoped opaque 128-bit base64url value as the session subject and stores provider identities separately.
 
-1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>`. With account management, verified credentials return their linked `account:<random-base64url-128bit>`.
+1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>`. With account management, verified credentials return their linked bare opaque account ID.
 2. Public signup is gated by `account_management.password_signup.enabled`. `POST /auth/password/signup` creates a pending account, stores only the bcrypt password hash, and creates a single-use email verification challenge whose raw token is never stored.
 3. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard access and refresh cookies.
 4. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified password accounts receive a reset challenge; unknown accounts receive a synthetic accepted response.
 5. `POST /auth/password/reset/complete` consumes the reset challenge, rotates the bcrypt hash, revokes all account refresh sessions, and issues fresh cookies.
-6. Authenticated `/auth/account/*` endpoints require an opaque `account:<random-base64url-128bit>` session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
+6. Authenticated `/auth/account/*` endpoints require a bare opaque account-ID session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
 7. Google and Apple login also participate in account management when enabled: linked `google:<sub>` and `apple:<sub>` identities resolve to the account, and a first provider login creates an active account with that provider identity.
 
 ### 3.7 Browser helper handshake
@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 );
 ```
 
-When account management is enabled, account state and identity links live in separate tables. `accounts.account_id` is generated once as `account:<random-base64url-128bit>` and is never derived from tenant, email, provider, or provider subject material.
+When account management is enabled, account state and identity links live in separate tables. `accounts.account_id` is generated once as a 128-bit base64url value and is never derived from tenant, email, provider, provider subject material, or a `user_id` prefix.
 
 ```sql
 CREATE TABLE IF NOT EXISTS accounts (
