@@ -14,7 +14,7 @@
 - Masked password credential lookup timing by running a dummy bcrypt comparison when a normalized email has no stored credential.
 - Added `GET /auth/session` for browser bootstrap so stale restore hints return profile JSON or `204 No Content` instead of emitting expected `/me` or `/auth/refresh` 401s.
 - Require browser `/auth/google` ID tokens to carry a nonce claim matching the submitted TAuth nonce token or its opaque hash.
-- Generate persisted opaque `account:<random-base64url-128bit>` account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
+- Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
