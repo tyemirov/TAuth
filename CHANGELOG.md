@@ -22,6 +22,29 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.7] - 2026-06-24
+
+### Features ✨
+- Introduced persisted opaque 128-bit base64url account IDs for enhanced uniqueness and security in account management.
+- Full tenant-gated account management now uses these opaque account IDs for sessions, supporting signup, email verification, reset, password change, identity linking/unlinking, and account disablement.
+
+### Improvements ⚙️
+- Refactored account ID handling to remove "account:" prefix and use bare opaque IDs consistently.
+- Updated documentation across AGENTS.md, ARCHITECTURE.md, README.md, and usage docs to clarify the new opaque account ID format and session subject usage.
+- Added Ansible resource definitions for TAuth deployment.
+
+### Bug Fixes 🐛
+- Fixed account management to generate and persist opaque account IDs for sessions, migrating existing references and revoking refresh tokens tied to old subjects.
+- Enforced rejection of non-opaque account subjects at runtime to maintain contract integrity.
+
+### Testing 🧪
+- Focused tests on account ID persistence and session handling in internal authkit packages.
+
+### Docs 📚
+- Updated AGENTS.md with forward-only contract discipline emphasizing no backward compatibility.
+- Clarified account ID formats and session subject details in multiple docs including changelog, usage, and issue tracker descriptions.
+- Fixed wording in changelog regarding account subject format changes.
+
 ## [v1.1.6] - 2026-06-09
 
 ### Features ✨
