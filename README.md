@@ -191,7 +191,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <button type="button" onclick="startAppleLogin()">Sign in with Apple</button>
 ```
 
-The GitHub Pages workflow in `.github/workflows/frontend-deploy.yml` publishes the `docs/` site and copies `web/tauth.js` into the site root, so the helper is available at `https://<pages-domain>/tauth.js` when Pages is enabled.
+The production backend serves the embedded helper at `/tauth.js`; for the gateway-owned deployment it is available at `https://tauth.mprlab.com/tauth.js`. Documentation under `docs/` is repository source and is not deployed through a separate Pages workflow.
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/auth/session` recovery without browser-visible 401s. Use `bootstrapMode: "eager"` only when you intentionally want a startup session check, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 
