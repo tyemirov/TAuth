@@ -70,6 +70,8 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Rebuilt `examples/tauth-demo/index.html` with semantic markup + mpr-ui elements, adjusted demo scripts to load the bundle after `tauth.js`, and updated demo tests to match the new component structure.
 - [x] [TA-419] Document CORS origin exceptions and align example configs with the enforced allowlist rules.
   Added `cors_allowed_origin_exceptions` guidance (including GIS), updated demo/multi-tenant configs, and added regression checks in the JS test suite.
+- [x] [TA-446] Make TAuth the canonical owner of shared production configuration and prepare the PoodleScanner tenant for the static frontend/API split.
+  Resolved 2026-07-10: TAuth now owns the complete shared tenant registry and environment contract, the `ps` tenant resolves `https://poodlescanner.com` and scopes its cookies to `api.poodlescanner.com`, and the production CORS allowlist includes its declared Google exception. The app-owned deploy manifest moved to the current `.mprlab/deploy/resources.yml` discovery path, and the deploy no-op no longer requires a gateway checkout. Validation passed with the production config black-box test, deployment no-op test, the real TAuth doctor/preflight commands, and `make ci`.
 
 
 ## BugFixes (361–399)

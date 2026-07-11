@@ -20,6 +20,18 @@ TAuth is authentication-only: it validates provider identity tokens and issues f
 
 ## Deploy TAuth for a hosted product
 
+### Shared MPR production configuration
+
+TAuth owns the shared production tenant registry and its environment contract:
+
+- `configs/config.tauth.yml` is the canonical production YAML.
+- `configs/tauth.env.sample` documents every required environment value.
+- `configs/.env.tauth` is the ignored operator file containing deployed values and secrets.
+
+Create the operator file from the sample, replace every `CHANGEME` value, and keep it beside the canonical YAML. `mprlab-gateway` transports these TAuth-owned files to the gateway host but does not maintain another copy.
+
+The PoodleScanner tenant resolves browser requests from `https://poodlescanner.com` and issues `app_session_ps` / `app_refresh_ps` cookies for `api.poodlescanner.com`. The gateway therefore routes PoodleScanner's browser-facing TAuth paths through `https://api.poodlescanner.com`; direct browser authentication against an `mprlab.com` TAuth host cannot set that API-host cookie.
+
 ### 1. Describe your tenants
 
 Every deployment — even “single tenant” ones — loads configuration from a YAML file. Define your tenants (origins, Google clients, cookie domain, and TTLs) once and pass that file to every TAuth process:
