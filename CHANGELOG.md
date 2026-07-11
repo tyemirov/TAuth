@@ -17,6 +17,7 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Made TAuth the canonical owner of the shared production tenant configuration and deploy manifest, including its CORS exceptions, and prepared the PoodleScanner tenant for `poodlescanner.com` with API-host session cookies.
 - Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 - Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.

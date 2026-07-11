@@ -285,6 +285,8 @@ type AccountManagementStore interface {
 
 Configuration is loaded from a single YAML file (`config.yaml` by default, override via `tauth --config=/path/to/file` or `TAUTH_CONFIG_FILE`).
 
+The shared MPR production deployment uses `configs/config.tauth.yml` and the ignored `configs/.env.tauth` as its canonical runtime inputs. Both files are owned by TAuth. `mprlab-gateway` may copy or mount them as deployment transport, but it must not carry an independent tenant registry or environment contract. The `ps` tenant is split-origin: `https://poodlescanner.com` resolves the tenant, while TAuth is exposed to that browser through `https://api.poodlescanner.com` and issues its HttpOnly cookies specifically for `api.poodlescanner.com`.
+
 ### 5.1 Multi-tenant configuration file
 
 Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, identity-provider clients, and cookie/scheduling knobs:
