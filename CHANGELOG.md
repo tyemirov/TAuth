@@ -23,6 +23,23 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.8] - 2026-07-11
+
+- Merge pull request #132 from tyemirov/gix/refactor-policies-and-workflows-remove-legacy-ci-and
+- test: remove --skip-ci argument from deploy_contract_test deployment command
+- docs(issues): resolve B043 with updated deploy contract test alignment
+- Merge remote-tracking branch 'origin/master' into gix/refactor-policies-and-workflows-remove-legacy-ci-and
+- test: add release contract test to verify repository-owned release tooling
+- refactor(scripts): modularize release/publish flow and remove legacy scripts
+- docs: remove CNAME file from documentation
+- chore(deploy): remove obsolete Ansible resources.yml
+- docs: update README to clarify deployment and helper script serving
+- build(makefile): update release and publish targets for container artifact flow
+- docs: update agent and issue management policies, add recurring maintenance runbooks
+- ci: remove GitHub Actions workflows for frontend deploy and release
+- Merge pull request #131 from tyemirov/tyemirov/improvement/TA-446-production-config-ownership
+- feat(config): own shared TAuth production deployment contract
+
 ## [v1.1.7] - 2026-06-24
 
 ### Features ✨
