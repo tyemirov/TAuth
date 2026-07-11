@@ -21,7 +21,6 @@ func TestDeployNoOpDoesNotRequireGatewayCheckout(t *testing.T) {
 		"scripts/deploy.sh",
 		"--tag",
 		"v0.0.0",
-		"--skip-ci",
 		"--skip-image-verify",
 		"--skip-backend",
 	)
