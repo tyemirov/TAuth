@@ -2,4 +2,4 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-exec "${repo_root}/scripts/release/prepare_release.sh" "$@"
+exec "${repo_root}/scripts/release/publish_release.sh" "$@"
