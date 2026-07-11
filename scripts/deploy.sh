@@ -113,11 +113,11 @@ resolve_gateway_dir() {
   done
 }
 
-GATEWAY_DIR="$(resolve_gateway_dir)"
-[[ -n "${GATEWAY_DIR}" ]] || { echo "error: gateway checkout not found; set GATEWAY_DIR=/path/to/mprlab-gateway or pass --gateway-dir" >&2; exit 1; }
-[[ -d "${GATEWAY_DIR}" ]] || { echo "error: gateway checkout not found: ${GATEWAY_DIR}" >&2; exit 1; }
-
 if [[ "${SKIP_BACKEND}" != "true" ]]; then
+  GATEWAY_DIR="$(resolve_gateway_dir)"
+  [[ -n "${GATEWAY_DIR}" ]] || { echo "error: gateway checkout not found; set GATEWAY_DIR=/path/to/mprlab-gateway or pass --gateway-dir" >&2; exit 1; }
+  [[ -d "${GATEWAY_DIR}" ]] || { echo "error: gateway checkout not found: ${GATEWAY_DIR}" >&2; exit 1; }
+
   timeout -k 30s -s SIGKILL 30s git fetch origin "${DEFAULT_BRANCH}" --tags
 
   current_branch="$(git rev-parse --abbrev-ref HEAD)"
