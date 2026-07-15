@@ -27,8 +27,8 @@ const (
 	poodleScannerRefreshCookieName = "app_refresh_ps"
 	mediaOpsOrigin                 = "https://mediaops.mprlab.com"
 	mediaOpsCookieDomain           = ".mprlab.com"
-	mediaOpsSessionCookieName      = "mediaops_session"
-	mediaOpsRefreshCookieName      = "mediaops_refresh"
+	mediaOpsSessionCookieName      = "app_session_mediaops"
+	mediaOpsRefreshCookieName      = "app_refresh_mediaops"
 	googleIdentityOrigin           = "https://accounts.google.com"
 )
 
