@@ -176,8 +176,8 @@ func TestLoadApplicationConfigMultiTenantFixture(testingHandle *testing.T) {
 	testingHandle.Setenv("TAUTH_CORS_EXCEPTION_1", "https://accounts.google.com")
 	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID1", "notes-client")
 	testingHandle.Setenv("TAUTH_NOTES_JWT_SIGNING_KEY", "notes-signing-key")
-	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "mpr-client")
-	testingHandle.Setenv("TAUTH_MPR_JWT_SIGNING_KEY", "mpr-signing-key")
+	testingHandle.Setenv("TAUTH_GOOGLE_WEB_CLIENT_ID2", "portal-client")
+	testingHandle.Setenv("TAUTH_PORTAL_JWT_SIGNING_KEY", "portal-signing-key")
 	testingHandle.Setenv("TAUTH_ALLOW_INSECURE_HTTP", "true")
 
 	_, filename, _, ok := runtime.Caller(0)
@@ -214,14 +214,14 @@ func TestLoadApplicationConfigMultiTenantFixture(testingHandle *testing.T) {
 	if tenant, ok := tenantConfig.OriginOwner("http://localhost:8000"); !ok || tenant != "notes" {
 		testingHandle.Fatalf("expected notes tenant for gravity origin, got %s", tenant)
 	}
-	if tenant, ok := tenantConfig.OriginOwner("http://localhost:4173"); !ok || tenant != "mpr-sites" {
-		testingHandle.Fatalf("expected mpr-sites tenant for demo origin, got %s", tenant)
+	if tenant, ok := tenantConfig.OriginOwner("http://localhost:4173"); !ok || tenant != "portal" {
+		testingHandle.Fatalf("expected portal tenant for demo origin, got %s", tenant)
 	}
 	if notesTenant, ok := tenantConfig.TenantByID("notes"); !ok || string(notesTenant.SigningKey()) != "notes-signing-key" {
 		testingHandle.Fatalf("expected notes tenant signing key to be applied")
 	}
-	if mprTenant, ok := tenantConfig.TenantByID("mpr-sites"); !ok || string(mprTenant.SigningKey()) != "mpr-signing-key" {
-		testingHandle.Fatalf("expected mpr tenant signing key to be applied")
+	if portalTenant, ok := tenantConfig.TenantByID("portal"); !ok || string(portalTenant.SigningKey()) != "portal-signing-key" {
+		testingHandle.Fatalf("expected portal tenant signing key to be applied")
 	}
 }
 

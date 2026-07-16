@@ -11,14 +11,14 @@ const DEMO_HTML_PATH = path.join(
   "index.html",
 );
 
-test("demo uses mpr-ui layout components for styling", async () => {
+test("demo uses self-contained semantic layout styling", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes("<mpr-band"),
-    "Expected demo to render the mpr-ui band component",
+    html.includes('<main class="demo-shell">'),
+    "Expected demo to render the local content shell",
   );
   assert.ok(
-    html.includes("<mpr-header"),
-    "Expected demo to render the mpr-ui header component",
+    html.includes('<header id="demo-header"'),
+    "Expected demo to render a semantic header",
   );
 });

@@ -13,10 +13,8 @@ RELEASE_ARGS ?=
 RELEASE_HELPER := $(abspath $(CURDIR)/scripts/release/release_helper.py)
 RELEASE_ARTIFACT_TARGETS ?= container-artifacts
 RELEASE_TOOL_DIR := $(abspath $(CURDIR)/scripts/release)
-DEPLOY_ARGS ?=
-GATEWAY_DIR ?=
 
-.PHONY: ci format lint test-go test-js release container-artifacts publish-release publish deploy
+.PHONY: ci format lint test-go test-js release container-artifacts publish-release publish
 
 ci: format lint test-go test-js
 
@@ -47,6 +45,3 @@ publish-release:
 
 publish: publish-release
 	@"$(RELEASE_TOOL_DIR)/publish_container_artifacts.sh"
-
-deploy:
-	@GATEWAY_DIR="$(GATEWAY_DIR)" DOCKER_IMAGE="$(DOCKER_IMAGE)" bash scripts/deploy.sh $(DEPLOY_ARGS)

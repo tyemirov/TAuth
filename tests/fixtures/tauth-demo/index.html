@@ -4,52 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TAuth Demo Fixture</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.css"
-    />
     <link rel="stylesheet" href="./demo.css" />
     <script defer src="./demo-config.js"></script>
     <script defer src="./tauth-config.js"></script>
   </head>
-  <body data-mpr-theme="dark">
-    <mpr-header
-      id="demo-header"
-      tauth-tenant-id="demo"
-      brand-label="Marco Polo Research Lab"
-      nav-links="fixture-links"
-      tauth-login-path="/auth/google"
-      tauth-logout-path="/auth/logout"
-      tauth-nonce-path="/auth/nonce"
-      settings="true"
-      sticky="true"
-    >
-      <header class="mpr-header">
-        <button type="button" data-mpr-header="sign-out-button">Sign out</button>
-      </header>
-    </mpr-header>
+  <body>
+    <header id="demo-header" class="demo-header" data-tenant-id="demo">
+      <a class="demo-brand" href="#">TAuth</a>
+      <nav aria-label="Documentation"><a href="#docs">Docs</a></nav>
+      <div data-demo-google-signin aria-label="Google Sign-In"></div>
+      <button type="button" data-demo-sign-out>Sign out</button>
+    </header>
 
-    <main>
-      <mpr-band category="platform">
-        <section aria-labelledby="demo-title">
-          <h1 id="demo-title">Fixture demo</h1>
-          <p>Fixture content for demo tests.</p>
-        </section>
-        <section aria-labelledby="profile-status-title">
-          <h2 id="profile-status-title">Current session</h2>
-          <div data-demo-auth-status aria-live="polite" aria-atomic="true">
-            <p>Awaiting connection to the TAuth service…</p>
-          </div>
-        </section>
-      </mpr-band>
+    <main class="demo-shell">
+      <section aria-labelledby="demo-title">
+        <h1 id="demo-title">Fixture demo</h1>
+        <p>Fixture content for demo tests.</p>
+      </section>
+      <section aria-labelledby="profile-status-title">
+        <h2 id="profile-status-title">Current session</h2>
+        <div data-demo-auth-status aria-live="polite" aria-atomic="true">
+          <p>Awaiting connection to the TAuth service…</p>
+        </div>
+      </section>
     </main>
 
-    <mpr-footer
-      id="page-footer"
-      prefix-text="Built by Marco Polo Research Lab"
-      links="fixture-links"
-      sticky="true"
-    ></mpr-footer>
+    <footer id="page-footer" class="demo-footer">
+      <span>TAuth demonstration</span>
+      <nav aria-label="Project links"><a href="#docs">Documentation</a></nav>
+    </footer>
     <script defer src="./status-panel.js"></script>
   </body>
 </html>

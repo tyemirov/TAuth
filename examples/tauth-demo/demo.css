@@ -8,19 +8,75 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--mpr-color-surface-primary, rgba(3, 23, 32, 0.95));
-  color: var(--mpr-color-text-primary, #e2e8f0);
+  background: #031720;
+  color: #e2e8f0;
 }
 
-mpr-header,
-mpr-footer {
-  display: block;
+.demo-header,
+.demo-footer {
   width: 100%;
   flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem clamp(1rem, 4vw, 3rem);
+  background: #061f2a;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.demo-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid;
+}
+
+.demo-footer {
+  justify-content: space-between;
+  border-top: 1px solid;
+}
+
+.demo-header nav,
+.demo-footer nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.demo-header a,
+.demo-footer a {
+  color: #7dd3fc;
+}
+
+.demo-brand {
+  font-weight: 800;
+  text-decoration: none;
+}
+
+[data-demo-google-signin] {
+  margin-left: auto;
+}
+
+[data-demo-sign-out] {
+  display: none;
+}
+
+.demo-header--authenticated [data-demo-sign-out] {
+  display: inline-flex;
+}
+
+.demo-header--authenticated [data-demo-google-signin] {
+  display: none;
 }
 
 main {
   flex: 1 0 auto;
+}
+
+.demo-shell {
+  width: min(100% - 2rem, 960px);
+  margin: 0 auto;
+  padding: 3rem 0;
 }
 
 section {
@@ -33,21 +89,21 @@ section {
 section > h1,
 section > h2 {
   margin: 0;
-  color: var(--mpr-color-accent, #38bdf8);
+  color: #38bdf8;
 }
 
 section > p,
 section li,
 section dd {
-  color: var(--mpr-color-text-primary, #e2e8f0);
+  color: #e2e8f0;
 }
 
 [data-demo-auth-status] {
-  border: 1px solid var(--mpr-color-border, rgba(148, 163, 184, 0.35));
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 0.75rem;
   padding: 1.25rem;
-  background: var(--mpr-color-surface-elevated, rgba(3, 27, 32, 0.92));
-  box-shadow: var(--mpr-shadow-elevated, 0 25px 60px rgba(0, 0, 0, 0.55));
+  background: rgba(3, 27, 32, 0.92);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
   display: grid;
   gap: 0.75rem;
 }
@@ -68,7 +124,7 @@ dl {
 
 dt {
   font-weight: 600;
-  color: var(--mpr-color-text-muted, #94a3b8);
+  color: #94a3b8;
 }
 
 dd {

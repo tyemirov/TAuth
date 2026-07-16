@@ -10,26 +10,22 @@ const DEMO_HTML_PATH = path.join(
   "tauth-demo",
   "index.html",
 );
-test("demo renders mpr-ui header wiring for tauth.js", async () => {
+test("demo renders vendor-neutral auth controls for tauth.js", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes("mpr-ui.css"),
-    "Expected demo to load the mpr-ui stylesheet",
+    html.includes('rel="stylesheet" href="./demo.css"'),
+    "Expected demo to load its local stylesheet",
   );
   assert.ok(
-    html.includes("<mpr-header"),
-    "Expected demo to declare the mpr-ui header element",
+    html.includes('<header id="demo-header"'),
+    "Expected demo to declare the native header element",
   );
   assert.ok(
-    html.includes('login-path="/auth/google"'),
-    "Expected demo to declare the login endpoint on the header",
+    html.includes("data-demo-google-signin"),
+    "Expected demo to declare the Google Sign-In host",
   );
   assert.ok(
-    html.includes('nonce-path="/auth/nonce"'),
-    "Expected demo to declare the nonce endpoint on the header",
-  );
-  assert.ok(
-    html.includes('logout-path="/auth/logout"'),
-    "Expected demo to declare the logout endpoint on the header",
+    html.includes("data-demo-sign-out"),
+    "Expected demo to declare the sign-out control",
   );
 });

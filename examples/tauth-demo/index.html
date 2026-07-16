@@ -4,106 +4,85 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TAuth Demo</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.css"
-    />
     <link rel="stylesheet" href="./demo.css" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="https://tauth.mprlab.com/tauth.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.js"></script>
+    <script src="https://auth.example.com/tauth.js"></script>
   </head>
-  <body data-mpr-theme="dark">
-    <mpr-header
+  <body>
+    <header
       id="demo-header"
-      brand-label="Marco Polo Research Lab"
-      brand-href="https://mprlab.com/"
-      nav-links='[
-        { "label": "Docs", "href": "https://github.com/tyemirov/TAuth/blob/master/docs/usage.md", "target": "_blank" },
-        { "label": "Architecture", "href": "https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md", "target": "_blank" }
-      ]'
-      google-site-id="212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com"
-      tauth-tenant-id="demo"
-      tauth-url="http://localhost:8082"
-      tauth-login-path="/auth/google"
-      tauth-logout-path="/auth/logout"
-      tauth-nonce-path="/auth/nonce"
-      sticky="true"
-    ></mpr-header>
+      class="demo-header"
+      data-base-url="http://localhost:8082"
+      data-google-client-id="212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com"
+      data-tenant-id="demo"
+    >
+      <a class="demo-brand" href="https://github.com/tyemirov/TAuth">TAuth</a>
+      <nav aria-label="Documentation">
+        <a href="https://github.com/tyemirov/TAuth/blob/master/docs/usage.md">Docs</a>
+        <a href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md">Architecture</a>
+      </nav>
+      <div data-demo-google-signin aria-label="Google Sign-In"></div>
+      <button type="button" data-demo-sign-out>Sign out</button>
+    </header>
 
-    <main>
-      <mpr-band category="platform">
-        <section aria-labelledby="demo-title">
-          <h1 id="demo-title">Docker Compose demo</h1>
-          <p>
-            This page connects the <code>mpr-header</code> web component to a
-            local TAuth service running under Docker Compose. Sign in with
-            Google, observe the authenticated profile state, and use the header
-            sign-out control to clear your session.
-          </p>
-        </section>
+    <main class="demo-shell">
+      <section aria-labelledby="demo-title">
+        <h1 id="demo-title">Docker Compose demo</h1>
+        <p>
+          This page connects a native browser interface to a local TAuth service
+          running under Docker Compose. Sign in with Google, observe the
+          authenticated profile state, and use the sign-out control to clear
+          your session.
+        </p>
+      </section>
 
-        <section aria-labelledby="profile-status-title">
-          <h2 id="profile-status-title">Current session</h2>
-          <p>
-            Google sign-in requests are exchanged with
-            <code>https://computercat.tyemirov.net:8082</code>. The helper script provided by
-            TAuth monitors <code>/me</code> and <code>/auth/refresh</code> to
-            keep a valid browser session without storing tokens in localStorage.
-          </p>
-          <div data-demo-auth-status aria-live="polite" aria-atomic="true">
-            <p>Awaiting connection to the TAuth service…</p>
-          </div>
-        </section>
+      <section aria-labelledby="profile-status-title">
+        <h2 id="profile-status-title">Current session</h2>
+        <p>
+          Google sign-in requests are exchanged with
+          <code>http://localhost:8082</code>. The helper script provided by
+          TAuth monitors <code>/auth/session</code> and
+          <code>/auth/refresh</code> to keep a valid browser session without
+          storing tokens in localStorage.
+        </p>
+        <div data-demo-auth-status aria-live="polite" aria-atomic="true">
+          <p>Awaiting connection to the TAuth service…</p>
+        </div>
+      </section>
 
-        <section aria-labelledby="instructions-title">
-          <h2 id="instructions-title">How it works</h2>
-          <ol>
-            <li>
-              The frontend is served over
-              <code>https://computercat.tyemirov.net:8081</code>.
-            </li>
-            <li>
-              TAuth listens on port 8082, issuing HttpOnly session cookies scoped
-              to <code>computercat.tyemirov.net</code>.
-            </li>
-            <li>
-              The header component requests <code>/auth/nonce</code> before
-              rendering the Google button and exchanges the returned credential
-              via <code>/auth/google</code>.
-            </li>
-            <li>
-              The embedded <code>tauth.js</code> helper refreshes sessions by
-              calling <code>/auth/refresh</code> whenever a request returns 401.
-            </li>
-            <li>
-              Clicking <strong>Sign out</strong> invokes
-              <code>/auth/logout</code> and resets the profile snapshot below.
-            </li>
-          </ol>
-        </section>
-      </mpr-band>
+      <section aria-labelledby="instructions-title">
+        <h2 id="instructions-title">How it works</h2>
+        <ol>
+          <li>The frontend is served over <code>http://localhost:8000</code>.</li>
+          <li>
+            TAuth listens on port 8082, issuing HttpOnly session cookies scoped
+            to <code>localhost</code>.
+          </li>
+          <li>
+            The page requests <code>/auth/nonce</code> before rendering the
+            Google button and exchanges the returned credential through
+            <code>/auth/google</code>.
+          </li>
+          <li>
+            The embedded <code>tauth.js</code> helper refreshes sessions through
+            <code>/auth/refresh</code> whenever a protected request returns 401.
+          </li>
+          <li>
+            Clicking <strong>Sign out</strong> invokes
+            <code>/auth/logout</code> and resets the profile snapshot below.
+          </li>
+        </ol>
+      </section>
     </main>
 
-    <mpr-footer
-      id="page-footer"
-      prefix-text="Built by Marco Polo Research Lab"
-      privacy-link-label="Privacy &amp; Terms"
-      privacy-link-href="#privacy"
-      links='[
-        { "label": "Marco Polo Research Lab", "url": "https://mprlab.com" },
-        { "label": "Gravity Notes", "url": "https://gravity.mprlab.com" },
-        { "label": "LoopAware", "url": "https://loopaware.mprlab.com" },
-        { "label": "Allergy Wheel", "url": "https://allergy.mprlab.com" },
-        { "label": "Social Threader", "url": "https://threader.mprlab.com" },
-        { "label": "RSVP", "url": "https://rsvp.mprlab.com" },
-        { "label": "Countdown Calendar", "url": "https://countdown.mprlab.com" },
-        { "label": "LLM Crossword", "url": "https://llm-crossword.mprlab.com" },
-        { "label": "Prompt Bubbles", "url": "https://prompts.mprlab.com" },
-        { "label": "Wallpapers", "url": "https://wallpapers.mprlab.com" }
-      ]'
-      sticky="true"
-    ></mpr-footer>
+    <footer id="page-footer" class="demo-footer">
+      <span>TAuth demonstration</span>
+      <nav aria-label="Project links">
+        <a href="https://github.com/tyemirov/TAuth/blob/master/docs/usage.md">Documentation</a>
+        <a href="https://github.com/tyemirov/TAuth/blob/master/ARCHITECTURE.md">Architecture</a>
+        <a href="https://github.com/tyemirov/TAuth">Source</a>
+      </nav>
+    </footer>
     <script defer src="./app.js"></script>
   </body>
 </html>

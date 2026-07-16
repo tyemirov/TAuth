@@ -448,7 +448,7 @@ def command_generate_notes(args: argparse.Namespace) -> int:
 def release_artifact_dir(cwd: Path, override: str | None = None) -> Path:
     if override:
         return Path(override).expanduser().resolve()
-    raw_path = run(["git", "rev-parse", "--git-path", "mprlab-release"], cwd=cwd).stdout.strip()
+    raw_path = run(["git", "rev-parse", "--git-path", "tauth-release"], cwd=cwd).stdout.strip()
     artifact_path = Path(raw_path)
     if not artifact_path.is_absolute():
         artifact_path = cwd / artifact_path
@@ -470,7 +470,7 @@ def command_initialize_release_artifact(args: argparse.Namespace) -> int:
     (artifact_path / "payloads").mkdir(parents=True)
     staging = {
         "schema_version": 1,
-        "artifact_kind": "mprlab.release.staging",
+        "artifact_kind": "tauth.release.staging",
         "version": args.version,
         "source_commit": resolve_commit(cwd, args.source_commit, "source_commit"),
         "release_timestamp": parse_release_timestamp(args.release_timestamp).isoformat(),
@@ -583,7 +583,7 @@ def command_write_release_artifact(args: argparse.Namespace) -> int:
         fail("prepared release staging area is missing", {"artifact_dir": str(artifact_path)})
     staging = json.loads(staging_path.read_text(encoding="utf-8"))
     expected_staging = {
-        "artifact_kind": "mprlab.release.staging",
+        "artifact_kind": "tauth.release.staging",
         "version": args.version,
         "source_commit": source_commit,
     }
@@ -599,7 +599,7 @@ def command_write_release_artifact(args: argparse.Namespace) -> int:
     payloads = inventory_payloads(artifact_path)
     manifest = {
         "schema_version": 2,
-        "artifact_kind": "mprlab.release",
+        "artifact_kind": "tauth.release",
         "version": args.version,
         "source_commit": source_commit,
         "release_commit": release_commit,
@@ -625,7 +625,7 @@ def load_release_artifact(cwd: Path, override: str | None = None) -> tuple[Path,
             {"artifact_dir": str(artifact_path)},
         )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != 2 or manifest.get("artifact_kind") != "mprlab.release":
+    if manifest.get("schema_version") != 2 or manifest.get("artifact_kind") != "tauth.release":
         raise HelperError("prepared release manifest has an invalid contract", {"manifest": str(manifest_path)})
     actual_notes_sha256 = sha256_file(notes_path)
     if manifest.get("notes_sha256") != actual_notes_sha256:
@@ -663,7 +663,7 @@ def publish_release_assets(cwd: Path, version: str, assets: list[Path]) -> list[
 
     run(["gh", "release", "upload", version, *[str(path) for path in assets], "--clobber"], cwd=cwd)
     published: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="mprlab-release-assets-") as temporary_directory:
+    with tempfile.TemporaryDirectory(prefix="tauth-release-assets-") as temporary_directory:
         download_root = Path(temporary_directory)
         for asset in assets:
             asset_dir = download_root / asset.name

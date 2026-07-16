@@ -21,7 +21,7 @@ command -v python3 >/dev/null 2>&1 || { echo "error: python3 is required" >&2; e
 docker buildx version >/dev/null 2>&1 || { echo "error: docker buildx is required" >&2; exit 1; }
 
 repo_root="$(git rev-parse --show-toplevel)"
-artifact_dir="$(git rev-parse --git-path mprlab-release)"
+artifact_dir="$(git rev-parse --git-path tauth-release)"
 [[ "${artifact_dir}" == /* ]] || artifact_dir="${repo_root}/${artifact_dir}"
 helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release_helper.py"
 "${helper}" verify-release-artifact >/dev/null
@@ -55,7 +55,7 @@ import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-if data.get("schema_version") != 1 or data.get("artifact_kind") != "mprlab.container":
+if data.get("schema_version") != 1 or data.get("artifact_kind") != "tauth.container":
     raise SystemExit("invalid container artifact descriptor")
 print(data["name"])
 print(data["image"])

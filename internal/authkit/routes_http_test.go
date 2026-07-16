@@ -289,7 +289,7 @@ func newMobileNativeTestServerConfig() ServerConfig {
 			ClientID: "ios-client-id",
 			RedirectURIs: []string{
 				"com.promptdew.mobile://oauth2redirect/google",
-				"https://promptdew.mprlab.com/oauth/google/callback",
+				"https://promptdew.example.com/oauth/google/callback",
 			},
 		},
 		{
@@ -2546,7 +2546,7 @@ tenants:
         client_id: "ios-client-id"
         redirect_uris:
           - "com.promptdew.mobile://oauth2redirect/google"
-          - "https://promptdew.mprlab.com/oauth/google/callback"
+          - "https://promptdew.example.com/oauth/google/callback"
       - platform: android
         client_id: "android-client-id"
         redirect_uris:

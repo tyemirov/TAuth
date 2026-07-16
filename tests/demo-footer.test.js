@@ -14,11 +14,11 @@ const DEMO_HTML_PATH = path.join(
 test("demo renders the static footer content", async () => {
   const html = await fs.readFile(DEMO_HTML_PATH, "utf8");
   assert.ok(
-    html.includes("<mpr-footer"),
-    "Expected demo to declare the mpr-ui footer element",
+    html.includes('<footer id="page-footer"'),
+    "Expected demo to declare the semantic footer element",
   );
   assert.ok(
-    html.includes("Built by Marco Polo Research Lab"),
-    "Expected footer copy to include the organization name",
+    html.includes("TAuth demonstration"),
+    "Expected footer copy to identify the neutral demonstration",
   );
 });

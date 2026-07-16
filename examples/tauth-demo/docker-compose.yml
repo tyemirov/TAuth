@@ -13,7 +13,7 @@ services:
       - ./config.yaml:/config/config.yaml:ro
     restart: unless-stopped
 
-  mpr-frontend:
+  demo-frontend:
     image: ghcr.io/tyemirov/ghttp:latest
     pull_policy: always
     depends_on:

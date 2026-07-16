@@ -7,7 +7,7 @@ Usage:
   prepare_container_artifact.sh --name <name> --image <registry/repository> [options]
 
 Builds one or more platform-specific container images into local Docker archives
-under the active .git/mprlab-release staging area. It never logs in or pushes.
+under the active .git/tauth-release staging area. It never logs in or pushes.
 
 Options:
   --file <path>          Dockerfile path. Default: Dockerfile
@@ -80,7 +80,7 @@ for platform in "${platform_list[@]}"; do
   [[ "${platform}" =~ ^linux/(amd64|arm64)$ ]] || { echo "error: unsupported release platform: ${platform}" >&2; exit 1; }
   platform_token="${platform//\//-}"
   version_token="$(printf '%s' "${RELEASE_VERSION}" | tr -c 'A-Za-z0-9_.-' '-')"
-  local_ref="mprlab-release.local/${name}:${version_token}-${platform_token}"
+  local_ref="tauth-release.local/${name}:${version_token}-${platform_token}"
   archive="${artifact_root}/${platform_token}.tar"
   build_command=(docker buildx build --platform "${platform}" --load --file "${dockerfile}" --tag "${local_ref}")
   [[ "${pull}" == "true" ]] && build_command+=(--pull)
@@ -122,7 +122,7 @@ for row in pathlib.Path(rows_path).read_text(encoding="utf-8").splitlines():
     )
 document = {
     "schema_version": 1,
-    "artifact_kind": "mprlab.container",
+    "artifact_kind": "tauth.container",
     "name": name,
     "image": image,
     "version": version,

@@ -2,19 +2,10 @@
 'use strict';
 
 const STATUS_HOST_SELECTOR = '[data-demo-auth-status]';
-const HEADER_HOST_SELECTOR = 'mpr-header#demo-header';
-const GOOGLE_SIGNIN_SELECTOR = '[data-mpr-header="google-signin"]';
-const HEADER_ERROR_MESSAGES = Object.freeze({
-  'missing-site-id': 'Missing Google client ID (google-site-id).',
-  'missing-tauth-tenant-id': 'Missing TAuth tenant id (tauth-tenant-id).',
-  'mpr-ui.google_site_id_required': 'Missing Google client ID (google-site-id).',
-  'mpr-ui.header.google_site_id_missing': 'Missing Google client ID (google-site-id).',
-  'mpr-ui.tenant_id_required': 'Missing TAuth tenant id (tauth-tenant-id).',
-  'mpr-ui.header.google_error': 'Google Sign-In failed to render.',
-  'mpr-ui.header.google_unavailable': 'Google Sign-In is unavailable.',
-  'mpr-ui.header.google_render_failed': 'Google Sign-In failed to render.',
-  'mpr-ui.header.google_script_failed': 'Google Sign-In script failed to load.',
-});
+const HEADER_SELECTOR = 'header#demo-header';
+const GOOGLE_SIGNIN_SELECTOR = '[data-demo-google-signin]';
+const SIGN_OUT_SELECTOR = '[data-demo-sign-out]';
+const AUTHENTICATED_CLASS = 'demo-header--authenticated';
 
 /**
  * @typedef {object} AuthProfile
@@ -26,7 +17,35 @@ const HEADER_ERROR_MESSAGES = Object.freeze({
  */
 
 /**
- * Renders the session snapshot with the provided profile.
+ * @returns {{ baseUrl: string, googleClientId: string, tenantId: string }}
+ */
+function readDemoConfig() {
+  const header = document.querySelector(HEADER_SELECTOR);
+  if (!(header instanceof HTMLElement)) {
+    throw new Error('tauth.demo.header_missing');
+  }
+  const baseUrl = String(header.dataset.baseUrl || '').trim();
+  const googleClientId = String(header.dataset.googleClientId || '').trim();
+  const tenantId = String(header.dataset.tenantId || '').trim();
+  if (!baseUrl || !googleClientId || !tenantId) {
+    throw new Error('tauth.demo.config_missing');
+  }
+  return { baseUrl, googleClientId, tenantId };
+}
+
+/**
+ * @param {boolean} authenticated
+ * @returns {void}
+ */
+function updateHeaderState(authenticated) {
+  const header = document.querySelector(HEADER_SELECTOR);
+  if (!header) {
+    return;
+  }
+  header.classList.toggle(AUTHENTICATED_CLASS, authenticated);
+}
+
+/**
  * @param {AuthProfile | null | undefined} profile
  * @returns {void}
  */
@@ -35,6 +54,7 @@ function renderSession(profile) {
   if (!host) {
     return;
   }
+  updateHeaderState(Boolean(profile));
   const roles = Array.isArray(profile?.roles) ? profile.roles : [];
   const roleLabel = roles.length ? roles.join(', ') : 'user';
   host.replaceChildren();
@@ -63,14 +83,7 @@ function renderSession(profile) {
   roleLabelElement.textContent = 'Roles';
   const roleValue = document.createElement('dd');
   roleValue.textContent = roleLabel;
-  details.append(
-    nameLabel,
-    nameValue,
-    emailLabel,
-    emailValue,
-    roleLabelElement,
-    roleValue
-  );
+  details.append(nameLabel, nameValue, emailLabel, emailValue, roleLabelElement, roleValue);
   if (profile.avatar_url) {
     const avatar = document.createElement('img');
     avatar.src = profile.avatar_url;
@@ -80,14 +93,13 @@ function renderSession(profile) {
   }
   const expiryParagraph = document.createElement('p');
   if (profile.expires) {
-    const readableExpires = new Date(profile.expires).toLocaleString();
     const timeElement = document.createElement('time');
     timeElement.dateTime = profile.expires;
-    timeElement.textContent = readableExpires;
+    timeElement.textContent = new Date(profile.expires).toLocaleString();
     expiryParagraph.append(
       document.createTextNode('Current session cookie expires at '),
       timeElement,
-      document.createTextNode('.')
+      document.createTextNode('.'),
     );
   } else {
     expiryParagraph.textContent =
@@ -99,7 +111,11 @@ function renderSession(profile) {
   host.append(title, summary, details, expiryParagraph, refreshParagraph);
 }
 
-function renderError(message) {
+/**
+ * @param {unknown} error
+ * @returns {void}
+ */
+function renderError(error) {
   const host = document.querySelector(STATUS_HOST_SELECTOR);
   if (!host) {
     return;
@@ -108,116 +124,104 @@ function renderError(message) {
   const title = document.createElement('h3');
   title.textContent = 'Sign-in error';
   const details = document.createElement('p');
-  details.textContent = message;
+  details.textContent = error instanceof Error ? error.message : 'Unable to complete authentication.';
   host.append(title, details);
 }
 
 /**
- * @param {unknown} code
- * @param {unknown} message
- * @returns {string}
+ * @returns {Promise<any>}
  */
-function formatErrorMessage(code, message) {
-  const normalizedCode = typeof code === 'string' ? code.trim() : '';
-  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
-  if (normalizedMessage) {
-    return normalizedMessage;
+async function waitForGoogleIdentity() {
+  const readIdentity = () => /** @type {any} */ (window).google?.accounts?.id;
+  const availableIdentity = readIdentity();
+  if (availableIdentity) {
+    return availableIdentity;
   }
-  if (normalizedCode && HEADER_ERROR_MESSAGES[normalizedCode]) {
-    return HEADER_ERROR_MESSAGES[normalizedCode];
+  const script = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+  if (!(script instanceof HTMLScriptElement)) {
+    throw new Error('tauth.demo.google_script_missing');
   }
-  if (normalizedCode) {
-    return `Sign-in error: ${normalizedCode}`;
-  }
-  return 'Unable to complete authentication.';
-}
-
-/**
- * @param {Element | null} headerElement
- * @returns {string}
- */
-function readGoogleSigninError(headerElement) {
-  if (!headerElement || typeof headerElement.querySelector !== 'function') {
-    return '';
-  }
-  const googleSigninElement = headerElement.querySelector(GOOGLE_SIGNIN_SELECTOR);
-  if (!googleSigninElement) {
-    return '';
-  }
-  const errorCode = googleSigninElement.getAttribute('data-mpr-google-error');
-  return errorCode ? formatErrorMessage(errorCode, '') : '';
-}
-
-/**
- * @param {Element | null} headerElement
- * @returns {string}
- */
-function readMissingHeaderConfig(headerElement) {
-  if (!headerElement || typeof headerElement.getAttribute !== 'function') {
-    return '';
-  }
-  const siteId =
-    headerElement.getAttribute('google-site-id') ||
-    headerElement.getAttribute('site-id');
-  if (!siteId) {
-    return formatErrorMessage('missing-site-id', '');
-  }
-  const tenantId = headerElement.getAttribute('tauth-tenant-id');
-  if (!tenantId) {
-    return formatErrorMessage('missing-tauth-tenant-id', '');
-  }
-  return '';
-}
-
-/**
- * @returns {string}
- */
-function readHeaderErrorMessage() {
-  const headerElement = document.querySelector(HEADER_HOST_SELECTOR);
-  if (!headerElement) {
-    return '';
-  }
-  const googleSigninError = readGoogleSigninError(headerElement);
-  if (googleSigninError) {
-    return googleSigninError;
-  }
-  return readMissingHeaderConfig(headerElement);
-}
-
-function initSessionPanel() {
-  const currentProfile =
-    typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null;
-  if (currentProfile) {
-    renderSession(currentProfile);
-  } else {
-    const headerError = readHeaderErrorMessage();
-    if (headerError) {
-      renderError(headerError);
-    } else {
-      renderSession(null);
-    }
-  }
-  document.addEventListener('mpr-ui:auth:authenticated', (event) => {
-    renderSession(event?.detail?.profile ?? null);
+  await new Promise((resolve, reject) => {
+    script.addEventListener('load', resolve, { once: true });
+    script.addEventListener('error', () => reject(new Error('tauth.demo.google_script_failed')), {
+      once: true,
+    });
   });
-  document.addEventListener('mpr-ui:auth:unauthenticated', () => {
-    const headerError = readHeaderErrorMessage();
-    if (headerError) {
-      renderError(headerError);
+  const loadedIdentity = readIdentity();
+  if (!loadedIdentity) {
+    throw new Error('tauth.demo.google_unavailable');
+  }
+  return loadedIdentity;
+}
+
+/**
+ * @param {{ googleClientId: string }} config
+ * @returns {Promise<void>}
+ */
+async function renderGoogleButton(config) {
+  const buttonHost = document.querySelector(GOOGLE_SIGNIN_SELECTOR);
+  if (!(buttonHost instanceof HTMLElement)) {
+    throw new Error('tauth.demo.google_button_host_missing');
+  }
+  if (typeof window.requestNonce !== 'function' || typeof window.exchangeGoogleCredential !== 'function') {
+    throw new Error('tauth.demo.auth_client_missing');
+  }
+  const googleIdentity = await waitForGoogleIdentity();
+  const nonceToken = await window.requestNonce();
+  googleIdentity.initialize({
+    client_id: config.googleClientId,
+    nonce: nonceToken,
+    callback: async (response) => {
+      try {
+        await window.exchangeGoogleCredential({
+          credential: String(response?.credential || ''),
+          nonceToken,
+        });
+      } catch (error) {
+        renderError(error);
+      }
+    },
+  });
+  googleIdentity.renderButton(buttonHost, { theme: 'outline', size: 'large' });
+}
+
+function attachSignOut() {
+  const signOutButton = document.querySelector(SIGN_OUT_SELECTOR);
+  if (!(signOutButton instanceof HTMLButtonElement)) {
+    throw new Error('tauth.demo.sign_out_missing');
+  }
+  signOutButton.addEventListener('click', async () => {
+    if (typeof window.logout !== 'function') {
+      renderError(new Error('tauth.demo.auth_client_missing'));
       return;
     }
-    renderSession(null);
+    await window.logout();
   });
-  const handleErrorEvent = (event) => {
-    const detail = event?.detail;
-    renderError(formatErrorMessage(detail?.code, detail?.message));
-  };
-  document.addEventListener('mpr-ui:auth:error', handleErrorEvent);
-  document.addEventListener('mpr-ui:header:error', handleErrorEvent);
+}
+
+async function initializeDemo() {
+  try {
+    const config = readDemoConfig();
+    if (typeof window.initAuthClient !== 'function') {
+      throw new Error('tauth.demo.auth_client_missing');
+    }
+    await window.initAuthClient({
+      baseUrl: config.baseUrl,
+      tenantId: config.tenantId,
+      onAuthenticated: renderSession,
+      onUnauthenticated: () => renderSession(null),
+      onAuthError: renderError,
+    });
+    renderSession(typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null);
+    attachSignOut();
+    await renderGoogleButton(config);
+  } catch (error) {
+    renderError(error);
+  }
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initSessionPanel);
+  document.addEventListener('DOMContentLoaded', () => void initializeDemo());
 } else {
-  initSessionPanel();
+  void initializeDemo();
 }
