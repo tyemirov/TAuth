@@ -25,6 +25,10 @@ const (
 	poodleScannerCookieDomain      = "api.poodlescanner.com"
 	poodleScannerSessionCookieName = "app_session_ps"
 	poodleScannerRefreshCookieName = "app_refresh_ps"
+	mediaOpsOrigin                 = "https://mediaops.mprlab.com"
+	mediaOpsCookieDomain           = ".mprlab.com"
+	mediaOpsSessionCookieName      = "app_session_mediaops"
+	mediaOpsRefreshCookieName      = "app_refresh_mediaops"
 	googleIdentityOrigin           = "https://accounts.google.com"
 )
 
@@ -58,7 +62,7 @@ type preflightTenant struct {
 	SameSiteMode          string   `json:"same_site_mode"`
 }
 
-func TestProductionConfigSupportsPoodleScanner(t *testing.T) {
+func TestProductionConfigSupportsSplitStaticFrontends(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	configPath := filepath.Join(repositoryRoot, "configs", "config.tauth.yml")
 	environmentSamplePath := filepath.Join(repositoryRoot, "configs", "tauth.env.sample")
@@ -95,6 +99,9 @@ func TestProductionConfigSupportsPoodleScanner(t *testing.T) {
 	if !containsString(preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins, poodleScannerOrigin) {
 		t.Fatalf("expected CORS origins to contain %s, got %#v", poodleScannerOrigin, preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins)
 	}
+	if !containsString(preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins, mediaOpsOrigin) {
+		t.Fatalf("expected CORS origins to contain %s, got %#v", mediaOpsOrigin, preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins)
+	}
 	if !containsString(preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins, googleIdentityOrigin) {
 		t.Fatalf("expected CORS origins to contain %s, got %#v", googleIdentityOrigin, preflightPayload.EffectiveConfig.Server.CORSAllowedOrigins)
 	}
@@ -123,6 +130,20 @@ func TestProductionConfigSupportsPoodleScanner(t *testing.T) {
 	}
 	if poodleScannerTenant.SameSiteMode != "None" {
 		t.Fatalf("expected ps cross-origin SameSite mode None, got %s", poodleScannerTenant.SameSiteMode)
+	}
+
+	mediaOpsTenant := requireTenant(t, preflightPayload.EffectiveConfig.Tenants, "mediaops")
+	if len(mediaOpsTenant.TenantOrigins) != 1 || mediaOpsTenant.TenantOrigins[0] != mediaOpsOrigin {
+		t.Fatalf("expected mediaops origin %s, got %#v", mediaOpsOrigin, mediaOpsTenant.TenantOrigins)
+	}
+	if mediaOpsTenant.CookieDomain != mediaOpsCookieDomain {
+		t.Fatalf("expected mediaops cookie domain %s, got %s", mediaOpsCookieDomain, mediaOpsTenant.CookieDomain)
+	}
+	if mediaOpsTenant.SessionCookieName != mediaOpsSessionCookieName || mediaOpsTenant.RefreshCookieName != mediaOpsRefreshCookieName {
+		t.Fatalf("unexpected mediaops cookie names: %s %s", mediaOpsTenant.SessionCookieName, mediaOpsTenant.RefreshCookieName)
+	}
+	if mediaOpsTenant.AllowInsecureHTTP || mediaOpsTenant.SameSiteMode != "None" {
+		t.Fatalf("expected secure cross-origin mediaops cookies, got insecure=%t same_site=%s", mediaOpsTenant.AllowInsecureHTTP, mediaOpsTenant.SameSiteMode)
 	}
 }
 

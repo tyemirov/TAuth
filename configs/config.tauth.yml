@@ -17,6 +17,7 @@ server:
     - ${TAUTH_CORS_ORIGIN_12}
     - ${TAUTH_CORS_ORIGIN_13}
     - ${TAUTH_CORS_ORIGIN_14}
+    - ${TAUTH_CORS_ORIGIN_15}
     - "${TAUTH_CORS_EXCEPTION_1}"
   cors_allowed_origin_exceptions:
     - "${TAUTH_CORS_EXCEPTION_1}"
@@ -189,6 +190,19 @@ tenants:
     cookie_domain: "${TAUTH_COOKIE_DOMAIN_LLM_PROXY}"
     session_cookie_name: "${TAUTH_SESSION_COOKIE_NAME_LLM_PROXY}"
     refresh_cookie_name: "${TAUTH_REFRESH_COOKIE_NAME_LLM_PROXY}"
+    session_ttl: "${TAUTH_SESSION_TTL}"
+    refresh_ttl: "${TAUTH_REFRESH_TTL}"
+    nonce_ttl: "${TAUTH_NONCE_TTL}"
+    allow_insecure_http: "${TAUTH_ALLOW_INSECURE_HTTP}"
+  - id: "${TAUTH_TENANT_ID_MEDIAOPS}"
+    display_name: "${TAUTH_DISPLAY_NAME_MEDIAOPS}"
+    tenant_origins:
+      - ${TAUTH_TENANT_ORIGIN_MEDIAOPS}
+    google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID_MEDIAOPS}"
+    jwt_signing_key: "${TAUTH_JWT_SIGNING_KEY_MEDIAOPS}"
+    cookie_domain: "${TAUTH_COOKIE_DOMAIN}"
+    session_cookie_name: "${TAUTH_SESSION_COOKIE_NAME_MEDIAOPS}"
+    refresh_cookie_name: "${TAUTH_REFRESH_COOKIE_NAME_MEDIAOPS}"
     session_ttl: "${TAUTH_SESSION_TTL}"
     refresh_ttl: "${TAUTH_REFRESH_TTL}"
     nonce_ttl: "${TAUTH_NONCE_TTL}"

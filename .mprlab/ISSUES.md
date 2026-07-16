@@ -57,6 +57,10 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
+  MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
+  Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
+
 - [x] [TA-112] Remove the palette suggestions section from the landing page.
   Removed the palette section and navigation link from `docs/index.html`.
 - [x] [TA-212] Switch tenant configuration format from JSON to YAML.
