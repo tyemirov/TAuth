@@ -1,0 +1,14 @@
+---
+mprlab_resources:
+  schema_version: 1
+  repo:
+    id: tauth
+    directory: TAuth
+    dispatch_target: tauth
+  resources:
+    - type: make_workflow
+      name: tauth
+      targets:
+        release: release
+        publish: publish
+        deploy: deploy
