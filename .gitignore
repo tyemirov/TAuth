@@ -12,6 +12,7 @@ tools/
 !tsconfig.json
 # Managed by gix gitignore workflow
 .env.*
+!.env.deploy.example
 !examples/tauth-demo/.env.tauth.example
 !tests/fixtures/tauth-demo/.env.tauth.example
 .DS_Store
