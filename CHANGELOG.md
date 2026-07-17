@@ -24,6 +24,11 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.11] - 2026-07-17
+
+- Merge pull request #136 from tyemirov/bugfix/TA-450-restore-deploy-discovery-manifest
+- fix(deploy): restore canonical vendor-neutral deployment discovery manifest
+
 ## [v1.1.10] - 2026-07-17
 
 - Merge pull request #135 from tyemirov/bugfix/TA-449-restore-vanilla-deploy-contract
