@@ -22,6 +22,14 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.9] - 2026-07-17
+
+- Merge pull request #134 from tyemirov/bugfix/TA-448-vendor-neutral-deployment
+- Remove operator deployment knowledge from TAuth
+- Merge pull request #133 from tyemirov/improvement/TA-447-add-mediaops-tenant
+- Scope MediaOps TAuth cookies
+- Add TA-447 MediaOps production tenant
+
 ## [v1.1.8] - 2026-07-11
 
 - Merge pull request #132 from tyemirov/gix/refactor-policies-and-workflows-remove-legacy-ci-and
