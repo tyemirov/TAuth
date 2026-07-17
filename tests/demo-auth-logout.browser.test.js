@@ -22,7 +22,7 @@ function buildDemoConfigScript(baseUrl) {
   const payload = {
     baseUrl,
     googleClientId: "demo-client-id",
-    tenantId: "mpr-sites",
+    tenantId: "portal",
   };
   return `// @ts-check\n'use strict';\n\nconst DEMO_CONFIG = Object.freeze(${JSON.stringify(
     payload,
@@ -76,7 +76,7 @@ if (!puppeteer) {
 
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
-    await page.waitForSelector("mpr-header#demo-header header.mpr-header", {
+    await page.waitForSelector("header#demo-header.demo-header", {
       timeout: 5000,
     });
     await page.waitForFunction(
@@ -90,10 +90,8 @@ if (!puppeteer) {
     });
 
     const initialAuthenticated = await page.evaluate(() => {
-      const headerRoot = document.querySelector(
-        "mpr-header#demo-header header.mpr-header",
-      );
-      return headerRoot ? headerRoot.classList.contains("mpr-header--authenticated") : null;
+      const headerRoot = document.querySelector("header#demo-header.demo-header");
+      return headerRoot ? headerRoot.classList.contains("demo-header--authenticated") : null;
     });
     assert.equal(initialAuthenticated, false);
 
@@ -114,20 +112,16 @@ if (!puppeteer) {
     assert.equal(profile.user_email, "demo@example.com");
 
     await page.waitForFunction(() => {
-      const headerRoot = document.querySelector(
-        "mpr-header#demo-header header.mpr-header",
-      );
-      return headerRoot && headerRoot.classList.contains("mpr-header--authenticated");
+      const headerRoot = document.querySelector("header#demo-header.demo-header");
+      return headerRoot && headerRoot.classList.contains("demo-header--authenticated");
     }, { timeout: 5000 });
 
-    await page.click('mpr-header#demo-header [data-mpr-header="sign-out-button"]');
+    await page.click('header#demo-header [data-demo-sign-out]');
     await delay(50);
 
     await page.waitForFunction(() => {
-      const headerRoot = document.querySelector(
-        "mpr-header#demo-header header.mpr-header",
-      );
-      return headerRoot && !headerRoot.classList.contains("mpr-header--authenticated");
+      const headerRoot = document.querySelector("header#demo-header.demo-header");
+      return headerRoot && !headerRoot.classList.contains("demo-header--authenticated");
     }, { timeout: 5000 });
 
     const statusText = await page.evaluate(() => {

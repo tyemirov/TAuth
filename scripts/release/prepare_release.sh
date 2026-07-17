@@ -8,7 +8,7 @@ Usage:
 
 Prepares a release entirely from local repository state. The command validates
 the worktree, runs make ci, creates the changelog commit and annotated tag, and
-writes the release manifest and notes under .git/mprlab-release.
+writes the release manifest and notes under .git/tauth-release.
 
 It never fetches, pushes, calls GitHub, publishes an image/store build, updates
 GitHub Pages, or deploys production.
@@ -230,7 +230,7 @@ effective_scheme="$(sed -n '3p' <<<"${selection}")"
   --version "${next_version}" \
   --source-commit "${source_commit}" \
   --release-timestamp "${release_timestamp}"
-artifact_dir="$(git rev-parse --git-path mprlab-release)"
+artifact_dir="$(git rev-parse --git-path tauth-release)"
 if [[ "${artifact_dir}" != /* ]]; then
   artifact_dir="${repo_root}/${artifact_dir}"
 fi

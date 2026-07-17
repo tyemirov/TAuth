@@ -36,27 +36,24 @@ if (!puppeteer) {
     const page = await browser.newPage();
     await page.goto(`${server.baseUrl}/demo`, { waitUntil: "networkidle0" });
 
-    await page.waitForSelector("mpr-footer", {
+    await page.waitForSelector("footer#page-footer", {
       visible: true,
       timeout: 5000,
     });
 
     const footerState = await page.evaluate(() => {
-      const footerRoot = document.querySelector("mpr-footer");
+      const footerRoot = document.querySelector("footer#page-footer");
       if (!footerRoot) {
         return null;
       }
       return {
-        prefixText: footerRoot.getAttribute("prefix-text"),
-        links: footerRoot.getAttribute("links"),
-        sticky: footerRoot.getAttribute("sticky"),
+        text: footerRoot.textContent,
+        links: footerRoot.querySelectorAll("a").length,
       };
     });
     assert.ok(footerState, "Expected footer root element to exist");
-    assert.match(footerState.prefixText || "", /Built by/i);
-    assert.match(footerState.prefixText || "", /Marco Polo Research Lab/);
-    assert.ok(footerState.links, "Expected footer links to be configured");
-    assert.equal(footerState.sticky, "true", "Expected footer to opt into sticky layout");
+    assert.match(footerState.text || "", /TAuth demonstration/);
+    assert.ok(footerState.links > 0, "Expected footer links to be configured");
 
   });
 }

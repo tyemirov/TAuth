@@ -8,6 +8,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Removed operator-specific tenant configuration, deployment resources, gateway orchestration, and branding from the generic TAuth repository. TAuth now ships only the vendor-neutral service, configuration schema, examples, and release artifacts.
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
 - Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.
@@ -17,9 +18,6 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
-- Added the MediaOps tenant and Pages origin to the TAuth-owned production registry with dedicated cookie names and shared `.mprlab.com` cookie scope.
-- Made TAuth the canonical owner of the shared production tenant configuration and deploy manifest, including its CORS exceptions, and prepared the PoodleScanner tenant for `poodlescanner.com` with API-host session cookies.
-- Added repo-local `make release`, `make publish`, and `make deploy` wrappers so TAuth satisfies the shared MPR deployed-app workflow contract.
 - Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.

@@ -20,17 +20,11 @@ TAuth is authentication-only: it validates provider identity tokens and issues f
 
 ## Deploy TAuth for a hosted product
 
-### Shared MPR production configuration
-
-TAuth owns the shared production tenant registry and its environment contract:
-
-- `configs/config.tauth.yml` is the canonical production YAML.
-- `configs/tauth.env.sample` documents every required environment value.
-- `configs/.env.tauth` is the ignored operator file containing deployed values and secrets.
-
-Create the operator file from the sample, replace every `CHANGEME` value, and keep it beside the canonical YAML. `mprlab-gateway` transports these TAuth-owned files to the gateway host but does not maintain another copy.
-
-The PoodleScanner tenant resolves browser requests from `https://poodlescanner.com` and issues `app_session_ps` / `app_refresh_ps` cookies for `api.poodlescanner.com`. The gateway therefore routes PoodleScanner's browser-facing TAuth paths through `https://api.poodlescanner.com`; direct browser authentication against an `mprlab.com` TAuth host cannot set that API-host cookie.
+TAuth accepts one complete YAML configuration from its operator. The consuming
+company owns that file, every tenant value, all secrets, routing, and deployment
+orchestration. This repository ships the generic service, configuration schema,
+neutral examples, release artifacts, and validation commands; it does not carry
+any company's production registry or deployment implementation.
 
 ### 1. Describe your tenants
 
@@ -42,8 +36,8 @@ tenants:
   - id: "prod"
     display_name: "Production tenant"
     tenant_origins:
-      - "https://gravity.mprlab.com"
-      - "https://pinguin.mprlab.com"
+      - "https://app.example.com"
+      - "https://admin.example.com"
     google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
     google_native_client_id: "your_desktop_native_client_id.apps.googleusercontent.com"
     google_native_clients:
@@ -62,7 +56,7 @@ tenants:
       team_id: "APPLETEAMID"
       key_id: "APPLEKEYID"
       private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
-      redirect_uri: "https://tauth.mprlab.com/auth/apple/callback"
+      redirect_uri: "https://auth.example.com/auth/apple/callback"
     password_auth:
       enabled: true
       users:
@@ -77,7 +71,7 @@ tenants:
       email_verification_ttl: "30m"
       password_reset_ttl: "15m"
     jwt_signing_key: "replace-with-your-tenant-signing-key"
-    cookie_domain: ".mprlab.com"
+    cookie_domain: ".example.com"
     session_cookie_name: "app_session_prod"
     refresh_cookie_name: "app_refresh_prod"
     session_ttl: "15m"
@@ -102,11 +96,11 @@ Each entry defines:
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
 - `account_management` – optional first-party account lifecycle. Set `enabled: true` to use persisted opaque 128-bit base64url session subjects for password, Google, and Apple identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
-- `cookie_domain` – registrable domain for cookies (e.g. `.mprlab.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
+- `cookie_domain` – registrable domain for cookies (e.g. `.example.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
 - `allow_insecure_http` – `true` only for local development; production tenants must stay `false`. When enabled, cookies drop the `Secure` flag and default to `SameSite=Lax` so browsers keep them over HTTP (even if CORS is on). That setup only works when your dev UI also runs on `http://localhost`, so avoid mixing hosts like `127.0.0.1`.
 
-### 2. Launch the service (e.g. on `https://tauth.mprlab.com`)
+### 2. Launch the service (e.g. on `https://auth.example.com`)
 
 ```bash
 cat > config.yaml <<'YAML'
@@ -115,29 +109,29 @@ server:
   database_url: "sqlite:///data/tauth.db"
   enable_cors: true
   cors_allowed_origins:
-    - "https://gravity.mprlab.com"
+    - "https://app.example.com"
     - "https://accounts.google.com"
   cors_allowed_origin_exceptions:
     - "https://accounts.google.com"
   enable_tenant_header_override: false
 
 tenants:
-  - id: "gravity"
-    display_name: "Gravity"
-    tenant_origins: ["https://gravity.mprlab.com"]
-    google_web_client_id: "gravity-client.apps.googleusercontent.com"
-    google_native_client_id: "gravity-native.apps.googleusercontent.com"
+  - id: "product"
+    display_name: "Product"
+    tenant_origins: ["https://app.example.com"]
+    google_web_client_id: "product-client.apps.googleusercontent.com"
+    google_native_client_id: "product-native.apps.googleusercontent.com"
     apple_oauth:
       enabled: true
-      client_id: "com.gravity.web"
+      client_id: "com.example.product.web"
       team_id: "APPLETEAMID"
       key_id: "APPLEKEYID"
       private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
-      redirect_uri: "https://tauth.mprlab.com/auth/apple/callback"
-    jwt_signing_key: "replace-with-gravity-signing-key"
-    cookie_domain: ".mprlab.com"
-    session_cookie_name: "app_session_gravity"
-    refresh_cookie_name: "app_refresh_gravity"
+      redirect_uri: "https://auth.example.com/auth/apple/callback"
+    jwt_signing_key: "replace-with-product-signing-key"
+    cookie_domain: ".example.com"
+    session_cookie_name: "app_session_product"
+    refresh_cookie_name: "app_refresh_product"
     session_ttl: "30m"
     refresh_ttl: "720h"
     nonce_ttl: "10m"
@@ -154,7 +148,7 @@ Before deploying, run `tauth preflight --config=config.yaml` to validate the con
 
 When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`. If you include non-tenant origins (for example `https://accounts.google.com`), mirror them in `cors_allowed_origin_exceptions` so config validation permits them.
 
-Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://tauth.mprlab.com` will also be sent with requests made by `https://gravity.mprlab.com` because both live under `.mprlab.com`.
+Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://auth.example.com` will also be sent with requests made by `https://app.example.com` because both live under `.example.com`.
 
 ### Run the demo with Docker Compose (local quick-start)
 
@@ -173,22 +167,22 @@ We ship a compose example under `examples/tauth-demo` that builds TAuth from the
 
 The sample config now defines **two tenants** so you can exercise origin-based routing without touching `/etc/hosts`. Thanks to RFC 6761, any `*.localhost` name automatically resolves to `127.0.0.1`, so both tenants work out of the box:
 
-- `notes` – resolve via `http://localhost:8082` (or the Gravity UI at `http://localhost:8000`). This matches the default Gravity config and is the tenant you’ve already used.
-- `mpr-sites` – the `mpr-frontend` container serves `examples/tauth-demo/index.html` on `http://localhost:8001`. Its browser origin (`http://localhost:4173`) lives under `tenant_origins`, so TAuth can derive the tenant from the request `Origin` header without extra UI wiring.
+- `notes` – resolve via `http://localhost:8082` or the example UI at `http://localhost:8000`.
+- `portal` – a second example frontend runs at `http://localhost:4173`. Its browser origin lives under `tenant_origins`, so TAuth can derive the tenant from the request `Origin` header without extra UI wiring.
 
 This setup lets you verify header overrides, cookie isolation, and resolver behavior locally before promoting changes to production.
 
-When multiple tenants run on the same machine, list each distinct frontend origin (for example `http://localhost:8000` for Gravity and `http://localhost:4173` for the MPR demo) under `tenant_origins`. TAuth resolves tenants by the request `Origin` header, so you only need explicit tenant overrides when two tenants intentionally share the exact same origin.
+When multiple tenants run on the same machine, list each distinct frontend origin (for example `http://localhost:8000` and `http://localhost:4173`) under `tenant_origins`. TAuth resolves tenants by the request `Origin` header, so you only need explicit tenant overrides when two tenants intentionally share the exact same origin.
 
 Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, origins, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
 ### 3. Integrate the browser helper from the product site
 
 ```html
-<script src="https://tauth.mprlab.com/tauth.js"></script>
+<script src="https://auth.example.com/tauth.js"></script>
 <script>
   initAuthClient({
-    baseUrl: "https://tauth.mprlab.com",
+    baseUrl: "https://auth.example.com",
     tenantId: "demo", // optional override when multiple tenants share an origin
     onAuthenticated(profile) {
       renderDashboard(profile);
@@ -203,13 +197,13 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <button type="button" onclick="startAppleLogin()">Sign in with Apple</button>
 ```
 
-The production backend serves the embedded helper at `/tauth.js`; for the gateway-owned deployment it is available at `https://tauth.mprlab.com/tauth.js`. Documentation under `docs/` is repository source and is not deployed through a separate Pages workflow.
+The production backend serves the embedded helper at `/tauth.js`; operators expose it through the authentication origin they configure. Documentation under `docs/` is repository source and is not deployed through a separate Pages workflow.
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/auth/session` recovery without browser-visible 401s. Use `bootstrapMode: "eager"` only when you intentionally want a startup session check, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 
 ### 4. Prepare and exchange provider credentials across origins
 
-`tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.mprlab.com`).
+`tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.example.com`).
 
 For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control that calls `startAppleLogin()` or navigates to `getAppleLoginUrl()`. The helper builds `/auth/apple/start`, includes the configured tenant id when needed, and adds the current page as `return_to` so the callback can return to the product after cookies are minted. `startAppleLogin()` also records the non-secret restore hint before leaving the page, letting the returned app restore through `/auth/session`. TAuth validates Apple’s ID token and nonce, then mints the same cookies and profile payload used by Google and password login.
 
@@ -217,7 +211,7 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
 
 ### Configure Google Identity Services (popup flow)
 
-1. **Create or reuse a Google OAuth Web client.** Add every product origin (e.g. `https://gravity.mprlab.com`) to the *Authorized JavaScript origins* list. Redirect URIs are not required for this popup flow.
+1. **Create or reuse a Google OAuth Web client.** Add every product origin (e.g. `https://app.example.com`) to the *Authorized JavaScript origins* list. Redirect URIs are not required for this popup flow.
 2. **Load the GIS SDK before you render a button.**
 
    ```html
@@ -226,14 +220,14 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
    ```
 
 3. **Fetch and attach a nonce before prompting Google.** Use `POST /auth/nonce`, call `google.accounts.id.initialize({ nonce, client_id, ux_mode: "popup" })`, and render the button programmatically (see `prepareGoogleSignIn` above or `examples/tauth-demo/index.html`).
-4. **Exchange the credential without redirecting.** When GIS invokes your callback, post `{ google_id_token, nonce_token }` to `https://tauth.mprlab.com/auth/google` (or your hosted base URL) with `credentials: "include"` so TAuth can mint cookies.
+4. **Exchange the credential without redirecting.** When GIS invokes your callback, post `{ google_id_token, nonce_token }` to `https://auth.example.com/auth/google` (or your hosted base URL) with `credentials: "include"` so TAuth can mint cookies.
 
 ### Quick verification checklist
 
 - Open the browser console and confirm a nonce request (`POST /auth/nonce`) fires before the GIS popup.
 - Click the button; the popup should open and return a credential to `handleCredential`.
-- Check the network tab for `POST https://tauth.mprlab.com/auth/google` and ensure it succeeds (`200`).
-- Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.mprlab.com`).
+- Check the network tab for `POST https://auth.example.com/auth/google` and ensure it succeeds (`200`).
+- Inspect cookies; `app_session` and `app_refresh` should now be scoped to the configured domain (e.g. `.example.com`).
 - Call `/api/me` and verify it returns the signed-in profile.
 
 > **Tip:** The Docker demo ships with a placeholder Google OAuth Web client inside `examples/tauth-demo/.env.tauth`. Replace it with your own value before sharing the stack beyond local testing.
@@ -241,7 +235,7 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
 ### Configure Sign in with Apple
 
 1. Create a Sign in with Apple key in Apple Developer and keep the Key ID, Team ID, and downloaded private key PEM.
-2. Create or reuse a Services ID for the web client, then add your TAuth callback URL, for example `https://tauth.mprlab.com/auth/apple/callback`.
+2. Create or reuse a Services ID for the web client, then add your TAuth callback URL, for example `https://auth.example.com/auth/apple/callback`.
 3. Add the matching `apple_oauth` block to the tenant config and keep `private_key` or `private_key_base64` in an environment variable or secret manager.
 4. Point your UI button at `startAppleLogin()` from `tauth.js` or the URL returned by `getAppleLoginUrl()`.
 
@@ -258,7 +252,7 @@ TAuth also supports installed apps that cannot use the browser popup flow. Nativ
 5. Reuse the minted `app_session` / `app_refresh` cookies just like a browser client.
 
 This keeps TAuth authentication-only: Google authorization codes and Google refresh tokens never transit through TAuth.
-TAuth does not return bearer or refresh tokens in the response body for mobile clients. Expo apps should preserve the `Set-Cookie` headers in the native cookie jar and send cookies on calls to TAuth and downstream API hosts. For cross-host use, configure a shared `cookie_domain` such as `.mprlab.com` and have downstream services validate `app_session` with `pkg/sessionvalidator`.
+TAuth does not return bearer or refresh tokens in the response body for mobile clients. Expo apps should preserve the `Set-Cookie` headers in the native cookie jar and send cookies on calls to TAuth and downstream API hosts. For cross-host use, configure a shared `cookie_domain` such as `.example.com` and have downstream services validate `app_session` with `pkg/sessionvalidator`.
 
 ### Example `/me` payload
 
@@ -340,7 +334,7 @@ Rules enforced by the loader:
 - Each tenant must configure at least one auth provider: browser Google via `google_web_client_id`, native Google via `google_native_client_id`/`google_native_clients`, Apple via `apple_oauth.enabled`, or password login via `password_auth.enabled`. `google_native_client_id` and `google_native_clients` enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. `apple_oauth.enabled` gates `GET /auth/apple/start` plus `GET`/`POST /auth/apple/callback`; enabled Apple providers require a Services ID client, Team ID, Key ID, PKCS8 ECDSA private key supplied as `private_key` or `private_key_base64`, and HTTPS callback URI. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
 - `account_management.enabled` enables persisted opaque account IDs, password signup/verification/reset flows, authenticated password changes, provider/password linking, unlinking, and account disablement. Account IDs are generated once as 128-bit base64url values and reused through stored identity links; callers must not derive them from email, provider, subject, tenant values, or `user_id` prefixes. `password_signup.enabled` requires account management to be enabled. Challenge tokens are hashed at rest and single-use; production deployments should keep `return_challenge_tokens` false and deliver tokens through an email adapter or trusted delivery path.
-- `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_mpr`). Legacy stacks (such as Gravity) can keep `app_session`/`app_refresh` as long as they understand the collision risk.
+- `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_notes`).
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
 

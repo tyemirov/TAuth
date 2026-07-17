@@ -48,7 +48,7 @@ func TestLoadConfigSuccess(t *testing.T) {
     display_name: "Production Tenant"
     tenant_origins:
       - "https://app.example.com"
-      - "https://app.mprlab.com"
+      - "https://admin.example.com"
     google_web_client_id: "prod-client.apps.googleusercontent.com"
     google_native_client_id: "prod-native.apps.googleusercontent.com"
     jwt_signing_key: "prod-tenant-key"
@@ -696,7 +696,7 @@ func TestLoadConfigParsesPlatformNativeGoogleClients(t *testing.T) {
 			ClientID: "ios-client.apps.googleusercontent.com",
 			RedirectURIs: []string{
 				"com.promptdew.mobile://oauth2redirect/google",
-				"https://promptdew.mprlab.com/oauth/google/callback",
+				"https://promptdew.example.com/oauth/google/callback",
 			},
 		},
 		{
@@ -727,7 +727,7 @@ func TestLoadConfigParsesPlatformNativeGoogleClients(t *testing.T) {
 	if clients[0].Platform() != "ios" {
 		t.Fatalf("expected normalized ios platform, got %s", clients[0].Platform())
 	}
-	if !sameStringSlices(clients[0].RedirectURIs(), []string{"com.promptdew.mobile://oauth2redirect/google", "https://promptdew.mprlab.com/oauth/google/callback"}) {
+	if !sameStringSlices(clients[0].RedirectURIs(), []string{"com.promptdew.mobile://oauth2redirect/google", "https://promptdew.example.com/oauth/google/callback"}) {
 		t.Fatalf("unexpected ios redirect uris: %#v", clients[0].RedirectURIs())
 	}
 }

@@ -36,7 +36,7 @@ const DEMO_FRONTEND_ORIGIN_TEST_CASES = Object.freeze(
   })),
 );
 
-test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
+test("tauth demo loads local config and vendor-neutral bootstrap scripts", async () => {
   const html = await fileSystem.readFile(DEMO_INDEX_PATH, "utf8");
   assert.ok(
     html.includes('<script defer src="./demo-config.js"></script>'),
@@ -47,20 +47,16 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
     "Expected demo to load tauth-config.js",
   );
   assert.ok(
-    html.includes("mpr-ui.css"),
-    "Expected demo to load mpr-ui CSS",
-  );
-  assert.ok(
     html.includes('rel="stylesheet" href="./demo.css"'),
     "Expected demo to load the local demo.css stylesheet",
   );
   assert.ok(
-    html.includes("<mpr-header"),
-    "Expected demo to render the mpr-ui header element",
+    html.includes('<header id="demo-header"'),
+    "Expected demo to render the native header element",
   );
   assert.ok(
-    html.includes("<mpr-footer"),
-    "Expected demo to render the mpr-ui footer element",
+    html.includes('<footer id="page-footer"'),
+    "Expected demo to render the semantic footer element",
   );
 
   const configSource = await fileSystem.readFile(DEMO_CONFIG_PATH, "utf8");
@@ -75,10 +71,6 @@ test("tauth demo loads local config and mpr-ui bootstrap scripts", async () => {
   assert.ok(
     configSource.includes("__TAUTH_AUTH_CLIENT_READY__"),
     "Expected demo config to expose an auth client readiness handle",
-  );
-  assert.ok(
-    configSource.includes("mpr-ui@3.3.0/mpr-ui.js"),
-    "Expected demo config to load the mpr-ui bundle from the CDN",
   );
   assert.ok(
     configSource.includes("accounts.google.com/gsi/client"),

@@ -101,13 +101,13 @@ function renderError(message) {
 
 function initSessionPanel() {
   renderSession(typeof window.getCurrentUser === 'function' ? window.getCurrentUser() : null);
-  document.addEventListener('mpr-ui:auth:authenticated', (event) => {
+  document.addEventListener('tauth-demo:authenticated', (event) => {
     renderSession(event?.detail?.profile ?? null);
   });
-  document.addEventListener('mpr-ui:auth:unauthenticated', () => {
+  document.addEventListener('tauth-demo:unauthenticated', () => {
     renderSession(null);
   });
-  document.addEventListener('mpr-ui:auth:error', (event) => {
+  document.addEventListener('tauth-demo:error', (event) => {
     const code = event?.detail?.code;
     renderError(code ? String(code) : 'Unable to complete authentication.');
   });

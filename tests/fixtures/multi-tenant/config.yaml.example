@@ -12,13 +12,12 @@ server:
 
 tenants:
   - id: "notes"
-    display_name: "Gravity Notes"
+    display_name: "Notes"
     tenant_origins:
       - "http://localhost"
       - "http://localhost:8000"
     allowed_users:
-      - "temirov@gmail.com"
-      - "peter.tyemirov@gmail.com"
+      - "operator@example.com"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID1}"
     jwt_signing_key: "${TAUTH_NOTES_JWT_SIGNING_KEY}"
     cookie_domain: ""
@@ -29,19 +28,18 @@ tenants:
     nonce_ttl: "10m"
     allow_insecure_http: "${TAUTH_ALLOW_INSECURE_HTTP}"
 
-  - id: "mpr-sites"
-    display_name: "MPR Sites"
+  - id: "portal"
+    display_name: "Portal"
     tenant_origins:
       - "http://localhost"
       - "http://localhost:4173"
     allowed_users:
-      - "temirov@gmail.com"
-      - "peter.tyemirov@gmail.com"
+      - "operator@example.com"
     google_web_client_id: "${TAUTH_GOOGLE_WEB_CLIENT_ID2}"
-    jwt_signing_key: "${TAUTH_MPR_JWT_SIGNING_KEY}"
+    jwt_signing_key: "${TAUTH_PORTAL_JWT_SIGNING_KEY}"
     cookie_domain: ""
-    session_cookie_name: "app_session_mpr"
-    refresh_cookie_name: "app_refresh_mpr"
+    session_cookie_name: "app_session_portal"
+    refresh_cookie_name: "app_refresh_portal"
     session_ttl: "30m"
     refresh_ttl: "720h"
     nonce_ttl: "10m"

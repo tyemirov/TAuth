@@ -3,8 +3,6 @@
 
 const AUTH_CLIENT_CACHE_BUSTER_PARAM = "tauth_cache_buster";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
-const MPR_UI_SCRIPT_URL =
-  "https://cdn.jsdelivr.net/gh/MarcoPoloResearchLab/mpr-ui@3.3.0/mpr-ui.js";
 const DEFAULT_DEMO_CONFIG = Object.freeze({
   baseUrl: "http://localhost:8082",
   googleClientId:
@@ -55,14 +53,13 @@ function resolveDemoConfig() {
  * @returns {void}
  */
 function applyHeaderConfig(config) {
-  const headerElement = document.querySelector("mpr-header#demo-header");
-  if (!headerElement) {
+  const headerElement = document.querySelector("header#demo-header");
+  if (!(headerElement instanceof HTMLElement)) {
     return;
   }
-  headerElement.setAttribute("tauth-url", config.baseUrl);
-  headerElement.setAttribute("google-site-id", config.googleClientId);
-  headerElement.setAttribute("tauth-tenant-id", config.tenantId);
-  ensureHeaderRoot(headerElement);
+  headerElement.dataset.baseUrl = config.baseUrl;
+  headerElement.dataset.googleClientId = config.googleClientId;
+  headerElement.dataset.tenantId = config.tenantId;
 }
 
 /**
@@ -70,16 +67,15 @@ function applyHeaderConfig(config) {
  * @returns {void}
  */
 function updateHeaderAuthState(isAuthenticated) {
-  const headerElement = document.querySelector("mpr-header#demo-header");
-  const headerRoot = headerElement ? ensureHeaderRoot(headerElement) : null;
-  if (!headerRoot) {
+  const headerElement = document.querySelector("header#demo-header");
+  if (!headerElement) {
     return;
   }
   if (isAuthenticated) {
-    headerRoot.classList.add("mpr-header--authenticated");
+    headerElement.classList.add("demo-header--authenticated");
     return;
   }
-  headerRoot.classList.remove("mpr-header--authenticated");
+  headerElement.classList.remove("demo-header--authenticated");
 }
 
 /**
@@ -98,7 +94,7 @@ function dispatchAuthEvent(eventName, detail) {
  */
 function handleAuthenticated(profile) {
   updateHeaderAuthState(true);
-  dispatchAuthEvent("mpr-ui:auth:authenticated", { profile: profile });
+  dispatchAuthEvent("tauth-demo:authenticated", { profile: profile });
 }
 
 /**
@@ -106,27 +102,7 @@ function handleAuthenticated(profile) {
  */
 function handleUnauthenticated() {
   updateHeaderAuthState(false);
-  dispatchAuthEvent("mpr-ui:auth:unauthenticated", null);
-}
-
-/**
- * @param {Element} headerHost
- * @returns {HTMLElement | null}
- */
-function ensureHeaderRoot(headerHost) {
-  const existingHeader = headerHost.querySelector("header.mpr-header");
-  if (existingHeader instanceof HTMLElement) {
-    return existingHeader;
-  }
-  const headerElement = document.createElement("header");
-  headerElement.classList.add("mpr-header");
-  const signOutButton = document.createElement("button");
-  signOutButton.type = "button";
-  signOutButton.setAttribute("data-mpr-header", "sign-out-button");
-  signOutButton.textContent = "Sign out";
-  headerElement.appendChild(signOutButton);
-  headerHost.appendChild(headerElement);
-  return headerElement;
+  dispatchAuthEvent("tauth-demo:unauthenticated", null);
 }
 
 /**
@@ -162,9 +138,7 @@ function attachLogoutListener() {
     if (!(target instanceof Element)) {
       return;
     }
-    const signOutButton = target.closest(
-      '[data-mpr-header="sign-out-button"]',
-    );
+    const signOutButton = target.closest("[data-demo-sign-out]");
     if (!signOutButton || typeof window.logout !== "function") {
       return;
     }
@@ -177,10 +151,7 @@ const authClientCacheBuster = Date.now();
 const authClientPromise = (async () => {
   applyHeaderConfig(resolvedConfig);
   void loadScript(GIS_SCRIPT_URL, {}).catch(() => {
-    dispatchAuthEvent("mpr-ui:auth:error", { code: "tauth.demo.gis_load_failed" });
-  });
-  void loadScript(MPR_UI_SCRIPT_URL, {}).catch(() => {
-    dispatchAuthEvent("mpr-ui:auth:error", { code: "tauth.demo.mpr_ui_load_failed" });
+    dispatchAuthEvent("tauth-demo:error", { code: "tauth.demo.gis_load_failed" });
   });
   await loadScript(
     `${resolvedConfig.baseUrl}/tauth.js?${AUTH_CLIENT_CACHE_BUSTER_PARAM}=${authClientCacheBuster}`,

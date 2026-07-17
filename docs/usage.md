@@ -119,7 +119,7 @@ Run this behind TLS so the service issues `Secure` cookies and the browser accep
 To restrict sign-ins, set `allowed_users` on a tenant; when present, only those email addresses are permitted to log in (an empty list denies all logins).
 Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
 
-When migrating an existing tenant that expects the legacy cookie names (`app_session`, `app_refresh`), set the `session_cookie_name` / `refresh_cookie_name` fields inside the tenant block. These fields are always required—choose unique names per tenant to avoid collisions when multiple tenants share `localhost`. Legacy stacks (such as Gravity) can keep `app_session` / `app_refresh`, but doing so means any other tenant using the same names will overwrite those cookies.
+Set `session_cookie_name` and `refresh_cookie_name` explicitly inside every tenant block. Choose unique names per tenant to avoid collisions when multiple tenants share a cookie domain or `localhost`.
 
 ### 2.4 Example: local quick‑start (Docker Compose)
 
@@ -205,7 +205,7 @@ On your product site, include the script from wherever you host the asset:
 
 ```html
 <script
-  src="https://tauth.mprlab.com/tauth.js"
+  src="https://auth.example.com/tauth.js"
   data-tenant-id="tenant-admin"
 ></script>
 ```
@@ -370,7 +370,7 @@ const result = await request.promptAsync({
 });
 ```
 
-After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.mprlab.com`.
+After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.example.com`.
 
 ### 5.4 Sign in with Apple
 
