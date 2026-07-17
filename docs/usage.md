@@ -150,6 +150,25 @@ The JSON payload is versioned and shaped as:
 
 The preflight builder is generalized under `github.com/tyemirov/utils/preflight` with a Viper-based adapter (`github.com/tyemirov/utils/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
 
+### 2.6 Local deployment binding
+
+Tracked TAuth files contain only the vendor-neutral deployment dispatcher. Each
+operator checkout supplies its concrete deployment binding through the ignored
+local `.env.deploy` file:
+
+```bash
+cp .env.deploy.example .env.deploy
+$EDITOR .env.deploy
+make deploy-dry-run
+```
+
+The local file must set an absolute `DEPLOY_DIRECTORY` and one
+`DEPLOY_MAKE_TARGET` from that directory's Makefile. The dry run validates the
+configured target without executing its recipe. After `make release` and
+`make publish` complete, the operator may run `make deploy`; repository code,
+examples, and documentation must not contain that checkout's concrete operator
+values.
+
 ---
 
 ## 3. Sessions and cookies

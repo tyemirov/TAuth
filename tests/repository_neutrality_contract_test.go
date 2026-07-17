@@ -3,6 +3,7 @@ package productionconfig_test
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,22 +21,21 @@ var forbiddenVendorTokens = []string{
 	"mprlab.release",
 }
 
-func TestRepositoryDoesNotOwnAnOperatorDeployment(t *testing.T) {
+const (
+	deployConfigFileName       = ".env.deploy"
+	deployConfigExampleName    = ".env.deploy.example"
+	deployScriptRelativePath   = "scripts/deploy.sh"
+	fixtureDeployMakeTarget    = "apply"
+	fixtureDeployMissingTarget = "missing"
+)
+
+func TestRepositoryExposesVanillaLocalDeploymentContract(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
-	for _, relativePath := range []string{
-		".mprlab/deploy/resources.yml",
-		"configs/config.tauth.yml",
-		"configs/tauth.env.sample",
-		"scripts/deploy.sh",
-	} {
+	for _, relativePath := range []string{deployConfigExampleName, deployScriptRelativePath} {
 		path := filepath.Join(repositoryRoot, filepath.FromSlash(relativePath))
 		_, statErr := os.Stat(path)
-		if statErr == nil {
-			t.Errorf("generic TAuth repository contains operator deployment path %s", relativePath)
-			continue
-		}
-		if !errors.Is(statErr, os.ErrNotExist) {
-			t.Fatalf("inspect %s: %v", relativePath, statErr)
+		if statErr != nil {
+			t.Fatalf("generic TAuth repository is missing deployment contract %s: %v", relativePath, statErr)
 		}
 	}
 
@@ -45,20 +45,84 @@ func TestRepositoryDoesNotOwnAnOperatorDeployment(t *testing.T) {
 		t.Fatalf("read Makefile: %v", readErr)
 	}
 	makefileText := string(makefileDocument)
-	for _, forbiddenContract := range []string{"\ndeploy:", "GATEWAY_DIR", "DEPLOY_ARGS"} {
-		if strings.Contains(makefileText, forbiddenContract) {
-			t.Errorf("generic TAuth Makefile contains operator deployment contract %q", forbiddenContract)
+	for _, requiredContract := range []string{"\ndeploy-dry-run:", "\ndeploy:", deployScriptRelativePath} {
+		if !strings.Contains(makefileText, requiredContract) {
+			t.Errorf("generic TAuth Makefile is missing deployment contract %q", requiredContract)
 		}
 	}
 
-	deployCommand := exec.Command("make", "--dry-run", "deploy")
-	deployCommand.Dir = repositoryRoot
-	deployOutput, deployErr := deployCommand.CombinedOutput()
-	if deployErr == nil {
-		t.Fatalf("generic TAuth unexpectedly exposes make deploy:\n%s", deployOutput)
+	ignoreCommand := exec.Command("git", "check-ignore", "--quiet", "--no-index", deployConfigFileName)
+	ignoreCommand.Dir = repositoryRoot
+	if ignoreErr := ignoreCommand.Run(); ignoreErr != nil {
+		t.Fatalf("local deployment config must be ignored: %v", ignoreErr)
 	}
-	if !strings.Contains(string(deployOutput), "No rule to make target") {
-		t.Fatalf("make deploy failed for an unexpected reason: %v\n%s", deployErr, deployOutput)
+}
+
+func TestDeployDryRunRequiresLocalConfiguration(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr == nil {
+		t.Fatalf("deploy dry-run accepted a missing local configuration:\n%s", deployOutput)
+	}
+	if !strings.Contains(string(deployOutput), "local deployment config not found") {
+		t.Fatalf("deploy dry-run returned an unexpected missing-config error: %v\n%s", deployErr, deployOutput)
+	}
+}
+
+func TestDeployDryRunValidatesWithoutExecutingLocalTarget(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	writeDeploymentConfig(t, fixtureRoot, operatorDirectory, fixtureDeployMakeTarget)
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr != nil {
+		t.Fatalf("run deploy dry-run: %v\n%s", deployErr, deployOutput)
+	}
+	outputText := string(deployOutput)
+	for _, expectedOutput := range []string{
+		"deployment_config=" + filepath.Join(fixtureRoot, deployConfigFileName),
+		"deployment_directory=" + operatorDirectory,
+		"deployment_make_target=" + fixtureDeployMakeTarget,
+	} {
+		if !strings.Contains(outputText, expectedOutput) {
+			t.Errorf("deploy dry-run output is missing %q:\n%s", expectedOutput, deployOutput)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(fixtureRoot, "dispatch.log")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("deploy dry-run executed the local target: %v", statErr)
+	}
+}
+
+func TestDeployDryRunRejectsUnknownLocalTarget(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	writeDeploymentConfig(t, fixtureRoot, operatorDirectory, fixtureDeployMissingTarget)
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr == nil {
+		t.Fatalf("deploy dry-run accepted an unknown local target:\n%s", deployOutput)
+	}
+	if !strings.Contains(string(deployOutput), "configured deployment Make target is unavailable") {
+		t.Fatalf("deploy dry-run returned an unexpected target error: %v\n%s", deployErr, deployOutput)
+	}
+}
+
+func TestDeployDispatchesThroughLocalConfiguration(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	writeDeploymentConfig(t, fixtureRoot, operatorDirectory, fixtureDeployMakeTarget)
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy")
+	if deployErr != nil {
+		t.Fatalf("run local fixture deploy: %v\n%s", deployErr, deployOutput)
+	}
+	dispatchLogPath := filepath.Join(fixtureRoot, "dispatch.log")
+	dispatchLog, readErr := os.ReadFile(dispatchLogPath)
+	if readErr != nil {
+		t.Fatalf("read local dispatch log: %v", readErr)
+	}
+	if string(dispatchLog) != "applied\n" {
+		t.Fatalf("unexpected local dispatch log: %q", dispatchLog)
 	}
 }
 
@@ -105,7 +169,7 @@ func TestProductAndReleaseSurfacesAreVendorNeutral(t *testing.T) {
 }
 
 func isVendorNeutralitySurface(relativePath string) bool {
-	if relativePath == "README.md" || relativePath == "ARCHITECTURE.md" || relativePath == "Makefile" {
+	if relativePath == "README.md" || relativePath == "ARCHITECTURE.md" || relativePath == "Makefile" || relativePath == deployConfigExampleName {
 		return true
 	}
 	for _, prefix := range []string{"docs/", "examples/", "internal/", "scripts/", "tests/"} {
@@ -114,6 +178,64 @@ func isVendorNeutralitySurface(relativePath string) bool {
 		}
 	}
 	return false
+}
+
+func prepareDeploymentFixture(t *testing.T) string {
+	t.Helper()
+	repositoryRoot := testRepositoryRoot(t)
+	fixtureRoot := t.TempDir()
+	fixtureScriptsDirectory := filepath.Join(fixtureRoot, "scripts")
+	if makeDirectoryErr := os.MkdirAll(fixtureScriptsDirectory, 0o755); makeDirectoryErr != nil {
+		t.Fatalf("create fixture scripts directory: %v", makeDirectoryErr)
+	}
+	copyDeploymentFixtureFile(t, filepath.Join(repositoryRoot, "Makefile"), filepath.Join(fixtureRoot, "Makefile"), 0o644)
+	copyDeploymentFixtureFile(t, filepath.Join(repositoryRoot, filepath.FromSlash(deployScriptRelativePath)), filepath.Join(fixtureRoot, filepath.FromSlash(deployScriptRelativePath)), 0o755)
+	return fixtureRoot
+}
+
+func prepareOperatorFixture(t *testing.T, fixtureRoot string) string {
+	t.Helper()
+	operatorDirectory := filepath.Join(fixtureRoot, "operator")
+	if makeDirectoryErr := os.MkdirAll(operatorDirectory, 0o755); makeDirectoryErr != nil {
+		t.Fatalf("create operator fixture directory: %v", makeDirectoryErr)
+	}
+	operatorMakefile := ".PHONY: " + fixtureDeployMakeTarget + "\n" +
+		fixtureDeployMakeTarget + ":\n" +
+		"\t@printf 'applied\\n' > \"$(DEPLOY_TEST_LOG)\"\n"
+	if writeErr := os.WriteFile(filepath.Join(operatorDirectory, "Makefile"), []byte(operatorMakefile), 0o644); writeErr != nil {
+		t.Fatalf("write operator fixture Makefile: %v", writeErr)
+	}
+	return operatorDirectory
+}
+
+func writeDeploymentConfig(t *testing.T, fixtureRoot string, operatorDirectory string, makeTarget string) {
+	t.Helper()
+	configDocument := fmt.Sprintf(
+		"DEPLOY_DIRECTORY=%q\nDEPLOY_MAKE_TARGET=%q\nDEPLOY_TEST_LOG=%q\n",
+		operatorDirectory,
+		makeTarget,
+		filepath.Join(fixtureRoot, "dispatch.log"),
+	)
+	if writeErr := os.WriteFile(filepath.Join(fixtureRoot, deployConfigFileName), []byte(configDocument), 0o600); writeErr != nil {
+		t.Fatalf("write local deployment config: %v", writeErr)
+	}
+}
+
+func copyDeploymentFixtureFile(t *testing.T, sourcePath string, destinationPath string, fileMode os.FileMode) {
+	t.Helper()
+	document, readErr := os.ReadFile(sourcePath)
+	if readErr != nil {
+		t.Fatalf("read deployment fixture source %s: %v", sourcePath, readErr)
+	}
+	if writeErr := os.WriteFile(destinationPath, document, fileMode); writeErr != nil {
+		t.Fatalf("write deployment fixture destination %s: %v", destinationPath, writeErr)
+	}
+}
+
+func runFixtureMake(fixtureRoot string, target string) ([]byte, error) {
+	makeCommand := exec.Command("make", "--no-print-directory", target)
+	makeCommand.Dir = fixtureRoot
+	return makeCommand.CombinedOutput()
 }
 
 func testRepositoryRoot(t *testing.T) string {

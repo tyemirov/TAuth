@@ -8,7 +8,8 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
-- Removed operator-specific tenant configuration, deployment resources, gateway orchestration, and branding from the generic TAuth repository. TAuth now ships only the vendor-neutral service, configuration schema, examples, and release artifacts.
+- Restored `make deploy` and `make deploy-dry-run` through a vendor-neutral dispatcher whose concrete operator directory and target exist only in the ignored local `.env.deploy` configuration.
+- Removed operator-specific tenant configuration, deployment resources, orchestration values, and branding from tracked TAuth files. TAuth now ships the vendor-neutral service, configuration schema, examples, release artifacts, and generic lifecycle entrypoints.
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
 - Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.

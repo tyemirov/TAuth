@@ -23,8 +23,9 @@ TAuth is authentication-only: it validates provider identity tokens and issues f
 TAuth accepts one complete YAML configuration from its operator. The consuming
 company owns that file, every tenant value, all secrets, routing, and deployment
 orchestration. This repository ships the generic service, configuration schema,
-neutral examples, release artifacts, and validation commands; it does not carry
-any company's production registry or deployment implementation.
+neutral examples, release artifacts, validation commands, and generic lifecycle
+entrypoints; it does not carry any company's production registry or concrete
+deployment binding.
 
 ### 1. Describe your tenants
 
@@ -150,6 +151,30 @@ When multiple product origins need access, list them under the `cors_allowed_ori
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://auth.example.com` will also be sent with requests made by `https://app.example.com` because both live under `.example.com`.
 
+### 3. Bind this checkout to the local operator
+
+The tracked repository remains vendor-neutral. Copy the neutral example to the
+single ignored local deployment configuration and set the concrete operator
+Make directory and target for this machine:
+
+```bash
+cp .env.deploy.example .env.deploy
+$EDITOR .env.deploy
+make deploy-dry-run
+```
+
+`DEPLOY_DIRECTORY` must be an absolute path and `DEPLOY_MAKE_TARGET` must name
+one target in that directory's Makefile. `make deploy-dry-run` validates the
+binding with Make's non-executing question mode and never executes the target.
+After release and publication are complete, only the operator runs:
+
+```bash
+make deploy
+```
+
+The concrete `.env.deploy` file is ignored. Do not copy its directory, target,
+credentials, tenant values, domains, or routes into tracked repository files.
+
 ### Run the demo with Docker Compose (local quick-start)
 
 We ship a compose example under `examples/tauth-demo` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the demo assets on port `8000`. The TAuth service itself serves only API endpoints plus `/tauth.js`.
@@ -176,7 +201,7 @@ When multiple tenants run on the same machine, list each distinct frontend origi
 
 Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, origins, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
 
-### 3. Integrate the browser helper from the product site
+### 4. Integrate the browser helper from the product site
 
 ```html
 <script src="https://auth.example.com/tauth.js"></script>
@@ -201,7 +226,7 @@ The production backend serves the embedded helper at `/tauth.js`; operators expo
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/auth/session` recovery without browser-visible 401s. Use `bootstrapMode: "eager"` only when you intentionally want a startup session check, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 
-### 4. Prepare and exchange provider credentials across origins
+### 5. Prepare and exchange provider credentials across origins
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.example.com`).
 

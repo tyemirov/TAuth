@@ -14,7 +14,7 @@ RELEASE_HELPER := $(abspath $(CURDIR)/scripts/release/release_helper.py)
 RELEASE_ARTIFACT_TARGETS ?= container-artifacts
 RELEASE_TOOL_DIR := $(abspath $(CURDIR)/scripts/release)
 
-.PHONY: ci format lint test-go test-js release container-artifacts publish-release publish
+.PHONY: ci format lint test-go test-js release container-artifacts publish-release publish deploy-dry-run deploy
 
 ci: format lint test-go test-js
 
@@ -45,3 +45,9 @@ publish-release:
 
 publish: publish-release
 	@"$(RELEASE_TOOL_DIR)/publish_container_artifacts.sh"
+
+deploy-dry-run:
+	@bash scripts/deploy.sh --dry-run
+
+deploy:
+	@bash scripts/deploy.sh

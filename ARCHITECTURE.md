@@ -290,6 +290,13 @@ service. Tenant identities, origins, provider clients, cookie policy, secrets,
 routing, persistence, and deployment orchestration belong entirely to that
 operator and are not tracked in this repository.
 
+The root `make deploy` lifecycle entrypoint is a vendor-neutral dispatcher. It
+loads the ignored local `.env.deploy` file, requires one absolute operator Make
+directory and one Make target, validates that target without executing it in
+`make deploy-dry-run`, and executes only that exact target in `make deploy`.
+Tracked files contain neither a default operator path nor a concrete deployment
+target.
+
 ### 5.1 Multi-tenant configuration file
 
 Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, identity-provider clients, and cookie/scheduling knobs:
