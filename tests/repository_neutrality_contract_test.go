@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var forbiddenVendorTokens = []string{
@@ -24,10 +26,39 @@ var forbiddenVendorTokens = []string{
 const (
 	deployConfigFileName       = ".env.deploy"
 	deployConfigExampleName    = ".env.deploy.example"
+	deployManifestRelativePath = ".mprlab/deploy/resources.yml"
 	deployScriptRelativePath   = "scripts/deploy.sh"
 	fixtureDeployMakeTarget    = "apply"
 	fixtureDeployMissingTarget = "missing"
 )
+
+type deploymentManifestDocument struct {
+	Resources deploymentManifest `yaml:"mprlab_resources"`
+}
+
+type deploymentManifest struct {
+	SchemaVersion int                          `yaml:"schema_version"`
+	Repository    deploymentManifestRepository `yaml:"repo"`
+	Resources     []deploymentManifestResource `yaml:"resources"`
+}
+
+type deploymentManifestRepository struct {
+	ID             string `yaml:"id"`
+	Directory      string `yaml:"directory"`
+	DispatchTarget string `yaml:"dispatch_target"`
+}
+
+type deploymentManifestResource struct {
+	Type    string                        `yaml:"type"`
+	Name    string                        `yaml:"name"`
+	Targets deploymentManifestMakeTargets `yaml:"targets"`
+}
+
+type deploymentManifestMakeTargets struct {
+	Release string `yaml:"release"`
+	Publish string `yaml:"publish"`
+	Deploy  string `yaml:"deploy"`
+}
 
 func TestRepositoryExposesVanillaLocalDeploymentContract(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
@@ -55,6 +86,52 @@ func TestRepositoryExposesVanillaLocalDeploymentContract(t *testing.T) {
 	ignoreCommand.Dir = repositoryRoot
 	if ignoreErr := ignoreCommand.Run(); ignoreErr != nil {
 		t.Fatalf("local deployment config must be ignored: %v", ignoreErr)
+	}
+}
+
+func TestRepositoryExposesVanillaDeploymentDiscoveryManifest(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
+	manifestDocument, readErr := os.ReadFile(manifestPath)
+	if readErr != nil {
+		t.Fatalf("read vanilla deployment discovery manifest: %v", readErr)
+	}
+
+	var document deploymentManifestDocument
+	decoder := yaml.NewDecoder(strings.NewReader(string(manifestDocument)))
+	decoder.KnownFields(true)
+	if decodeErr := decoder.Decode(&document); decodeErr != nil {
+		t.Fatalf("decode vanilla deployment discovery manifest: %v", decodeErr)
+	}
+
+	manifest := document.Resources
+	if manifest.SchemaVersion != 1 {
+		t.Errorf("unexpected deployment manifest schema version: %d", manifest.SchemaVersion)
+	}
+	expectedRepository := deploymentManifestRepository{
+		ID:             "tauth",
+		Directory:      "TAuth",
+		DispatchTarget: "tauth",
+	}
+	if manifest.Repository != expectedRepository {
+		t.Errorf("unexpected deployment manifest repository identity: %#v", manifest.Repository)
+	}
+	if len(manifest.Resources) != 1 {
+		t.Fatalf("vanilla deployment manifest must expose exactly one lifecycle resource, got %d", len(manifest.Resources))
+	}
+
+	resource := manifest.Resources[0]
+	expectedResource := deploymentManifestResource{
+		Type: "make_workflow",
+		Name: "tauth",
+		Targets: deploymentManifestMakeTargets{
+			Release: "release",
+			Publish: "publish",
+			Deploy:  "deploy",
+		},
+	}
+	if resource != expectedResource {
+		t.Errorf("unexpected vanilla deployment lifecycle resource: %#v", resource)
 	}
 }
 
@@ -169,7 +246,7 @@ func TestProductAndReleaseSurfacesAreVendorNeutral(t *testing.T) {
 }
 
 func isVendorNeutralitySurface(relativePath string) bool {
-	if relativePath == "README.md" || relativePath == "ARCHITECTURE.md" || relativePath == "Makefile" || relativePath == deployConfigExampleName {
+	if relativePath == "README.md" || relativePath == "ARCHITECTURE.md" || relativePath == "Makefile" || relativePath == deployConfigExampleName || relativePath == deployManifestRelativePath {
 		return true
 	}
 	for _, prefix := range []string{"docs/", "examples/", "internal/", "scripts/", "tests/"} {
