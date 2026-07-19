@@ -157,14 +157,15 @@ operator checkout supplies its concrete deployment binding through the ignored
 local `.env.deploy` file:
 
 ```bash
-cp .env.deploy.example .env.deploy
+install -m 0600 .env.deploy.example .env.deploy
 $EDITOR .env.deploy
 make deploy-dry-run
 ```
 
-The local file must set an absolute `DEPLOY_DIRECTORY` and one
-`DEPLOY_MAKE_TARGET` from that directory's Makefile. The dry run validates the
-configured target without executing its recipe. After `make release` and
+The mode-`0600` local file accepts exactly one absolute `DEPLOY_DIRECTORY`
+assignment and one `DEPLOY_MAKE_TARGET` assignment from that directory's
+Makefile. It is parsed as data and never sourced as shell. The dry run validates
+the configured target without executing its recipe. After `make release` and
 `make publish` complete, the operator may run `make deploy`; repository code,
 examples, and documentation must not contain that checkout's concrete operator
 values.

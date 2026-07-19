@@ -291,8 +291,9 @@ routing, persistence, and deployment orchestration belong entirely to that
 operator and are not tracked in this repository.
 
 The root `make deploy` lifecycle entrypoint is a vendor-neutral dispatcher. It
-loads the ignored local `.env.deploy` file, requires one absolute operator Make
-directory and one Make target, validates that target without executing it in
+parses the ignored mode-`0600` local `.env.deploy` file as exactly one absolute
+`DEPLOY_DIRECTORY` assignment and one `DEPLOY_MAKE_TARGET` assignment, without
+shell evaluation. It validates that target without executing it in
 `make deploy-dry-run`, and executes only that exact target in `make deploy`.
 Tracked files contain neither a default operator path nor a concrete deployment
 target.

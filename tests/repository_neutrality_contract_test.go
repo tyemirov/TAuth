@@ -184,6 +184,132 @@ func TestDeployDryRunRejectsUnknownLocalTarget(t *testing.T) {
 	}
 }
 
+func TestDeployDryRunRejectsIncompleteLocalConfiguration(t *testing.T) {
+	for _, testCase := range []struct {
+		name                 string
+		configurationForRoot func(string) string
+		expected             string
+	}{
+		{
+			name: "missing directory",
+			configurationForRoot: func(string) string {
+				return "DEPLOY_MAKE_TARGET=" + fixtureDeployMakeTarget + "\n"
+			},
+			expected: "DEPLOY_DIRECTORY is required",
+		},
+		{
+			name: "missing target",
+			configurationForRoot: func(fixtureRoot string) string {
+				return "DEPLOY_DIRECTORY=" + fixtureRoot + "\n"
+			},
+			expected: "DEPLOY_MAKE_TARGET is required",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixtureRoot := prepareDeploymentFixture(t)
+			writeRawDeploymentConfig(t, fixtureRoot, testCase.configurationForRoot(fixtureRoot), 0o600)
+
+			deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+			if deployErr == nil || !strings.Contains(string(deployOutput), testCase.expected) {
+				t.Fatalf("deploy dry-run accepted incomplete local configuration: %v\n%s", deployErr, deployOutput)
+			}
+		})
+	}
+}
+
+func TestDeployDryRunRejectsExecutableConfigSyntax(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	executionMarker := filepath.Join(fixtureRoot, "config-executed")
+	writeRawDeploymentConfig(
+		t,
+		fixtureRoot,
+		fmt.Sprintf(
+			"DEPLOY_DIRECTORY=%s\nDEPLOY_MAKE_TARGET=%s\nprintf exploited > %s\n",
+			operatorDirectory,
+			fixtureDeployMakeTarget,
+			executionMarker,
+		),
+		0o600,
+	)
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr == nil || !strings.Contains(string(deployOutput), "invalid .env.deploy assignment") {
+		t.Fatalf("deploy dry-run accepted executable config syntax: %v\n%s", deployErr, deployOutput)
+	}
+	if _, statErr := os.Stat(executionMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("deployment config was executed: %v", statErr)
+	}
+}
+
+func TestDeployDryRunRejectsUnknownAndDuplicateConfigKeys(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		extra    string
+		expected string
+	}{
+		{name: "unknown", extra: "DEPLOY_EXTRA=value\n", expected: "unknown .env.deploy key"},
+		{name: "duplicate", extra: "DEPLOY_MAKE_TARGET=second-target\n", expected: "DEPLOY_MAKE_TARGET is duplicated"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixtureRoot := prepareDeploymentFixture(t)
+			operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+			writeRawDeploymentConfig(
+				t,
+				fixtureRoot,
+				fmt.Sprintf(
+					"DEPLOY_DIRECTORY=%s\nDEPLOY_MAKE_TARGET=%s\n%s",
+					operatorDirectory,
+					fixtureDeployMakeTarget,
+					testCase.extra,
+				),
+				0o600,
+			)
+
+			deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+			if deployErr == nil || !strings.Contains(string(deployOutput), testCase.expected) {
+				t.Fatalf("deploy dry-run accepted %s config key: %v\n%s", testCase.name, deployErr, deployOutput)
+			}
+		})
+	}
+}
+
+func TestDeployDryRunRejectsPermissiveLocalConfiguration(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	writeDeploymentConfig(t, fixtureRoot, operatorDirectory, fixtureDeployMakeTarget)
+	if chmodErr := os.Chmod(filepath.Join(fixtureRoot, deployConfigFileName), 0o644); chmodErr != nil {
+		t.Fatalf("make local deployment config permissive: %v", chmodErr)
+	}
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr == nil || !strings.Contains(string(deployOutput), "mode 0600") {
+		t.Fatalf("deploy dry-run accepted permissive local configuration: %v\n%s", deployErr, deployOutput)
+	}
+}
+
+func TestDeployDryRunRejectsSymlinkedLocalConfiguration(t *testing.T) {
+	fixtureRoot := prepareDeploymentFixture(t)
+	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
+	realConfigPath := filepath.Join(fixtureRoot, "operator.env")
+	configDocument := fmt.Sprintf(
+		"DEPLOY_DIRECTORY=%s\nDEPLOY_MAKE_TARGET=%s\n",
+		operatorDirectory,
+		fixtureDeployMakeTarget,
+	)
+	if writeErr := os.WriteFile(realConfigPath, []byte(configDocument), 0o600); writeErr != nil {
+		t.Fatalf("write symlink target deployment config: %v", writeErr)
+	}
+	if symlinkErr := os.Symlink(realConfigPath, filepath.Join(fixtureRoot, deployConfigFileName)); symlinkErr != nil {
+		t.Fatalf("symlink local deployment config: %v", symlinkErr)
+	}
+
+	deployOutput, deployErr := runFixtureMake(fixtureRoot, "deploy-dry-run")
+	if deployErr == nil || !strings.Contains(string(deployOutput), "local deployment config not found") {
+		t.Fatalf("deploy dry-run accepted symlinked local configuration: %v\n%s", deployErr, deployOutput)
+	}
+}
+
 func TestDeployDispatchesThroughLocalConfiguration(t *testing.T) {
 	fixtureRoot := prepareDeploymentFixture(t)
 	operatorDirectory := prepareOperatorFixture(t, fixtureRoot)
@@ -276,9 +402,12 @@ func prepareOperatorFixture(t *testing.T, fixtureRoot string) string {
 	if makeDirectoryErr := os.MkdirAll(operatorDirectory, 0o755); makeDirectoryErr != nil {
 		t.Fatalf("create operator fixture directory: %v", makeDirectoryErr)
 	}
-	operatorMakefile := ".PHONY: " + fixtureDeployMakeTarget + "\n" +
-		fixtureDeployMakeTarget + ":\n" +
-		"\t@printf 'applied\\n' > \"$(DEPLOY_TEST_LOG)\"\n"
+	operatorMakefile := fmt.Sprintf(
+		".PHONY: %s\n%s:\n\t@printf 'applied\\n' > %q\n",
+		fixtureDeployMakeTarget,
+		fixtureDeployMakeTarget,
+		filepath.Join(fixtureRoot, "dispatch.log"),
+	)
 	if writeErr := os.WriteFile(filepath.Join(operatorDirectory, "Makefile"), []byte(operatorMakefile), 0o644); writeErr != nil {
 		t.Fatalf("write operator fixture Makefile: %v", writeErr)
 	}
@@ -288,12 +417,16 @@ func prepareOperatorFixture(t *testing.T, fixtureRoot string) string {
 func writeDeploymentConfig(t *testing.T, fixtureRoot string, operatorDirectory string, makeTarget string) {
 	t.Helper()
 	configDocument := fmt.Sprintf(
-		"DEPLOY_DIRECTORY=%q\nDEPLOY_MAKE_TARGET=%q\nDEPLOY_TEST_LOG=%q\n",
+		"DEPLOY_DIRECTORY=%s\nDEPLOY_MAKE_TARGET=%s\n",
 		operatorDirectory,
 		makeTarget,
-		filepath.Join(fixtureRoot, "dispatch.log"),
 	)
-	if writeErr := os.WriteFile(filepath.Join(fixtureRoot, deployConfigFileName), []byte(configDocument), 0o600); writeErr != nil {
+	writeRawDeploymentConfig(t, fixtureRoot, configDocument, 0o600)
+}
+
+func writeRawDeploymentConfig(t *testing.T, fixtureRoot string, configDocument string, mode os.FileMode) {
+	t.Helper()
+	if writeErr := os.WriteFile(filepath.Join(fixtureRoot, deployConfigFileName), []byte(configDocument), mode); writeErr != nil {
 		t.Fatalf("write local deployment config: %v", writeErr)
 	}
 }

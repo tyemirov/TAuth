@@ -158,14 +158,16 @@ single ignored local deployment configuration and set the concrete operator
 Make directory and target for this machine:
 
 ```bash
-cp .env.deploy.example .env.deploy
+install -m 0600 .env.deploy.example .env.deploy
 $EDITOR .env.deploy
 make deploy-dry-run
 ```
 
-`DEPLOY_DIRECTORY` must be an absolute path and `DEPLOY_MAKE_TARGET` must name
-one target in that directory's Makefile. `make deploy-dry-run` validates the
-binding with Make's non-executing question mode and never executes the target.
+The mode-`0600` file accepts exactly one `DEPLOY_DIRECTORY` assignment and one
+`DEPLOY_MAKE_TARGET` assignment; it is parsed as data and never sourced as
+shell. The directory must be absolute and the target must exist in that
+directory's Makefile. `make deploy-dry-run` validates the binding with Make's
+non-executing question mode and never executes the target.
 After release and publication are complete, only the operator runs:
 
 ```bash
