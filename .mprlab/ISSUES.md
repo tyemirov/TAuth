@@ -175,6 +175,26 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 - [x] [TA-360] Demo cached an outdated tauth.js bundle, preventing logout state updates.
   Added a cache-busting query string for local demo tauth.js loads and regression coverage for the demo loader script.
 
+- [x] [B044] Parse the ignored local deployment binding as data.
+  Goal:
+  Keep TAuth vendor-neutral while preventing its operator-owned `.env.deploy` file from executing shell syntax.
+
+  Requirements:
+  - Accept exactly one absolute `DEPLOY_DIRECTORY` and one valid `DEPLOY_MAKE_TARGET` assignment.
+  - Reject executable syntax, unknown or duplicate keys, incomplete documents, symlinks, and permissions other than `0600`.
+  - Keep all concrete operator values ignored and outside tracked repository files.
+
+  Deliverables:
+  - A data-only vendor-neutral deployment dispatcher.
+  - Black-box coverage through the real Make lifecycle entrypoints.
+  - Operator documentation for installing the ignored file with the required permissions.
+
+  Validation:
+  - `make deploy-dry-run` validates the real ignored local binding without executing its target.
+  - `make ci` passes without contacting or changing production.
+
+  Resolved 2026-07-18: replaced shell sourcing with an exact data-only parser, enforced a regular non-symlink mode-`0600` binding, rejected unknown, duplicate, incomplete, and executable input, and documented permission-safe installation. Black-box tests cover every rejection boundary and fixture-only dispatch. Validation passed with `make deploy-dry-run`, `make test-go`, and `make ci`; production was not contacted. Changed tracked files: `.env.deploy.example`, `.mprlab/ISSUES.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, `README.md`, `docs/usage.md`, `scripts/deploy.sh`, and `tests/repository_neutrality_contract_test.go`.
+
 
 ## Maintenance
 
