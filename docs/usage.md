@@ -157,10 +157,12 @@ operator checkout supplies its concrete deployment binding through the ignored
 local `.env.deploy` file:
 
 ```bash
-install -m 0600 .env.deploy.example .env.deploy
+install -m 0600 /dev/null .env.deploy
 $EDITOR .env.deploy
 make deploy-dry-run
 ```
+
+Use `.env.deploy.example` only to review variable names. Its values are intentionally unusable; never copy or source it.
 
 The mode-`0600` local file accepts exactly one absolute `DEPLOY_DIRECTORY`
 assignment and one `DEPLOY_MAKE_TARGET` assignment from that directory's
