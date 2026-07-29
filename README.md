@@ -153,12 +153,13 @@ Host the binary behind TLS (or terminate TLS at your load balancer) so responses
 
 ### 3. Bind this checkout to the local operator
 
-The tracked repository remains vendor-neutral. Copy the neutral example to the
-single ignored local deployment configuration and set the concrete operator
-Make directory and target for this machine:
+The tracked repository remains vendor-neutral. Create the single ignored local
+deployment configuration explicitly and set the concrete operator Make
+directory and target for this machine. The env example documents variable names
+only and must never be copied or sourced:
 
 ```bash
-install -m 0600 .env.deploy.example .env.deploy
+install -m 0600 /dev/null .env.deploy
 $EDITOR .env.deploy
 make deploy-dry-run
 ```

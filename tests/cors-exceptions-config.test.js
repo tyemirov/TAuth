@@ -35,6 +35,7 @@ const DOC_PATHS = Object.freeze([
 const CORS_EXCEPTION_KEY = "cors_allowed_origin_exceptions";
 const CORS_EXCEPTION_ENV = "TAUTH_CORS_EXCEPTION_1";
 const GIS_ORIGIN = "https://accounts.google.com";
+const DOCUMENTATION_ONLY_ORIGIN = "https://waffle-wizard.invalid";
 
 async function assertConfigIncludesExceptions(filePath) {
   const source = await fileSystem.readFile(filePath, "utf8");
@@ -59,8 +60,12 @@ test("fixture configs declare CORS exception origins", async () => {
     "Expected demo env template to include a CORS exception variable",
   );
   assert.ok(
-    envSource.includes(GIS_ORIGIN),
-    "Expected demo env template to include the GIS origin",
+    envSource.includes(DOCUMENTATION_ONLY_ORIGIN),
+    "Expected demo env template to use a non-operational CORS exception origin",
+  );
+  assert.ok(
+    !envSource.includes(GIS_ORIGIN),
+    "Expected demo env template not to embed the operational GIS origin",
   );
 });
 

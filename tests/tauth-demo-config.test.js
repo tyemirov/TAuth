@@ -27,6 +27,12 @@ const DEMO_FRONTEND_ORIGINS = Object.freeze([
   "http://localhost:8080",
   "http://127.0.0.1:8080",
 ]);
+const DEMO_ENV_DOCUMENTATION_MARKER =
+  "Documentation only: never source, copy, or use this file as runtime configuration.";
+const DEMO_ENV_FAKE_ORIGINS = Object.freeze([
+  "http://disco-pickle.invalid:4242",
+  "http://moon-cheese.invalid:4242",
+]);
 
 const DEMO_FRONTEND_ORIGIN_TEST_CASES = Object.freeze(
   DEMO_FRONTEND_ORIGINS.map((origin) => ({
@@ -109,16 +115,30 @@ test("tauth demo tenant config allows the frontend origins", async () => {
   }
 });
 
-test("tauth demo env enables CORS for the frontend origins", async () => {
+test("tauth demo env is documentation-only and uses non-operational origins", async () => {
   const envConfigSource = await fileSystem.readFile(
     DEMO_ENV_TEMPLATE_PATH,
     "utf8",
   );
 
+  assert.ok(
+    envConfigSource.includes(DEMO_ENV_DOCUMENTATION_MARKER),
+    "Expected demo env to forbid runtime use",
+  );
+  assert.ok(
+    envConfigSource.includes("TAUTH_ENABLE_CORS=false"),
+    "Expected demo env to keep CORS disabled",
+  );
   for (const testCase of DEMO_FRONTEND_ORIGIN_TEST_CASES) {
     assert.ok(
-      envConfigSource.includes(testCase.origin),
-      testCase.corsMessage,
+      !envConfigSource.includes(testCase.origin),
+      `Expected demo env not to embed ${testCase.origin}`,
+    );
+  }
+  for (const fakeOrigin of DEMO_ENV_FAKE_ORIGINS) {
+    assert.ok(
+      envConfigSource.includes(fakeOrigin),
+      `Expected demo env to document ${fakeOrigin}`,
     );
   }
 });
