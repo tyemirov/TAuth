@@ -25,6 +25,18 @@
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
 
+## [v1.1.12] - 2026-07-29
+
+- Merge pull request #138 from tyemirov/gix/mark-example-env-files-as-documentation-only-clarify
+- test: use non-operational origins in demo env and update related assertions
+- chore(deploy): update deploy.sh guidance for .env.deploy creation
+- docs(example): clarify tauth-demo .env file as non-operational sample
+- docs: clarify .env.deploy.example usage and update setup instructions
+- docs: clarify creation of local deployment config in README
+- docs: clarify .env.deploy.example is documentation-only with dummy values
+- Merge pull request #137 from tyemirov/bugfix/B044-data-only-deploy-binding
+- Fix B044 data-only deployment binding
+
 ## [v1.1.11] - 2026-07-17
 
 - Merge pull request #136 from tyemirov/bugfix/TA-450-restore-deploy-discovery-manifest
