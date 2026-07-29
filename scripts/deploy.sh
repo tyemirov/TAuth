@@ -41,7 +41,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 deployment_config="${repository_root}/.env.deploy"
 [[ -f "${deployment_config}" && ! -L "${deployment_config}" ]] || {
   printf 'error: local deployment config not found: %s\n' "${deployment_config}" >&2
-  printf '%s\n' 'run: install -m 0600 .env.deploy.example .env.deploy; then set the local operator binding' >&2
+  printf '%s\n' 'run: install -m 0600 /dev/null .env.deploy; then define the required values explicitly (the env example is documentation only)' >&2
   exit 1
 }
 [[ "$(find "${deployment_config}" -prune -type f -perm 0600 -print)" == "${deployment_config}" ]] || {
