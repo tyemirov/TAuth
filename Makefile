@@ -4,17 +4,8 @@ GO ?= go
 STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
-DOCKER_IMAGE ?= ghcr.io/tyemirov/tauth
-PUBLISH_PLATFORMS ?= linux/amd64,linux/arm64
-PUBLISH_BRANCH ?= master
-PUBLISH_REMOTE ?= origin
-PUBLISH_RELEASE_ARGS ?=
-RELEASE_ARGS ?=
-RELEASE_HELPER := $(abspath $(CURDIR)/scripts/release/release_helper.py)
-RELEASE_ARTIFACT_TARGETS ?= container-artifacts
-RELEASE_TOOL_DIR := $(abspath $(CURDIR)/scripts/release)
 
-.PHONY: ci format lint test-go test-js release container-artifacts publish-release publish deploy-dry-run deploy
+.PHONY: ci format lint test-go test-js
 
 ci: format lint test-go test-js
 
@@ -34,20 +25,15 @@ test-go:
 test-js:
 	npm test
 
-release:
-	@RELEASE_HELPER="$(RELEASE_HELPER)" RELEASE_ARTIFACT_TARGETS="$(RELEASE_ARTIFACT_TARGETS)" bash scripts/release.sh $(RELEASE_ARGS)
+.PHONY: release publish deploy
 
-container-artifacts:
-	@"$(RELEASE_TOOL_DIR)/prepare_container_artifact.sh" --name tauth --image "$(DOCKER_IMAGE)" --file Dockerfile --context . --platforms "$(PUBLISH_PLATFORMS)"
-
-publish-release:
-	@RELEASE_HELPER="$(RELEASE_HELPER)" bash scripts/publish-release.sh $(PUBLISH_RELEASE_ARGS)
-
-publish: publish-release
-	@"$(RELEASE_TOOL_DIR)/publish_container_artifacts.sh"
-
-deploy-dry-run:
-	@bash scripts/deploy.sh --dry-run
-
-deploy:
-	@bash scripts/deploy.sh
+release publish deploy:
+	@application_root="$$(git rev-parse --show-toplevel)"; \
+	gateway_root="$$(dirname "$${application_root}")/mprlab-gateway"; \
+	if [ ! -d "$${gateway_root}" ]; then \
+		printf "required sibling gateway is missing: %s; clone mprlab-gateway at exactly %s\n" \
+			"$${gateway_root}" "$${gateway_root}" >&2; \
+		exit 2; \
+	fi; \
+	$(MAKE) --no-print-directory -C "$${gateway_root}" "app-$@" \
+		MPRLAB_APP_ROOT="$${application_root}"

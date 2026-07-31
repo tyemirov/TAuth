@@ -57,6 +57,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [ ] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
+  Goal:
+  Make TAuth independently releasable, publishable, and deployable without an
+  installed controller, local operator binding, or app-owned production
+  lifecycle engine.
+
+  Requirements:
+  - Keep `.mprlab/deploy/resources.yml` as the only tracked deployment file.
+  - Declare the TAuth image, retained data, gateway-managed tenant config,
+    runtime capabilities, public routes, and public health in schema v2.
+  - Expose only zero-argument `make release`, `make publish`, and `make deploy`
+    wrappers to the exact sibling `../mprlab-gateway`.
+  - Keep operator values, Ansible, Compose, Caddy, receipts, publication, and
+    convergence in the gateway.
+
+  Validation:
+  - The repository lifecycle contract test passes.
+  - `make ci` passes.
+  - The sibling gateway accepts an exact sealed TAuth release plan without
+    release, publication, production contact, or deployment mutation.
+
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
   Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.

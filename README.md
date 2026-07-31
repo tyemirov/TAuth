@@ -23,9 +23,10 @@ TAuth is authentication-only: it validates provider identity tokens and issues f
 TAuth accepts one complete YAML configuration from its operator. The consuming
 company owns that file, every tenant value, all secrets, routing, and deployment
 orchestration. This repository ships the generic service, configuration schema,
-neutral examples, release artifacts, validation commands, and generic lifecycle
-entrypoints; it does not carry any company's production registry or concrete
-deployment binding.
+neutral examples, and validation commands. For the MPR Lab deployment, the
+tracked `.mprlab/deploy/resources.yml` declares only desired resources and
+secret identities; the exact sibling `../mprlab-gateway` owns Ansible,
+operator values, release sealing, publication, and convergence.
 
 ### 1. Describe your tenants
 
@@ -151,32 +152,21 @@ When multiple product origins need access, list them under the `cors_allowed_ori
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://auth.example.com` will also be sent with requests made by `https://app.example.com` because both live under `.example.com`.
 
-### 3. Bind this checkout to the local operator
+### 3. Use the sibling gateway lifecycle
 
-The tracked repository remains vendor-neutral. Create the single ignored local
-deployment configuration explicitly and set the concrete operator Make
-directory and target for this machine. The env example documents variable names
-only and must never be copied or sourced:
+The three production lifecycle commands are fixed:
 
 ```bash
-install -m 0600 /dev/null .env.deploy
-$EDITOR .env.deploy
-make deploy-dry-run
-```
-
-The mode-`0600` file accepts exactly one `DEPLOY_DIRECTORY` assignment and one
-`DEPLOY_MAKE_TARGET` assignment; it is parsed as data and never sourced as
-shell. The directory must be absolute and the target must exist in that
-directory's Makefile. `make deploy-dry-run` validates the binding with Make's
-non-executing question mode and never executes the target.
-After release and publication are complete, only the operator runs:
-
-```bash
+make release
+make publish
 make deploy
 ```
 
-The concrete `.env.deploy` file is ignored. Do not copy its directory, target,
-credentials, tenant values, domains, or routes into tracked repository files.
+Each command passes this exact Git root to `../mprlab-gateway`. TAuth declares
+its image, retained data, shared tenant-config mount, runtime capabilities,
+public routes, and health check in `.mprlab/deploy/resources.yml`; it contains
+no production controller, Ansible, Compose, Caddy, release, publication, or
+deployment implementation. Only the operator runs `make deploy`.
 
 ### Run the demo with Docker Compose (local quick-start)
 

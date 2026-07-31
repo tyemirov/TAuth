@@ -8,10 +8,6 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
-- Parse the ignored mode-`0600` `.env.deploy` binding as exactly two data assignments instead of sourcing it as shell code.
-- Restored the canonical TAuth deployment discovery manifest with only vendor-neutral repository identity and release/publish/deploy lifecycle metadata.
-- Restored `make deploy` and `make deploy-dry-run` through a vendor-neutral dispatcher whose concrete operator directory and target exist only in the ignored local `.env.deploy` configuration.
-- Removed operator-specific tenant configuration, deployment resources, orchestration values, and branding from tracked TAuth files. TAuth now ships the vendor-neutral service, configuration schema, examples, release artifacts, and generic lifecycle entrypoints.
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
 - Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.
@@ -21,6 +17,8 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Declare the complete schema-v2 TAuth runtime, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
+- Delegate only `make release`, `make publish`, and `make deploy` to the exact sibling `../mprlab-gateway`, removing the app-owned release, publication, deployment, and local-controller implementations.
 - Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
 - Updated `tauth.js` hinted restore to use `/auth/session` while preserving `/auth/refresh` for protected `apiFetch` retries.
