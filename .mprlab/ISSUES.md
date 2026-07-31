@@ -57,7 +57,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
-- [ ] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
+- [x] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
   Goal:
   Make TAuth independently releasable, publishable, and deployable without an
   installed controller, local operator binding, or app-owned production
@@ -77,6 +77,15 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - `make ci` passes.
   - The sibling gateway accepts an exact sealed TAuth release plan without
     release, publication, production contact, or deployment mutation.
+
+  Resolved 2026-07-30: replaced the schema-v1 workflow dispatcher with the
+  complete schema-v2 TAuth runtime, removed the local operator binding and
+  app-owned production lifecycle implementation, and reduced the public
+  lifecycle to the exact sibling-gateway `release`, `publish`, and `deploy`
+  wrappers. The repository contract tests and full `make ci` suite passed.
+  Gateway commit `76e2e3f` accepted the committed TAuth source as a sealed,
+  deterministic release plan without publication, production contact, or
+  deployment.
 
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
