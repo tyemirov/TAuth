@@ -92,6 +92,8 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 		"name: mprlab-nginx-gateway_tauth-data",
 		"name: tauth.http",
 		"name: tauth.tenants",
+		"alias: tauth-api",
+		"alias: tauth-tenants",
 		"hostname: tauth-api.mprlab.com",
 		"hostname: tauth.mprlab.com",
 		"url: https://tauth-api.mprlab.com/tauth.js",

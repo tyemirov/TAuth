@@ -68,7 +68,7 @@ mprlab_resources:
       endpoint:
         scope: same_host
         scheme: http
-        alias: tauth-api
+        alias: tauth-tenants
         port: 8080
       health:
         protocol: http
