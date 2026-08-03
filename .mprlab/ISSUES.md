@@ -66,7 +66,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Requirements:
   - Keep `.mprlab/deploy/resources.yml` as the only tracked deployment file.
   - Declare the TAuth image, retained data, gateway-managed tenant config,
-    runtime capabilities, public routes, and public health in schema v2.
+    runtime capabilities, public routes, and public health in schema v3.
   - Expose only zero-argument `make release`, `make publish`, and `make deploy`
     wrappers to the exact sibling `../mprlab-gateway`.
   - Keep operator values, Ansible, Compose, Caddy, receipts, publication, and
@@ -78,8 +78,8 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - The sibling gateway accepts an exact sealed TAuth release plan without
     release, publication, production contact, or deployment mutation.
 
-  Resolved 2026-07-30: replaced the schema-v1 workflow dispatcher with the
-  complete schema-v2 TAuth runtime, removed the local operator binding and
+  Resolved 2026-07-30 and migrated forward 2026-08-03: replaced the obsolete
+  workflow dispatcher with the complete schema-v3 TAuth runtime, removed the local operator binding and
   app-owned production lifecycle implementation, and reduced the public
   lifecycle to the exact sibling-gateway `release`, `publish`, and `deploy`
   wrappers. The repository contract tests and full `make ci` suite passed.
@@ -89,10 +89,17 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
   Post-review correction 2026-07-31: declared the exact bounded retirement of
   the legacy `mprlab-nginx-gateway/tauth-api` Compose service so the first
-  schema-v2 convergence removes only the obsolete container while preserving
+  schema-v3 convergence removes only the obsolete container while preserving
   the retained `mprlab-nginx-gateway_tauth-data` volume. Extended the
   repository lifecycle contract test to require that exact declaration.
   Validation passed with `make ci`.
+
+  Schema-v3 migration 2026-08-03: moved placement to the `tauth-api` service,
+  removed obsolete dependency, profile, and environment-file fields, and kept
+  the exact runtime, retirement, retained data, capabilities, routes, and health
+  graph. `make ci` passed, and sibling gateway commit `251e3c0` accepted the
+  clean committed snapshot as an isolated deploy plan without release,
+  publication, production contact, or deployment.
 
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
