@@ -287,16 +287,17 @@ Configuration is loaded from a single YAML file (`config.yaml` by default, overr
 
 Each operator supplies one complete runtime configuration to the generic TAuth
 service. Tenant identities, origins, provider clients, cookie policy, secrets,
-routing, persistence, and deployment orchestration belong entirely to that
-operator and are not tracked in this repository.
+routing, and secret values remain operator-owned. The MPR Lab deployment shape
+is declarative: `.mprlab/deploy/resources.yml` names the TAuth image, retained
+data, gateway-managed tenant configuration, exported capabilities, public
+routes, and health contract without containing secret bytes or host paths.
 
-The root `make deploy` lifecycle entrypoint is a vendor-neutral dispatcher. It
-parses the ignored mode-`0600` local `.env.deploy` file as exactly one absolute
-`DEPLOY_DIRECTORY` assignment and one `DEPLOY_MAKE_TARGET` assignment, without
-shell evaluation. It validates that target without executing it in
-`make deploy-dry-run`, and executes only that exact target in `make deploy`.
-Tracked files contain neither a default operator path nor a concrete deployment
-target.
+The root `make release`, `make publish`, and `make deploy` entrypoints delegate
+the exact selected Git root to the required sibling `../mprlab-gateway`.
+Gateway-owned Ansible validates the schema, assembles shared tenant state from
+application contributions, generates Compose and Caddy state, manages
+immutable lifecycle receipts, and performs convergence. TAuth carries no
+production lifecycle script or alternate controller.
 
 ### 5.1 Multi-tenant configuration file
 

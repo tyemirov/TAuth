@@ -1,14 +1,128 @@
 ---
 mprlab_resources:
-  schema_version: 1
-  repo:
-    id: tauth
-    directory: TAuth
-    dispatch_target: tauth
+  schema_version: 3
+  owner: tauth
   resources:
-    - type: make_workflow
-      name: tauth
-      targets:
-        release: release
-        publish: publish
-        deploy: deploy
+    - kind: compose_project
+      id: runtime
+      retired_services:
+        - project: mprlab-nginx-gateway
+          service: tauth-api
+      images:
+        - id: tauth-image
+          repository: ghcr.io/tyemirov/tauth
+          visibility: public
+          build:
+            context: .
+            dockerfile: Dockerfile
+            platforms:
+              - linux/amd64
+              - linux/arm64
+      services:
+        - id: tauth-api
+          image: tauth-image
+          placement:
+            group: gateway
+            cardinality: one
+          command:
+            - --config=/config/config.yml
+          assets:
+            - managed: tauth.config
+              target: /config/config.yml
+              mode: "0600"
+          mounts:
+            - volume: data
+              target: /data
+              read_only: false
+          ports:
+            - container_port: 8080
+          readiness:
+            protocol: http
+            port: 8080
+            path: /tauth.js
+            expected_status: 200
+      volumes:
+        - id: data
+          name: mprlab-nginx-gateway_tauth-data
+          retention: retain
+    - kind: runtime_capability
+      id: http
+      name: tauth.http
+      version: 1
+      project: runtime
+      service: tauth-api
+      endpoint:
+        scope: same_host
+        scheme: http
+        alias: tauth-api
+        port: 8080
+      health:
+        protocol: http
+        path: /tauth.js
+        expected_status: 200
+    - kind: runtime_capability
+      id: tenants
+      name: tauth.tenants
+      version: 1
+      project: runtime
+      service: tauth-api
+      endpoint:
+        scope: same_host
+        scheme: http
+        alias: tauth-tenants
+        port: 8080
+      health:
+        protocol: http
+        path: /tauth.js
+        expected_status: 200
+    - kind: caddy_route
+      id: public-api
+      hostname: tauth-api.mprlab.com
+      listener: https
+      handlers:
+        - id: default
+          path_prefix: /
+          upstream: tauth.http
+          transport:
+            protocol: http
+            dial_timeout_seconds: 10
+            response_header_timeout_seconds: 30
+            read_timeout_seconds: 80
+      tls:
+        mode: automatic
+      access:
+        trusted_networks:
+          - 127.0.0.1/32
+          - 172.19.0.0/16
+          - 192.168.1.158/32
+        rate_limit:
+          events: 300
+          window_seconds: 10
+    - kind: caddy_route
+      id: public-helper
+      hostname: tauth.mprlab.com
+      listener: https
+      handlers:
+        - id: default
+          path_prefix: /
+          upstream: tauth.http
+          transport:
+            protocol: http
+            dial_timeout_seconds: 10
+            response_header_timeout_seconds: 30
+            read_timeout_seconds: 80
+      tls:
+        mode: automatic
+      access:
+        trusted_networks:
+          - 127.0.0.1/32
+          - 172.19.0.0/16
+          - 192.168.1.158/32
+        rate_limit:
+          events: 300
+          window_seconds: 10
+    - kind: health_check
+      id: public-health
+      protocol: http
+      url: https://tauth-api.mprlab.com/tauth.js
+      expected_status: 200

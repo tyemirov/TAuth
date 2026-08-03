@@ -150,27 +150,15 @@ The JSON payload is versioned and shaped as:
 
 The preflight builder is generalized under `github.com/tyemirov/utils/preflight` with a Viper-based adapter (`github.com/tyemirov/utils/preflight/viperconfig`) for services that load YAML configs and bind env vars through Viper.
 
-### 2.6 Local deployment binding
+### 2.6 MPR Lab lifecycle
 
-Tracked TAuth files contain only the vendor-neutral deployment dispatcher. Each
-operator checkout supplies its concrete deployment binding through the ignored
-local `.env.deploy` file:
-
-```bash
-install -m 0600 /dev/null .env.deploy
-$EDITOR .env.deploy
-make deploy-dry-run
-```
-
-Use `.env.deploy.example` only to review variable names. Its values are intentionally unusable; never copy or source it.
-
-The mode-`0600` local file accepts exactly one absolute `DEPLOY_DIRECTORY`
-assignment and one `DEPLOY_MAKE_TARGET` assignment from that directory's
-Makefile. It is parsed as data and never sourced as shell. The dry run validates
-the configured target without executing its recipe. After `make release` and
-`make publish` complete, the operator may run `make deploy`; repository code,
-examples, and documentation must not contain that checkout's concrete operator
-values.
+The MPR Lab production lifecycle requires the exact sibling
+`../mprlab-gateway`. Run `make release`, `make publish`, and, as the operator,
+`make deploy`. Each command delegates this exact Git root to the sibling
+gateway, whose Ansible engine reads `.mprlab/deploy/resources.yml`, assembles
+the shared TAuth tenant configuration from application contributions, and owns
+all operator values and remote convergence. TAuth carries no local deployment
+binding or production lifecycle implementation.
 
 ---
 
