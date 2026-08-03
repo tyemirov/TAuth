@@ -30,7 +30,7 @@ var expectedGatewayWrapper = strings.Join([]string{
 	"\t\tMPRLAB_APP_ROOT=\"$${application_root}\"",
 }, "\n")
 
-func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
+func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
 	manifestDocument, readErr := os.ReadFile(manifestPath)
@@ -49,15 +49,19 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 	if !available {
 		t.Fatalf("application resource manifest has no mprlab_resources mapping: %#v", document)
 	}
-	if schemaVersion, available := resourcesDocument["schema_version"].(int); !available || schemaVersion != 2 {
+	if schemaVersion, available := resourcesDocument["schema_version"].(int); !available || schemaVersion != 3 {
 		t.Fatalf("application resource manifest has unexpected schema version: %#v", resourcesDocument["schema_version"])
 	}
 	if owner, available := resourcesDocument["owner"].(string); !available || owner != "tauth" {
 		t.Fatalf("application resource manifest has unexpected owner: %#v", resourcesDocument["owner"])
 	}
-	dependencies, available := resourcesDocument["dependencies"].([]any)
-	if !available || len(dependencies) != 0 {
-		t.Fatalf("TAuth must declare no runtime dependencies: %#v", resourcesDocument["dependencies"])
+	resourceKeys := make([]string, 0, len(resourcesDocument))
+	for resourceKey := range resourcesDocument {
+		resourceKeys = append(resourceKeys, resourceKey)
+	}
+	slices.Sort(resourceKeys)
+	if !slices.Equal(resourceKeys, []string{"owner", "resources", "schema_version"}) {
+		t.Fatalf("application resource manifest root is not the exact schema-v3 contract: %#v", resourceKeys)
 	}
 
 	resources, available := resourcesDocument["resources"].([]any)
@@ -92,6 +96,33 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 	if runtimeProject == nil {
 		t.Fatal("application resource manifest has no runtime Compose project")
 	}
+	if _, available := runtimeProject["placement"]; available {
+		t.Fatalf("runtime Compose project retains obsolete project placement: %#v", runtimeProject["placement"])
+	}
+	if _, available := runtimeProject["profiles"]; available {
+		t.Fatalf("runtime Compose project retains obsolete profiles: %#v", runtimeProject["profiles"])
+	}
+	services, available := runtimeProject["services"].([]any)
+	if !available || len(services) != 1 {
+		t.Fatalf("runtime Compose project must declare exactly one service: %#v", runtimeProject["services"])
+	}
+	runtimeService, available := services[0].(map[string]any)
+	if !available {
+		t.Fatalf("runtime Compose service is not a mapping: %#v", services[0])
+	}
+	placement, available := runtimeService["placement"].(map[string]any)
+	if !available || len(placement) != 2 {
+		t.Fatalf("runtime Compose service must declare exact schema-v3 placement: %#v", runtimeService["placement"])
+	}
+	if group := stringField(t, placement, "group"); group != "gateway" {
+		t.Fatalf("runtime Compose service has unexpected placement group: %q", group)
+	}
+	if cardinality := stringField(t, placement, "cardinality"); cardinality != "one" {
+		t.Fatalf("runtime Compose service has unexpected placement cardinality: %q", cardinality)
+	}
+	if _, available := runtimeService["environment_files"]; available {
+		t.Fatalf("runtime Compose service retains obsolete environment files: %#v", runtimeService["environment_files"])
+	}
 	retiredServices, available := runtimeProject["retired_services"].([]any)
 	if !available || len(retiredServices) != 1 {
 		t.Fatalf("runtime Compose project must retire exactly one legacy service: %#v", runtimeProject["retired_services"])
@@ -110,7 +141,6 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 	manifestText := string(manifestDocument)
 	for _, requiredContract := range []string{
 		"managed: tauth.config",
-		"secret: tauth.runtime-environment",
 		"name: mprlab-nginx-gateway_tauth-data",
 		"name: tauth.http",
 		"name: tauth.tenants",
@@ -126,6 +156,10 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 	}
 	for _, obsoleteContract := range []string{
 		"schema_version: 1",
+		"schema_version: 2",
+		"dependencies:",
+		"profiles:",
+		"environment_files:",
 		"make_workflow",
 		"ansible_task_bundle",
 		"dispatch_target:",
