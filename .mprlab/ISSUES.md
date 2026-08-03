@@ -87,6 +87,13 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   deterministic release plan without publication, production contact, or
   deployment.
 
+  Post-review correction 2026-07-31: declared the exact bounded retirement of
+  the legacy `mprlab-nginx-gateway/tauth-api` Compose service so the first
+  schema-v2 convergence removes only the obsolete container while preserving
+  the retained `mprlab-nginx-gateway_tauth-data` volume. Extended the
+  repository lifecycle contract test to require that exact declaration.
+  Validation passed with `make ci`.
+
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
   Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
