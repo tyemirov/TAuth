@@ -17,8 +17,8 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
-- Declare the complete schema-v2 TAuth runtime, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
-- Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the schema-v2 cutover.
+- Declare the complete schema-v3 TAuth runtime, service placement, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
+- Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the schema-v3 cutover.
 - Delegate only `make release`, `make publish`, and `make deploy` to the exact sibling `../mprlab-gateway`, removing the app-owned release, publication, deployment, and local-controller implementations.
 - Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.
