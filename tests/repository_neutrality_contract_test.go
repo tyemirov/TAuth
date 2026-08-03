@@ -65,12 +65,17 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 		t.Fatalf("application resource manifest has no resources list: %#v", resourcesDocument["resources"])
 	}
 	resourceIdentities := make([]string, 0, len(resources))
+	var runtimeProject map[string]any
 	for _, resourceValue := range resources {
 		resource, resourceAvailable := resourceValue.(map[string]any)
 		if !resourceAvailable {
 			t.Fatalf("application resource is not a mapping: %#v", resourceValue)
 		}
-		resourceIdentities = append(resourceIdentities, stringField(t, resource, "kind")+"/"+stringField(t, resource, "id"))
+		resourceIdentity := stringField(t, resource, "kind") + "/" + stringField(t, resource, "id")
+		resourceIdentities = append(resourceIdentities, resourceIdentity)
+		if resourceIdentity == "compose_project/runtime" {
+			runtimeProject = resource
+		}
 	}
 	slices.Sort(resourceIdentities)
 	expectedResourceIdentities := []string{
@@ -83,6 +88,23 @@ func TestRepositoryOwnsSchemaV2ApplicationResources(t *testing.T) {
 	}
 	if !slices.Equal(resourceIdentities, expectedResourceIdentities) {
 		t.Fatalf("application resource identities do not match the TAuth lifecycle: %#v", resourceIdentities)
+	}
+	if runtimeProject == nil {
+		t.Fatal("application resource manifest has no runtime Compose project")
+	}
+	retiredServices, available := runtimeProject["retired_services"].([]any)
+	if !available || len(retiredServices) != 1 {
+		t.Fatalf("runtime Compose project must retire exactly one legacy service: %#v", runtimeProject["retired_services"])
+	}
+	retiredService, available := retiredServices[0].(map[string]any)
+	if !available || len(retiredService) != 2 {
+		t.Fatalf("legacy service retirement must contain only project and service: %#v", retiredServices[0])
+	}
+	if project := stringField(t, retiredService, "project"); project != "mprlab-nginx-gateway" {
+		t.Fatalf("legacy service retirement has unexpected Compose project: %q", project)
+	}
+	if service := stringField(t, retiredService, "service"); service != "tauth-api" {
+		t.Fatalf("legacy service retirement has unexpected service: %q", service)
 	}
 
 	manifestText := string(manifestDocument)
