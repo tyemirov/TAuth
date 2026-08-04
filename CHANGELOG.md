@@ -8,6 +8,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Made `https://tauth.mprlab.com/tauth.js` the sole browser-helper location, removed the backend's embedded helper route so `tauth-api.mprlab.com/tauth.js` returns 404, and added the independent `/health` readiness endpoint.
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.
 - Preserved literal bcrypt hashes during YAML environment expansion so `$2a$`, `$2b$`, and `$2y$` hashes are not mistaken for shell variables.
 - Reconciled password credential rows during startup seeding so users removed from `password_auth.users` cannot continue authenticating from persistent stores.
@@ -17,6 +18,7 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Declared the canonical `web/` GitHub Pages resource in the schema-v3 lifecycle manifest and removed the obsolete `tauth.mprlab.com` Caddy route.
 - Declare the complete schema-v3 TAuth runtime, service placement, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
 - Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the schema-v3 cutover.
 - Delegate only `make release`, `make publish`, and `make deploy` to the exact sibling `../mprlab-gateway`, removing the app-owned release, publication, deployment, and local-controller implementations.

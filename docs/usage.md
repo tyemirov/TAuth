@@ -16,7 +16,7 @@ TAuth sits between identity providers and your product UI:
 - Manages first-party accounts when `account_management.enabled` is configured, including signup, email verification, reset, password change, provider linking, unlinking, and disablement.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
-- Exposes a small HTTP API and a browser helper (`/tauth.js`) for zero-token-in-JavaScript sessions.
+- Exposes a small HTTP API for zero-token-in-JavaScript sessions; GitHub Pages publishes the browser helper only at `https://tauth.mprlab.com/tauth.js`.
 - Does not implement OAuth2 authorization for Google or Apple APIs, MFA/passkeys, organization membership, public profile editing, or third-party token custody.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
@@ -183,7 +183,7 @@ Your product should:
 
 ## 4. Recommended integration: `tauth.js`
 
-The simplest way to use TAuth from the browser is through the helper served at `/tauth.js`. It exports these globals:
+The simplest way to use TAuth from the browser is through the helper served only at `https://tauth.mprlab.com/tauth.js`. It exports these globals:
 
 - `initAuthClient(options)` – initializes client auth state and restores prior sessions when appropriate.
 - `apiFetch(url, init)` – wrapper around `fetch` that automatically refreshes sessions on `401`.
@@ -211,11 +211,11 @@ For backend services written in Go, use the `pkg/sessionvalidator` package descr
 
 ### 4.1 Loading the helper
 
-On your product site, include the script from wherever you host the asset:
+On your product site, include the canonical GitHub Pages asset:
 
 ```html
 <script
-  src="https://auth.example.com/tauth.js"
+  src="https://tauth.mprlab.com/tauth.js"
   data-tenant-id="tenant-admin"
 ></script>
 ```
@@ -745,13 +745,13 @@ Revokes the refresh token and clears cookies.
 
 Clients should treat this as “signed out” regardless of prior state.
 
-### 6.7 `GET /tauth.js`
+### 6.7 `GET /health`
 
-Serves the browser helper described in section 4.
+Reports whether the TAuth API process is ready to accept requests.
 
-- Include it via `<script src="https://your-tauth-origin/tauth.js"></script>`.
-- Exposes the helper globals listed in section 4, including Google/password login, Apple login start, password signup, verification, reset, password change, identity linking/unlinking, disable-account, logout, and tenant selection.
-- The TAuth service serves only API endpoints plus `/tauth.js`; demo pages live in `examples/` and are served separately.
+- **Auth**: none.
+- **Response**: `200 OK` with an empty body.
+- `GET /tauth.js` is intentionally unregistered and returns `404 Not Found`; load the sole helper copy from `https://tauth.mprlab.com/tauth.js` as described in section 4.
 
 ## 6.8 Validating sessions from other Go services
 

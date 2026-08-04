@@ -138,6 +138,19 @@ func TestRunServerSuccess(t *testing.T) {
 		if server.Handler == nil {
 			t.Fatalf("expected handler to be configured")
 		}
+		healthRecorder := httptest.NewRecorder()
+		healthRequest := httptest.NewRequest(http.MethodGet, "/health", nil)
+		server.Handler.ServeHTTP(healthRecorder, healthRequest)
+		if healthRecorder.Code != http.StatusOK {
+			t.Fatalf("expected backend health 200, got %d", healthRecorder.Code)
+		}
+
+		browserHelperRecorder := httptest.NewRecorder()
+		browserHelperRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
+		server.Handler.ServeHTTP(browserHelperRecorder, browserHelperRequest)
+		if browserHelperRecorder.Code != http.StatusNotFound {
+			t.Fatalf("expected API-only /tauth.js 404, got %d", browserHelperRecorder.Code)
+		}
 		return http.ErrServerClosed
 	})
 	defer restoreServe()
@@ -464,120 +477,6 @@ func TestBuildTenantRegistryUsesTenantSpecificCookieNames(t *testing.T) {
 	beta := registry.Config("beta")
 	if beta.SessionCookieName != "app_session_beta" || beta.RefreshCookieName != "app_refresh_beta" {
 		t.Fatalf("expected beta cookies to be tenant-specific, got %s / %s", beta.SessionCookieName, beta.RefreshCookieName)
-	}
-}
-
-func TestStaticAuthClientRequiresKnownOrigin(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	document := tenants.FileDocument{
-		Tenants: []tenants.FileTenant{
-			{
-				ID:                "demo",
-				DisplayName:       "Demo",
-				TenantOrigins:     []string{"https://demo.localhost"},
-				GoogleWebClientID: "demo-client.apps.googleusercontent.com",
-				JWTSigningKey:     "demo-key",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_demo",
-				RefreshCookieName: "app_refresh_demo",
-				SessionTTL:        "30m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-	config, err := tenants.LoadConfigFromDocument(document)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-
-	router := gin.New()
-	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
-
-	validRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
-	validRequest.Host = "demo.localhost"
-	validRequest.Header.Set("Origin", "https://demo.localhost")
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, validRequest)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200 for known origin, got %d", recorder.Code)
-	}
-
-	unknownRequest := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
-	unknownRequest.Host = "unknown.localhost"
-	unknownRequest.Header.Set("Origin", "https://unknown.localhost")
-	unknownRecorder := httptest.NewRecorder()
-	router.ServeHTTP(unknownRecorder, unknownRequest)
-	if unknownRecorder.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unknown origin, got %d", unknownRecorder.Code)
-	}
-}
-
-func TestStaticAuthClientAllowsMissingOriginForSharedOrigins(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	document := tenants.FileDocument{
-		Tenants: []tenants.FileTenant{
-			{
-				ID:                "notes",
-				DisplayName:       "Notes",
-				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:8000"},
-				GoogleWebClientID: "notes-client.apps.googleusercontent.com",
-				JWTSigningKey:     "notes-key",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_notes",
-				RefreshCookieName: "app_refresh_notes",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-			{
-				ID:                "mpr",
-				DisplayName:       "MPR",
-				TenantOrigins:     []string{"https://shared.localhost", "http://localhost:4173"},
-				GoogleWebClientID: "mpr-client.apps.googleusercontent.com",
-				JWTSigningKey:     "mpr-key",
-				CookieDomain:      "",
-				SessionCookieName: "app_session_mpr",
-				RefreshCookieName: "app_refresh_mpr",
-				SessionTTL:        "15m",
-				RefreshTTL:        "720h",
-				NonceTTL:          "5m",
-				AllowInsecureHTTP: true,
-			},
-		},
-	}
-	config, err := tenants.LoadConfigFromDocument(document)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-
-	router := gin.New()
-	router.GET("/tauth.js", serveStaticJSHandler(config, "tauth.js"))
-
-	makeRecorder := func(origin string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodGet, "/tauth.js", nil)
-		request.Host = "shared.localhost"
-		if origin != "" {
-			request.Header.Set("Origin", origin)
-		}
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, request)
-		return recorder
-	}
-
-	if resp := makeRecorder("http://localhost:8000"); resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 for notes origin, got %d", resp.Code)
-	}
-	if resp := makeRecorder("http://localhost:4173"); resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 for mpr origin, got %d", resp.Code)
-	}
-	if resp := makeRecorder(""); resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 when origin missing, got %d", resp.Code)
-	}
-	if resp := makeRecorder("http://unknown.localhost"); resp.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unknown origin, got %d", resp.Code)
 	}
 }
 

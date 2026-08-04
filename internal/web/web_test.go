@@ -10,40 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	webassets "github.com/tyemirov/tauth/web"
 	"go.uber.org/zap"
 )
-
-func TestServeEmbeddedStaticJS(t *testing.T) {
-	t.Parallel()
-	gin.SetMode(gin.TestMode)
-
-	router := gin.New()
-	router.GET("/client.js", func(contextGin *gin.Context) {
-		ServeEmbeddedStaticJS(contextGin, webassets.FS, "tauth.js")
-	})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/client.js", nil)
-	router.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", recorder.Code)
-	}
-	if contentType := recorder.Header().Get("Content-Type"); contentType == "" {
-		t.Fatalf("expected content type header")
-	}
-
-	missRouter := gin.New()
-	missRouter.GET("/missing.js", func(contextGin *gin.Context) {
-		ServeEmbeddedStaticJS(contextGin, webassets.FS, "missing.js")
-	})
-	missRecorder := httptest.NewRecorder()
-	missRouter.ServeHTTP(missRecorder, httptest.NewRequest(http.MethodGet, "/missing.js", nil))
-	if missRecorder.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing asset, got %d", missRecorder.Code)
-	}
-}
 
 func TestPermissiveCORS(t *testing.T) {
 	t.Parallel()

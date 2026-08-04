@@ -164,13 +164,13 @@ make deploy
 
 Each command passes this exact Git root to `../mprlab-gateway`. TAuth declares
 its image, retained data, shared tenant-config mount, runtime capabilities,
-public routes, and health check in `.mprlab/deploy/resources.yml`; it contains
+backend route, GitHub Pages site, and health check in `.mprlab/deploy/resources.yml`; it contains
 no production controller, Ansible, Compose, Caddy, release, publication, or
 deployment implementation. Only the operator runs `make deploy`.
 
 ### Run the demo with Docker Compose (local quick-start)
 
-We ship a compose example under `examples/tauth-demo` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the demo assets on port `8000`. The TAuth service itself serves only API endpoints plus `/tauth.js`.
+We ship a compose example under `examples/tauth-demo` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the demo assets on port `8000`. The TAuth service itself serves only API and health endpoints.
 
 1. `cd examples/tauth-demo`
 2. Update the environment file with your Google OAuth client ID and signing key:
@@ -197,10 +197,10 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 ### 4. Integrate the browser helper from the product site
 
 ```html
-<script src="https://auth.example.com/tauth.js"></script>
+<script src="https://tauth.mprlab.com/tauth.js"></script>
 <script>
   initAuthClient({
-    baseUrl: "https://auth.example.com",
+    baseUrl: "https://tauth-api.mprlab.com",
     tenantId: "demo", // optional override when multiple tenants share an origin
     onAuthenticated(profile) {
       renderDashboard(profile);
@@ -215,7 +215,7 @@ Stop the stack with `docker compose down`. The compose file persists refresh tok
 <button type="button" onclick="startAppleLogin()">Sign in with Apple</button>
 ```
 
-The production backend serves the embedded helper at `/tauth.js`; operators expose it through the authentication origin they configure. Documentation under `docs/` is repository source and is not deployed through a separate Pages workflow.
+GitHub Pages publishes `web/tauth.js` only at `https://tauth.mprlab.com/tauth.js`. The production backend at `https://tauth-api.mprlab.com` does not serve a helper copy; `GET /tauth.js` returns `404 Not Found`. Keep the helper URL and the required API `baseUrl` separate.
 
 `tauth.js` requires an explicit `baseUrl` in `initAuthClient`; it never infers the API host from the script origin. On first load the helper defaults to `bootstrapMode: "restore-if-hinted"`: anonymous visitors are reported through `onUnauthenticated()` without probing protected endpoints, while browsers that previously authenticated carry a non-secret local restore hint that allows `/auth/session` recovery without browser-visible 401s. Use `bootstrapMode: "eager"` only when you intentionally want a startup session check, or `bootstrapMode: "passive"` when a public surface should never restore on load.
 

@@ -18,7 +18,6 @@ import (
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
-	webassets "github.com/tyemirov/tauth/web"
 	"go.uber.org/zap"
 )
 
@@ -64,6 +63,7 @@ const (
 	defaultAppJWTIssuer = appconfig.DefaultJWTIssuer
 	defaultCookieDomain = ""
 	tenantHeaderName    = "X-TAuth-Tenant"
+	healthEndpointPath  = "/health"
 
 	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
 	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
@@ -259,7 +259,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 		router.Use(corsMiddleware)
 	}
 
-	router.GET("/tauth.js", serveStaticJSHandler(tenantConfig, "tauth.js"))
+	router.GET(healthEndpointPath, web.HandleHealth)
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
@@ -335,16 +335,6 @@ func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userSto
 	return nil
 }
 
-func serveStaticJSHandler(config tenants.Config, asset string) gin.HandlerFunc {
-	return func(contextGin *gin.Context) {
-		if !staticOriginAllowed(contextGin.Request, config) {
-			contextGin.AbortWithStatus(http.StatusForbidden)
-			return
-		}
-		web.ServeEmbeddedStaticJS(contextGin, webassets.FS, asset)
-	}
-}
-
 func originGateMiddleware(config tenants.Config, allowHeaderOverride bool) gin.HandlerFunc {
 	return func(context *gin.Context) {
 		if appleOAuthBypassPath(context.Request) {
@@ -410,15 +400,6 @@ func headerOverrideAllowed(request *http.Request, config tenants.Config) bool {
 		return ok
 	}
 	_, ok := config.TenantByID(tenants.TenantID(override))
-	return ok
-}
-
-func staticOriginAllowed(request *http.Request, config tenants.Config) bool {
-	origin := strings.TrimSpace(request.Header.Get("Origin"))
-	if origin == "" {
-		return true
-	}
-	_, ok := config.OriginOwner(origin)
 	return ok
 }
 

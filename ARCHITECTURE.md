@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-TAuth is a single-origin authentication service that sits between identity providers and your product UI. It verifies Google ID tokens, completes Sign in with Apple redirects, or checks tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The service is written in Go (Gin router) and ships the companion browser helper `web/tauth.js`.
+TAuth is an authentication service that sits between identity providers and your product UI. It verifies Google ID tokens, completes Sign in with Apple redirects, or checks tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The backend is written in Go with Gin. GitHub Pages publishes the companion `web/tauth.js` only at `https://tauth.mprlab.com/tauth.js`.
 
 ```
 Browser ──(Google ID token)──────────────> TAuth ──(verify)──> Google Identity Services
@@ -18,8 +18,8 @@ Browser <─(HttpOnly cookies)───────────── TAuth ─�
 ├─ cmd/server/                 # Cobra CLI entrypoint (reads config.yaml, boots Gin server)
 ├─ internal/
 │  ├─ authkit/                 # Domain logic: routes, JWT helpers, refresh stores
-│  └─ web/                     # Demo user store, CORS middleware, static file serving
-└─ web/                        # Embeddable tauth.js helper
+│  └─ web/                     # Health/profile handlers, demo user store, CORS middleware
+└─ web/                        # GitHub Pages source for the canonical tauth.js helper
 ```
 
 All Go packages under `internal/` are private; only the CLI is exported.
@@ -51,10 +51,10 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
-| GET    | `/tauth.js` | Serve the client helper                        | `200` JavaScript                            |
+| GET    | `/health`       | Report backend process readiness                       | `200 OK` with an empty body                 |
 
-These endpoints are implemented only by the TAuth server. Consuming applications should call them, not host copies.
-TAuth serves no other static assets; demo pages live in the repository under `examples/` and are hosted separately for local development.
+These endpoints are implemented only by the TAuth backend at `tauth-api.mprlab.com`. The backend registers no static asset routes, so `GET /tauth.js` returns `404 Not Found`.
+Consuming applications load the sole public helper from `https://tauth.mprlab.com/tauth.js`; demo pages live under `examples/` and are hosted separately for local development.
 
 ### 3.2 Cookies
 
@@ -119,7 +119,7 @@ Password authentication is tenant-enabled with `password_auth.enabled: true`. Ac
 
 ### 3.7 Browser helper handshake
 
-`web/tauth.js` abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
+The canonical `https://tauth.mprlab.com/tauth.js` asset is built from `web/tauth.js` and abstracts the nonce and credential exchange, but custom front-ends can implement the same flow with a small wrapper around Google Identity Services:
 
 ```js
 let pendingNonce = "";
@@ -198,11 +198,12 @@ For Apple, custom UIs do not fetch or manage a nonce themselves. Use `getAppleLo
 
 - `NewInMemoryUsers`: placeholder application user store (maps provider subjects or password emails to profiles).
 - `PermissiveCORS`: development-only CORS middleware.
-- `ServeEmbeddedStaticJS`: serves `tauth.js` from the embedded FS.
+- `HandleHealth`: returns backend readiness at `/health` without tenant resolution.
 - `HandleWhoAmI`: returns profile data for `/api/me`.
 
 ### 4.4 `web/tauth.js`
 
+- Is published by the gateway-managed GitHub Pages resource only at `https://tauth.mprlab.com/tauth.js`; the API binary neither embeds nor serves it.
 - Tracks client auth state as `unknown`, `anonymous`, `restoring`, `authenticated`, or `error`.
 - Defaults `initAuthClient` to `bootstrapMode: "restore-if-hinted"` so a fresh anonymous page load reports `onUnauthenticated()` without calling protected endpoints. Successful login, profile restore, and refresh set a non-secret local restore hint keyed by `baseUrl` and tenant id.
 - Restores hinted sessions by calling `/auth/session`, which returns profile JSON for valid or refresh-restored cookies and `204 No Content` for anonymous or expired browsers without emitting expected 401s.
@@ -475,7 +476,7 @@ Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, ex
 - Store only bcrypt password hashes and hashed one-time challenge tokens. Raw passwords and raw challenge tokens should exist only at HTTP/delivery edges.
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
-- Serve browser code through `/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
+- Load browser code only from `https://tauth.mprlab.com/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
 
 ## 8. Local Development Modes
 
