@@ -124,7 +124,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
-- [ ] [B045] (P0) Serve tauth.js from one canonical GitHub Pages origin.
+- [x] [B045] (P0) Serve tauth.js from one canonical GitHub Pages origin.
   Goal:
   Make `https://tauth.mprlab.com/tauth.js` the only served TAuth browser-helper artifact while keeping `tauth-api.mprlab.com` API-only.
 
@@ -138,6 +138,12 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Prove the 404 and health behavior through the real HTTP router.
   - Prove the schema-v3 manifest contains one Pages resource and no static-host Caddy route.
   - Pass `make ci` and selected-manifest sibling-gateway validation without production mutation.
+
+  Resolved 2026-08-03:
+  - The Go backend no longer embeds or registers `tauth.js`; its real router returns 404 for that path and exposes unauthenticated `GET /health` for runtime readiness.
+  - The schema-v3 manifest now declares `web/` as the sole `github_pages/browser-helper` source for `tauth.mprlab.com`, removes the static-host Caddy route, and keeps only `tauth-api.mprlab.com` as a backend route.
+  - Focused Go tests, all 43 JavaScript tests, and complete `make ci` passed. Gateway selected-manifest isolation passed against merged gateway commit `abe0bfe0310769f3513b6245f21f71183f9c143e`, and the independent selected TAuth reconciliation suite passed without production mutation.
+  - Changed tracked files: `.mprlab/deploy/resources.yml`, `cmd/server/main.go`, `cmd/server/main_test.go`, `internal/web/cors.go`, `internal/web/health.go`, `internal/web/web_test.go`, `web/embed.go`, `tests/repository_neutrality_contract_test.go`, public documentation, `.mprlab/ISSUES.md`, and `CHANGELOG.md`.
 
 - [x] [TA-450] Restore the vanilla app deployment discovery manifest.
   The released `make deploy` dispatcher reaches the configured operator target, but the gateway preflight fails on `tutosh` because TAuth no longer exposes the canonical `.mprlab/deploy/resources.yml` manifest for dispatch target `tauth`. Restore only the vendor-neutral repository identity and `make_workflow` lifecycle resource required for discovery. Do not restore any operator image, registry, hostname, route, health URL, credential, tenant, gateway path, or other concrete production binding. Add repository-contract coverage and verify the gateway loader and targeted preflight without contacting production.
