@@ -114,8 +114,12 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		}
 	}
 	pagesSource, available := browserHelperPages["source"].(map[string]any)
-	if !available || len(pagesSource) != 2 || stringField(t, pagesSource, "kind") != "directory" || stringField(t, pagesSource, "path") != "web" {
-		t.Fatalf("browser-helper Pages source is not the exact web directory: %#v", browserHelperPages["source"])
+	if !available || len(pagesSource) != 4 ||
+		stringField(t, pagesSource, "kind") != "container" ||
+		stringField(t, pagesSource, "context") != "." ||
+		stringField(t, pagesSource, "dockerfile") != "docker/pages/Dockerfile" ||
+		stringField(t, pagesSource, "target") != "pages" {
+		t.Fatalf("browser-helper Pages source is not the exact site artifact: %#v", browserHelperPages["source"])
 	}
 	pagesVerification, available := browserHelperPages["verification"].(map[string]any)
 	if !available || len(pagesVerification) != 1 || stringField(t, pagesVerification, "path") != "/.mprlab-release.json" {
@@ -198,6 +202,60 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		if strings.Contains(manifestText, obsoleteContract) {
 			t.Errorf("application resource manifest retains obsolete contract %q", obsoleteContract)
 		}
+	}
+}
+
+func TestAPIImageExcludesBrowserHelper(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	runtimeDockerfileDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, "Dockerfile"))
+	if readErr != nil {
+		t.Fatalf("read API image Dockerfile: %v", readErr)
+	}
+	if strings.Contains(string(runtimeDockerfileDocument), "/web") {
+		t.Fatalf("API image Dockerfile retains the obsolete browser-helper filesystem")
+	}
+}
+
+func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	dockerfilePath := filepath.Join(repositoryRoot, "docker", "pages", "Dockerfile")
+	dockerfileDocument, readErr := os.ReadFile(dockerfilePath)
+	if readErr != nil {
+		t.Fatalf("read Pages artifact Dockerfile: %v", readErr)
+	}
+	expectedDockerfile := strings.Join([]string{
+		"# syntax=docker/dockerfile:1",
+		"",
+		"FROM scratch AS pages-source",
+		"",
+		"COPY docs/ /",
+		"COPY web/tauth.js /tauth.js",
+		"COPY web/.nojekyll /.nojekyll",
+		"",
+		"FROM scratch AS pages",
+		"",
+		"COPY --from=pages-source / /",
+		"",
+	}, "\n")
+	if string(dockerfileDocument) != expectedDockerfile {
+		t.Fatalf("Pages artifact Dockerfile does not assemble the exact published site")
+	}
+
+	noJekyllPath := filepath.Join(repositoryRoot, "web", ".nojekyll")
+	noJekyllInfo, statErr := os.Stat(noJekyllPath)
+	if statErr != nil {
+		t.Fatalf("inspect Pages .nojekyll marker: %v", statErr)
+	}
+	if !noJekyllInfo.Mode().IsRegular() || noJekyllInfo.Size() != 0 {
+		t.Fatalf("Pages .nojekyll marker must be an empty regular file: mode=%s size=%d", noJekyllInfo.Mode(), noJekyllInfo.Size())
+	}
+
+	dockerIgnoreDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))
+	if readErr != nil {
+		t.Fatalf("read Docker ignore contract: %v", readErr)
+	}
+	if !strings.HasSuffix(string(dockerIgnoreDocument), "\n!docs/\n!docs/**\n") {
+		t.Fatalf("Docker ignore contract does not expose the complete Pages docs source")
 	}
 }
 
