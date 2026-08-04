@@ -124,6 +124,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B045] (P0) Serve tauth.js from one canonical GitHub Pages origin.
+  Goal:
+  Make `https://tauth.mprlab.com/tauth.js` the only served TAuth browser-helper artifact while keeping `tauth-api.mprlab.com` API-only.
+
+  Requirements:
+  - Return 404 from backend `GET /tauth.js`; do not embed or serve a second copy.
+  - Expose a dedicated backend health endpoint that does not depend on the browser-helper artifact.
+  - Remove the `tauth.mprlab.com` Caddy route and declare its immutable GitHub Pages resource.
+  - Keep `tauth-api.mprlab.com` as the only backend Caddy hostname.
+
+  Validation:
+  - Prove the 404 and health behavior through the real HTTP router.
+  - Prove the schema-v3 manifest contains one Pages resource and no static-host Caddy route.
+  - Pass `make ci` and selected-manifest sibling-gateway validation without production mutation.
+
+  Resolved 2026-08-03:
+  - The Go backend no longer embeds or registers `tauth.js`; its real router returns 404 for that path and exposes unauthenticated `GET /health` for runtime readiness.
+  - The schema-v3 manifest now declares one container-built `github_pages/browser-helper` artifact for `tauth.mprlab.com`. It assembles the complete `docs/` site, the single tracked `web/tauth.js`, and an empty `.nojekyll`, removes the static-host Caddy route, and keeps only `tauth-api.mprlab.com` as a backend route.
+  - The exported Pages filesystem contained all seven expected files, preserved the docs and helper byte-for-byte, and included the empty Jekyll-disable marker. Focused Go tests, all 43 JavaScript tests, and complete `make ci` passed. The clean-checkout gateway isolation rerun remains pending because the exact sibling gateway contains unrelated active B398 changes and the verifier accepts committed clean inputs only; production was not contacted.
+  - Changed tracked files: `.dockerignore`, `.mprlab/deploy/resources.yml`, `Dockerfile`, `docker/pages/Dockerfile`, `web/.nojekyll`, `cmd/server/main.go`, `cmd/server/main_test.go`, `internal/web/cors.go`, `internal/web/health.go`, `internal/web/web_test.go`, `web/embed.go`, `tests/repository_neutrality_contract_test.go`, public documentation, `.mprlab/ISSUES.md`, and `CHANGELOG.md`.
+
 - [x] [TA-450] Restore the vanilla app deployment discovery manifest.
   The released `make deploy` dispatcher reaches the configured operator target, but the gateway preflight fails on `tutosh` because TAuth no longer exposes the canonical `.mprlab/deploy/resources.yml` manifest for dispatch target `tauth`. Restore only the vendor-neutral repository identity and `make_workflow` lifecycle resource required for discovery. Do not restore any operator image, registry, hostname, route, health URL, credential, tenant, gateway path, or other concrete production binding. Add repository-contract coverage and verify the gateway loader and targeted preflight without contacting production.
   Resolved 2026-07-17: restored the canonical `.mprlab/deploy/resources.yml` discovery manifest with only the TAuth repository identity and generic release/publish/deploy `make_workflow`. Added a strict repository contract that rejects additional deployment resource fields or types and includes the manifest in vendor-neutrality scanning. Validation passed with the initially failing `make test-go`, the repaired `make test-go`, `make deploy-dry-run`, `make ci`, gateway `MPRLAB_APP_DISPATCH_TARGET=tauth make plan-app-resources`, and the targeted gateway `preflight-contract-local` on `tutosh` with `failed=0`. The gateway worktree remained clean and production was not contacted. Changed tracked files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`, `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.

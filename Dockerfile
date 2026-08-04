@@ -17,12 +17,11 @@ RUN targetOs="${TARGETOS:-$(go env GOOS)}" && \
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates && \
-    mkdir -p /data /web
+    mkdir -p /data
 
 COPY --from=builder /app/tauth /usr/local/bin/tauth
-COPY --from=builder /app/web /web
 
-VOLUME ["/data", "/web"]
+VOLUME ["/data"]
 
 EXPOSE 8080
 

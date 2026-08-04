@@ -70,6 +70,7 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	}
 	resourceIdentities := make([]string, 0, len(resources))
 	var runtimeProject map[string]any
+	var browserHelperPages map[string]any
 	for _, resourceValue := range resources {
 		resource, resourceAvailable := resourceValue.(map[string]any)
 		if !resourceAvailable {
@@ -80,12 +81,15 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		if resourceIdentity == "compose_project/runtime" {
 			runtimeProject = resource
 		}
+		if resourceIdentity == "github_pages/browser-helper" {
+			browserHelperPages = resource
+		}
 	}
 	slices.Sort(resourceIdentities)
 	expectedResourceIdentities := []string{
 		"caddy_route/public-api",
-		"caddy_route/public-helper",
 		"compose_project/runtime",
+		"github_pages/browser-helper",
 		"health_check/public-health",
 		"runtime_capability/http",
 		"runtime_capability/tenants",
@@ -95,6 +99,31 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	}
 	if runtimeProject == nil {
 		t.Fatal("application resource manifest has no runtime Compose project")
+	}
+	if browserHelperPages == nil {
+		t.Fatal("application resource manifest has no canonical browser-helper Pages resource")
+	}
+	for fieldName, expectedValue := range map[string]string{
+		"repository": "tyemirov/tauth",
+		"branch":     "gh-pages",
+		"domain":     "tauth.mprlab.com",
+		"url":        "https://tauth.mprlab.com/",
+	} {
+		if actualValue := stringField(t, browserHelperPages, fieldName); actualValue != expectedValue {
+			t.Fatalf("browser-helper Pages %s mismatch: got %q want %q", fieldName, actualValue, expectedValue)
+		}
+	}
+	pagesSource, available := browserHelperPages["source"].(map[string]any)
+	if !available || len(pagesSource) != 4 ||
+		stringField(t, pagesSource, "kind") != "container" ||
+		stringField(t, pagesSource, "context") != "." ||
+		stringField(t, pagesSource, "dockerfile") != "docker/pages/Dockerfile" ||
+		stringField(t, pagesSource, "target") != "pages" {
+		t.Fatalf("browser-helper Pages source is not the exact site artifact: %#v", browserHelperPages["source"])
+	}
+	pagesVerification, available := browserHelperPages["verification"].(map[string]any)
+	if !available || len(pagesVerification) != 1 || stringField(t, pagesVerification, "path") != "/.mprlab-release.json" {
+		t.Fatalf("browser-helper Pages verification is not canonical: %#v", browserHelperPages["verification"])
 	}
 	if _, available := runtimeProject["placement"]; available {
 		t.Fatalf("runtime Compose project retains obsolete project placement: %#v", runtimeProject["placement"])
@@ -147,12 +176,14 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		"alias: tauth-api",
 		"alias: tauth-tenants",
 		"hostname: tauth-api.mprlab.com",
-		"hostname: tauth.mprlab.com",
-		"url: https://tauth-api.mprlab.com/tauth.js",
+		"url: https://tauth-api.mprlab.com/health",
 	} {
 		if !strings.Contains(manifestText, requiredContract) {
 			t.Errorf("application resource manifest is missing %q", requiredContract)
 		}
+	}
+	if healthPathCount := strings.Count(manifestText, "path: /health"); healthPathCount != 3 {
+		t.Errorf("application resource manifest must use /health at three backend readiness boundaries, got %d", healthPathCount)
 	}
 	for _, obsoleteContract := range []string{
 		"schema_version: 1",
@@ -164,10 +195,67 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		"ansible_task_bundle",
 		"dispatch_target:",
 		"directory:",
+		"hostname: tauth.mprlab.com",
+		"path: /tauth.js",
+		"url: https://tauth-api.mprlab.com/tauth.js",
 	} {
 		if strings.Contains(manifestText, obsoleteContract) {
 			t.Errorf("application resource manifest retains obsolete contract %q", obsoleteContract)
 		}
+	}
+}
+
+func TestAPIImageExcludesBrowserHelper(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	runtimeDockerfileDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, "Dockerfile"))
+	if readErr != nil {
+		t.Fatalf("read API image Dockerfile: %v", readErr)
+	}
+	if strings.Contains(string(runtimeDockerfileDocument), "/web") {
+		t.Fatalf("API image Dockerfile retains the obsolete browser-helper filesystem")
+	}
+}
+
+func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	dockerfilePath := filepath.Join(repositoryRoot, "docker", "pages", "Dockerfile")
+	dockerfileDocument, readErr := os.ReadFile(dockerfilePath)
+	if readErr != nil {
+		t.Fatalf("read Pages artifact Dockerfile: %v", readErr)
+	}
+	expectedDockerfile := strings.Join([]string{
+		"# syntax=docker/dockerfile:1",
+		"",
+		"FROM scratch AS pages-source",
+		"",
+		"COPY docs/ /",
+		"COPY web/tauth.js /tauth.js",
+		"COPY web/.nojekyll /.nojekyll",
+		"",
+		"FROM scratch AS pages",
+		"",
+		"COPY --from=pages-source / /",
+		"",
+	}, "\n")
+	if string(dockerfileDocument) != expectedDockerfile {
+		t.Fatalf("Pages artifact Dockerfile does not assemble the exact published site")
+	}
+
+	noJekyllPath := filepath.Join(repositoryRoot, "web", ".nojekyll")
+	noJekyllInfo, statErr := os.Stat(noJekyllPath)
+	if statErr != nil {
+		t.Fatalf("inspect Pages .nojekyll marker: %v", statErr)
+	}
+	if !noJekyllInfo.Mode().IsRegular() || noJekyllInfo.Size() != 0 {
+		t.Fatalf("Pages .nojekyll marker must be an empty regular file: mode=%s size=%d", noJekyllInfo.Mode(), noJekyllInfo.Size())
+	}
+
+	dockerIgnoreDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))
+	if readErr != nil {
+		t.Fatalf("read Docker ignore contract: %v", readErr)
+	}
+	if !strings.HasSuffix(string(dockerIgnoreDocument), "\n!docs/\n!docs/**\n") {
+		t.Fatalf("Docker ignore contract does not expose the complete Pages docs source")
 	}
 }
 

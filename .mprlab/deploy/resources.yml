@@ -39,7 +39,7 @@ mprlab_resources:
           readiness:
             protocol: http
             port: 8080
-            path: /tauth.js
+            path: /health
             expected_status: 200
       volumes:
         - id: data
@@ -58,7 +58,7 @@ mprlab_resources:
         port: 8080
       health:
         protocol: http
-        path: /tauth.js
+        path: /health
         expected_status: 200
     - kind: runtime_capability
       id: tenants
@@ -73,7 +73,7 @@ mprlab_resources:
         port: 8080
       health:
         protocol: http
-        path: /tauth.js
+        path: /health
         expected_status: 200
     - kind: caddy_route
       id: public-api
@@ -98,31 +98,21 @@ mprlab_resources:
         rate_limit:
           events: 300
           window_seconds: 10
-    - kind: caddy_route
-      id: public-helper
-      hostname: tauth.mprlab.com
-      listener: https
-      handlers:
-        - id: default
-          path_prefix: /
-          upstream: tauth.http
-          transport:
-            protocol: http
-            dial_timeout_seconds: 10
-            response_header_timeout_seconds: 30
-            read_timeout_seconds: 80
-      tls:
-        mode: automatic
-      access:
-        trusted_networks:
-          - 127.0.0.1/32
-          - 172.19.0.0/16
-          - 192.168.1.158/32
-        rate_limit:
-          events: 300
-          window_seconds: 10
     - kind: health_check
       id: public-health
       protocol: http
-      url: https://tauth-api.mprlab.com/tauth.js
+      url: https://tauth-api.mprlab.com/health
       expected_status: 200
+    - kind: github_pages
+      id: browser-helper
+      repository: tyemirov/tauth
+      branch: gh-pages
+      domain: tauth.mprlab.com
+      url: https://tauth.mprlab.com/
+      source:
+        kind: container
+        context: .
+        dockerfile: docker/pages/Dockerfile
+        target: pages
+      verification:
+        path: /.mprlab-release.json
