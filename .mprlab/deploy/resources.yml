@@ -110,7 +110,9 @@ mprlab_resources:
       domain: tauth.mprlab.com
       url: https://tauth.mprlab.com/
       source:
-        kind: directory
-        path: web
+        kind: container
+        context: .
+        dockerfile: docker/pages/Dockerfile
+        target: pages
       verification:
         path: /.mprlab-release.json
