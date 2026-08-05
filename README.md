@@ -30,7 +30,9 @@ operator values, release sealing, publication, and convergence.
 
 ### 1. Describe your tenants
 
-Every deployment — even “single tenant” ones — loads configuration from a YAML file. Define your tenants (origins, Google clients, cookie domain, and TTLs) once and pass that file to every TAuth process:
+Every active deployment loads one YAML configuration. Define each active tenant
+(origins, Google clients, cookie domain, and TTLs) once and pass that file to
+every TAuth process:
 
 ```bash
 cat > tenants.yaml <<'YAML'
@@ -143,6 +145,17 @@ YAML
 tauth --config=config.yaml
 # or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
 ```
+
+For a forward-only aggregate deployment before any application declares a
+tenant, use an explicit empty set instead of inventing a placeholder tenant:
+
+```yaml
+tenants: []
+```
+
+This bootstrap state is valid for `tauth doctor` and keeps `GET /health`
+available. TAuth does not authenticate requests until a subsequent aggregate
+configuration supplies a tenant.
 
 Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys and tenant origins are reported as fingerprints only so validators can compare without seeing secrets).
 
@@ -393,7 +406,7 @@ tauth doctor config.yaml --check-database
 
 The doctor command performs comprehensive validation including:
 - Configuration file syntax and structure
-- Tenant configuration requirements (TTLs, signing keys, origins)
+- Tenant configuration requirements (TTLs, signing keys, origins) when active tenants are declared
 - CORS origin alignment with tenant origins
 - Cookie scope isolation across tenants
 - Cross-config validation (conflicting origins, shared signing keys)

@@ -326,12 +326,6 @@ func TestParseTenantOriginsRejectsDuplicateEntries(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromDocumentRejectsEmptyTenants(t *testing.T) {
-	if _, err := LoadConfigFromDocument(FileDocument{}); err == nil {
-		t.Fatalf("expected error for empty tenants")
-	}
-}
-
 func TestLoadConfigExpandsEnvironmentVariables(t *testing.T) {
 	if err := os.Setenv("TENANT_ID", "env-demo"); err != nil {
 		t.Fatalf("setenv failed: %v", err)

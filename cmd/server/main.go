@@ -67,7 +67,6 @@ const (
 
 	configCodeMissingConfigFile       = appconfig.ErrorCodeMissingConfigFile
 	configCodeInvalidConfigFile       = appconfig.ErrorCodeInvalidConfigFile
-	configCodeMissingTenants          = appconfig.ErrorCodeMissingTenants
 	configCodeInvalidCORSOrigin       = appconfig.ErrorCodeInvalidCORSOrigin
 	configCodeCORSOriginNotAllowed    = appconfig.ErrorCodeCORSOriginNotAllowed
 	configCodeUninitializedServerConf = "config.uninitialized_server_config"

@@ -8,6 +8,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Accepted the explicit zero-tenant aggregate during forward deployment bootstrap: `tauth doctor` validates it, `/health` remains available, and auth routes stay inactive until an application contributes a tenant.
 - Made `https://tauth.mprlab.com/tauth.js` the sole browser-helper location, removed the backend's embedded helper route and obsolete `/web` image payload so `tauth-api.mprlab.com/tauth.js` returns 404, and added the independent `/health` readiness endpoint.
 - Preserved the complete documentation site in the canonical Pages artifact and disabled Jekyll so the gateway verification marker remains publicly addressable.
 - Fixed deploy image verification when `latest` matches a normalized SemVer image tag such as `1.1.1` rather than the literal Git release tag `v1.1.1`.

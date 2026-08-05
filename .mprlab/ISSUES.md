@@ -124,6 +124,21 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B046] (P0) Allow the active TAuth aggregate configuration to start before applications declare tenants.
+  After a forward-only production reset, TAuth is deployed before Pinguin and the
+  other applications contribute their tenant resources. The canonical aggregate
+  configuration therefore contains `tenants: []`. TAuth must accept that active
+  zero-tenant state: `tauth doctor` must validate it, the server must expose
+  `GET /health`, and all tenant-authenticated routes must remain inactive until
+  a subsequent application deployment supplies a tenant. Do not add a legacy
+  mode, fallback configuration, or migration path. Cover the contract through
+  the real CLI and HTTP server entrypoints.
+  Resolved 2026-08-05: removed the obsolete at-least-one-tenant rejection and
+  made the validated empty aggregate an initialized registry/resolver state.
+  The image-level acceptance run builds the real Docker image, validates
+  `tenants: []` through `tauth doctor`, starts the server, observes `GET
+  /health` as 200, and observes an auth route reject with 403. `make ci` passed.
+
 - [x] [B045] (P0) Serve tauth.js from one canonical GitHub Pages origin.
   Goal:
   Make `https://tauth.mprlab.com/tauth.js` the only served TAuth browser-helper artifact while keeping `tauth-api.mprlab.com` API-only.

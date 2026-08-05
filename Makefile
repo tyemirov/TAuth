@@ -5,9 +5,9 @@ STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
 
-.PHONY: ci format lint test-go test-js
+.PHONY: ci format lint test-go test-js test-empty-tenant-bootstrap-runtime
 
-ci: format lint test-go test-js
+ci: format lint test-go test-js test-empty-tenant-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
@@ -24,6 +24,9 @@ test-go:
 
 test-js:
 	npm test
+
+test-empty-tenant-bootstrap-runtime:
+	bash tests/empty-tenant-bootstrap-runtime.sh
 
 .PHONY: release publish deploy
 

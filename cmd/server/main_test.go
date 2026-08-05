@@ -95,20 +95,6 @@ func TestPrepareServerConfigUsesEnvOverride(t *testing.T) {
 	}
 }
 
-func TestLoadApplicationConfigRequiresTenants(t *testing.T) {
-	cfg := sampleApplicationConfig()
-	cfg.Tenants = nil
-	path := writeConfigFileFromStruct(t, cfg)
-
-	_, err := appconfig.LoadConfig(path)
-	if err == nil {
-		t.Fatalf("expected error when tenants missing")
-	}
-	if !strings.Contains(err.Error(), configCodeMissingTenants) {
-		t.Fatalf("expected missing tenants error, got %v", err)
-	}
-}
-
 func TestRunServerValidatorInitFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
