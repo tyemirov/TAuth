@@ -111,7 +111,6 @@ const (
 	defaultPasswordResetTTL              = 15 * time.Minute
 	defaultNativeGooglePlatform          = "desktop"
 	errorCodeInvalidPath                 = "tenant.invalid_path"
-	errorCodeMissingTenants              = "tenant.missing_records"
 	errorCodeDuplicateTenantID           = "tenant.duplicate_id"
 	errorCodeInvalidID                   = "tenant.invalid_id"
 	errorCodeMissingOrigins              = "tenant.missing_origins"
@@ -201,10 +200,6 @@ func LoadConfig(path string) (Config, error) {
 // LoadConfigFromDocument constructs a Config from the parsed YAML document.
 func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	document = expandFileDocumentEnv(document)
-	if len(document.Tenants) == 0 {
-		return Config{}, fmt.Errorf("%w: %s", ErrInvalidTenantConfig, errorCodeMissingTenants)
-	}
-
 	tenantIndex := make(map[TenantID]Tenant)
 	originToTenantIDs := make(map[string][]TenantID)
 	nativeGoogleClientIDs := make(map[string]TenantID)

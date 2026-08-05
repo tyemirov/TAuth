@@ -16,9 +16,6 @@ const ErrorCodeMissingConfigFile = "config.missing_config_file"
 // ErrorCodeInvalidConfigFile is returned when the config payload cannot be decoded.
 const ErrorCodeInvalidConfigFile = "config.invalid_config_file"
 
-// ErrorCodeMissingTenants is returned when no tenants are defined.
-const ErrorCodeMissingTenants = "config.missing_tenants"
-
 // ErrorCodeInvalidCORSOrigin is returned when a CORS origin is malformed.
 const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 
@@ -101,9 +98,6 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 	document = expandApplicationConfigEnv(document)
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
-	}
-	if len(document.Tenants) == 0 {
-		return nil, fmt.Errorf("%s: at least one tenant must be configured", ErrorCodeMissingTenants)
 	}
 	return &document, nil
 }

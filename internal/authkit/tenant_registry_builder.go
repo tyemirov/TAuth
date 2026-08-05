@@ -15,7 +15,6 @@ type SameSiteResolver func(allowInsecureHTTP bool) http.SameSite
 var ErrTenantRegistryConfig = errors.New("tenantregistry.invalid")
 
 const (
-	errorCodeMissingTenants          = "tenantregistry.missing_tenants"
 	errorCodeMissingSameSiteResolver = "tenantregistry.missing_same_site_resolver"
 )
 
@@ -35,9 +34,6 @@ func NewSameSiteResolver(enableCORS bool) SameSiteResolver {
 // BuildTenantRegistry constructs a tenant registry from validated tenant config.
 func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSiteResolver SameSiteResolver) (TenantRegistry, error) {
 	tenantList := tenantConfig.Tenants()
-	if len(tenantList) == 0 {
-		return TenantRegistry{}, fmt.Errorf("%w: %s", ErrTenantRegistryConfig, errorCodeMissingTenants)
-	}
 	if sameSiteResolver == nil {
 		return TenantRegistry{}, fmt.Errorf("%w: %s", ErrTenantRegistryConfig, errorCodeMissingSameSiteResolver)
 	}
@@ -69,7 +65,10 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.SameSiteMode = sameSiteResolver(tenant.AllowInsecureHTTP())
 		configs[tenantServerConfig.TenantID] = tenantServerConfig
 	}
-	defaultTenantID := string(tenantList[0].ID())
+	defaultTenantID := ""
+	if len(tenantList) > 0 {
+		defaultTenantID = string(tenantList[0].ID())
+	}
 	return NewTenantRegistryFromMap(defaultTenantID, configs), nil
 }
 
