@@ -4,7 +4,118 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to documentation. Read @issues.md/POLICY.md, @issues.md/PLANNING.md, @issues.md/NOTES.md, and @issues.md/ISSUES.md. Start working on open issues. Prioritize bugfixes and maintenance. Work autonomously and stack up PRs.
 
-## Features (112–200)
+## Features
+
+- [ ] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
+  Goal:
+  TAuth can authorize remote clients for first-party MPR resources after a user
+  authenticates through an existing TAuth identity provider.
+  TAuth issues resource-bound access tokens without exposing upstream provider
+  tokens or changing resource-server ownership.
+  Current contract:
+  - TAuth issues first-party session and refresh cookies after authentication.
+  - Native clients also receive cookies and do not receive OAuth bearer tokens.
+  - TAuth has no authorization-server metadata, public JWKS, resource scopes,
+    client metadata contract, consent grants, or OAuth token endpoint.
+  - LLM Proxy F021 requires this capability for authenticated remote MCP access.
+  Requirements:
+  - Implement the current OAuth 2.1 authorization code grant for public clients.
+  - Require PKCE with `S256` for every authorization request.
+  - Reject a missing verifier, a plain challenge, and a mismatched verifier.
+  - Serve RFC 8414 authorization-server metadata and a public JWKS endpoint.
+  - Add authorization, token, and revocation endpoints under one canonical
+    issuer.
+  - Read the issuer and public endpoint URLs from validated operator
+    configuration.
+  - Validate each redirect URI against the client's exact registered value.
+  - Permit bounded loopback-port variation only for a declared native client.
+  - Issue a short-lived, one-time authorization code.
+  - Bind each code to the client, user, redirect URI, resource, scope, and PKCE
+    challenge.
+  - Require an RFC 8707 resource indicator during authorization and token
+    exchange.
+  - Use the exact resource identifier as the access-token audience.
+  - Require each TAuth tenant to declare its permitted resource identifiers and
+    scopes.
+  - Reject each undeclared resource, scope, client, and redirect URI.
+  - Sign OAuth access tokens with asymmetric keys.
+  - Publish only the public verification keys through JWKS.
+  - Keep OAuth signing keys separate from the existing cookie-session signing
+    keys.
+  - Include `iss`, `sub`, `aud`, `exp`, `iat`, `client_id`, `scope`, and
+    `tenant_id` claims in each access token.
+  - Use the same stable account subject that the current TAuth session contains.
+  - Make the access-token lifetime explicit and bounded in tenant
+    configuration.
+  - Issue an opaque rotating refresh token for an approved client grant.
+  - Store only a refresh-token digest and the minimum grant metadata.
+  - Bind each refresh-token family to one client, user, resource, and scope set.
+  - Revoke the full family after reuse of a rotated refresh token.
+  - Revoke refresh-token families and consent grants through the OAuth
+    revocation endpoint.
+  - Bound remaining access after revocation with the short access-token
+    lifetime.
+  - Keep browser authentication and consent on TAuth-owned browser routes.
+  - Show the client identity, resource, and requested scopes before approval.
+  - Require an explicit approval or denial for each new consent grant.
+  - Support explicitly registered clients and MCP Client ID Metadata Documents.
+  - Validate metadata documents with strict HTTPS, size, redirect, cache, and
+    network-address rules.
+  - Do not implement Dynamic Client Registration.
+  - Publish a reusable Go validator for issuer, signature, audience, expiry,
+    and scope checks at a protected resource.
+  - Keep protected-resource metadata and domain authorization in each resource
+    server.
+  - Keep Google, Apple, GitHub, and other provider access tokens outside this
+    contract.
+  - Never place an OAuth access token or refresh token in browser storage, DOM,
+    logs, redirect queries, or TAuth session cookies.
+  - Return standard OAuth errors without account data, token data, code data,
+    or signing-key data.
+  - Keep the generic TAuth product free of a hard-coded LLM Proxy resource or
+    scope.
+  - Declare the LLM Proxy resource and `llm-proxy:use` scope only in the MPR Lab
+    deployment configuration.
+  - Add the authorization-server capability to OpenAPI, documentation, runtime
+    configuration, and the deployment capability contract.
+  - Keep local acceptance separate from live deployment acceptance.
+  - Do not contact or change production during implementation.
+  Open decisions:
+  - Select the asymmetric signing algorithm and operator key-rotation contract.
+  - Select the hosted TAuth authorization and consent origin.
+  - Define the consent lifetime and repeat-consent policy.
+  Deliverables:
+  - Add validated OAuth resource, scope, client, key, token, and consent domain
+    types.
+  - Add the authorization-code, grant, refresh-token, and consent stores.
+  - Add metadata, JWKS, authorization, token, revocation, login, and consent
+    HTTP routes.
+  - Add the asymmetric access-token signer and the reusable Go validator.
+  - Add OpenAPI, configuration, deployment, security, and client-integration
+    documentation.
+  - Add black-box HTTP and browser coverage through public entry points.
+  Validation:
+  - Run the real TAuth server with a fake protected resource and seeded users.
+  - Complete authorization code plus PKCE through the TAuth browser flow.
+  - Verify metadata, JWKS, consent approval, token claims, token refresh, and
+    revocation.
+  - Verify authorization-code replay, PKCE failure, redirect mismatch, and
+    consent denial.
+  - Verify unknown clients, resources, scopes, metadata documents, and signing
+    keys.
+  - Verify wrong-issuer, wrong-audience, wrong-scope, expired, and revoked access
+    tokens at the protected resource.
+  - Verify refresh rotation, family reuse detection, expiry, and cross-client
+    isolation.
+  - Verify user and TAuth-tenant isolation for codes, grants, tokens, and
+    consent.
+  - Verify explicitly registered clients and valid MCP metadata documents.
+  - Verify that browser content, logs, errors, and redirects contain no token,
+    code, signing key, or provider credential.
+  - Run existing cookie-session login, refresh, logout, and downstream validator
+    regression scenarios.
+  - Run the required baseline and final
+    `timeout -k 350s -s SIGKILL 350s make ci` pair.
 
 - [x] [TA-200] Add Apple Sign in as an additional identity provider while keeping TAuth session cookies/JWT model.
   Add a per-tenant Apple provider block (client_id, team_id, key_id, private_key, redirect_uri, optional scopes, and optional mockable endpoint overrides). Implement `GET /auth/apple/start` to issue state + nonce and redirect to Apple, plus `GET`/`POST /auth/apple/callback` to validate state, exchange the authorization code with Apple using a client-secret JWT, verify the returned Apple ID token against Apple's JWKS, enforce nonce/email/allowed_users, and mint the same `app_session` + `app_refresh` cookies/profile JSON. Apple callback tenant resolution must use the signed state payload because provider callbacks may omit `Origin`. Add account-management support so Apple identities resolve/link as provider `apple`, add `tauth.js` helpers, document configuration and errors, and cover the flow with black-box tests using a mock Apple server.
