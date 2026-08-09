@@ -5,9 +5,11 @@ STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
 
-.PHONY: ci format lint test-go test-js test-empty-tenant-bootstrap-runtime
+.PHONY: ci format lint test test-go test-js test-empty-tenant-bootstrap-runtime
 
 ci: format lint test-go test-js test-empty-tenant-bootstrap-runtime
+
+test: test-go test-js test-empty-tenant-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
