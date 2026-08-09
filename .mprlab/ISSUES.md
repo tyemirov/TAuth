@@ -130,6 +130,12 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Aligned authorization-code exchange and client metadata with the current
     OAuth 2.1 and MCP contracts. Revocation treats each token type value as a
     hint, and token exchange reports an invalid resource as `invalid_target`.
+  - The token endpoint now validates each stored grant against the current
+    resource and client policy.
+  - The validator now limits JWKS requests for unknown key identifiers. It gives
+    `ErrInsufficientScope` for a valid access token with insufficient scope.
+  - Added public HTTP and package tests for policy changes, concurrent JWKS
+    requests, and insufficient scopes.
   - Added HTTP, browser, store, isolation, key-rotation, security, and
     regression coverage. Added OpenAPI, examples, operator documentation, and
     the generic `tauth.oauth` runtime capability.
@@ -147,8 +153,9 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
     `internal/tenants/oauth_test.go`, all files in `pkg/oauthvalidator`,
     `tests/oauth-authorization.browser.test.js`, and
     `tests/repository_neutrality_contract_test.go`.
-  - Validation passed with the required baseline, post-implementation, and
-    final standards-audit `timeout -k 350s -s SIGKILL 350s make ci` runs.
+  - Validation passed with the required baseline, post-implementation,
+    standards-audit, and post-review
+    `timeout -k 350s -s SIGKILL 350s make ci` runs.
     Focused Go, browser, lint, OpenAPI YAML, and changed-line ASD-STE100 checks
     also passed.
   Blocked: the sibling gateway `tauth_tenant` resource contract cannot express
