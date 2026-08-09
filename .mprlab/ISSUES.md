@@ -6,7 +6,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
-- [ ] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
+- [!] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
   Goal:
   TAuth can authorize remote clients for first-party MPR resources after a user
   authenticates through an existing TAuth identity provider.
@@ -116,6 +116,53 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
     regression scenarios.
   - Run the required baseline and final
     `timeout -k 350s -s SIGKILL 350s make ci` pair.
+  Progress (2026-08-08):
+  - Added the validated issuer, tenant resource, scope, client, key, token,
+    consent, and metadata-document contracts.
+  - Added discovery, JWKS, authorization, login, consent, token, and revocation
+    routes. Added memory and database stores with atomic consumption and
+    refresh-family reuse revocation.
+  - Added ES256 access-token signing and the public `pkg/oauthvalidator`
+    protected-resource validator.
+  - Added TAuth-owned Google and password browser authentication. Google-only
+    OAuth tenants now use the existing Google identity provider without
+    exposing provider credentials to clients or logs.
+  - Aligned authorization-code exchange and client metadata with the current
+    OAuth 2.1 and MCP contracts. Revocation treats each token type value as a
+    hint, and token exchange reports an invalid resource as `invalid_target`.
+  - The token endpoint now validates each stored grant against the current
+    resource and client policy.
+  - The validator now limits JWKS requests for unknown key identifiers. It gives
+    `ErrInsufficientScope` for a valid access token with insufficient scope.
+  - Added public HTTP and package tests for policy changes, concurrent JWKS
+    requests, and insufficient scopes.
+  - Added HTTP, browser, store, isolation, key-rotation, security, and
+    regression coverage. Added OpenAPI, examples, operator documentation, and
+    the generic `tauth.oauth` runtime capability.
+  - Changed files: `.mprlab/TERMINOLOGY.md`,
+    `.mprlab/deploy/resources.yml`, `ARCHITECTURE.md`, `CHANGELOG.md`,
+    `README.md`, `docs/openapi.yaml`, `docs/usage.md`, and
+    `examples/oauth/config.yaml.example`.
+  - Changed files: `cmd/server/doctor_test.go`, `cmd/server/main.go`,
+    `cmd/server/main_test.go`, `internal/appconfig/config.go`,
+    `internal/appconfig/oauth.go`, `internal/appconfig/oauth_test.go`,
+    `internal/authkit/database_helpers.go`, and
+    `internal/authkit/oauth_browser_sessions.go`.
+  - Changed files: all files in `internal/oauthserver`,
+    `internal/tenants/config.go`, `internal/tenants/oauth.go`,
+    `internal/tenants/oauth_test.go`, all files in `pkg/oauthvalidator`,
+    `tests/oauth-authorization.browser.test.js`, and
+    `tests/repository_neutrality_contract_test.go`.
+  - Validation passed with the required baseline, post-implementation,
+    standards-audit, and post-review
+    `timeout -k 350s -s SIGKILL 350s make ci` runs.
+    Focused Go, browser, lint, OpenAPI YAML, and changed-line ASD-STE100 checks
+    also passed.
+  Blocked: the sibling gateway `tauth_tenant` resource contract cannot express
+  the root OAuth issuer and signing-key settings. It also cannot express the
+  tenant resource, scope, and client declarations. The gateway lifecycle
+  contract must add those fields before the LLM Proxy deployment manifest can
+  declare its resource and `llm-proxy:use` scope.
 
 - [x] [TA-200] Add Apple Sign in as an additional identity provider while keeping TAuth session cookies/JWT model.
   Add a per-tenant Apple provider block (client_id, team_id, key_id, private_key, redirect_uri, optional scopes, and optional mockable endpoint overrides). Implement `GET /auth/apple/start` to issue state + nonce and redirect to Apple, plus `GET`/`POST /auth/apple/callback` to validate state, exchange the authorization code with Apple using a client-secret JWT, verify the returned Apple ID token against Apple's JWKS, enforce nonce/email/allowed_users, and mint the same `app_session` + `app_refresh` cookies/profile JSON. Apple callback tenant resolution must use the signed state payload because provider callbacks may omit `Origin`. Add account-management support so Apple identities resolve/link as provider `apple`, add `tauth.js` helpers, document configuration and errors, and cover the flow with black-box tests using a mock Apple server.

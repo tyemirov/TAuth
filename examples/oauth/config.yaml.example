@@ -1,0 +1,84 @@
+server:
+  listen_addr: ":8080"
+  database_url: "sqlite:///data/tauth.db"
+  enable_cors: false
+  cors_allowed_origins: []
+  cors_allowed_origin_exceptions: []
+  enable_tenant_header_override: false
+
+oauth:
+  enabled: true
+  allow_insecure_http: false
+  issuer: "https://auth.example.com"
+  authorization_endpoint: "https://auth.example.com/oauth/authorize"
+  token_endpoint: "https://auth.example.com/oauth/token"
+  revocation_endpoint: "https://auth.example.com/oauth/revoke"
+  jwks_uri: "https://auth.example.com/oauth/jwks"
+  login_endpoint: "https://auth.example.com/oauth/login"
+  consent_endpoint: "https://auth.example.com/oauth/consent"
+  authorization_request_ttl: "5m"
+  authorization_code_ttl: "1m"
+  active_signing_key_id: "oauth-2026-08"
+  signing_keys:
+    - id: "oauth-2026-08"
+      private_key_base64: "${TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64}"
+  client_metadata:
+    request_timeout: "3s"
+    maximum_bytes: 5120
+    minimum_cache_ttl: "1m"
+    maximum_cache_ttl: "1h"
+
+tenants:
+  - id: "example"
+    display_name: "Example"
+    tenant_origins:
+      - "https://app.example.com"
+    password_auth:
+      enabled: true
+      users:
+        - email: "operator@example.com"
+          display_name: "Operator"
+          password_hash: "${TAUTH_EXAMPLE_PASSWORD_HASH}"
+    oauth:
+      enabled: true
+      access_token_ttl: "5m"
+      refresh_token_ttl: "720h"
+      consent_ttl: "720h"
+      allow_client_metadata_documents: true
+      resources:
+        - identifier: "https://api.example.com"
+          display_name: "Example API"
+          scopes:
+            - identifier: "documents:read"
+              display_name: "Read documents"
+              description: "Read documents from the Example API."
+      clients:
+        - id: "example-web-client"
+          display_name: "Example Web Client"
+          application_type: "web"
+          redirect_uris:
+            - "https://client.example.com/oauth/callback"
+          grants:
+            - resource: "https://api.example.com"
+              scopes:
+                - "documents:read"
+        - id: "example-native-client"
+          display_name: "Example Native Client"
+          application_type: "native"
+          redirect_uris:
+            - "http://127.0.0.1/oauth/callback"
+          loopback_port_range:
+            minimum: 49152
+            maximum: 65535
+          grants:
+            - resource: "https://api.example.com"
+              scopes:
+                - "documents:read"
+    jwt_signing_key: "${TAUTH_EXAMPLE_SESSION_SIGNING_KEY}"
+    cookie_domain: ".example.com"
+    session_cookie_name: "app_session_example"
+    refresh_cookie_name: "app_refresh_example"
+    session_ttl: "15m"
+    refresh_ttl: "720h"
+    nonce_ttl: "5m"
+    allow_insecure_http: false

@@ -66,7 +66,7 @@ func TestDoctorCommandJSONOutput(testingHandle *testing.T) {
 	if !strings.Contains(output, `"schema_version"`) {
 		testingHandle.Fatalf("expected JSON output, got %s", output)
 	}
-	if !strings.Contains(output, `"tauth.doctor.v1"`) {
+	if !strings.Contains(output, `"tauth.doctor.v2"`) {
 		testingHandle.Fatalf("expected schema version in JSON output, got %s", output)
 	}
 }

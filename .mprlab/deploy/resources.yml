@@ -75,6 +75,21 @@ mprlab_resources:
         protocol: http
         path: /health
         expected_status: 200
+    - kind: runtime_capability
+      id: oauth
+      name: tauth.oauth
+      version: 1
+      project: runtime
+      service: tauth-api
+      endpoint:
+        scope: same_host
+        scheme: http
+        alias: tauth-oauth
+        port: 8080
+      health:
+        protocol: http
+        path: /health
+        expected_status: 200
     - kind: caddy_route
       id: public-api
       hostname: tauth-api.mprlab.com

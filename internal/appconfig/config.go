@@ -23,7 +23,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v5"
+const ConfigSchemaVersion = "tauth.config.v6"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
@@ -34,7 +34,9 @@ const DefaultJWTIssuer = "tauth"
 // ApplicationConfig represents the parsed config.yaml payload.
 type ApplicationConfig struct {
 	Server  ServerSettings       `yaml:"server"`
+	OAuth   FileOAuthSettings    `yaml:"oauth"`
 	Tenants []tenants.FileTenant `yaml:"tenants"`
+	oauth   OAuthServerConfig
 }
 
 // ServerSettings describe server-level configuration settings.
@@ -99,6 +101,11 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
 	}
+	oauthConfig, oauthErr := parseOAuthServerConfig(document.OAuth)
+	if oauthErr != nil {
+		return nil, oauthErr
+	}
+	document.oauth = oauthConfig
 	return &document, nil
 }
 
@@ -107,11 +114,17 @@ func (config ApplicationConfig) TenantDocument() tenants.FileDocument {
 	return tenants.FileDocument{Tenants: config.Tenants}
 }
 
+// OAuthServer returns the validated OAuth authorization-server configuration.
+func (config ApplicationConfig) OAuthServer() OAuthServerConfig {
+	return config.oauth.clone()
+}
+
 func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
 	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
 	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)
 	config.Server.CORSAllowedOrigins = expandEnvSlice(config.Server.CORSAllowedOrigins)
 	config.Server.CORSAllowedOriginExceptions = expandEnvSlice(config.Server.CORSAllowedOriginExceptions)
+	config.OAuth = expandOAuthSettingsEnv(config.OAuth)
 	return config
 }
 

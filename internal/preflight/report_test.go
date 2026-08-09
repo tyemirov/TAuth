@@ -1,7 +1,14 @@
 package preflight
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,6 +232,92 @@ func TestBuildFullReportIncludesOrigins(testingHandle *testing.T) {
 	}
 	if len(tenant.TenantOrigins) != 1 || tenant.TenantOrigins[0] != testTenantOrigin {
 		testingHandle.Fatalf("expected tenant_origins to include %s", testTenantOrigin)
+	}
+}
+
+func TestBuildReportIncludesOAuthPolicyWithoutPrivateKey(t *testing.T) {
+	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		t.Fatalf("generate OAuth key: %v", keyErr)
+	}
+	keyDER, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
+	if marshalErr != nil {
+		t.Fatalf("marshal OAuth key: %v", marshalErr)
+	}
+	keyBase64 := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	config := fmt.Sprintf(`server:
+  listen_addr: ":8080"
+  database_url: ""
+oauth:
+  enabled: true
+  issuer: "https://auth.example.com"
+  authorization_endpoint: "https://auth.example.com/oauth/authorize"
+  token_endpoint: "https://auth.example.com/oauth/token"
+  revocation_endpoint: "https://auth.example.com/oauth/revoke"
+  jwks_uri: "https://auth.example.com/oauth/jwks"
+  login_endpoint: "https://auth.example.com/oauth/login"
+  consent_endpoint: "https://auth.example.com/oauth/consent"
+  authorization_request_ttl: "5m"
+  authorization_code_ttl: "1m"
+  active_signing_key_id: "active"
+  signing_keys:
+    - id: "active"
+      private_key_base64: %q
+  client_metadata:
+    request_timeout: "2s"
+    maximum_bytes: 5120
+    minimum_cache_ttl: "1m"
+    maximum_cache_ttl: "1h"
+tenants:
+  - id: "oauth"
+    tenant_origins: ["https://app.example.com"]
+    password_auth:
+      enabled: true
+      users: []
+    oauth:
+      enabled: true
+      access_token_ttl: "5m"
+      refresh_token_ttl: "24h"
+      consent_ttl: "12h"
+      allow_client_metadata_documents: false
+      resources:
+        - identifier: "https://api.example.com"
+          display_name: "API"
+          scopes:
+            - identifier: "api:use"
+              display_name: "Use API"
+              description: "Use the API."
+      clients:
+        - id: "oauth-client"
+          display_name: "OAuth Client"
+          application_type: "web"
+          redirect_uris: ["https://client.example.com/callback"]
+          grants:
+            - resource: "https://api.example.com"
+              scopes: ["api:use"]
+    jwt_signing_key: "session-signing-key"
+    session_cookie_name: "session_oauth"
+    refresh_cookie_name: "refresh_oauth"
+    session_ttl: "15m"
+    refresh_ttl: "24h"
+    nonce_ttl: "5m"
+`, keyBase64)
+	report, reportErr := BuildRedactedReport(writeConfigFile(t, config))
+	if reportErr != nil {
+		t.Fatalf("build OAuth report: %v", reportErr)
+	}
+	if strings.Contains(string(report), keyBase64) || strings.Contains(string(report), "PRIVATE KEY") {
+		t.Fatal("preflight report exposed OAuth private key")
+	}
+	var payload map[string]any
+	if decodeErr := json.Unmarshal(report, &payload); decodeErr != nil {
+		t.Fatalf("decode OAuth report: %v", decodeErr)
+	}
+	effective := payload["effective_config"].(map[string]any)
+	server := effective["server"].(map[string]any)
+	oauth := server["oauth"].(map[string]any)
+	if oauth["enabled"] != true || oauth["active_signing_key_id"] != "active" || len(oauth["signing_keys"].([]any)) != 1 {
+		t.Fatalf("unexpected OAuth preflight payload: %#v", oauth)
 	}
 }
 

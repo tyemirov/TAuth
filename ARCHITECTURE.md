@@ -18,11 +18,14 @@ Browser <─(HttpOnly cookies)───────────── TAuth ─�
 ├─ cmd/server/                 # Cobra CLI entrypoint (reads config.yaml, boots Gin server)
 ├─ internal/
 │  ├─ authkit/                 # Domain logic: routes, JWT helpers, refresh stores
+│  ├─ oauthserver/             # OAuth issuer routes, signing, policy, and stores
 │  └─ web/                     # Health/profile handlers, demo user store, CORS middleware
+├─ pkg/                        # Public session and OAuth token validators
 └─ web/                        # GitHub Pages source for the canonical tauth.js helper
 ```
 
-All Go packages under `internal/` are private; only the CLI is exported.
+Go packages under `internal/` are private. The CLI and packages under `pkg/`
+are public integration surfaces.
 
 ## 3. Request and Session Flow
 
@@ -50,6 +53,12 @@ All Go packages under `internal/` are private; only the CLI is exported.
 | GET    | `/auth/session` | Return current/restored session profile for browser bootstrap | `200` JSON or `204 No Content` when anonymous |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
+| GET    | `/.well-known/oauth-authorization-server` | Publish issuer metadata | `200` RFC 8414 JSON |
+| GET    | Configured OAuth JWKS path | Publish retained ES256 public keys | `200` JWKS JSON |
+| GET    | Configured OAuth authorization path | Validate a public client request and start login or consent | `303` issuer page or exact client callback |
+| POST   | Configured OAuth token path | Redeem a one-time code or rotate a refresh token | `200` OAuth token JSON |
+| POST   | Configured OAuth revocation path | Revoke a refresh-token family and consent grant | `200` for known or unknown tokens |
+| GET/POST | Configured OAuth login and consent paths | Authenticate the tenant user and record an explicit decision | no-store HTML or `303` |
 | GET    | `/me`           | Return profile associated with current access cookie   | `200` JSON or `401` when unauthenticated    |
 | GET    | `/health`       | Report backend process readiness                       | `200 OK` with an empty body                 |
 
@@ -172,6 +181,22 @@ Nonce handling rules:
 
 For Apple, custom UIs do not fetch or manage a nonce themselves. Use `getAppleLoginUrl()` to render a tenant-aware link or call `startAppleLogin()` from a click handler. TAuth creates and validates the nonce/state pair around the Apple redirect.
 
+### 3.8 OAuth resource authorization
+
+1. The client reads issuer metadata and creates a PKCE `S256` challenge.
+2. The authorization route requires one exact resource indicator and resolves it to one tenant policy.
+3. The registry resolves an explicit client or retrieves one strict HTTPS Client ID Metadata Document. It then validates the exact redirect URI and requested scopes.
+4. TAuth stores a short-lived pending request under an opaque handle. The browser uses only issuer-owned login and consent routes.
+5. The normal tenant session supplies the stable user subject. A new exact client, resource, and scope set requires approval. An active exact consent grant skips repeat consent.
+6. TAuth stores only an authorization-code digest. Code redemption atomically verifies the client, redirect URI, resource, expiry, and PKCE verifier before consumption.
+7. The token route returns an ES256 resource-bound access token and an opaque rotating refresh token. The access-token audience is the exact requested resource.
+8. Refresh reuse revokes every member of the refresh-token family and the consent grant. Explicit revocation has the same family and consent result. Issued access tokens expire after the configured short lifetime.
+
+OAuth access and refresh tokens do not enter the TAuth session cookies, browser
+storage, page content, or issuer redirects. The required authorization code is
+returned only to the exact validated client callback. Provider tokens remain
+outside this authorization-server contract.
+
 ## 4. Components
 
 ### 4.1 `cmd/server`
@@ -271,6 +296,14 @@ type AccountManagementStore interface {
 - Provides `ValidateToken`, `ValidateRequest`, and a Gin middleware adapter to populate typed `Claims`.
 - Shares the same claim shape (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`) used by the server.
 - Includes `LoadTenantAuthConfig` to derive tenant signing keys, issuer, and cookie names from the same `config.yaml` used by TAuth.
+
+### 4.7 OAuth authorization components
+
+- `internal/oauthserver` owns issuer discovery, JWKS, client and resource resolution, browser transactions, PKCE, signing, consent, authorization-code, and refresh-token behavior.
+- `MemoryStore` and `DatabaseStore` implement one store contract. The database implementation uses atomic code consumption and refresh rotation for SQLite and Postgres.
+- `ClientMetadataResolver` permits only HTTPS client IDs with a non-root path. It resolves public DNS addresses and dials a validated address. It disables proxy and redirect use and limits response time and size. It validates public-client metadata and bounds valid-document caching.
+- `authkit.OAuthBrowserSessions` resolves and creates the same tenant session used by the existing TAuth routes. The issuer-owned login page accepts the tenant's configured Google browser provider, password provider, or both.
+- `pkg/oauthvalidator` is the public protected-resource library. It accepts only ES256 access tokens with `typ=at+jwt` and a known key ID. It also requires the configured issuer, audience, expiry, and scopes.
 
 ## 5. Configuration Surface
 
@@ -465,6 +498,13 @@ CREATE TABLE IF NOT EXISTS account_challenges (
 
 Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, expire by `expires_unix`, and are consumed once by setting `consumed_at_unix`.
 
+OAuth persistence uses four additional tables:
+
+- `oauth_authorization_requests` stores the short-lived validated browser transaction under a request digest.
+- `oauth_authorization_codes` stores a code digest and its immutable client, user, redirect, resource, scope, consent, PKCE, and expiry bindings.
+- `oauth_consents` stores one time-bounded exact user approval and its revocation time.
+- `oauth_refresh_tokens` stores only a token digest, family ID, minimum grant metadata, absolute expiry, and active, rotated, or revoked state.
+
 `DatabaseRefreshTokenStore` and `DatabaseUserStore` parse the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silence default logging, auto-migrate their schemas, and tag errors with context (`refresh_store.*` / `user_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
 ## 7. Security Considerations
@@ -478,6 +518,11 @@ Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, ex
 - Rotate each tenant's `jwt_signing_key` using standard secrets management practices.
 - Only hashed refresh tokens are stored—never persist the raw opaque value.
 - Load browser code only from `https://tauth.mprlab.com/tauth.js` and avoid inline scripts to keep CSP-friendly deployments.
+- Keep OAuth P-256 signing keys separate from tenant session keys. Publish only public coordinates in JWKS. Add the new key before activation and retain the prior key until its access tokens expire.
+- Require PKCE `S256`, one resource indicator, one exact redirect URI, and configured scopes for every authorization-code flow.
+- Require the exact issuer `Origin` header for login and consent POST requests. Do not emit CORS headers at the authorization endpoint.
+- Keep access-token lifetimes short. Protected resources validate issuer, ES256 signature, audience, expiry, client, tenant, and required scopes with `pkg/oauthvalidator`.
+- Treat Client ID Metadata retrieval as untrusted network input. Keep its HTTPS, public-address, no-redirect, response-size, timeout, media-type, document, and cache limits enabled.
 
 ## 8. Local Development Modes
 
@@ -531,7 +576,9 @@ Challenge rows store only `hashOpaque(token)`, are scoped by tenant and kind, ex
 
 The following surface area is considered stable across releases:
 
-- Endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/verify-email`, `/auth/password/reset/start`, `/auth/password/reset/complete`, `/auth/account/password/change`, `/auth/account/password/link/start`, `/auth/account/password/link/verify`, `/auth/account/google/link`, `/auth/account/unlink`, `/auth/account/disable`, `/auth/session`, `/auth/refresh`, `/auth/logout`, `/me`.
+- Identity endpoints: `/auth/nonce`, `/auth/google`, `/auth/google/native/config`, `/auth/google/native`, `/auth/password/login`, `/auth/password/signup`, `/auth/password/verify-email`, `/auth/password/reset/start`, and `/auth/password/reset/complete`.
+- Account and session endpoints: `/auth/account/password/change`, `/auth/account/password/link/start`, `/auth/account/password/link/verify`, `/auth/account/google/link`, `/auth/account/unlink`, `/auth/account/disable`, `/auth/session`, `/auth/refresh`, `/auth/logout`, and `/me`.
+- OAuth endpoints: `/.well-known/oauth-authorization-server` and every exact configured OAuth endpoint.
 - Cookie names: `app_session`, `app_refresh`.
 - JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`, and `state` for account-management profile responses).
 

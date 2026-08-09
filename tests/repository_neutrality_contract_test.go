@@ -92,6 +92,7 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		"github_pages/browser-helper",
 		"health_check/public-health",
 		"runtime_capability/http",
+		"runtime_capability/oauth",
 		"runtime_capability/tenants",
 	}
 	if !slices.Equal(resourceIdentities, expectedResourceIdentities) {
@@ -173,8 +174,10 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 		"name: mprlab-nginx-gateway_tauth-data",
 		"name: tauth.http",
 		"name: tauth.tenants",
+		"name: tauth.oauth",
 		"alias: tauth-api",
 		"alias: tauth-tenants",
+		"alias: tauth-oauth",
 		"hostname: tauth-api.mprlab.com",
 		"url: https://tauth-api.mprlab.com/health",
 	} {
@@ -182,8 +185,8 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 			t.Errorf("application resource manifest is missing %q", requiredContract)
 		}
 	}
-	if healthPathCount := strings.Count(manifestText, "path: /health"); healthPathCount != 3 {
-		t.Errorf("application resource manifest must use /health at three backend readiness boundaries, got %d", healthPathCount)
+	if healthPathCount := strings.Count(manifestText, "path: /health"); healthPathCount != 4 {
+		t.Errorf("application resource manifest must use /health at four backend readiness boundaries, got %d", healthPathCount)
 	}
 	for _, obsoleteContract := range []string{
 		"schema_version: 1",

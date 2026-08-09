@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- Added an OAuth 2.1 authorization server for public first-party resource clients. It supports RFC 8414 metadata, RFC 8707 resource binding, and PKCE `S256`. It adds issuer-owned Google and password authentication, consent, ES256 JWKS, refresh rotation, revocation, and strict Client ID Metadata Documents. It also includes the public `pkg/oauthvalidator` protected-resource library.
 - Added tenant-enabled Sign in with Apple using `/auth/apple/start` and `/auth/apple/callback`, including signed state, nonce validation, Apple client-secret JWT generation, JWKS-backed ID-token validation, allowlist enforcement, account-management support, and the `tauth.js` Apple login helpers.
 - Added full tenant-gated account management for first-party email/password accounts, including signup, email verification, reset, password change, Google/password linking, unlinking, account disablement, persisted opaque account IDs, and account-level refresh revocation.
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
@@ -20,6 +21,8 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Added the `tauth.oauth` deployment capability, config/preflight schema v6, HTTP contract v2, and OAuth OpenAPI. Added security guidance, key-rotation guidance, and black-box HTTP and Chromium acceptance coverage.
+- Aligned authorization-code exchange with the current OAuth 2.1 request shape. Accepted the MCP refresh-token grant declaration in Client ID Metadata Documents.
 - Declared a canonical container-built GitHub Pages resource that assembles the documentation site and `web/tauth.js` in the schema-v3 lifecycle manifest, and removed the obsolete `tauth.mprlab.com` Caddy route.
 - Declare the complete schema-v3 TAuth runtime, service placement, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
 - Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the schema-v3 cutover.

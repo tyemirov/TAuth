@@ -1,11 +1,11 @@
 # TAuth
 
-*Google Sign-In, Sign in with Apple, email/password account management, and JWT sessions for single-origin apps*
+*Identity sessions and OAuth 2.1 resource authorization for first-party apps*
 
 TAuth lets product teams accept Google Sign-In, Sign in with Apple, or tenant-managed email/password accounts, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
 TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
 
-TAuth is authentication-only: it validates provider identity tokens and issues first-party session cookies/JWTs. It does not implement OAuth2 authorization flows for Google APIs, Apple APIs, or other provider APIs and does not manage provider API access/refresh tokens.
+TAuth validates provider identities and issues first-party session cookies. Its optional OAuth 2.1 authorization server issues TAuth access tokens for declared first-party resources. It does not issue or store Google, Apple, GitHub, or other provider access tokens.
 
 ---
 
@@ -15,6 +15,80 @@ TAuth is authentication-only: it validates provider identity tokens and issues f
 - **Zero tokens in JavaScript** – the client handles hydration, silent refresh, and logout notifications without touching `localStorage`.
 - **Minutes to value** – a single binary with predictable defaults, powered by Gin and OpenID Connect provider integrations.
 - **Designed for growth** – plug in Postgres or SQLite to persist refresh tokens, and extend the web hook points to fit your product.
+
+## Authorize first-party resource clients
+
+Enable the issuer-level `oauth` block and at least one tenant `oauth` block in
+the same config. OAuth tenants use the existing Google browser provider,
+password provider, or both on the TAuth-owned login page. TAuth requires
+authorization code plus PKCE `S256`, one
+RFC 8707 `resource` value, an exact scope set, and an exact registered redirect
+URI. Native clients can declare a bounded loopback-port range. Public clients
+can also use a validated HTTPS Client ID Metadata Document. TAuth does not
+provide Dynamic Client Registration.
+
+```yaml
+oauth:
+  enabled: true
+  allow_insecure_http: false
+  issuer: "https://auth.example.com"
+  authorization_endpoint: "https://auth.example.com/oauth/authorize"
+  token_endpoint: "https://auth.example.com/oauth/token"
+  revocation_endpoint: "https://auth.example.com/oauth/revoke"
+  jwks_uri: "https://auth.example.com/oauth/jwks"
+  login_endpoint: "https://auth.example.com/oauth/login"
+  consent_endpoint: "https://auth.example.com/oauth/consent"
+  authorization_request_ttl: "5m"
+  authorization_code_ttl: "1m"
+  active_signing_key_id: "oauth-2026-08"
+  signing_keys:
+    - id: "oauth-2026-08"
+      private_key_base64: "${TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64}"
+  client_metadata:
+    request_timeout: "3s"
+    maximum_bytes: 5120
+    minimum_cache_ttl: "1m"
+    maximum_cache_ttl: "1h"
+
+tenants:
+  - id: "product"
+    # The normal tenant fields and one issuer-page browser provider are also required.
+    oauth:
+      enabled: true
+      access_token_ttl: "5m"
+      refresh_token_ttl: "720h"
+      consent_ttl: "720h"
+      allow_client_metadata_documents: true
+      resources:
+        - identifier: "https://api.example.com"
+          display_name: "Example API"
+          scopes:
+            - identifier: "documents:read"
+              display_name: "Read documents"
+              description: "Read documents from the Example API."
+      clients:
+        - id: "example-web-client"
+          display_name: "Example Web Client"
+          application_type: "web"
+          redirect_uris:
+            - "https://client.example.com/oauth/callback"
+          grants:
+            - resource: "https://api.example.com"
+              scopes: ["documents:read"]
+```
+
+The signing keys must be PKCS8 P-256 private keys. TAuth signs new access tokens
+with the `active_signing_key_id` and publishes all configured public keys. Add a
+new private key, make it active, and replace the old entry with its PKIX P-256
+`public_key` or `public_key_base64` value. Retain that verification-only entry
+until every access token that uses it has expired. OAuth keys are separate from
+tenant HS256 session keys.
+
+The discovery document is at
+`/.well-known/oauth-authorization-server`. The complete endpoint and payload
+contract is in [docs/openapi.yaml](docs/openapi.yaml). Protected Go services
+use [pkg/oauthvalidator](pkg/oauthvalidator/README.md) to validate issuer,
+signature, resource audience, expiry, and scopes.
 
 ---
 
@@ -99,6 +173,7 @@ Each entry defines:
 - `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`, configure an Apple Services ID as `client_id`, Apple `team_id`, Sign in with Apple `key_id`, either PKCS8 ECDSA `private_key` or one-line `private_key_base64`, and an HTTPS `redirect_uri` that points at `/auth/apple/callback` on your TAuth origin.
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
 - `account_management` – optional first-party account lifecycle. Set `enabled: true` to use persisted opaque 128-bit base64url session subjects for password, Google, and Apple identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
+- `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The issuer-owned login page uses the tenant's configured Google browser provider, password provider, or both.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.example.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
