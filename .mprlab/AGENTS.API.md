@@ -95,4 +95,5 @@ This guide applies when the repository declares or implements an API contract. A
 - Assert methods or RPCs, resource identifiers, status codes, headers or metadata, response bodies, typed errors, and externally visible state changes.
 - Cover method safety, idempotent retries, validation failures, authorization boundaries, pagination, conflicts, and cancellation where those behaviors apply.
 - Validate or lint the canonical API contract and regenerate derived artifacts with the repository-owned command.
-- Run repository-native formatting, lint, test, and CI targets before claiming completion.
+- Use `.mprlab/POLICY.md` for validation.
+- During the change, run the smallest API target that validates the changed contract.

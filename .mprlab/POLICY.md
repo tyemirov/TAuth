@@ -30,8 +30,19 @@ This policy controls all agent work in this repository.
 ## Validation
 
 - Use repository-native `make` targets when available.
-- Prefer `make ci` for full validation.
-- Use focused `make test`, `make lint`, or documented stack commands for narrow investigations.
+- Use a satisfactory CI result only when the source code, tests, config, dependencies, and build files stay the same.
+- If there is no applicable satisfactory result, run `make ci` once before you change files.
+- During the change, run the smallest repository target that validates the changed contract.
+- After the last source, test, config, dependency, or build change, run `make ci` once.
+- If this run reports an error, run the target that reports the error during the correction.
+- After the last correction, run `make ci` once.
+- When `make ci` includes `make fmt`, `make lint`, and `make test`, use its result for those targets.
+- During the change or error diagnosis, run the necessary component target.
+- Run a component target when `make ci` does not include the necessary check.
+- For documentation-only work, run the applicable document and repository checks.
+- For `.mprlab/`-only work, run the Governor check and `git diff --check`.
+- These checks are the full validation for `.mprlab/`-only work.
+- For read-only work, use source facts and run only the necessary checks.
 - For frontend behavior, verify through a browser test when the behavior is user-visible.
 - For services and CLIs, verify through HTTP, CLI, or public API entry points.
 

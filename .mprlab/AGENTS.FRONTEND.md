@@ -38,12 +38,8 @@ This file gives rules for browser frontends. Obey root `AGENTS.md` and `.mprlab/
 
 ## Validation
 
-Use repo-native targets:
+Use `.mprlab/POLICY.md` for validation.
 
-```bash
-make lint
-make test
-make ci
-```
+During the change, run the smallest frontend target that validates the changed contract.
 
 Run build or browser tests when source changes affect generated or shipped assets.

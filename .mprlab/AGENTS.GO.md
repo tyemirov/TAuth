@@ -32,13 +32,8 @@ This file gives backend rules for Go code. Obey root `AGENTS.md` and `.mprlab/PO
 
 ## Validation
 
-Use repo-native targets:
+Use `.mprlab/POLICY.md` for validation.
 
-```bash
-make fmt
-make lint
-make test
-make ci
-```
+During the change, run the smallest Go target that validates the changed contract.
 
 When these tools are part of the repository contract, `make lint` must include `go vet`, `staticcheck`, and `ineffassign`.

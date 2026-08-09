@@ -34,7 +34,9 @@ Git and GitHub workflow guidance for this repository. Use this guide whenever br
 
 ## Validation
 
-Before you finalize Git work, run the repo-native validation that `AGENTS.md` and `.mprlab/POLICY.md` specify.
+Before you finalize Git work, complete the applicable validation after the last change.
+
+Use that result while the applicable files stay the same.
 
 Then, run these commands:
 
