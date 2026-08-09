@@ -23,7 +23,11 @@ var (
 	ErrInvalidConfig = errors.New("oauthvalidator.invalid_config")
 	// ErrInvalidToken means the bearer token is missing, malformed, expired, or outside policy.
 	ErrInvalidToken = errors.New("oauthvalidator.invalid_token")
+	// ErrInsufficientScope means a valid bearer token does not contain each required scope.
+	ErrInsufficientScope = errors.New("oauthvalidator.insufficient_scope")
 )
+
+const minimumJWKSRefreshInterval = 5 * time.Second
 
 // JWK is one public ES256 verification key.
 type JWK struct {
@@ -72,6 +76,9 @@ type Validator struct {
 	mu             sync.RWMutex
 	keys           map[string]*ecdsa.PublicKey
 	keysExpiresAt  time.Time
+	refreshDone    chan struct{}
+	refreshErr     error
+	nextRefreshAt  time.Time
 }
 
 // New constructs a protected-resource validator.
@@ -144,26 +151,53 @@ func (validator *Validator) ValidateToken(ctx context.Context, tokenValue string
 		return nil, ErrInvalidToken
 	}
 	if !containsScopes(claims.Scope, validator.requiredScopes) {
-		return nil, ErrInvalidToken
+		return nil, ErrInsufficientScope
 	}
 	return claims, nil
 }
 
 func (validator *Validator) verificationKey(ctx context.Context, keyID string) (*ecdsa.PublicKey, error) {
 	now := validator.clock().UTC()
-	validator.mu.RLock()
+	validator.mu.Lock()
 	key := validator.keys[keyID]
 	fresh := validator.keysExpiresAt.After(now)
-	validator.mu.RUnlock()
 	if key != nil && fresh {
+		validator.mu.Unlock()
 		return key, nil
 	}
 	if validator.jwksURL == "" {
+		validator.mu.Unlock()
 		return nil, ErrInvalidToken
 	}
+	if validator.refreshDone != nil {
+		refreshDone := validator.refreshDone
+		validator.mu.Unlock()
+		select {
+		case <-refreshDone:
+		case <-ctx.Done():
+			return nil, ErrInvalidToken
+		}
+		validator.mu.RLock()
+		key = validator.keys[keyID]
+		refreshErr := validator.refreshErr
+		validator.mu.RUnlock()
+		if refreshErr != nil || key == nil {
+			return nil, ErrInvalidToken
+		}
+		return key, nil
+	}
+	if validator.nextRefreshAt.After(now) {
+		validator.mu.Unlock()
+		return nil, ErrInvalidToken
+	}
+	refreshDone := make(chan struct{})
+	validator.refreshDone = refreshDone
+	validator.mu.Unlock()
 	if refreshErr := validator.refreshKeys(ctx, now); refreshErr != nil {
+		validator.finishRefresh(refreshDone, refreshErr)
 		return nil, ErrInvalidToken
 	}
+	validator.finishRefresh(refreshDone, nil)
 	validator.mu.RLock()
 	key = validator.keys[keyID]
 	validator.mu.RUnlock()
@@ -171,6 +205,15 @@ func (validator *Validator) verificationKey(ctx context.Context, keyID string) (
 		return nil, ErrInvalidToken
 	}
 	return key, nil
+}
+
+func (validator *Validator) finishRefresh(refreshDone chan struct{}, refreshErr error) {
+	validator.mu.Lock()
+	validator.refreshErr = refreshErr
+	validator.nextRefreshAt = validator.clock().UTC().Add(minimumJWKSRefreshInterval)
+	close(refreshDone)
+	validator.refreshDone = nil
+	validator.mu.Unlock()
 }
 
 func (validator *Validator) refreshKeys(ctx context.Context, now time.Time) error {

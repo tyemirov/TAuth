@@ -8,6 +8,7 @@ key source, and an optional required scope set.
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/tyemirov/tauth/pkg/oauthvalidator"
@@ -26,7 +27,13 @@ func main() {
 
 	http.HandleFunc("/documents", func(response http.ResponseWriter, request *http.Request) {
 		claims, validateErr := validator.ValidateRequest(request)
+		if errors.Is(validateErr, oauthvalidator.ErrInsufficientScope) {
+			response.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="documents:read", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"`)
+			http.Error(response, "forbidden", http.StatusForbidden)
+			return
+		}
 		if validateErr != nil {
+			response.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"`)
 			http.Error(response, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -44,6 +51,15 @@ It validates the issuer, exact audience, expiry, issued-at claim, subject,
 client ID, tenant ID, consent grant ID, and every required scope. A static
 `JWKSet` is also accepted when the application already gets keys through a
 trusted configuration channel.
+
+The validator gives `ErrInsufficientScope` when a valid token does not contain
+each required scope. Use HTTP 403 and the `insufficient_scope` challenge for
+this error. The validator gives `ErrInvalidToken` for all other token errors.
+Use HTTP 401 and the protected-resource metadata challenge for those errors.
+
+The validator caches remote JWKS responses. It sends one JWKS request for
+concurrent key checks. It sends no more than one unknown-key refresh request in
+five seconds.
 
 Revocation stops refresh and revokes the consent grant at TAuth. A previously
 issued access token remains valid until its short expiry. Set a bounded tenant

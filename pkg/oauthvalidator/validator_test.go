@@ -6,7 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +45,13 @@ func TestValidatorAcceptsOnlyExactResourcePolicy(t *testing.T) {
 	if _, requestValidationErr := validator.ValidateRequest(request); requestValidationErr != nil {
 		t.Fatalf("validate request: %v", requestValidationErr)
 	}
+	insufficientScopeValidator := mustValidator(t, Config{
+		Issuer: "https://issuer.example", Audience: "https://resource.example",
+		RequiredScopes: []string{"resource:delete"}, JWKSet: keySet, Clock: func() time.Time { return now },
+	})
+	if _, scopeErr := insufficientScopeValidator.ValidateToken(context.Background(), validToken); scopeErr != ErrInsufficientScope {
+		t.Fatalf("expected insufficient scope, got %v", scopeErr)
+	}
 	missingIssuedAtToken := signTestClaims(t, privateKey, "active", Claims{
 		ClientID: "client-1", Scope: "resource:write", TenantID: "tenant-1", GrantID: "consent-1",
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -64,7 +75,6 @@ func TestValidatorAcceptsOnlyExactResourcePolicy(t *testing.T) {
 	}{
 		{name: "wrong issuer", config: Config{Issuer: "https://other.example", Audience: "https://resource.example", JWKSet: keySet}, token: validToken, clockTime: now},
 		{name: "wrong audience", config: Config{Issuer: "https://issuer.example", Audience: "https://other.example", JWKSet: keySet}, token: validToken, clockTime: now},
-		{name: "wrong scope", config: Config{Issuer: "https://issuer.example", Audience: "https://resource.example", RequiredScopes: []string{"resource:delete"}, JWKSet: keySet}, token: validToken, clockTime: now},
 		{name: "expired", config: Config{Issuer: "https://issuer.example", Audience: "https://resource.example", JWKSet: keySet}, token: validToken, clockTime: now.Add(2 * time.Minute)},
 		{name: "unknown signing key", config: Config{Issuer: "https://issuer.example", Audience: "https://resource.example", JWKSet: keySet}, token: signTestAccessToken(t, privateKey, "retired", now, "https://issuer.example", "https://resource.example", "resource:write"), clockTime: now},
 		{name: "wrong signing key", config: Config{Issuer: "https://issuer.example", Audience: "https://resource.example", JWKSet: keySet}, token: signTestAccessToken(t, otherPrivateKey, "active", now, "https://issuer.example", "https://resource.example", "resource:write"), clockTime: now},
@@ -79,6 +89,85 @@ func TestValidatorAcceptsOnlyExactResourcePolicy(t *testing.T) {
 				t.Fatalf("expected invalid token, got %v", candidateErr)
 			}
 		})
+	}
+}
+
+func TestValidatorCoalescesAndBoundsJWKSRefresh(t *testing.T) {
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	currentTime := now
+	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		t.Fatalf("generate key: %v", keyErr)
+	}
+	keySet := testJWKSet(t, &privateKey.PublicKey, "active")
+	validToken := signTestAccessToken(t, privateKey, "active", now, "https://issuer.example", "https://resource.example", "resource:read")
+	unknownKeyToken := signTestAccessToken(t, privateKey, "unknown", now, "https://issuer.example", "https://resource.example", "resource:read")
+
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRequest) }) }
+	var requestCount atomic.Int64
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if requestCount.Add(1) == 1 {
+			close(requestStarted)
+			<-releaseRequest
+		}
+		response.Header().Set("Cache-Control", "public, max-age=300")
+		if encodeErr := json.NewEncoder(response).Encode(keySet); encodeErr != nil {
+			t.Errorf("encode JWKS: %v", encodeErr)
+		}
+	}))
+	t.Cleanup(jwksServer.Close)
+	t.Cleanup(release)
+
+	validator := mustValidator(t, Config{
+		Issuer: "https://issuer.example", Audience: "https://resource.example",
+		JWKSURL: jwksServer.URL, HTTPClient: jwksServer.Client(), Clock: func() time.Time { return currentTime },
+	})
+	firstResult := make(chan error, 1)
+	go func() {
+		_, validateErr := validator.ValidateToken(context.Background(), validToken)
+		firstResult <- validateErr
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("JWKS request did not start")
+	}
+	const parallelValidations = 8
+	results := make(chan error, parallelValidations)
+	for range parallelValidations {
+		go func() {
+			_, validateErr := validator.ValidateToken(context.Background(), validToken)
+			results <- validateErr
+		}()
+	}
+	release()
+	if validateErr := <-firstResult; validateErr != nil {
+		t.Fatalf("validate first token: %v", validateErr)
+	}
+	for range parallelValidations {
+		if validateErr := <-results; validateErr != nil {
+			t.Fatalf("validate concurrent token: %v", validateErr)
+		}
+	}
+	if count := requestCount.Load(); count != 1 {
+		t.Fatalf("expected one coalesced JWKS request, got %d", count)
+	}
+
+	if _, validateErr := validator.ValidateToken(context.Background(), unknownKeyToken); validateErr != ErrInvalidToken {
+		t.Fatalf("expected invalid unknown key, got %v", validateErr)
+	}
+	if count := requestCount.Load(); count != 1 {
+		t.Fatalf("fresh unknown key caused a JWKS request: %d", count)
+	}
+	currentTime = currentTime.Add(minimumJWKSRefreshInterval + time.Second)
+	if _, validateErr := validator.ValidateToken(context.Background(), unknownKeyToken); validateErr != ErrInvalidToken {
+		t.Fatalf("expected invalid unknown key after refresh, got %v", validateErr)
+	}
+	if count := requestCount.Load(); count != 2 {
+		t.Fatalf("expected one bounded unknown-key refresh, got %d requests", count)
 	}
 }
 
