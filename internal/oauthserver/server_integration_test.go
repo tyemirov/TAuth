@@ -269,6 +269,21 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	if !strings.HasPrefix(metadataAuthorizeResponse.Header.Get("Location"), issuer+"/oauth/consent?request=") {
 		t.Fatalf("valid metadata client did not reach consent: %s", metadataAuthorizeResponse.Header.Get("Location"))
 	}
+	metadataConsentForm := url.Values{
+		"request":  {queryValue(t, metadataAuthorizeResponse.Header.Get("Location"), "request")},
+		"decision": {"approve"},
+	}
+	metadataConsentResponse := doRequest(t, client, http.MethodPost, issuer+"/oauth/consent", strings.NewReader(metadataConsentForm.Encode()))
+	assertStatus(t, metadataConsentResponse, http.StatusSeeOther)
+	metadataTokenForm := codeTokenForm(queryValue(t, metadataConsentResponse.Header.Get("Location"), "code"), verifier)
+	metadataTokenForm.Set("client_id", testMetadataClient)
+	metadataTokenResponse := doRequest(t, client, http.MethodPost, issuer+"/oauth/token", strings.NewReader(metadataTokenForm.Encode()))
+	assertStatus(t, metadataTokenResponse, http.StatusOK)
+	metadataTokens := decodeTokenResponse(t, metadataTokenResponse)
+	metadataClaims, metadataValidateErr := validator.ValidateToken(context.Background(), metadataTokens.AccessToken)
+	if metadataValidateErr != nil || metadataClaims.ClientID != testMetadataClient {
+		t.Fatalf("validate metadata-client token: claims=%#v err=%v", metadataClaims, metadataValidateErr)
+	}
 	metadataRedirectMismatch := authorizationURL(issuer, challenge, "state-metadata-mismatch", testOAuthRedirect, testOAuthResource, testOAuthScope, testMetadataClient)
 	assertOAuthError(t, doRequest(t, client, http.MethodGet, metadataRedirectMismatch, nil), "invalid_request")
 	invalidScope := doRequest(t, client, http.MethodGet, authorizationURL(issuer, challenge, "state-five", testOAuthRedirect, testOAuthResource, "resource:admin", testOAuthClient), nil)
@@ -326,6 +341,56 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	if googleValidateErr != nil || googleClaims.Subject != "google:google-user" || googleClaims.TenantID != "demo" {
 		t.Fatalf("validate Google-authorized token: claims=%#v err=%v", googleClaims, googleValidateErr)
 	}
+
+	policyChangeTime := time.Now().UTC()
+	codeConsent, codeConsentErr := store.SaveConsent(context.Background(), Consent{
+		ConsentKey: ConsentKey{
+			TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
+			Resource: testOAuthResource, Scope: testOAuthScope,
+		},
+		CreatedAtUnix: policyChangeTime.Unix(), ExpiresAtUnix: policyChangeTime.Add(time.Hour).Unix(),
+	})
+	if codeConsentErr != nil {
+		t.Fatalf("save policy-change code consent: %v", codeConsentErr)
+	}
+	staleCode, staleCodeErr := store.IssueAuthorizationCode(context.Background(), AuthorizationGrant{
+		ConsentID: codeConsent.ID, TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
+		RedirectURI: testOAuthRedirect, Resource: testOAuthResource, Scope: testOAuthScope,
+		CodeChallenge: challenge, ExpiresAtUnix: policyChangeTime.Add(time.Minute).Unix(),
+	})
+	if staleCodeErr != nil {
+		t.Fatalf("issue policy-change code: %v", staleCodeErr)
+	}
+	refreshConsent, refreshConsentErr := store.SaveConsent(context.Background(), Consent{
+		ConsentKey: ConsentKey{
+			TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
+			Resource: testOAuthResource, Scope: testOAuthScope,
+		},
+		CreatedAtUnix: policyChangeTime.Unix(), ExpiresAtUnix: policyChangeTime.Add(time.Hour).Unix(),
+	})
+	if refreshConsentErr != nil {
+		t.Fatalf("save policy-change refresh consent: %v", refreshConsentErr)
+	}
+	staleRefreshToken, staleRefreshErr := store.IssueRefreshToken(context.Background(), RefreshGrant{
+		ConsentID: refreshConsent.ID, TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
+		Resource: testOAuthResource, Scope: testOAuthScope, ExpiresAtUnix: policyChangeTime.Add(time.Hour).Unix(),
+	})
+	if staleRefreshErr != nil {
+		t.Fatalf("issue policy-change refresh token: %v", staleRefreshErr)
+	}
+	currentPolicy := oauthHandler.registry.resources[testOAuthResource]
+	currentResource := currentPolicy.Resources[testOAuthResource]
+	removedScope := currentResource.Scopes[testOAuthScope]
+	delete(currentResource.Scopes, testOAuthScope)
+	assertOAuthError(t, doRequest(t, client, http.MethodPost, issuer+"/oauth/token", strings.NewReader(codeTokenForm(staleCode, verifier).Encode())), "invalid_grant")
+	currentResource.Scopes[testOAuthScope] = removedScope
+	currentClient := currentPolicy.Clients[testOAuthClient]
+	delete(currentClient.grants[testOAuthResource], testOAuthScope)
+	staleRefreshForm := url.Values{
+		"grant_type": {"refresh_token"}, "refresh_token": {staleRefreshToken},
+		"client_id": {testOAuthClient}, "resource": {testOAuthResource},
+	}
+	assertOAuthError(t, doRequest(t, client, http.MethodPost, issuer+"/oauth/token", strings.NewReader(staleRefreshForm.Encode())), "invalid_grant")
 }
 
 func loadOAuthTestConfig(t *testing.T, issuer string) (*appconfig.ApplicationConfig, tenants.Config) {

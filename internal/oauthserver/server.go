@@ -337,12 +337,13 @@ func (server *Server) handleToken(response http.ResponseWriter, request *http.Re
 func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, request *http.Request) {
 	clientID := request.PostForm.Get("client_id")
 	resourceID := request.PostForm.Get("resource")
-	policy, _, resourceErr := server.registry.ResolveResource(resourceID)
+	policy, resource, resourceErr := server.registry.ResolveResource(resourceID)
 	if resourceErr != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_target")
 		return
 	}
-	if !server.clientKnownForToken(policy, clientID) {
+	client, clientErr := server.resolveTokenClient(policy, clientID)
+	if clientErr != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		return
 	}
@@ -359,8 +360,12 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 		}
 		return
 	}
-	if grant.TenantID != policy.TenantID {
-		writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) {
+			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
+		} else {
+			writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		}
 		return
 	}
 	refreshGrant := RefreshGrant{
@@ -384,12 +389,13 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 		writeOAuthError(response, http.StatusBadRequest, "invalid_scope")
 		return
 	}
-	policy, _, resourceErr := server.registry.ResolveResource(resourceID)
+	policy, resource, resourceErr := server.registry.ResolveResource(resourceID)
 	if resourceErr != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_target")
 		return
 	}
-	if !server.clientKnownForToken(policy, clientID) {
+	client, clientErr := server.resolveTokenClient(policy, clientID)
+	if clientErr != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		return
 	}
@@ -405,8 +411,12 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 		}
 		return
 	}
-	if grant.TenantID != policy.TenantID {
-		writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) {
+			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
+		} else {
+			writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		}
 		return
 	}
 	server.writeTokenResponse(response, grant, rotatedToken, policy.AccessTokenTTL, now)
@@ -464,11 +474,30 @@ func (server *Server) resolveClient(ctx context.Context, policy TenantPolicy, cl
 	return client, nil
 }
 
-func (server *Server) clientKnownForToken(policy TenantPolicy, clientID string) bool {
-	if _, exists := server.registry.ResolveExplicitClient(policy.TenantID, clientID); exists {
-		return true
+func (server *Server) resolveTokenClient(policy TenantPolicy, clientID string) (Client, error) {
+	if client, exists := server.registry.ResolveExplicitClient(policy.TenantID, clientID); exists {
+		return client, nil
 	}
-	return policy.AllowClientMetadataDocuments && strings.HasPrefix(clientID, "https://")
+	if !policy.AllowClientMetadataDocuments {
+		return Client{}, ErrUnknownClient
+	}
+	if _, validationErr := validateClientIdentifierURL(clientID); validationErr != nil {
+		return Client{}, ErrUnknownClient
+	}
+	return Client{ID: clientID, Source: clientSourceMetadata}, nil
+}
+
+func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, consentID string, scope string, nowUnix int64) error {
+	if tenantID != policy.TenantID {
+		return ErrInvalidScope
+	}
+	if _, _, scopeErr := validateRequestedScopes(resource, client, scope); scopeErr == nil {
+		return nil
+	}
+	if revokeErr := server.store.RevokeConsent(ctx, consentID, nowUnix); revokeErr != nil {
+		return fmt.Errorf("oauth.grant.revoke: %w", revokeErr)
+	}
+	return ErrInvalidScope
 }
 
 func (server *Server) pendingBrowserRequest(response http.ResponseWriter, request *http.Request) (AuthorizationRequest, string, bool) {
