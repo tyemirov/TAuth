@@ -13,16 +13,18 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
+	"github.com/tyemirov/tauth/internal/oauthserver"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/utils/preflight"
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v5"
-	endpointContractVersion    = "tauth.http.v1"
+	reportSchemaVersion        = "tauth.preflight.v6"
+	endpointContractVersion    = "tauth.http.v2"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
 	errorCodeValidateCORS      = "preflight.validate_cors"
+	errorCodeValidateOAuth     = "preflight.validate_oauth"
 	errorCodeBuildRegistry     = "preflight.build_registry"
 	errorCodeRefreshStoreCheck = "preflight.refresh_store"
 	errorCodeBuildServiceInfo  = "preflight.build_service_info"
@@ -41,10 +43,40 @@ type effectiveConfigPayload struct {
 }
 
 type serverPayload struct {
-	EnableCORS                  bool     `json:"enable_cors"`
-	CORSAllowedOrigins          []string `json:"cors_allowed_origins"`
-	CORSAllowedOriginExceptions []string `json:"cors_allowed_origin_exceptions"`
-	EnableTenantHeaderOverride  bool     `json:"enable_tenant_header_override"`
+	EnableCORS                  bool               `json:"enable_cors"`
+	CORSAllowedOrigins          []string           `json:"cors_allowed_origins"`
+	CORSAllowedOriginExceptions []string           `json:"cors_allowed_origin_exceptions"`
+	EnableTenantHeaderOverride  bool               `json:"enable_tenant_header_override"`
+	OAuth                       oauthServerPayload `json:"oauth"`
+}
+
+type oauthServerPayload struct {
+	Enabled                 bool                     `json:"enabled"`
+	Issuer                  string                   `json:"issuer,omitempty"`
+	AuthorizationEndpoint   string                   `json:"authorization_endpoint,omitempty"`
+	TokenEndpoint           string                   `json:"token_endpoint,omitempty"`
+	RevocationEndpoint      string                   `json:"revocation_endpoint,omitempty"`
+	JWKSURI                 string                   `json:"jwks_uri,omitempty"`
+	LoginEndpoint           string                   `json:"login_endpoint,omitempty"`
+	ConsentEndpoint         string                   `json:"consent_endpoint,omitempty"`
+	AuthorizationRequestTTL string                   `json:"authorization_request_ttl,omitempty"`
+	AuthorizationCodeTTL    string                   `json:"authorization_code_ttl,omitempty"`
+	ActiveSigningKeyID      string                   `json:"active_signing_key_id,omitempty"`
+	SigningKeys             []oauthSigningKeyPayload `json:"signing_keys,omitempty"`
+	ClientMetadata          oauthMetadataPayload     `json:"client_metadata"`
+}
+
+type oauthSigningKeyPayload struct {
+	ID                   string `json:"id"`
+	Algorithm            string `json:"algorithm"`
+	PublicKeyFingerprint string `json:"public_key_fingerprint"`
+}
+
+type oauthMetadataPayload struct {
+	RequestTimeout  string `json:"request_timeout,omitempty"`
+	MaximumBytes    int64  `json:"maximum_bytes,omitempty"`
+	MinimumCacheTTL string `json:"minimum_cache_ttl,omitempty"`
+	MaximumCacheTTL string `json:"maximum_cache_ttl,omitempty"`
 }
 
 type tenantPayload struct {
@@ -85,6 +117,28 @@ type tenantPayload struct {
 	SameSiteMode               string                      `json:"same_site_mode"`
 	JWTIssuer                  string                      `json:"jwt_issuer"`
 	JWTSigningKeyFingerprint   string                      `json:"jwt_signing_key_fingerprint"`
+	OAuth                      oauthTenantPayload          `json:"oauth"`
+}
+
+type oauthTenantPayload struct {
+	Enabled                      bool                   `json:"enabled"`
+	AccessTokenTTL               string                 `json:"access_token_ttl,omitempty"`
+	RefreshTokenTTL              string                 `json:"refresh_token_ttl,omitempty"`
+	ConsentTTL                   string                 `json:"consent_ttl,omitempty"`
+	AllowClientMetadataDocuments bool                   `json:"allow_client_metadata_documents"`
+	Resources                    []oauthResourcePayload `json:"resources,omitempty"`
+	Clients                      []oauthClientPayload   `json:"clients,omitempty"`
+}
+
+type oauthResourcePayload struct {
+	Identifier string   `json:"identifier"`
+	Scopes     []string `json:"scopes"`
+}
+
+type oauthClientPayload struct {
+	ID              string   `json:"id"`
+	ApplicationType string   `json:"application_type"`
+	RedirectURIs    []string `json:"redirect_uris"`
 }
 
 type nativeGoogleClientPayload struct {
@@ -114,6 +168,9 @@ func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error
 	}
 	if corsErr := appconfig.ValidateCORSAllowlist(config.Server, tenantConfig); corsErr != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeValidateCORS, corsErr)
+	}
+	if oauthErr := validateOAuth(config.OAuthServer(), tenantConfig); oauthErr != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeValidateOAuth, oauthErr)
 	}
 	registry, registryErr := buildTenantRegistry(config, tenantConfig)
 	if registryErr != nil {
@@ -146,6 +203,26 @@ func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error
 	return reportBytes, nil
 }
 
+func validateOAuth(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config) error {
+	enabledTenants := 0
+	for _, tenant := range tenantConfig.Tenants() {
+		if tenant.OAuthAuthorization().Enabled() {
+			enabledTenants++
+		}
+	}
+	if serverConfig.Enabled() != (enabledTenants != 0) {
+		return fmt.Errorf("issuer and tenant OAuth enablement must be configured together")
+	}
+	if !serverConfig.Enabled() {
+		return nil
+	}
+	if _, registryErr := oauthserver.NewRegistry(tenantConfig); registryErr != nil {
+		return registryErr
+	}
+	_, signerErr := oauthserver.NewSigner(serverConfig)
+	return signerErr
+}
+
 func buildTenantRegistry(config *appconfig.ApplicationConfig, tenantConfig tenants.Config) (authkit.TenantRegistry, error) {
 	baseConfig := authkit.ServerConfig{
 		AppJWTIssuer: appconfig.DefaultJWTIssuer,
@@ -161,12 +238,17 @@ type configReporter struct {
 }
 
 func (reporter configReporter) Build(mode preflight.RedactionMode) (json.RawMessage, error) {
+	oauthPayload, oauthPayloadErr := buildOAuthServerPayload(reporter.config.OAuthServer())
+	if oauthPayloadErr != nil {
+		return nil, oauthPayloadErr
+	}
 	payload := effectiveConfigPayload{
 		Server: serverPayload{
 			EnableCORS:                  bool(reporter.config.Server.EnableCORS),
 			CORSAllowedOrigins:          append([]string(nil), reporter.config.Server.CORSAllowedOrigins...),
 			CORSAllowedOriginExceptions: append([]string(nil), reporter.config.Server.CORSAllowedOriginExceptions...),
 			EnableTenantHeaderOverride:  bool(reporter.config.Server.EnableTenantHeaderOverride),
+			OAuth:                       oauthPayload,
 		},
 		Tenants: buildTenantPayloads(reporter.tenantConfig, reporter.registry, mode),
 	}
@@ -226,6 +308,7 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			SameSiteMode:               formatSameSiteMode(serverConfig.SameSiteMode),
 			JWTIssuer:                  serverConfig.AppJWTIssuer,
 			JWTSigningKeyFingerprint:   preflight.HashSHA256Hex(tenant.SigningKey()),
+			OAuth:                      buildOAuthTenantPayload(tenant.OAuthAuthorization()),
 		}
 		if tenant.AppleOAuth().Enabled() {
 			payload.ApplePrivateKeyFingerprint = preflight.HashSHA256Hex([]byte(tenant.AppleOAuth().PrivateKey()))
@@ -237,6 +320,63 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 		payloads = append(payloads, payload)
 	}
 	return payloads
+}
+
+func buildOAuthServerPayload(config appconfig.OAuthServerConfig) (oauthServerPayload, error) {
+	payload := oauthServerPayload{Enabled: config.Enabled()}
+	if !config.Enabled() {
+		return payload, nil
+	}
+	policy := config.ClientMetadata()
+	payload.Issuer = config.Issuer()
+	payload.AuthorizationEndpoint = config.AuthorizationEndpoint()
+	payload.TokenEndpoint = config.TokenEndpoint()
+	payload.RevocationEndpoint = config.RevocationEndpoint()
+	payload.JWKSURI = config.JWKSURI()
+	payload.LoginEndpoint = config.LoginEndpoint()
+	payload.ConsentEndpoint = config.ConsentEndpoint()
+	payload.AuthorizationRequestTTL = config.AuthorizationRequestTTL().String()
+	payload.AuthorizationCodeTTL = config.AuthorizationCodeTTL().String()
+	payload.ActiveSigningKeyID = config.ActiveSigningKeyID()
+	payload.ClientMetadata = oauthMetadataPayload{
+		RequestTimeout: policy.RequestTimeout().String(), MaximumBytes: policy.MaximumBytes(),
+		MinimumCacheTTL: policy.MinimumCacheTTL().String(), MaximumCacheTTL: policy.MaximumCacheTTL().String(),
+	}
+	for _, key := range config.SigningKeys() {
+		publicKey := key.PublicKey()
+		publicKeyBytes, encodeErr := publicKey.Bytes()
+		if encodeErr != nil {
+			return oauthServerPayload{}, encodeErr
+		}
+		payload.SigningKeys = append(payload.SigningKeys, oauthSigningKeyPayload{
+			ID: key.ID(), Algorithm: key.Algorithm(), PublicKeyFingerprint: preflight.HashSHA256Hex(publicKeyBytes),
+		})
+	}
+	return payload, nil
+}
+
+func buildOAuthTenantPayload(config tenants.OAuthAuthorization) oauthTenantPayload {
+	payload := oauthTenantPayload{Enabled: config.Enabled()}
+	if !config.Enabled() {
+		return payload
+	}
+	payload.AccessTokenTTL = config.AccessTokenTTL().String()
+	payload.RefreshTokenTTL = config.RefreshTokenTTL().String()
+	payload.ConsentTTL = config.ConsentTTL().String()
+	payload.AllowClientMetadataDocuments = config.AllowClientMetadataDocuments()
+	for _, resource := range config.Resources() {
+		scopes := make([]string, 0, len(resource.Scopes()))
+		for _, scope := range resource.Scopes() {
+			scopes = append(scopes, scope.Identifier())
+		}
+		payload.Resources = append(payload.Resources, oauthResourcePayload{Identifier: resource.Identifier(), Scopes: scopes})
+	}
+	for _, client := range config.Clients() {
+		payload.Clients = append(payload.Clients, oauthClientPayload{
+			ID: client.ID(), ApplicationType: client.ApplicationType(), RedirectURIs: client.RedirectURIs(),
+		})
+	}
+	return payload
 }
 
 func buildNativeGoogleClientPayloads(clients []tenants.NativeGoogleClient) []nativeGoogleClientPayload {

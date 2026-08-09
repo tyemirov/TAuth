@@ -41,6 +41,7 @@ type Tenant struct {
 	passwordAuthEnabled  bool
 	passwordUsers        []PasswordUser
 	accountManagement    AccountManagement
+	oauthAuthorization   OAuthAuthorization
 	jwtSigningKey        []byte
 	cookieDomain         string
 	sessionCookieName    string
@@ -203,6 +204,8 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	tenantIndex := make(map[TenantID]Tenant)
 	originToTenantIDs := make(map[string][]TenantID)
 	nativeGoogleClientIDs := make(map[string]TenantID)
+	oauthResourceIDs := make(map[string]TenantID)
+	oauthClientIDs := make(map[string]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
 	cookieScopes := make([]tenantCookieScope, 0, len(document.Tenants))
 
@@ -230,6 +233,18 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 				)
 			}
 			nativeGoogleClientIDs[nativeGoogleClientID] = tenant.id
+		}
+		for _, resource := range tenant.OAuthAuthorization().Resources() {
+			if otherTenantID, exists := oauthResourceIDs[resource.Identifier()]; exists {
+				return Config{}, fmt.Errorf("%w: tenant.oauth_duplicate_resource resource=%s tenant=%s other_tenant=%s", ErrInvalidTenantConfig, resource.Identifier(), tenant.id, otherTenantID)
+			}
+			oauthResourceIDs[resource.Identifier()] = tenant.id
+		}
+		for _, client := range tenant.OAuthAuthorization().Clients() {
+			if otherTenantID, exists := oauthClientIDs[client.ID()]; exists {
+				return Config{}, fmt.Errorf("%w: tenant.oauth_duplicate_client client_id=%s tenant=%s other_tenant=%s", ErrInvalidTenantConfig, client.ID(), tenant.id, otherTenantID)
+			}
+			oauthClientIDs[client.ID()] = tenant.id
 		}
 		for _, origin := range origins {
 			originToTenantIDs[origin] = append(originToTenantIDs[origin], tenant.id)
@@ -440,6 +455,11 @@ func (tenant Tenant) AccountManagement() AccountManagement {
 	return tenant.accountManagement
 }
 
+// OAuthAuthorization returns the tenant OAuth authorization policy.
+func (tenant Tenant) OAuthAuthorization() OAuthAuthorization {
+	return tenant.oauthAuthorization.clone()
+}
+
 // Enabled indicates whether full account management is available.
 func (settings AccountManagement) Enabled() bool {
 	return settings.enabled
@@ -580,6 +600,13 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if accountManagementErr != nil {
 		return Tenant{}, nil, accountManagementErr
 	}
+	oauthAuthorization, oauthAuthorizationErr := parseOAuthAuthorization(raw.OAuth, tenantID, allowInsecureHTTP)
+	if oauthAuthorizationErr != nil {
+		return Tenant{}, nil, oauthAuthorizationErr
+	}
+	if oauthAuthorization.Enabled() && !passwordAuthEnabled && googleWebClientID == "" {
+		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeOAuthMissingBrowserAuth, tenantID)
+	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
 	sessionTTL, sessionErr := parseDuration(raw.SessionTTL)
 	if sessionErr != nil || sessionTTL <= 0 {
@@ -629,6 +656,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		passwordAuthEnabled:  passwordAuthEnabled,
 		passwordUsers:        passwordUsers,
 		accountManagement:    accountManagement,
+		oauthAuthorization:   oauthAuthorization,
 		jwtSigningKey:        signingKey,
 		cookieDomain:         cookieDomain,
 		sessionCookieName:    sessionCookieName,
@@ -1382,6 +1410,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	}
 	tenant.AccountManagement.EmailVerificationTTL = os.ExpandEnv(tenant.AccountManagement.EmailVerificationTTL)
 	tenant.AccountManagement.PasswordResetTTL = os.ExpandEnv(tenant.AccountManagement.PasswordResetTTL)
+	tenant.OAuth = expandFileOAuthAuthorizationEnv(tenant.OAuth)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
 	tenant.CookieDomain = os.ExpandEnv(tenant.CookieDomain)
 	tenant.SessionCookieName = os.ExpandEnv(tenant.SessionCookieName)
@@ -1423,6 +1452,7 @@ type FileTenant struct {
 	AppleOAuth           FileAppleOAuth           `json:"apple_oauth" yaml:"apple_oauth"`
 	PasswordAuth         FilePasswordAuth         `json:"password_auth" yaml:"password_auth"`
 	AccountManagement    FileAccountManagement    `json:"account_management" yaml:"account_management"`
+	OAuth                FileOAuthAuthorization   `json:"oauth" yaml:"oauth"`
 	JWTSigningKey        string                   `json:"jwt_signing_key" yaml:"jwt_signing_key"`
 	CookieDomain         string                   `json:"cookie_domain" yaml:"cookie_domain"`
 	SessionCookieName    string                   `json:"session_cookie_name" yaml:"session_cookie_name"`

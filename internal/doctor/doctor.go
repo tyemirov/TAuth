@@ -13,13 +13,14 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
+	"github.com/tyemirov/tauth/internal/oauthserver"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/utils/preflight"
 )
 
 const (
-	reportSchemaVersion     = "tauth.doctor.v1"
-	endpointContractVersion = "tauth.http.v1"
+	reportSchemaVersion     = "tauth.doctor.v2"
+	endpointContractVersion = "tauth.http.v2"
 )
 
 var errDoctor = errors.New("doctor.invalid")
@@ -139,6 +140,7 @@ func validateConfig(ctx context.Context, configPath string, checkDatabase bool) 
 		result.Valid = false
 		result.Errors = append(result.Errors, fmt.Sprintf("cors_validation: %v", corsErr))
 	}
+	validateOAuthConfig(config.OAuthServer(), tenantConfig, &result)
 
 	baseConfig := authkit.ServerConfig{
 		AppJWTIssuer: appconfig.DefaultJWTIssuer,
@@ -169,6 +171,31 @@ func validateConfig(ctx context.Context, configPath string, checkDatabase bool) 
 	sort.Strings(result.TenantIDs)
 
 	return result
+}
+
+func validateOAuthConfig(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config, result *DiagnosticResult) {
+	enabledTenants := 0
+	for _, tenant := range tenantConfig.Tenants() {
+		if tenant.OAuthAuthorization().Enabled() {
+			enabledTenants++
+		}
+	}
+	if serverConfig.Enabled() != (enabledTenants != 0) {
+		result.Valid = false
+		result.Errors = append(result.Errors, "oauth: issuer and tenant OAuth enablement must be configured together")
+		return
+	}
+	if !serverConfig.Enabled() {
+		return
+	}
+	if _, registryErr := oauthserver.NewRegistry(tenantConfig); registryErr != nil {
+		result.Valid = false
+		result.Errors = append(result.Errors, fmt.Sprintf("oauth_registry: %v", registryErr))
+	}
+	if _, signerErr := oauthserver.NewSigner(serverConfig); signerErr != nil {
+		result.Valid = false
+		result.Errors = append(result.Errors, fmt.Sprintf("oauth_signer: %v", signerErr))
+	}
 }
 
 func validateTenantConfig(tenant tenants.Tenant, result *DiagnosticResult) {

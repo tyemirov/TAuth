@@ -18,6 +18,7 @@ const (
 	refreshStoreErrorPrefix      = "refresh_store"
 	userStoreErrorPrefix         = "user_store"
 	nonceStoreErrorPrefix        = "nonce_store"
+	oauthStoreErrorPrefix        = "oauth_store"
 	schemaMigrationTableName     = "schema_migrations"
 	schemaMigrationNameColumn    = "store_name"
 	schemaMigrationVersionColumn = "version"
@@ -26,6 +27,7 @@ const (
 	refreshStoreSchemaVersion    = 1
 	userStoreSchemaVersion       = 5
 	nonceStoreSchemaVersion      = 1
+	oauthStoreSchemaVersion      = 1
 )
 
 var (
@@ -70,6 +72,16 @@ var storeSchemaPolicies = map[string]storeSchemaPolicy{
 		Version:               nonceStoreSchemaVersion,
 		AllowDestructiveReset: false,
 	},
+	oauthStoreErrorPrefix: {
+		StoreName:             oauthStoreErrorPrefix,
+		Version:               oauthStoreSchemaVersion,
+		AllowDestructiveReset: false,
+	},
+}
+
+// OpenOAuthDatabase opens the shared database contract and migrates OAuth store models.
+func OpenOAuthDatabase(requestContext context.Context, databaseURL string, models ...interface{}) (*gorm.DB, string, error) {
+	return openDatabase(requestContext, databaseURL, oauthStoreErrorPrefix, models...)
 }
 
 func openDatabase(requestContext context.Context, databaseURL string, errorPrefix string, models ...interface{}) (*gorm.DB, string, error) {
