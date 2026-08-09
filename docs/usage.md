@@ -17,7 +17,8 @@ TAuth sits between identity providers and your product UI:
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
 - Exposes a small HTTP API for zero-token-in-JavaScript sessions; GitHub Pages publishes the browser helper only at `https://tauth.mprlab.com/tauth.js`.
-- Does not implement OAuth2 authorization for Google or Apple APIs, MFA/passkeys, organization membership, public profile editing, or third-party token custody.
+- Optionally acts as an OAuth 2.1 authorization server for declared first-party protected resources.
+- Does not authorize Google or Apple APIs, MFA/passkeys, organization membership, public profile editing, or third-party token custody.
 
 Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
 
@@ -59,6 +60,8 @@ Key notes:
 - **Apple OAuth**: Set `apple_oauth.enabled: true` inside a tenant to expose `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and an HTTPS `redirect_uri` registered with Apple.
 - **Account management**: Set `account_management.enabled: true` inside a tenant to use persisted opaque 128-bit base64url session subjects across password, Google, and Apple identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
+- **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google browser authentication, password authentication, or both for the TAuth-owned login page.
+- **OAuth persistence**: When `database_url` is set, TAuth stores pending requests and authorization-code digests. It also stores consent grants and refresh-token digests in the same SQLite or Postgres database. Without a database URL, these records are process-local and disappear at restart.
 
 ### 2.3 Example: hosted deployment
 
@@ -141,7 +144,7 @@ Use the preflight command to validate configuration and emit a redacted effectiv
 tauth preflight --config=config.yaml
 ```
 
-The report includes effective server settings, per-tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints (never raw keys). Redacted reports still emit `tenant_origin_hashes` and `jwt_signing_key_fingerprint` so external validators can compare secrets without exposing them. To include the raw `tenant_origins` list, pass `--include-origins`.
+The report includes effective server settings, tenant cookie names and TTLs, derived SameSite modes, and JWT signing key fingerprints. It also includes OAuth endpoints, policy, public key fingerprints, resources, and clients. It never emits a private key. Redacted reports still emit `tenant_origin_hashes` and signing-key fingerprints so external validators can compare inputs without exposing them. To include the raw `tenant_origins` list, pass `--include-origins`.
 
 The JSON payload is versioned and shaped as:
 - `schema_version`, `service` metadata
@@ -459,6 +462,61 @@ const resetProfile = await completePasswordReset({
   password: form.newPassword.value,
 });
 ```
+
+### 5.6 OAuth resource authorization
+
+An OAuth client starts at the configured `authorization_endpoint`. It must send
+`response_type=code`, one `client_id`, one exact `redirect_uri`, one RFC 8707
+`resource`, a space-separated `scope`, `state`, a PKCE challenge, and
+`code_challenge_method=S256`. TAuth resolves the resource to one tenant. The
+issuer then authenticates the user, shows the client, resource, requested
+permissions, and return host, and requires approval for a new consent grant.
+The login and consent forms accept POST requests only from the exact issuer
+origin. The client callback includes the one-time code, `state`, and issuer
+identifier `iss`.
+
+The issuer login page renders the tenant's enabled Google browser control,
+password form, or both. Google Identity Services returns an ID token only to
+the issuer page. The page sends it directly to TAuth with a one-time nonce.
+TAuth returns the normal HttpOnly cookies. The page stores no ID token or OAuth
+resource token in browser storage or the DOM.
+
+The client exchanges the one-time code with the same client ID, resource, and
+PKCE verifier. The redirect URI remains bound inside the code and is absent
+from the current OAuth 2.1 token request:
+
+```bash
+curl -X POST https://auth.example.com/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=authorization_code' \
+  --data-urlencode 'code=ONE_TIME_CODE' \
+  --data-urlencode 'client_id=example-web-client' \
+  --data-urlencode 'resource=https://api.example.com' \
+  --data-urlencode 'code_verifier=PKCE_VERIFIER'
+```
+
+The token response contains one short-lived ES256 access token and one opaque
+rotating refresh token. A refresh request must repeat the exact client ID and
+resource. It can omit `scope` or repeat the exact approved scope set. Reuse of
+a rotated refresh token revokes the full refresh-token family and the consent
+grant. The revocation endpoint also revokes the family and grant. An issued
+access token remains usable only until its short configured expiry.
+
+An explicitly registered client uses the tenant `oauth.clients` list. An MCP
+or other public client can instead set its `client_id` to an HTTPS Client ID
+Metadata Document URL when the tenant enables
+`allow_client_metadata_documents`. The document must identify itself exactly,
+and declare `token_endpoint_auth_method: none`. It must use authorization code
+and response type code. The refresh-token grant is optional. The document must
+declare exact HTTPS or native-loopback redirect URIs. TAuth
+rejects redirects, oversized documents, unsafe network addresses, redirects
+during fetch, and invalid cache directives. Dynamic Client Registration is not
+available.
+
+Use `GET /.well-known/oauth-authorization-server` for issuer discovery and the
+published `jwks_uri` for verification keys. See [openapi.yaml](openapi.yaml) for
+the complete HTTP schema and [the OAuth validator package](../pkg/oauthvalidator/README.md)
+for protected-resource integration.
 
 ---
 
