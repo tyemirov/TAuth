@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/oauthserver"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
@@ -189,6 +191,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if loadErr != nil {
 		return loadErr
 	}
+	if oauthConfigErr := validateOAuthConfiguration(appConfig.OAuthServer(), tenantConfig); oauthConfigErr != nil {
+		return oauthConfigErr
+	}
 	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
 		return corsErr
 	}
@@ -255,10 +260,50 @@ func runServer(command *cobra.Command, arguments []string) error {
 		if corsErr != nil {
 			return corsErr
 		}
-		router.Use(corsMiddleware)
+		oauthBrowserPaths := map[string]struct{}{}
+		if appConfig.OAuthServer().Enabled() {
+			oauthBrowserPaths = oauthBrowserEndpointPaths(appConfig.OAuthServer())
+		}
+		router.Use(corsMiddlewareExceptPaths(corsMiddleware, oauthBrowserPaths))
 	}
 
 	router.GET(healthEndpointPath, web.HandleHealth)
+	if appConfig.OAuthServer().Enabled() {
+		oauthRegistry, oauthRegistryErr := oauthserver.NewRegistry(tenantConfig)
+		if oauthRegistryErr != nil {
+			return oauthRegistryErr
+		}
+		oauthSigner, oauthSignerErr := oauthserver.NewSigner(appConfig.OAuthServer())
+		if oauthSignerErr != nil {
+			return oauthSignerErr
+		}
+		var oauthStore oauthserver.Store
+		if databaseURL != "" {
+			persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
+			if oauthStoreErr != nil {
+				return oauthStoreErr
+			}
+			oauthStore = persistentOAuthStore
+			logger.Info("using persistent OAuth store", zap.String("driver", persistentOAuthStore.Driver()))
+		} else {
+			oauthStore = oauthserver.NewMemoryStore()
+			logger.Info("using in-memory OAuth store")
+		}
+		oauthHandler, oauthHandlerErr := oauthserver.NewServer(
+			appConfig.OAuthServer(),
+			oauthRegistry,
+			oauthStore,
+			oauthSigner,
+			oauthserver.NewClientMetadataResolver(appConfig.OAuthServer().ClientMetadata()),
+			authkit.NewOAuthBrowserSessions(registry, userStore, refreshStore, nonceStore, passwordCredentialStore),
+		)
+		if oauthHandlerErr != nil {
+			return oauthHandlerErr
+		}
+		if mountErr := oauthHandler.Mount(router); mountErr != nil {
+			return mountErr
+		}
+	}
 
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
@@ -298,6 +343,43 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	shutdownServer()
 	return nil
+}
+
+func validateOAuthConfiguration(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config) error {
+	enabledTenants := 0
+	for _, tenant := range tenantConfig.Tenants() {
+		if tenant.OAuthAuthorization().Enabled() {
+			enabledTenants++
+		}
+	}
+	if serverConfig.Enabled() && enabledTenants == 0 {
+		return fmt.Errorf("config.oauth_missing_tenant: enable OAuth for at least one tenant")
+	}
+	if !serverConfig.Enabled() && enabledTenants != 0 {
+		return fmt.Errorf("config.oauth_server_required: enabled_tenants=%d", enabledTenants)
+	}
+	return nil
+}
+
+func oauthBrowserEndpointPaths(config appconfig.OAuthServerConfig) map[string]struct{} {
+	paths := make(map[string]struct{}, 3)
+	for _, endpoint := range []string{config.AuthorizationEndpoint(), config.LoginEndpoint(), config.ConsentEndpoint()} {
+		parsed, parseErr := url.Parse(endpoint)
+		if parseErr == nil && parsed.EscapedPath() != "" {
+			paths[parsed.EscapedPath()] = struct{}{}
+		}
+	}
+	return paths
+}
+
+func corsMiddlewareExceptPaths(corsMiddleware gin.HandlerFunc, excludedPaths map[string]struct{}) gin.HandlerFunc {
+	return func(contextGin *gin.Context) {
+		if _, excluded := excludedPaths[contextGin.Request.URL.EscapedPath()]; excluded {
+			contextGin.Next()
+			return
+		}
+		corsMiddleware(contextGin)
+	}
 }
 
 func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userStore authkit.UserStore, passwordCredentialStore authkit.PasswordCredentialStore) error {

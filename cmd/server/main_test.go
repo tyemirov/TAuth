@@ -48,6 +48,34 @@ func TestZapLoggerMiddleware(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareExcludesOAuthBrowserRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	corsMiddleware, corsErr := web.PermissiveCORS([]string{"https://app.example"})
+	if corsErr != nil {
+		t.Fatalf("build CORS middleware: %v", corsErr)
+	}
+	router := gin.New()
+	router.Use(corsMiddlewareExceptPaths(corsMiddleware, map[string]struct{}{"/oauth/authorize": {}}))
+	router.GET("/oauth/authorize", func(contextGin *gin.Context) { contextGin.Status(http.StatusNoContent) })
+	router.GET("/auth/session", func(contextGin *gin.Context) { contextGin.Status(http.StatusNoContent) })
+
+	authorizeRecorder := httptest.NewRecorder()
+	authorizeRequest := httptest.NewRequest(http.MethodGet, "/oauth/authorize", nil)
+	authorizeRequest.Header.Set("Origin", "https://app.example")
+	router.ServeHTTP(authorizeRecorder, authorizeRequest)
+	if authorizeRecorder.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("OAuth authorization endpoint exposed CORS")
+	}
+
+	sessionRecorder := httptest.NewRecorder()
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	sessionRequest.Header.Set("Origin", "https://app.example")
+	router.ServeHTTP(sessionRecorder, sessionRequest)
+	if sessionRecorder.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatal("normal TAuth route lost configured CORS")
+	}
+}
+
 func TestRunServerMissingConfig(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
