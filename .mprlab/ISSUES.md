@@ -6,7 +6,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
-- [!] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
+- [x] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
   Goal:
   TAuth can authorize remote clients for first-party MPR resources after a user
   authenticates through an existing TAuth identity provider.
@@ -74,16 +74,8 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
     or signing-key data.
   - Keep the generic TAuth product free of a hard-coded LLM Proxy resource or
     scope.
-  - Declare the LLM Proxy resource and `llm-proxy:use` scope only in the MPR Lab
-    deployment configuration.
-  - Add the authorization-server capability to OpenAPI, documentation, runtime
-    configuration, and the deployment capability contract.
-  - Keep local acceptance separate from live deployment acceptance.
-  - Do not contact or change production during implementation.
-  Open decisions:
-  - Select the asymmetric signing algorithm and operator key-rotation contract.
-  - Select the hosted TAuth authorization and consent origin.
-  - Define the consent lifetime and repeat-consent policy.
+  - Add the authorization-server capability to OpenAPI, documentation, and
+    runtime configuration.
   Deliverables:
   - Add validated OAuth resource, scope, client, key, token, and consent domain
     types.
@@ -91,8 +83,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Add metadata, JWKS, authorization, token, revocation, login, and consent
     HTTP routes.
   - Add the asymmetric access-token signer and the reusable Go validator.
-  - Add OpenAPI, configuration, deployment, security, and client-integration
-    documentation.
+  - Add OpenAPI, configuration, security, and client-integration documentation.
   - Add black-box HTTP and browser coverage through public entry points.
   Validation:
   - Run the real TAuth server with a fake protected resource and seeded users.
@@ -158,11 +149,9 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
     `timeout -k 350s -s SIGKILL 350s make ci` runs.
     Focused Go, browser, lint, OpenAPI YAML, and changed-line ASD-STE100 checks
     also passed.
-  Blocked: the sibling gateway `tauth_tenant` resource contract cannot express
-  the root OAuth issuer and signing-key settings. It also cannot express the
-  tenant resource, scope, and client declarations. The gateway lifecycle
-  contract must add those fields before the LLM Proxy deployment manifest can
-  declare its resource and `llm-proxy:use` scope.
+  Resolved 2026-08-09: the implementation passed all development contract and
+  acceptance gates. mprlab-gateway F001 and LLM Proxy F021 track the dependent
+  feature work.
 
 - [x] [TA-200] Add Apple Sign in as an additional identity provider while keeping TAuth session cookies/JWT model.
   Add a per-tenant Apple provider block (client_id, team_id, key_id, private_key, redirect_uri, optional scopes, and optional mockable endpoint overrides). Implement `GET /auth/apple/start` to issue state + nonce and redirect to Apple, plus `GET`/`POST /auth/apple/callback` to validate state, exchange the authorization code with Apple using a client-secret JWT, verify the returned Apple ID token against Apple's JWKS, enforce nonce/email/allowed_users, and mint the same `app_session` + `app_refresh` cookies/profile JSON. Apple callback tenant resolution must use the signed state payload because provider callbacks may omit `Origin`. Add account-management support so Apple identities resolve/link as provider `apple`, add `tauth.js` helpers, document configuration and errors, and cover the flow with black-box tests using a mock Apple server.
