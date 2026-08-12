@@ -266,6 +266,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Kept the resource graph and lifecycle commands unchanged.
   - The repository contract failed against schema 3 and passed against schema 4.
   - The final `make ci` run passed.
+  - The sibling plan remains pending until the gateway checkout is clean.
   - Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`,
     `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
 
