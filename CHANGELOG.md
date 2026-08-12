@@ -21,6 +21,7 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Moved the SemVer release policy into the schema-4 resource manifest and removed the obsolete `.mprlab/release.yml` file.
 - Added the `tauth.oauth` deployment capability, config/preflight schema v6, HTTP contract v2, and OAuth OpenAPI. Added security guidance, key-rotation guidance, and black-box HTTP and Chromium acceptance coverage.
 - Aligned authorization-code exchange with the current OAuth 2.1 request shape. Accepted the MCP refresh-token grant declaration in Client ID Metadata Documents.
 - Declared a canonical container-built GitHub Pages resource that assembles the documentation site and `web/tauth.js` in the schema-v3 lifecycle manifest, and removed the obsolete `tauth.mprlab.com` Caddy route.

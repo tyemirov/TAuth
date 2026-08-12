@@ -248,6 +248,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   clean committed snapshot as an isolated deploy plan without release,
   publication, production contact, or deployment.
 
+- [x] [I205] (P0) Move the release policy into the resource manifest.
+  Goal:
+  Use one tracked application file for release and deployment configuration.
+  Requirements:
+  - Set the manifest schema version to 4.
+  - Add `release.scheme: semver` to the manifest.
+  - Delete `.mprlab/release.yml`.
+  - Keep the resource graph and lifecycle commands unchanged.
+  Validation:
+  - Pass the repository lifecycle contract test.
+  - Pass the sibling gateway manifest plan.
+  - Pass `make ci`.
+  Resolution 2026-08-12:
+  - Moved the SemVer policy into the schema-4 resource manifest.
+  - Deleted the obsolete `.mprlab/release.yml` file.
+  - Kept the resource graph and lifecycle commands unchanged.
+  - The repository contract failed against schema 3 and passed against schema 4.
+  - The final `make ci` run passed.
+  - Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`,
+    `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
+
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
   Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
