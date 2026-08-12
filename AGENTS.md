@@ -16,7 +16,7 @@ Single-origin authentication service for Goole Identy Service designed for stand
 
 - AGENTS.md: Read-only workflow + behavior playbook maintained by leads. Agents never edit it during implementation cycles.
 - ISSUES.md: Log of newly discovered requests and changes. Each entry records what changed or what was discovered. Located at `.mprlab/ISSUES.md`.
-- PLAN.md: Working plan for one concrete change/issue; ephemeral and replaced per change.
+- `.mprlab/<PLAN-ID>-PLAN.md`: Temporary execution plan. Use `.mprlab/PLANNING.md` for the plan ID.
 
 ### Document Precedence
 
@@ -59,7 +59,7 @@ Operational playbook for working in this repository. Use it to coordinate planni
 1. Run `make ci` before any code changes to establish a clean baseline. Fix any pre-existing failures before proceeding.
 2. Read `AGENTS.md` (plus relevant stack guides in `.mprlab/`) before touching code.
 3. Review the backlog in `.mprlab/ISSUES.md`; work sequentially through BugFixes, Improvements, Maintenance, then Features. Planning is reserved for future work; do not implement Planning items.
-4. For the active issue, create `PLAN.md` (ignored by git) with bullet steps. Keep it updated and delete/rewrite it for the next issue.
+4. For the active issue, read `.mprlab/PLANNING.md`. Make the execution plan that this contract specifies.
 5. Implement the requested change, keeping to stack-specific standards. Limit edits to necessary files plus issue-document updates when required.
 6. Run `make ci` to verify all tests, linting, and formatting pass.
 7. Report what changed and any blockers.
@@ -84,15 +84,15 @@ Operational playbook for working in this repository. Use it to coordinate planni
 ### Output Requirements
 
 - Always follow AGENTS* rules; do not restate them in PRs.
-- Begin every implementation with an up-to-date `PLAN.md`.
+- Begin every implementation with the execution plan that `.mprlab/PLANNING.md` specifies.
 - Do not touch `AGENTS.md` during normal work; treat it as read-only guidance.
 - `.mprlab/ISSUES.md` tracks issue status; mark items `[x]` with a concise resolution note once tests pass.
-- `PLAN.md` must remain untracked. If it enters git history, remove it via `git filter-repo --path PLAN.md --invert-paths` before continuing.
+- Keep each execution plan untracked. If Git tracks a plan, remove it with `git filter-repo --path-glob '.mprlab/*-PLAN.md' --invert-paths`.
 - Summaries at the end of each issue should list changed files.
 
 ### Pre-Finish Checklist
 
-1. `PLAN.md` reflects the final state for the active issue.
+1. The execution plan for the active issue shows the final execution state.
 2. `.mprlab/ISSUES.md` entry is marked `[x]` with the resolution note.
 3. Requested implementation and documentation updates are complete.
 4. Any blockers are documented with concrete failure context.
