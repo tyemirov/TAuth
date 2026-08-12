@@ -18,17 +18,58 @@ try {
 }
 
 const chromiumExecutable = process.env.CHROMIUM_PATH || "";
+const configuredServerBinary = process.env.TAUTH_BROWSER_TEST_SERVER || "";
+const repositoryRoot = path.join(__dirname, "..");
+let serverBinary = configuredServerBinary;
+let serverBuildDirectory = "";
 
 if (!puppeteer) {
   test.skip("OAuth authorization uses TAuth login and consent pages", () => {});
 } else {
+  test.before(async () => {
+    if (serverBinary) {
+      await fs.access(serverBinary);
+      return;
+    }
+    serverBuildDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "tauth-oauth-browser-build-"));
+    serverBinary = path.join(serverBuildDirectory, "tauth-test-server");
+    execFileSync("go", ["build", "-o", serverBinary, "./cmd/server"], { cwd: repositoryRoot });
+  });
+
+  test.after(async () => {
+    if (serverBuildDirectory) {
+      await fs.rm(serverBuildDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("OAuth authorization uses TAuth login and consent pages", { timeout: 60000 }, async (testingHandle) => {
+    /** @type {import("node:child_process").ChildProcess | null} */
+    let server = null;
+    /** @type {import("puppeteer").Browser | null} */
+    let browser = null;
     const port = await reservePort();
     const issuer = `http://127.0.0.1:${port}`;
     const resource = `${issuer}/protected-resource`;
     const redirectUri = `${issuer}/client/callback`;
     const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "tauth-oauth-browser-"));
-    testingHandle.after(() => fs.rm(temporaryDirectory, { recursive: true, force: true }));
+    testingHandle.after(async () => {
+      /** @type {Promise<void>[]} */
+      const cleanupTasks = [];
+      if (browser) {
+        cleanupTasks.push(closeBrowser(browser));
+      }
+      if (server) {
+        cleanupTasks.push(terminateChildProcess(server));
+      }
+      const cleanupResults = await Promise.allSettled(cleanupTasks);
+      await fs.rm(temporaryDirectory, { recursive: true, force: true });
+      const cleanupErrors = cleanupResults
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(cleanupErrors, "OAuth browser test cleanup failed");
+      }
+    }, { timeout: 15000 });
 
     const { privateKey } = crypto.generateKeyPairSync("ec", {
       namedCurve: "P-256",
@@ -39,29 +80,23 @@ if (!puppeteer) {
     const configPath = path.join(temporaryDirectory, "config.yaml");
     await fs.writeFile(configPath, oauthConfig({ issuer, resource, redirectUri, keyBase64 }), { mode: 0o600 });
 
-    const repositoryRoot = path.join(__dirname, "..");
-    const serverBinary = path.join(temporaryDirectory, "tauth-test-server");
-    execFileSync("go", ["build", "-o", serverBinary, "./cmd/server"], { cwd: repositoryRoot });
     let serverLogs = "";
-    const server = spawn(serverBinary, ["--config", configPath], {
+    const serverProcess = spawn(serverBinary, ["--config", configPath], {
       cwd: repositoryRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    server.stdout.on("data", (chunk) => { serverLogs += chunk.toString(); });
-    server.stderr.on("data", (chunk) => { serverLogs += chunk.toString(); });
-    testingHandle.after(async () => {
-      server.kill("SIGTERM");
-      await Promise.race([new Promise((resolve) => server.once("exit", resolve)), delay(5000)]);
-    });
-    await waitForHealth(`${issuer}/health`, server);
+    server = serverProcess;
+    serverProcess.stdout.on("data", (chunk) => { serverLogs += chunk.toString(); });
+    serverProcess.stderr.on("data", (chunk) => { serverLogs += chunk.toString(); });
+    await waitForHealth(`${issuer}/health`, serverProcess);
 
     const launchOptions = { headless: "new", args: ["--no-sandbox", "--disable-setuid-sandbox"] };
     if (chromiumExecutable) {
       launchOptions.executablePath = chromiumExecutable;
     }
-    const browser = await puppeteer.launch(launchOptions);
-    testingHandle.after(() => browser.close());
-    const page = await browser.newPage();
+    const launchedBrowser = await puppeteer.launch(launchOptions);
+    browser = launchedBrowser;
+    const page = await launchedBrowser.newPage();
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       if (request.url() === "https://accounts.google.com/gsi/client") {
@@ -244,6 +279,95 @@ async function waitForHealth(address, server) {
     await delay(100);
   }
   throw new Error("TAuth health endpoint did not become ready");
+}
+
+/**
+ * @param {import("node:child_process").ChildProcess} childProcess
+ */
+async function terminateChildProcess(childProcess) {
+  if (processExited(childProcess)) {
+    return;
+  }
+  const gracefulExit = waitForProcessExit(childProcess);
+  childProcess.kill("SIGTERM");
+  if (await settlesWithin(gracefulExit, 5000)) {
+    return;
+  }
+  const forcedExit = waitForProcessExit(childProcess);
+  childProcess.kill("SIGKILL");
+  if (!await settlesWithin(forcedExit, 5000)) {
+    throw new Error(`Child process ${childProcess.pid || "unknown"} did not exit after SIGKILL`);
+  }
+}
+
+/**
+ * @param {import("puppeteer").Browser} browser
+ */
+async function closeBrowser(browser) {
+  const closeResult = browser.close().then(() => null, (error) => error);
+  if (await settlesWithin(closeResult, 5000)) {
+    const closeError = await closeResult;
+    if (closeError) {
+      throw closeError;
+    }
+    return;
+  }
+
+  const browserProcess = browser.process();
+  if (browserProcess && !processExited(browserProcess)) {
+    const forcedExit = waitForProcessExit(browserProcess);
+    browserProcess.kill("SIGKILL");
+    if (!await settlesWithin(forcedExit, 5000)) {
+      throw new Error(`Browser process ${browserProcess.pid || "unknown"} did not exit after SIGKILL`);
+    }
+  }
+  if (browser.isConnected()) {
+    const disconnectResult = browser.disconnect().then(() => null, (error) => error);
+    if (!await settlesWithin(disconnectResult, 1000)) {
+      throw new Error("Browser did not disconnect after SIGKILL");
+    }
+    const disconnectError = await disconnectResult;
+    if (disconnectError) {
+      throw disconnectError;
+    }
+  }
+}
+
+/**
+ * @param {import("node:child_process").ChildProcess} childProcess
+ */
+function processExited(childProcess) {
+  return childProcess.exitCode !== null || childProcess.signalCode !== null;
+}
+
+/**
+ * @param {import("node:child_process").ChildProcess} childProcess
+ * @returns {Promise<void>}
+ */
+function waitForProcessExit(childProcess) {
+  if (processExited(childProcess)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => childProcess.once("exit", () => resolve()));
+}
+
+/**
+ * @param {Promise<unknown>} promise
+ * @param {number} milliseconds
+ */
+async function settlesWithin(promise, milliseconds) {
+  let timeoutHandle;
+  const timeoutResult = new Promise((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(false), milliseconds);
+  });
+  try {
+    return await Promise.race([
+      promise.then(() => true, () => true),
+      timeoutResult,
+    ]);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 function delay(milliseconds) {

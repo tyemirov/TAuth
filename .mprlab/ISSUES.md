@@ -293,6 +293,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B047] (P0) Start the OAuth browser test after the Go build.
+  Goal:
+  The OAuth browser test must start after the test server is ready.
+
+  Requirements:
+  - Build the test server before the 60-second browser test timeout starts.
+  - Set up the repository Go version and the Go cache in the frontend workflow.
+  - Keep the browser test timeout at 60 seconds.
+  - Limit the complete frontend job to 10 minutes.
+  - Terminate the test server and the browser after success, failure, or timeout.
+
+  Validation:
+  - Run the OAuth browser test with a prebuilt server.
+  - Run the complete JavaScript test target.
+  - Run `make ci`.
+
+  Resolved 2026-08-12:
+  - GitHub Actions now installs the Go version from `go.mod`, uses the Go cache, and builds the test server before `npm test` starts.
+  - The frontend job stops after 10 minutes if a tool or child process does not exit.
+  - The test uses `TAUTH_BROWSER_TEST_SERVER` for a prebuilt server. A local test build runs before the 60-second browser test starts.
+  - The cleanup step starts the server cleanup and the browser cleanup at the same time. The cleanup step first sends `SIGTERM` to the server. It sends `SIGKILL` to a server or Chromium process that does not exit in the time limit.
+  - The prebuilt-server test and all 44 JavaScript tests passed. `make ci` passed.
+
 - [x] [B046] (P0) Allow the active TAuth aggregate configuration to start before applications declare tenants.
   After a forward-only production reset, TAuth is deployed before Pinguin and the
   other applications contribute their tenant resources. The canonical aggregate

@@ -27,6 +27,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,11 +38,22 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
       - name: Install dependencies
         run: npm ci
 
       - name: Run typecheck
         run: npm run verify
 
+      - name: Build OAuth browser test server
+        run: go build -o "$RUNNER_TEMP/tauth-browser-test-server" ./cmd/server
+
       - name: Run tests
+        env:
+          TAUTH_BROWSER_TEST_SERVER: ${{ runner.temp }}/tauth-browser-test-server
         run: npm test
