@@ -13,7 +13,6 @@ mprlab_resources:
       images:
         - id: tauth-image
           repository: ghcr.io/tyemirov/tauth
-          visibility: public
           build:
             context: .
             dockerfile: Dockerfile
