@@ -16,7 +16,7 @@ You are a staff level full stack engineer. Your task is to **re-evaluate and ref
 
 1. **Read AGENTS.md first** → treat it as the _authoritative style guide_.
 2. **Scan the codebase** → identify violations (inline handlers, globals, duplicated strings, lack of constants, cross-component state leakage, etc.).
-3. **Generate PLAN.md** → bullet list of problems and refactors needed, scoped by file. PLAN.md is a part of PR metadata. It's a transient document outlining the work on a given issue. Do not commit PLAN.md; copy its content into the PR description.
+3. **Make the execution plan** → Obey `.mprlab/PLANNING.md`. Copy the temporary plan content into the pull request description.
 4. **Refactor in small commits** →
    Front-end:
    - Inline → Alpine `x-on:`
@@ -37,15 +37,15 @@ You are a staff level full stack engineer. Your task is to **re-evaluate and ref
 ## Output requirements
 
 - Always follow AGENTS.md rules (do not restate them, do not invent new ones).
-- Output a **PLAN.md** first, then refactor step-by-step.
+- Make the execution plan that `.mprlab/PLANNING.md` specifies. Then refactor the code in steps.
 - Only modify necessary files.
 - Treat `NOTES.md` as read-only; never edit it during an implementation cycle.
-- Only touch the following markdown files while delivering work: `ISSUES.md` (append-only status log), `PLAN.md` (local, untracked scratchpad), and `CHANGELOG.md` (post-completion history).
-- If `PLAN.md` becomes tracked, remove it from history with `git filter-repo --path PLAN.md --invert-paths` before continuing.
+- Only change `ISSUES.md`, `.mprlab/<PLAN-ID>-PLAN.md`, and `CHANGELOG.md` during delivery.
+- Keep each execution plan untracked. If Git tracks a plan, remove it with `git filter-repo --path-glob '.mprlab/*-PLAN.md' --invert-paths`.
 - Descriptive identifiers, no single-letter names.
 - End with a short summary of changed files and new event contracts.
 
-**Begin by reading AGENTS.md and generating PLAN.md now.**
+**Begin by reading `AGENTS.md` and `.mprlab/PLANNING.md`. Then make the specified execution plan.**
 
 ## Rules of engagement
 
@@ -80,7 +80,7 @@ Leave Features, BugFixes, Improvements, Maintenance sections empty when all fixe
 
 ## Pre-finish Checklist
 
-1. Update `PLAN.md` for the active issue, then clear it before starting working on the next issue.
+1. Update the execution plan for the active issue. Remove it after you complete the execution.
 2. Ensure the issue entry in `ISSUES.md` is marked `[x]` and includes an appended resolution note.
 3. Run tests, whether `go test ./...` or `npm test` or the relevant suite and resolve all failures.
 4. Commit only the intended changes and push the branch to origin. Esnure that the local branch is tracking the remote.
@@ -90,7 +90,7 @@ Leave Features, BugFixes, Improvements, Maintenance sections empty when all fixe
 
 All feature, improvement, bugfix, and maintenance backlog entries now live in `ISSUES.md`. This file remains append-only for process notes.
 
-_Use `PLAN.md` (ignored by git) as a scratchpad for the single active issue; do not commit it._
+_Use the temporary execution plan that `.mprlab/PLANNING.md` specifies._
 
 ## Action Items
 
@@ -99,7 +99,7 @@ The deliverables are code changes. Sequentially open PRs use `gh` utility after 
     1. Read the files that guide the development: README.md , PRD.md  , AGENTS.md , NOTES.md , ARCHITECTURE.md .
     2. Run the tests
     3. Plan the required changes to close the open issues. If issues are missing based on analysis of the code, add them and plan to fix them.
-    4. Use PLAN.md for an individual issue to plan the fix
+    4. Use `.mprlab/PLANNING.md` to make the execution plan for one issue.
     5. Read the documentation of gthe 3rd party libraries before implementing changes
 
 ## 2025-12-25
