@@ -173,6 +173,9 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 	}
 
 	manifestText := string(manifestDocument)
+	if strings.Contains(manifestText, "\n          visibility:") {
+		t.Fatal("application image retains removed visibility field")
+	}
 	for _, requiredContract := range []string{
 		"managed: tauth.config",
 		"name: mprlab-nginx-gateway_tauth-data",
