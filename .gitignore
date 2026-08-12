@@ -1,4 +1,3 @@
-PLAN.md
 .env
 .env.tauth
 !examples/docker-compose/.env.tauth.example
@@ -21,3 +20,7 @@ bin/
 .cache/
 .gocache/
 coverage.out
+
+# BEGIN MPRLAB-GOVERNANCE
+/.mprlab/*-PLAN.md
+# END MPRLAB-GOVERNANCE
