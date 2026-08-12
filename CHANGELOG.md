@@ -9,6 +9,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- The OAuth browser test now builds its server before the browser timeout starts. The cleanup step has a time limit and terminates the server and Chromium processes.
 - Accepted the explicit zero-tenant aggregate during forward deployment bootstrap: `tauth doctor` validates it, `/health` remains available, and auth routes stay inactive until an application contributes a tenant.
 - Made `https://tauth.mprlab.com/tauth.js` the sole browser-helper location, removed the backend's embedded helper route and obsolete `/web` image payload so `tauth-api.mprlab.com/tauth.js` returns 404, and added the independent `/health` readiness endpoint.
 - Preserved the complete documentation site in the canonical Pages artifact and disabled Jekyll so the gateway verification marker remains publicly addressable.
@@ -21,6 +22,7 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
+- Moved the SemVer release policy into the schema-4 resource manifest and removed the obsolete `.mprlab/release.yml` file.
 - Added the `tauth.oauth` deployment capability, config/preflight schema v6, HTTP contract v2, and OAuth OpenAPI. Added security guidance, key-rotation guidance, and black-box HTTP and Chromium acceptance coverage.
 - Aligned authorization-code exchange with the current OAuth 2.1 request shape. Accepted the MCP refresh-token grant declaration in Client ID Metadata Documents.
 - Declared a canonical container-built GitHub Pages resource that assembles the documentation site and `web/tauth.js` in the schema-v3 lifecycle manifest, and removed the obsolete `tauth.mprlab.com` Caddy route.

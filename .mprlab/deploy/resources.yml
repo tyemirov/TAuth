@@ -1,7 +1,9 @@
 ---
 mprlab_resources:
-  schema_version: 3
+  schema_version: 4
   owner: tauth
+  release:
+    scheme: semver
   resources:
     - kind: compose_project
       id: runtime

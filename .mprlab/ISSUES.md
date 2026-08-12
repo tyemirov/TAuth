@@ -248,6 +248,28 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   clean committed snapshot as an isolated deploy plan without release,
   publication, production contact, or deployment.
 
+- [x] [I205] (P0) Move the release policy into the resource manifest.
+  Goal:
+  Use one tracked application file for release and deployment configuration.
+  Requirements:
+  - Set the manifest schema version to 4.
+  - Add `release.scheme: semver` to the manifest.
+  - Delete `.mprlab/release.yml`.
+  - Keep the resource graph and lifecycle commands unchanged.
+  Validation:
+  - Pass the repository lifecycle contract test.
+  - Pass the sibling gateway manifest plan.
+  - Pass `make ci`.
+  Resolution 2026-08-12:
+  - Moved the SemVer policy into the schema-4 resource manifest.
+  - Deleted the obsolete `.mprlab/release.yml` file.
+  - Kept the resource graph and lifecycle commands unchanged.
+  - The repository contract failed against schema 3 and passed against schema 4.
+  - The final `make ci` run passed.
+  - The sibling plan remains pending until the gateway checkout is clean.
+  - Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`,
+    `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
+
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
   Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
@@ -270,6 +292,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B047] (P0) Start the OAuth browser test after the Go build.
+  Goal:
+  The OAuth browser test must start after the test server is ready.
+
+  Requirements:
+  - Build the test server before the 60-second browser test timeout starts.
+  - Set up the repository Go version and the Go cache in the frontend workflow.
+  - Keep the browser test timeout at 60 seconds.
+  - Limit the complete frontend job to 10 minutes.
+  - Terminate the test server and the browser after success, failure, or timeout.
+
+  Validation:
+  - Run the OAuth browser test with a prebuilt server.
+  - Run the complete JavaScript test target.
+  - Run `make ci`.
+
+  Resolved 2026-08-12:
+  - GitHub Actions now installs the Go version from `go.mod`, uses the Go cache, and builds the test server before `npm test` starts.
+  - The frontend job stops after 10 minutes if a tool or child process does not exit.
+  - The test uses `TAUTH_BROWSER_TEST_SERVER` for a prebuilt server. A local test build runs before the 60-second browser test starts.
+  - The cleanup step starts the server cleanup and the browser cleanup at the same time. The cleanup step first sends `SIGTERM` to the server. It sends `SIGKILL` to a server or Chromium process that does not exit in the time limit.
+  - The prebuilt-server test and all 44 JavaScript tests passed. `make ci` passed.
 
 - [x] [B046] (P0) Allow the active TAuth aggregate configuration to start before applications declare tenants.
   After a forward-only production reset, TAuth is deployed before Pinguin and the

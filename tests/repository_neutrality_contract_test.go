@@ -30,7 +30,7 @@ var expectedGatewayWrapper = strings.Join([]string{
 	"\t\tMPRLAB_APP_ROOT=\"$${application_root}\"",
 }, "\n")
 
-func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
+func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
 	manifestDocument, readErr := os.ReadFile(manifestPath)
@@ -49,19 +49,23 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	if !available {
 		t.Fatalf("application resource manifest has no mprlab_resources mapping: %#v", document)
 	}
-	if schemaVersion, available := resourcesDocument["schema_version"].(int); !available || schemaVersion != 3 {
+	if schemaVersion, available := resourcesDocument["schema_version"].(int); !available || schemaVersion != 4 {
 		t.Fatalf("application resource manifest has unexpected schema version: %#v", resourcesDocument["schema_version"])
 	}
 	if owner, available := resourcesDocument["owner"].(string); !available || owner != "tauth" {
 		t.Fatalf("application resource manifest has unexpected owner: %#v", resourcesDocument["owner"])
+	}
+	releasePolicy, available := resourcesDocument["release"].(map[string]any)
+	if !available || len(releasePolicy) != 1 || stringField(t, releasePolicy, "scheme") != "semver" {
+		t.Fatalf("application resource manifest has unexpected release policy: %#v", resourcesDocument["release"])
 	}
 	resourceKeys := make([]string, 0, len(resourcesDocument))
 	for resourceKey := range resourcesDocument {
 		resourceKeys = append(resourceKeys, resourceKey)
 	}
 	slices.Sort(resourceKeys)
-	if !slices.Equal(resourceKeys, []string{"owner", "resources", "schema_version"}) {
-		t.Fatalf("application resource manifest root is not the exact schema-v3 contract: %#v", resourceKeys)
+	if !slices.Equal(resourceKeys, []string{"owner", "release", "resources", "schema_version"}) {
+		t.Fatalf("application resource manifest root is not the exact schema-v4 contract: %#v", resourceKeys)
 	}
 
 	resources, available := resourcesDocument["resources"].([]any)
@@ -142,7 +146,7 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	}
 	placement, available := runtimeService["placement"].(map[string]any)
 	if !available || len(placement) != 2 {
-		t.Fatalf("runtime Compose service must declare exact schema-v3 placement: %#v", runtimeService["placement"])
+		t.Fatalf("runtime Compose service must declare exact schema-v4 placement: %#v", runtimeService["placement"])
 	}
 	if group := stringField(t, placement, "group"); group != "gateway" {
 		t.Fatalf("runtime Compose service has unexpected placement group: %q", group)
@@ -191,6 +195,7 @@ func TestRepositoryOwnsSchemaV3ApplicationResources(t *testing.T) {
 	for _, obsoleteContract := range []string{
 		"schema_version: 1",
 		"schema_version: 2",
+		"schema_version: 3",
 		"dependencies:",
 		"profiles:",
 		"environment_files:",
@@ -283,6 +288,7 @@ func TestRepositoryDelegatesOnlyThreeProductionLifecycleCommands(t *testing.T) {
 	}
 
 	for _, forbiddenPath := range []string{
+		".mprlab/release.yml",
 		".env.deploy.example",
 		"scripts/deploy.sh",
 		"scripts/release.sh",
