@@ -374,10 +374,11 @@ Set `enable_tenant_header_override: true` because native requests do not send a 
 1. Fetch `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
 2. Fetch a one-time nonce from `POST /auth/nonce` with the same tenant header.
 3. Pass that nonce to the native Apple authorization request.
-4. Post `{ "apple_id_token": "...", "nonce_token": "..." }` to `/auth/apple/native`.
+4. Post the token, nonce, and available `fullName` components to `/auth/apple/native`.
 5. Reuse the first-party cookies that TAuth returns.
 
 TAuth accepts only a configured `native_client_ids` audience. It also requires Apple issuer, signature, expiration, verified email, and an exact nonce match. It consumes each nonce once. The mobile app does not receive or store Apple access or refresh tokens.
+TAuth stores the native credential name during the first authorization. Later authorizations keep that stored display name when Apple omits it.
 
 ### Example `/me` payload
 
