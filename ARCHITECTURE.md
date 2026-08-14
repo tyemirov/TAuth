@@ -107,8 +107,9 @@ Native iOS apps use the system Sign in with Apple sheet:
 1. The client reads `GET /auth/apple/native/config` with `X-TAuth-Tenant` and confirms its App ID is the selected client.
 2. The client obtains a one-time nonce from `POST /auth/nonce` with the same tenant header.
 3. The client passes the nonce to Apple and obtains an Apple ID token.
-4. The client posts `{ "apple_id_token": "...", "nonce_token": "..." }` to `/auth/apple/native`.
-5. TAuth validates the Apple signature, issuer, expiration, configured native audience, verified email, and exact nonce. It then consumes the nonce and issues the standard cookies.
+4. The client posts the token, nonce, and available `fullName` components to `/auth/apple/native`.
+5. TAuth stores the first credential name and keeps it when a later authorization omits the name.
+6. TAuth validates the Apple signature, issuer, expiration, configured native audience, verified email, and exact nonce. It then consumes the nonce and issues the standard cookies.
 
 Apple Developer groups the native App ID with the browser Services ID. This provider association keeps the Apple subject stable across the two Apple sign-in modes. TAuth then resolves both modes to the same provider identity and account.
 
