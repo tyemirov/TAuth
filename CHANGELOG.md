@@ -10,6 +10,9 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Prevented shared caches from storing tenant-specific native Apple config responses.
+- Stored native Apple full-name components from the first authorization and kept the display name on later authorizations.
+- Bounded Apple provider requests and propagated inbound request cancellation to token and JWKS requests.
 - The OAuth browser test now builds its server before the browser timeout starts. The cleanup step has a time limit and terminates the server and Chromium processes.
 - Accepted the explicit zero-tenant aggregate during forward deployment bootstrap: `tauth doctor` validates it, `/health` remains available, and auth routes stay inactive until an application contributes a tenant.
 - Made `https://tauth.mprlab.com/tauth.js` the sole browser-helper location, removed the backend's embedded helper route and obsolete `/web` image payload so `tauth-api.mprlab.com/tauth.js` returns 404, and added the independent `/health` readiness endpoint.
