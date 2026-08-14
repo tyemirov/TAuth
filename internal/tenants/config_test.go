@@ -266,6 +266,7 @@ func TestLoadConfigParsesAppleOAuth(testingHandle *testing.T) {
 	tenant.AppleOAuth = FileAppleOAuth{
 		Enabled:               true,
 		ClientID:              "com.example.web",
+		NativeClientIDs:       []string{" com.example.ios ", "com.example.ipados"},
 		TeamID:                "TEAMID1234",
 		KeyID:                 "KEYID12345",
 		PrivateKey:            generateTestApplePrivateKeyPEM(testingHandle),
@@ -290,6 +291,9 @@ func TestLoadConfigParsesAppleOAuth(testingHandle *testing.T) {
 	if appleConfig.ClientID() != "com.example.web" || appleConfig.TeamID() != "TEAMID1234" || appleConfig.KeyID() != "KEYID12345" {
 		testingHandle.Fatalf("unexpected Apple identifiers: %#v", appleConfig)
 	}
+	if !sameStringSlices(appleConfig.NativeClientIDs(), []string{"com.example.ios", "com.example.ipados"}) {
+		testingHandle.Fatalf("unexpected native Apple client ids: %#v", appleConfig.NativeClientIDs())
+	}
 	if appleConfig.RedirectURI() != "https://tauth.example.com/auth/apple/callback" {
 		testingHandle.Fatalf("unexpected redirect URI: %s", appleConfig.RedirectURI())
 	}
@@ -298,6 +302,83 @@ func TestLoadConfigParsesAppleOAuth(testingHandle *testing.T) {
 	}
 	if appleConfig.AuthorizationEndpoint() != "https://appleid.example.test/auth/authorize" {
 		testingHandle.Fatalf("unexpected authorization endpoint: %s", appleConfig.AuthorizationEndpoint())
+	}
+}
+
+func TestLoadConfigRejectsDuplicateNativeAppleClientID(testingHandle *testing.T) {
+	document := FileDocument{
+		Tenants: []FileTenant{
+			buildTestTenant("alpha", []string{"https://alpha.localhost"}, "", "app_session_alpha", "app_refresh_alpha", "alpha-key"),
+			buildTestTenant("beta", []string{"https://beta.localhost"}, "", "app_session_beta", "app_refresh_beta", "beta-key"),
+		},
+	}
+	for tenantIndex := range document.Tenants {
+		document.Tenants[tenantIndex].AppleOAuth = FileAppleOAuth{
+			Enabled:         true,
+			ClientID:        fmt.Sprintf("com.example.web.%d", tenantIndex),
+			NativeClientIDs: []string{"com.example.shared"},
+			TeamID:          "TEAMID1234",
+			KeyID:           "KEYID12345",
+			PrivateKey:      generateTestApplePrivateKeyPEM(testingHandle),
+			RedirectURI:     fmt.Sprintf("https://tauth.example.com/auth/apple/callback/%d", tenantIndex),
+		}
+	}
+
+	_, loadErr := LoadConfigFromDocument(document)
+	if loadErr == nil {
+		testingHandle.Fatalf("expected config error")
+	}
+	if !errors.Is(loadErr, ErrInvalidTenantConfig) {
+		testingHandle.Fatalf("expected ErrInvalidTenantConfig, got %v", loadErr)
+	}
+	if !containsStableCode(loadErr, errorCodeDuplicateNativeAppleID) {
+		testingHandle.Fatalf("expected error to contain code %s, got %v", errorCodeDuplicateNativeAppleID, loadErr)
+	}
+}
+
+func TestLoadConfigRejectsInvalidNativeAppleClientIDs(testingHandle *testing.T) {
+	testCases := []struct {
+		name              string
+		nativeClientIDs   []string
+		expectedErrorCode string
+	}{
+		{
+			name:              "empty client id",
+			nativeClientIDs:   []string{""},
+			expectedErrorCode: errorCodeInvalidNativeAppleID,
+		},
+		{
+			name:              "duplicate client id",
+			nativeClientIDs:   []string{"com.example.ios", "com.example.ios"},
+			expectedErrorCode: errorCodeDuplicateNativeAppleID,
+		},
+	}
+
+	for testCaseIndex := range testCases {
+		testCase := testCases[testCaseIndex]
+		testingHandle.Run(testCase.name, func(subTest *testing.T) {
+			tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "", "app_session_demo", "app_refresh_demo", "demo-key")
+			tenant.AppleOAuth = FileAppleOAuth{
+				Enabled:         true,
+				ClientID:        "com.example.web",
+				NativeClientIDs: testCase.nativeClientIDs,
+				TeamID:          "TEAMID1234",
+				KeyID:           "KEYID12345",
+				PrivateKey:      generateTestApplePrivateKeyPEM(subTest),
+				RedirectURI:     "https://tauth.example.com/auth/apple/callback",
+			}
+
+			_, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+			if loadErr == nil {
+				subTest.Fatalf("expected config error")
+			}
+			if !errors.Is(loadErr, ErrInvalidTenantConfig) {
+				subTest.Fatalf("expected ErrInvalidTenantConfig, got %v", loadErr)
+			}
+			if !containsStableCode(loadErr, testCase.expectedErrorCode) {
+				subTest.Fatalf("expected error to contain code %s, got %v", testCase.expectedErrorCode, loadErr)
+			}
+		})
 	}
 }
 

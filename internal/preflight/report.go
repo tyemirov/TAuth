@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v6"
-	endpointContractVersion    = "tauth.http.v2"
+	reportSchemaVersion        = "tauth.preflight.v7"
+	endpointContractVersion    = "tauth.http.v3"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
 	errorCodeValidateCORS      = "preflight.validate_cors"
@@ -92,6 +92,7 @@ type tenantPayload struct {
 	GoogleNativeClients        []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
 	AppleOAuthEnabled          bool                        `json:"apple_oauth_enabled"`
 	AppleClientID              string                      `json:"apple_client_id,omitempty"`
+	AppleNativeClientIDs       []string                    `json:"apple_native_client_ids,omitempty"`
 	AppleTeamID                string                      `json:"apple_team_id,omitempty"`
 	AppleKeyID                 string                      `json:"apple_key_id,omitempty"`
 	ApplePrivateKeyFingerprint string                      `json:"apple_private_key_fingerprint,omitempty"`
@@ -284,6 +285,7 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			GoogleNativeClients:        buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
 			AppleOAuthEnabled:          tenant.AppleOAuth().Enabled(),
 			AppleClientID:              tenant.AppleOAuth().ClientID(),
+			AppleNativeClientIDs:       tenant.AppleOAuth().NativeClientIDs(),
 			AppleTeamID:                tenant.AppleOAuth().TeamID(),
 			AppleKeyID:                 tenant.AppleOAuth().KeyID(),
 			AppleRedirectURI:           tenant.AppleOAuth().RedirectURI(),

@@ -46,7 +46,7 @@ The binary reads configuration exclusively from a YAML file (default `config.yam
 | `enable_cors` | Enable CORS for cross-origin UIs | `true` / `false` |
 | `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
 | `cors_allowed_origin_exceptions` | Allowed non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
-| `enable_tenant_header_override` | Allow `X-TAuth-Tenant` overrides (dev/local only) | `true` / `false` |
+| `enable_tenant_header_override` | Allow explicit tenant selection for shared origins and non-browser clients | `true` / `false` |
 | `tenants` | Array of tenant entries (see README §5.1 for schema) | `[...]` |
 
 Key notes:
@@ -57,7 +57,7 @@ Key notes:
 - **Shared origins**: If multiple tenants run on the same machine, add each distinct frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `tenant_origins` so TAuth can resolve the tenant from the request `Origin` header. Only enable `enable_tenant_header_override` (and send `X-TAuth-Tenant`) when tenants intentionally share the exact same origin or when non-browser clients omit `Origin`.
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
-- **Apple OAuth**: Set `apple_oauth.enabled: true` inside a tenant to expose `GET /auth/apple/start` and `GET`/`POST /auth/apple/callback`. Enabled Apple providers require a Services ID `client_id`, Apple `team_id`, Sign in with Apple `key_id`, PKCS8 ECDSA `private_key`, and an HTTPS `redirect_uri` registered with Apple.
+- **Apple OAuth**: Set `apple_oauth.enabled: true` to expose the browser Apple endpoints. Add native iOS App IDs under `native_client_ids` to expose the native Apple endpoints. Enabled providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and registered HTTPS callback URI.
 - **Account management**: Set `account_management.enabled: true` inside a tenant to use persisted opaque 128-bit base64url session subjects across password, Google, and Apple identities. `account_management.password_signup.enabled: true` gates public signup, `email_verification_ttl` controls signup/link challenges, `password_reset_ttl` controls reset challenges, and `return_challenge_tokens` should stay `false` outside tests or trusted delivery integrations.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 - **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google browser authentication, password authentication, or both for the TAuth-owned login page.
@@ -78,7 +78,7 @@ server:
     - "https://accounts.google.com"
   cors_allowed_origin_exceptions:
     - "https://accounts.google.com"
-  enable_tenant_header_override: false
+  enable_tenant_header_override: true
 
 tenants:
   - id: "prod"
@@ -101,6 +101,8 @@ tenants:
     apple_oauth:
       enabled: true
       client_id: "com.example.web"
+      native_client_ids:
+        - "com.example.app"
       team_id: "APPLETEAMID"
       key_id: "APPLEKEYID"
       private_key: "${APPLE_PRIVATE_KEY_PEM}"
@@ -393,6 +395,8 @@ Apple login is a browser redirect flow. TAuth owns the state, nonce, Apple clien
 apple_oauth:
   enabled: true
   client_id: "com.example.web"
+  native_client_ids:
+    - "com.example.app"
   team_id: "APPLETEAMID"
   key_id: "APPLEKEYID"
   private_key: "${APPLE_PRIVATE_KEY_PEM}"
@@ -400,6 +404,8 @@ apple_oauth:
 ```
 
 Create a Sign in with Apple key in Apple Developer, register the callback URL on the Services ID, and keep the private key in an environment variable or secret manager. The callback URI must point at `/auth/apple/callback` on the public TAuth origin and must be HTTPS outside local insecure mode.
+
+Group each native App ID with the browser Services ID in Apple Developer. This provider association lets Apple return the same subject for native and browser sign-in. Every `native_client_ids` value must be unique across tenants.
 
 Browser integrations can use the helper directly:
 
@@ -412,6 +418,51 @@ document.querySelector("#appleSignIn").addEventListener("click", () => {
 For custom links, call `getAppleLoginUrl()` and assign the returned URL to your button or anchor. When `tenantId` is configured in `initAuthClient`, the helper appends `tenant_id` to `/auth/apple/start` because the provider redirect itself will not include the product origin. The helper also appends the current browser URL as `return_to`; TAuth signs that value into Apple state only when its origin matches the resolved tenant’s configured `tenant_origins`.
 
 The server redirects the browser to Apple with `response_type=code`, `response_mode=form_post`, `scope=openid email name`, a signed state JWT, and a nonce stored in TAuth. Apple returns an authorization code to `/auth/apple/callback`; TAuth exchanges it at Apple’s token endpoint, validates the returned ID token against Apple JWKS, checks the nonce, enforces `allowed_users`, and mints the same `app_session` / `app_refresh` cookies as Google and password login. When state contains a validated `return_to`, the callback responds with `303 See Other` to that product URL after setting cookies; otherwise it returns the profile JSON directly. `startAppleLogin()` records the restore hint before leaving the product page so the returned page restores through `/auth/session`. Apple access tokens are not exposed to JavaScript or stored by TAuth.
+
+Native iOS integrations use the operating-system Apple sign-in control:
+
+Set `enable_tenant_header_override: true` because native requests do not send a browser `Origin`.
+
+1. Call `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
+2. Call `POST /auth/nonce` with the same tenant header.
+3. Pass the returned nonce to the Apple authorization request.
+4. Post the Apple identity token and nonce to `/auth/apple/native`.
+5. Keep the returned TAuth cookies in the native cookie jar.
+
+An Expo iOS client uses `expo-apple-authentication` for steps 3 and 4:
+
+```ts
+import * as AppleAuthentication from "expo-apple-authentication";
+
+const credential = await AppleAuthentication.signInAsync({
+  nonce,
+  requestedScopes: [
+    AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+    AppleAuthentication.AppleAuthenticationScope.EMAIL,
+  ],
+});
+if (credential.identityToken === null) {
+  throw new Error("Apple did not return an identity token");
+}
+
+const response = await fetch(`${tauthBaseUrl}/auth/apple/native`, {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+    "X-TAuth-Tenant": tenantId,
+  },
+  body: JSON.stringify({
+    apple_id_token: credential.identityToken,
+    nonce_token: nonce,
+  }),
+});
+if (!response.ok) {
+  throw new Error(`TAuth rejected native Apple login: ${response.status}`);
+}
+```
+
+TAuth validates the native App ID audience, Apple issuer and signature, expiration, verified email, and exact nonce. It consumes the nonce once and applies the tenant allowlist and account-management policy.
 
 ### 5.5 Email/password accounts
 
@@ -613,6 +664,56 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
   - the ID token `nonce` claim must exactly equal `nonce_token`
 
 - **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
+
+### 6.2b.1 `GET /auth/apple/native/config`
+
+Returns the native Apple metadata for the resolved tenant.
+
+- **Server config**: set `enable_tenant_header_override: true` for native clients.
+- **Headers**: send `X-TAuth-Tenant` when the request does not include a browser `Origin`.
+- **Response**: `200 OK`
+
+  ```json
+  {
+    "client_id": "com.example.app",
+    "client_ids": ["com.example.app"],
+    "platform": "ios",
+    "requested_scopes": ["email", "full_name"],
+    "nonce_required": true
+  }
+  ```
+
+- **Errors**:
+  - `404` with `error: "native_apple_login_not_configured"` when the tenant has no native Apple clients
+  - tenant-resolution failures when no `Origin` or `X-TAuth-Tenant` can resolve a tenant
+
+### 6.2b.2 `POST /auth/apple/native`
+
+Verifies an Apple ID token from the native iOS sign-in sheet and mints the standard session cookies.
+
+- **Request body**:
+
+  ```json
+  {
+    "apple_id_token": "<identity_token_from_apple>",
+    "nonce_token": "<nonce_from_/auth/nonce>"
+  }
+  ```
+
+- **Validation**:
+  - the token audience must match one of the resolved tenant's `native_client_ids`
+  - issuer must be `https://appleid.apple.com`
+  - Apple must sign the token and its expiration must be valid
+  - the token must contain a verified email and subject
+  - the ID token `nonce` claim must exactly equal `nonce_token`
+  - the nonce must be valid, tenant-scoped, and unused
+
+- **Response**: `200 OK` with the same profile payload and cookies as other login endpoints
+- **Errors**:
+  - `404` with `error: "native_apple_login_not_configured"` when the tenant has no native Apple clients
+  - `400` with `error: "invalid_json"` or `error: "missing_nonce"` for malformed input
+  - `401` with `error: "invalid_apple_token"` or `error: "invalid_nonce"` for failed verification
+  - `403` with `error: "user_not_allowed"` when `allowed_users` rejects the Apple email
 
 ### 6.2c `GET /auth/apple/start`
 
@@ -959,6 +1060,8 @@ Use this checklist when integrating:
 - **403 from `/auth/google` with `user_not_allowed`** – The email is not listed under the tenant’s `allowed_users` allowlist (or the list is empty).
 - **404 from `/auth/apple/start` with `apple_login_not_configured`** – Add an enabled `apple_oauth` block to the resolved tenant.
 - **401 from `/auth/apple/callback` with `invalid_state` or `invalid_apple_token`** – Confirm the callback URL matches the Apple Services ID, the tenant has the correct Services ID client, Team ID, Key ID, and private key, and the user completed the original `/auth/apple/start` redirect without reusing an old URL.
+- **404 from `/auth/apple/native/config` with `native_apple_login_not_configured`** – Add the iOS App ID to `apple_oauth.native_client_ids` for the resolved tenant.
+- **401 from `/auth/apple/native` with `invalid_apple_token` or `invalid_nonce`** – Confirm that the iOS App ID audience is configured. Send a fresh TAuth nonce in the Apple request and TAuth exchange.
 - **Google rejects the client or TAuth rejects the token** – Confirm:
   - The OAuth client type is **Web**.
   - All relevant origins are in the **Authorized JavaScript origins** list.

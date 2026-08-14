@@ -6,6 +6,39 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F002] (P0) Add native Sign in with Apple authentication.
+  Goal:
+  TAuth accepts Apple ID tokens from iOS clients and issues the same tenant session as other identity providers.
+  This contract gives one Apple identity the same TAuth user ID in native and browser sessions.
+  Requirements:
+  - Add explicit native Apple client IDs to each enabled Apple provider.
+  - Reject a native client ID that another tenant owns.
+  - Add `GET /auth/apple/native/config` and `POST /auth/apple/native`.
+  - Validate Apple signature, issuer, audience, expiration, verified email, and nonce claims.
+  - Consume the TAuth nonce after successful token validation.
+  - Enforce HTTPS, tenant resolution, allowed users, and account state.
+  - Issue the canonical TAuth session cookies and profile payload.
+  - Keep the existing Apple browser flow on its Services ID.
+  - Keep Apple provider tokens inside TAuth.
+  Deliverables:
+  - Add config domain types, route handlers, API documentation, and tests.
+  - Add a public native client procedure for Expo iOS.
+  Validation:
+  - Verify success with the configured iOS bundle ID.
+  - Verify missing config, invalid input, wrong audience, wrong issuer, expired token, invalid nonce, and nonce replay.
+  - Verify tenant isolation, allowed-user policy, account management, cookies, and profile output.
+  - Pass focused tenant, HTTP, preflight, doctor, and gateway image tests.
+  - Run aggregate CI through the release lifecycle.
+
+  Resolution 2026-08-13:
+  - Added tenant-specific native Apple client IDs and public native endpoints.
+  - Added Apple claim, audience, nonce, replay, tenant, and account tests.
+  - Added the native Expo iOS procedure and provider association guidance.
+  - Focused tenant, HTTP, preflight, doctor, and static checks passed.
+  - The local image passed the gateway candidate test.
+  - ASD-STE100 checks found no errors in the changed text.
+  - The Governor check reports existing managed content drift in `.mprlab/POLICY.md`.
+
 - [x] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
   Goal:
   TAuth can authorize remote clients for first-party MPR resources after a user

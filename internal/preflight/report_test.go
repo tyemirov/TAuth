@@ -55,6 +55,7 @@ tenants:
     apple_oauth:
       enabled: true
       client_id: "com.example.web"
+      native_client_ids: ["com.example.ios"]
       team_id: "TEAMID1234"
       key_id: "KEYID12345"
       private_key: |
@@ -111,6 +112,7 @@ type testTenantPayload struct {
 	GoogleNativeClients        []testNativeGoogleClientPayload `json:"google_native_clients"`
 	AppleOAuthEnabled          bool                            `json:"apple_oauth_enabled"`
 	AppleClientID              string                          `json:"apple_client_id"`
+	AppleNativeClientIDs       []string                        `json:"apple_native_client_ids"`
 	AppleTeamID                string                          `json:"apple_team_id"`
 	AppleKeyID                 string                          `json:"apple_key_id"`
 	ApplePrivateKeyFingerprint string                          `json:"apple_private_key_fingerprint"`
@@ -201,6 +203,9 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	}
 	if !tenant.AppleOAuthEnabled || tenant.AppleClientID != "com.example.web" || tenant.AppleRedirectURI != "https://tauth.example.com/auth/apple/callback" {
 		testingHandle.Fatalf("unexpected Apple OAuth report fields: %#v", tenant)
+	}
+	if len(tenant.AppleNativeClientIDs) != 1 || tenant.AppleNativeClientIDs[0] != "com.example.ios" {
+		testingHandle.Fatalf("unexpected Apple native client ids: %#v", tenant.AppleNativeClientIDs)
 	}
 	if tenant.ApplePrivateKeyFingerprint == "" || len(tenant.AppleScopes) != 3 {
 		testingHandle.Fatalf("expected Apple private key fingerprint and default scopes")

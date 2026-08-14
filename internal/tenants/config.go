@@ -66,6 +66,7 @@ type NativeGoogleClient struct {
 type AppleOAuth struct {
 	enabled               bool
 	clientID              string
+	nativeClientIDs       []string
 	teamID                string
 	keyID                 string
 	privateKey            string
@@ -124,6 +125,8 @@ const (
 	errorCodeInvalidNativePlatform       = "tenant.invalid_native_google_platform"
 	errorCodeInvalidNativeRedirectURI    = "tenant.invalid_native_redirect_uri"
 	errorCodeDuplicateNativeGoogleID     = "tenant.duplicate_native_google_client_id"
+	errorCodeInvalidNativeAppleID        = "tenant.invalid_native_apple_client_id"
+	errorCodeDuplicateNativeAppleID      = "tenant.duplicate_native_apple_client_id"
 	errorCodeAppleOAuthDisabled          = "tenant.apple_oauth_disabled"
 	errorCodeInvalidAppleClientID        = "tenant.invalid_apple_client_id"
 	errorCodeInvalidAppleTeamID          = "tenant.invalid_apple_team_id"
@@ -204,6 +207,7 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	tenantIndex := make(map[TenantID]Tenant)
 	originToTenantIDs := make(map[string][]TenantID)
 	nativeGoogleClientIDs := make(map[string]TenantID)
+	nativeAppleClientIDs := make(map[string]TenantID)
 	oauthResourceIDs := make(map[string]TenantID)
 	oauthClientIDs := make(map[string]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
@@ -233,6 +237,19 @@ func LoadConfigFromDocument(document FileDocument) (Config, error) {
 				)
 			}
 			nativeGoogleClientIDs[nativeGoogleClientID] = tenant.id
+		}
+		for _, nativeAppleClientID := range tenant.AppleOAuth().NativeClientIDs() {
+			if otherTenantID, exists := nativeAppleClientIDs[nativeAppleClientID]; exists {
+				return Config{}, fmt.Errorf(
+					"%w: %s native_apple_client_id=%s tenant=%s other_tenant=%s",
+					ErrInvalidTenantConfig,
+					errorCodeDuplicateNativeAppleID,
+					nativeAppleClientID,
+					tenant.id,
+					otherTenantID,
+				)
+			}
+			nativeAppleClientIDs[nativeAppleClientID] = tenant.id
 		}
 		for _, resource := range tenant.OAuthAuthorization().Resources() {
 			if otherTenantID, exists := oauthResourceIDs[resource.Identifier()]; exists {
@@ -382,6 +399,7 @@ func (tenant Tenant) NativeGoogleClientIDs() []string {
 func (tenant Tenant) AppleOAuth() AppleOAuth {
 	config := tenant.appleOAuth
 	config.scopes = append([]string(nil), tenant.appleOAuth.scopes...)
+	config.nativeClientIDs = append([]string(nil), tenant.appleOAuth.nativeClientIDs...)
 	return config
 }
 
@@ -393,6 +411,11 @@ func (settings AppleOAuth) Enabled() bool {
 // ClientID returns the Apple Services ID or app client identifier.
 func (settings AppleOAuth) ClientID() string {
 	return settings.clientID
+}
+
+// NativeClientIDs returns the accepted native Apple audiences.
+func (settings AppleOAuth) NativeClientIDs() []string {
+	return append([]string(nil), settings.nativeClientIDs...)
 }
 
 // TeamID returns the Apple Developer Team ID.
@@ -779,6 +802,10 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 	if clientID == "" {
 		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleClientID, tenantID)
 	}
+	nativeClientIDs, nativeClientIDErr := parseNativeAppleClientIDs(raw.NativeClientIDs, tenantID)
+	if nativeClientIDErr != nil {
+		return AppleOAuth{}, nativeClientIDErr
+	}
 	teamID := strings.TrimSpace(raw.TeamID)
 	if teamID == "" {
 		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleTeamID, tenantID)
@@ -814,6 +841,7 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 	return AppleOAuth{
 		enabled:               true,
 		clientID:              clientID,
+		nativeClientIDs:       nativeClientIDs,
 		teamID:                teamID,
 		keyID:                 keyID,
 		privateKey:            privateKey,
@@ -823,6 +851,26 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 		tokenEndpoint:         tokenEndpoint,
 		jwksURL:               jwksURL,
 	}, nil
+}
+
+func parseNativeAppleClientIDs(rawClientIDs []string, tenantID TenantID) ([]string, error) {
+	if len(rawClientIDs) == 0 {
+		return nil, nil
+	}
+	clientIDs := make([]string, 0, len(rawClientIDs))
+	seenClientIDs := make(map[string]struct{}, len(rawClientIDs))
+	for _, rawClientID := range rawClientIDs {
+		clientID := strings.TrimSpace(rawClientID)
+		if clientID == "" {
+			return nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeAppleID, tenantID)
+		}
+		if _, exists := seenClientIDs[clientID]; exists {
+			return nil, fmt.Errorf("%w: %s tenant=%s native_apple_client_id=%s", ErrInvalidTenantConfig, errorCodeDuplicateNativeAppleID, tenantID, clientID)
+		}
+		seenClientIDs[clientID] = struct{}{}
+		clientIDs = append(clientIDs, clientID)
+	}
+	return clientIDs, nil
 }
 
 func parseApplePrivateKey(raw FileAppleOAuth, tenantID TenantID) (string, error) {
@@ -846,6 +894,7 @@ func parseApplePrivateKey(raw FileAppleOAuth, tenantID TenantID) (string, error)
 
 func appleOAuthBlockHasFields(raw FileAppleOAuth) bool {
 	return strings.TrimSpace(raw.ClientID) != "" ||
+		len(raw.NativeClientIDs) > 0 ||
 		strings.TrimSpace(raw.TeamID) != "" ||
 		strings.TrimSpace(raw.KeyID) != "" ||
 		strings.TrimSpace(raw.PrivateKey) != "" ||
@@ -1393,6 +1442,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.GoogleNativeClients[index].RedirectURIs = expandEnvSlice(tenant.GoogleNativeClients[index].RedirectURIs)
 	}
 	tenant.AppleOAuth.ClientID = os.ExpandEnv(tenant.AppleOAuth.ClientID)
+	tenant.AppleOAuth.NativeClientIDs = expandEnvSlice(tenant.AppleOAuth.NativeClientIDs)
 	tenant.AppleOAuth.TeamID = os.ExpandEnv(tenant.AppleOAuth.TeamID)
 	tenant.AppleOAuth.KeyID = os.ExpandEnv(tenant.AppleOAuth.KeyID)
 	tenant.AppleOAuth.PrivateKey = os.ExpandEnv(tenant.AppleOAuth.PrivateKey)
@@ -1474,6 +1524,7 @@ type FileNativeGoogleClient struct {
 type FileAppleOAuth struct {
 	Enabled               yamlBool `json:"enabled" yaml:"enabled"`
 	ClientID              string   `json:"client_id" yaml:"client_id"`
+	NativeClientIDs       []string `json:"native_client_ids" yaml:"native_client_ids"`
 	TeamID                string   `json:"team_id" yaml:"team_id"`
 	KeyID                 string   `json:"key_id" yaml:"key_id"`
 	PrivateKey            string   `json:"private_key" yaml:"private_key"`
