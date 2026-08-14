@@ -108,6 +108,7 @@ const (
 	errorNativeGooglePlatformNotConfigured = "native_google_platform_not_configured"
 	errorNativeGoogleRedirectURIInvalid    = "invalid_redirect_uri"
 	errorAppleLoginNotConfigured           = "apple_login_not_configured"
+	errorNativeAppleLoginNotConfigured     = "native_apple_login_not_configured"
 	errorAppleCallbackInvalid              = "invalid_apple_callback"
 	errorAppleStateInvalid                 = "invalid_state"
 	errorAppleReturnToInvalid              = "invalid_return_to"
@@ -128,15 +129,55 @@ const (
 	googleOAuthResponseTypeCode            = "code"
 	googleCodeChallengeMethodS256          = "S256"
 	nativeGoogleDefaultPlatform            = "desktop"
+	nativeApplePlatform                    = "ios"
 )
 
 var googleNativeScopes = []string{"openid", "email", "profile"}
+var nativeAppleRequestedScopes = []string{"email", "full_name"}
 
 type googleLoginInbound struct {
 	GoogleIDToken string `json:"google_id_token"`
 	NonceToken    string `json:"nonce_token"`
 	Platform      string `json:"platform"`
 	RedirectURI   string `json:"redirect_uri"`
+}
+
+type nativeAppleLoginInbound struct {
+	AppleIDToken string                      `json:"apple_id_token"`
+	NonceToken   string                      `json:"nonce_token"`
+	FullName     *nativeAppleFullNameInbound `json:"full_name"`
+}
+
+type nativeAppleFullNameInbound struct {
+	NamePrefix string `json:"name_prefix"`
+	GivenName  string `json:"given_name"`
+	MiddleName string `json:"middle_name"`
+	FamilyName string `json:"family_name"`
+	NameSuffix string `json:"name_suffix"`
+	Nickname   string `json:"nickname"`
+}
+
+func (fullName *nativeAppleFullNameInbound) displayName() string {
+	if fullName == nil {
+		return ""
+	}
+	components := []string{
+		strings.TrimSpace(fullName.NamePrefix),
+		strings.TrimSpace(fullName.GivenName),
+		strings.TrimSpace(fullName.MiddleName),
+		strings.TrimSpace(fullName.FamilyName),
+		strings.TrimSpace(fullName.NameSuffix),
+	}
+	populatedComponents := components[:0]
+	for _, component := range components {
+		if component != "" {
+			populatedComponents = append(populatedComponents, component)
+		}
+	}
+	if len(populatedComponents) != 0 {
+		return strings.Join(populatedComponents, " ")
+	}
+	return strings.TrimSpace(fullName.Nickname)
 }
 
 type passwordLoginInbound struct {
@@ -200,6 +241,14 @@ type nativeGoogleClientResponse struct {
 	Platform     string   `json:"platform"`
 	ClientID     string   `json:"client_id"`
 	RedirectURIs []string `json:"redirect_uris"`
+}
+
+type nativeAppleConfigResponse struct {
+	ClientID        string   `json:"client_id"`
+	ClientIDs       []string `json:"client_ids"`
+	Platform        string   `json:"platform"`
+	RequestedScopes []string `json:"requested_scopes"`
+	NonceRequired   bool     `json:"nonce_required"`
 }
 
 type googleIdentity struct {
@@ -426,6 +475,29 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		})
 	})
 
+	router.GET("/auth/apple/native/config", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		clientIDs := append([]string(nil), config.AppleOAuth.NativeClientIDs...)
+		if !config.AppleOAuth.Enabled || len(clientIDs) == 0 {
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeAppleLoginNotConfigured})
+			return
+		}
+		contextGin.Header("Cache-Control", "no-store")
+		contextGin.JSON(http.StatusOK, nativeAppleConfigResponse{
+			ClientID:        clientIDs[0],
+			ClientIDs:       clientIDs,
+			Platform:        nativeApplePlatform,
+			RequestedScopes: append([]string(nil), nativeAppleRequestedScopes...),
+			NonceRequired:   true,
+		})
+	})
+
 	router.GET("/auth/apple/start", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveAppleStartTenantID(contextGin, registry)
 		if !resolved {
@@ -502,14 +574,15 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
 			return
 		}
-		tokenResponse, tokenErr := exchangeAppleAuthorizationCode(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, clock, code)
+		requestContext := contextGin.Request.Context()
+		tokenResponse, tokenErr := exchangeAppleAuthorizationCode(requestContext, resolveAppleOAuthHTTPClient(), config.AppleOAuth, clock, code)
 		if tokenErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.token", tokenErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
 			return
 		}
-		identity, identityErr := validateAppleIDToken(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, tokenResponse.IDToken)
+		identity, identityErr := validateAppleIDToken(requestContext, resolveAppleOAuthHTTPClient(), config.AppleOAuth, tokenResponse.IDToken)
 		if identityErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.id_token", identityErr)
@@ -590,6 +663,134 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 	}
 	router.GET("/auth/apple/callback", handleAppleCallback)
 	router.POST("/auth/apple/callback", handleAppleCallback)
+
+	router.POST("/auth/apple/native", func(contextGin *gin.Context) {
+		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
+		if !resolved {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.tenant.missing", errMissingTenantContext)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		config := registry.Config(tenantID)
+		if !config.AppleOAuth.Enabled || len(config.AppleOAuth.NativeClientIDs) == 0 {
+			recordMetric(metricAuthLoginFailure)
+			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeAppleLoginNotConfigured})
+			return
+		}
+		inbound, inboundOK := bindNativeAppleLoginInbound(contextGin)
+		if !inboundOK {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.invalid_json", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+			return
+		}
+		if strings.TrimSpace(inbound.NonceToken) == "" {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.missing_nonce", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
+			return
+		}
+		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.insecure_http", nil)
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
+			return
+		}
+		identity, identityErr := validateAppleIDTokenForAudiences(
+			contextGin.Request.Context(),
+			resolveAppleOAuthHTTPClient(),
+			config.AppleOAuth,
+			inbound.AppleIDToken,
+			config.AppleOAuth.NativeClientIDs,
+		)
+		if identityErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.id_token", identityErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
+			return
+		}
+		nonceToken := strings.TrimSpace(inbound.NonceToken)
+		if strings.TrimSpace(identity.Nonce) == "" || identity.Nonce != nonceToken {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.nonce_mismatch", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if consumeErr := nonces.Consume(contextGin, tenantID, nonceToken); consumeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.invalid_nonce_token", consumeErr)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+			return
+		}
+		if identity.Subject == "" || identity.Email == "" || !identity.EmailVerified {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.unverified_identity", nil)
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
+			return
+		}
+		if !isAllowedUser(identity.Email, config.AllowedUsers) {
+			recordMetric(metricAuthLoginFailure)
+			logAuthWarning("auth.login.apple.native.user_not_allowed", nil)
+			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
+			return
+		}
+		identity.DisplayName = inbound.FullName.displayName()
+		if !config.AccountManagementEnabled && strings.TrimSpace(identity.DisplayName) == "" {
+			applicationUserID := accountProviderApple + ":" + identity.Subject
+			_, storedDisplayName, _, _, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+			if profileErr != nil && !errors.Is(profileErr, web.ErrUserNotFound) {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.native.profile", profileErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			identity.DisplayName = storedDisplayName
+		}
+		if config.AccountManagementEnabled {
+			if accountStore == nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.native.account_store_missing", nil)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			providerIdentity := AccountProviderIdentity{
+				Provider:    accountProviderApple,
+				Subject:     identity.Subject,
+				UserEmail:   identity.Email,
+				DisplayName: identity.DisplayName,
+			}
+			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			if accountErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if !found {
+				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+				if accountErr != nil {
+					recordMetric(metricAuthLoginFailure)
+					writeAccountError(contextGin, accountErr)
+					return
+				}
+			}
+			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.native.account_finalize", finalizeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			recordMetric(metricAuthLoginSuccess)
+			return
+		}
+		if finalizeErr := finalizeProviderLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProviderApple, identity.Subject, identity.Email, identity.DisplayName, ""); finalizeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			logAuthError("auth.login.apple.native.finalize", finalizeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		recordMetric(metricAuthLoginSuccess)
+	})
 
 	router.POST("/auth/password/login", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
@@ -1430,6 +1631,17 @@ func bindAppleCallbackInbound(contextGin *gin.Context) (string, string, bool) {
 		return "", "", false
 	}
 	return code, state, true
+}
+
+func bindNativeAppleLoginInbound(contextGin *gin.Context) (nativeAppleLoginInbound, bool) {
+	var inbound nativeAppleLoginInbound
+	if err := contextGin.BindJSON(&inbound); err != nil {
+		return nativeAppleLoginInbound{}, false
+	}
+	if strings.TrimSpace(inbound.AppleIDToken) == "" {
+		return nativeAppleLoginInbound{}, false
+	}
+	return inbound, true
 }
 
 func bindPasswordLoginInbound(contextGin *gin.Context) (passwordLoginInbound, bool) {

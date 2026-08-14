@@ -43,6 +43,7 @@ type NativeGoogleClientConfig struct {
 type AppleOAuthConfig struct {
 	Enabled               bool
 	ClientID              string
+	NativeClientIDs       []string
 	TeamID                string
 	KeyID                 string
 	PrivateKey            string

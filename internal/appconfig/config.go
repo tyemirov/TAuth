@@ -23,7 +23,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v6"
+const ConfigSchemaVersion = "tauth.config.v7"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"

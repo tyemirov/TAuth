@@ -28,10 +28,12 @@ const (
 	appleStateNonceClaim        = "nonce"
 	appleStateReturnToClaim     = "return_to"
 	appleDefaultClientSecretTTL = 5 * time.Minute
+	appleOAuthRequestTimeout    = 5 * time.Second
 )
 
 var configuredAppleOAuthHTTPClient *http.Client
 var configuredAppleOAuthHTTPClientMutex sync.RWMutex
+var defaultAppleOAuthHTTPClient = &http.Client{Timeout: appleOAuthRequestTimeout}
 
 var (
 	errAppleOAuthInvalidState = errors.New("auth.apple.invalid_state")
@@ -85,7 +87,7 @@ func resolveAppleOAuthHTTPClient() *http.Client {
 	if client != nil {
 		return client
 	}
-	return http.DefaultClient
+	return defaultAppleOAuthHTTPClient
 }
 
 func buildAppleAuthorizationRedirect(config AppleOAuthConfig, state string, nonce string) (string, error) {
@@ -261,35 +263,51 @@ func buildAppleClientSecret(config AppleOAuthConfig, clock Clock) (string, error
 }
 
 func validateAppleIDToken(ctx context.Context, client *http.Client, config AppleOAuthConfig, idToken string) (appleIdentity, error) {
+	return validateAppleIDTokenForAudiences(ctx, client, config, idToken, []string{config.ClientID})
+}
+
+func validateAppleIDTokenForAudiences(ctx context.Context, client *http.Client, config AppleOAuthConfig, idToken string, audiences []string) (appleIdentity, error) {
 	jwks, jwksErr := fetchAppleJWKS(ctx, client, config.JWKSURL)
 	if jwksErr != nil {
 		return appleIdentity{}, jwksErr
 	}
-	claims := jwt.MapClaims{}
-	_, parseErr := jwt.ParseWithClaims(idToken, claims, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodRS256 {
-			return nil, fmt.Errorf("%w: invalid_alg", errAppleOAuthIDToken)
+	var lastParseErr error
+	for _, rawAudience := range audiences {
+		audience := strings.TrimSpace(rawAudience)
+		if audience == "" {
+			continue
 		}
-		keyID, ok := token.Header["kid"].(string)
-		if !ok || strings.TrimSpace(keyID) == "" {
-			return nil, fmt.Errorf("%w: missing_kid", errAppleOAuthIDToken)
+		claims := jwt.MapClaims{}
+		_, parseErr := jwt.ParseWithClaims(idToken, claims, func(token *jwt.Token) (interface{}, error) {
+			if token.Method != jwt.SigningMethodRS256 {
+				return nil, fmt.Errorf("%w: invalid_alg", errAppleOAuthIDToken)
+			}
+			keyID, ok := token.Header["kid"].(string)
+			if !ok || strings.TrimSpace(keyID) == "" {
+				return nil, fmt.Errorf("%w: missing_kid", errAppleOAuthIDToken)
+			}
+			publicKey, keyErr := jwks.publicKey(keyID)
+			if keyErr != nil {
+				return nil, keyErr
+			}
+			return publicKey, nil
+		}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(appleIssuer), jwt.WithAudience(audience), jwt.WithExpirationRequired())
+		if parseErr != nil {
+			lastParseErr = parseErr
+			continue
 		}
-		publicKey, keyErr := jwks.publicKey(keyID)
-		if keyErr != nil {
-			return nil, keyErr
-		}
-		return publicKey, nil
-	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(appleIssuer), jwt.WithAudience(config.ClientID), jwt.WithExpirationRequired())
-	if parseErr != nil {
-		return appleIdentity{}, fmt.Errorf("%w: verify: %w", errAppleOAuthIDToken, parseErr)
+		return appleIdentity{
+			Subject:       readStringMapClaim(claims, "sub"),
+			Email:         strings.ToLower(readStringMapClaim(claims, "email")),
+			EmailVerified: readBoolishMapClaim(claims, "email_verified"),
+			DisplayName:   readStringMapClaim(claims, "name"),
+			Nonce:         readStringMapClaim(claims, "nonce"),
+		}, nil
 	}
-	return appleIdentity{
-		Subject:       readStringMapClaim(claims, "sub"),
-		Email:         strings.ToLower(readStringMapClaim(claims, "email")),
-		EmailVerified: readBoolishMapClaim(claims, "email_verified"),
-		DisplayName:   readStringMapClaim(claims, "name"),
-		Nonce:         readStringMapClaim(claims, "nonce"),
-	}, nil
+	if lastParseErr == nil {
+		lastParseErr = errors.New("missing_audience")
+	}
+	return appleIdentity{}, fmt.Errorf("%w: verify: %w", errAppleOAuthIDToken, lastParseErr)
 }
 
 func fetchAppleJWKS(ctx context.Context, client *http.Client, jwksURL string) (appleJWKS, error) {

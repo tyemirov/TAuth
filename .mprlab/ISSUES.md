@@ -6,6 +6,39 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F002] (P0) Add native Sign in with Apple authentication.
+  Goal:
+  TAuth accepts Apple ID tokens from iOS clients and issues the same tenant session as other identity providers.
+  This contract gives one Apple identity the same TAuth user ID in native and browser sessions.
+  Requirements:
+  - Add explicit native Apple client IDs to each enabled Apple provider.
+  - Reject a native client ID that another tenant owns.
+  - Add `GET /auth/apple/native/config` and `POST /auth/apple/native`.
+  - Validate Apple signature, issuer, audience, expiration, verified email, and nonce claims.
+  - Consume the TAuth nonce after successful token validation.
+  - Enforce HTTPS, tenant resolution, allowed users, and account state.
+  - Issue the canonical TAuth session cookies and profile payload.
+  - Keep the existing Apple browser flow on its Services ID.
+  - Keep Apple provider tokens inside TAuth.
+  Deliverables:
+  - Add config domain types, route handlers, API documentation, and tests.
+  - Add a public native client procedure for Expo iOS.
+  Validation:
+  - Verify success with the configured iOS bundle ID.
+  - Verify missing config, invalid input, wrong audience, wrong issuer, expired token, invalid nonce, and nonce replay.
+  - Verify tenant isolation, allowed-user policy, account management, cookies, and profile output.
+  - Pass focused tenant, HTTP, preflight, doctor, and gateway image tests.
+  - Run aggregate CI through the release lifecycle.
+
+  Resolution 2026-08-13:
+  - Added tenant-specific native Apple client IDs and public native endpoints.
+  - Added Apple claim, audience, nonce, replay, tenant, and account tests.
+  - Added the native Expo iOS procedure and provider association guidance.
+  - Focused tenant, HTTP, preflight, doctor, and static checks passed.
+  - The local image passed the gateway candidate test.
+  - ASD-STE100 checks found no errors in the changed text.
+  - The Governor check reports existing managed content drift in `.mprlab/POLICY.md`.
+
 - [x] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
   Goal:
   TAuth can authorize remote clients for first-party MPR resources after a user
@@ -270,6 +303,20 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`,
     `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
 
+- [x] [I206] (P2) Normalize the managed policy content.
+  Goal:
+  The repository policy matches the current MPR Lab Governor contract.
+  Requirements:
+  - Update only the managed content in `.mprlab/POLICY.md`.
+  - Preserve repository-owned policy content and all application changes.
+  Validation:
+  - Run the Governor check.
+  - Run `git diff --check`.
+  Resolution 2026-08-13:
+  - The Governor normalizer updated only `.mprlab/POLICY.md`.
+  - The final Governor check and `git diff --check` passed.
+  - Changed files: `.mprlab/POLICY.md` and `.mprlab/ISSUES.md`.
+
 - [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
   MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
   Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
@@ -292,6 +339,70 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B048] (P1) Bound and cancel Apple provider requests.
+  Goal:
+  A canceled TAuth request cancels its Apple provider request.
+  The production Apple HTTP client has a finite request time limit.
+  Actual result:
+  - The native Apple route passes a Gin context to the JWKS request.
+  - The production Apple HTTP client uses `http.DefaultClient` without a request time limit.
+  Requirements:
+  - Pass the inbound HTTP request context to each Apple provider request.
+  - Use one bounded production Apple HTTP client.
+  - Keep test HTTP client injection for public contract tests.
+  Validation:
+  - Cancel a native Apple login request during its JWKS request.
+  - Verify that the downstream request receives the cancellation.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The Apple routes now pass the inbound HTTP request context to provider requests.
+  - One shared production Apple HTTP client now has a five-second request time limit.
+  - The public route test verifies JWKS request cancellation.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/apple_oauth.go`, `internal/authkit/routes.go`, and `internal/authkit/routes_http_test.go`.
+
+- [x] [B049] (P2) Preserve the first native Apple full name.
+  Goal:
+  TAuth stores the full name that Apple returns during the first native authorization.
+  Actual result:
+  - The native exchange body contains only the Apple ID token and nonce.
+  - Apple does not put the native credential full name in the ID token.
+  Requirements:
+  - Add the native Apple full name to the exchange payload.
+  - Validate and compose the name at the HTTP boundary.
+  - Store the name in the canonical user or account profile.
+  - Keep the stored name when a later Apple authorization omits it.
+  Validation:
+  - Verify the first native login stores and returns the supplied full name.
+  - Verify a later login keeps the stored name.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The native exchange now accepts all Apple credential name components in `full_name`.
+  - TAuth now stores the composed display name in standard and account profiles.
+  - Later native Apple login requests now keep the stored name.
+  - Public HTTP tests cover both profile models and Apple tokens without a `name` claim.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/routes.go`, `internal/authkit/routes_http_test.go`, and `internal/authkit/routes_integration_test.go`.
+  - Changed files: `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B050] (P2) Prevent caches from storing native Apple config.
+  Goal:
+  A shared cache cannot return one tenant's native Apple config to another tenant.
+  Actual result:
+  - The native Apple config response depends on tenant request headers.
+  - The response does not define cache behavior or header variance.
+  Requirements:
+  - Set `Cache-Control: no-store` on each successful native Apple config response.
+  Validation:
+  - Verify the public config response includes `Cache-Control: no-store`.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The successful native Apple config response now sets `Cache-Control: no-store`.
+  - The public HTTP test now verifies the response header.
+  - The API usage document now defines the cache behavior.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/routes.go`, `internal/authkit/routes_http_test.go`, `docs/usage.md`, and `CHANGELOG.md`.
 
 - [x] [B047] (P0) Start the OAuth browser test after the Go build.
   Goal:

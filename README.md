@@ -131,6 +131,8 @@ tenants:
     apple_oauth:
       enabled: true
       client_id: "com.example.web"
+      native_client_ids:
+        - "com.example.app"
       team_id: "APPLETEAMID"
       key_id: "APPLEKEYID"
       private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
@@ -170,7 +172,7 @@ Each entry defines:
 - `google_web_client_id` – optional OAuth Web client configured in Google Cloud Console for this tenant’s origins. Omit it for Apple-only, password-only, or native-Google-only tenants.
 - `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
 - `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
-- `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`, configure an Apple Services ID as `client_id`, Apple `team_id`, Sign in with Apple `key_id`, either PKCS8 ECDSA `private_key` or one-line `private_key_base64`, and an HTTPS `redirect_uri` that points at `/auth/apple/callback` on your TAuth origin.
+- `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`. Configure the Services ID, Team ID, and Key ID. Provide a PKCS8 ECDSA private key and an HTTPS callback URI. Add each native iOS App ID under `native_client_ids`. Each native ID must be unique across tenants.
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
 - `account_management` – optional first-party account lifecycle. Set `enabled: true` to use persisted opaque 128-bit base64url session subjects for password, Google, and Apple identities. `password_signup.enabled` gates public signup, `email_verification_ttl` controls signup/link verification challenges, and `password_reset_ttl` controls reset challenges. Challenge tokens are only included in JSON responses when `return_challenge_tokens: true` for tests or non-email delivery integrations.
 - `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The issuer-owned login page uses the tenant's configured Google browser provider, password provider, or both.
@@ -192,7 +194,7 @@ server:
     - "https://accounts.google.com"
   cors_allowed_origin_exceptions:
     - "https://accounts.google.com"
-  enable_tenant_header_override: false
+  enable_tenant_header_override: true
 
 tenants:
   - id: "product"
@@ -203,6 +205,8 @@ tenants:
     apple_oauth:
       enabled: true
       client_id: "com.example.product.web"
+      native_client_ids:
+        - "com.example.product"
       team_id: "APPLETEAMID"
       key_id: "APPLEKEYID"
       private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
@@ -311,7 +315,7 @@ The GitHub Pages artifact publishes the documentation site and the single helper
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.example.com`).
 
-For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control that calls `startAppleLogin()` or navigates to `getAppleLoginUrl()`. The helper builds `/auth/apple/start`, includes the configured tenant id when needed, and adds the current page as `return_to` so the callback can return to the product after cookies are minted. `startAppleLogin()` also records the non-secret restore hint before leaving the page, letting the returned app restore through `/auth/session`. TAuth validates Apple’s ID token and nonce, then mints the same cookies and profile payload used by Google and password login.
+For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control. The control calls `startAppleLogin()` or opens the `getAppleLoginUrl()` value. The helper builds `/auth/apple/start` and includes the tenant ID when necessary. It also adds the current page as `return_to`. The callback can then return to the product after TAuth sets cookies. `startAppleLogin()` records the restore hint before it leaves the page. The returned app uses `/auth/session` to restore the session. A native iOS app first reads `/auth/apple/native/config` and obtains a TAuth nonce. It then posts the Apple ID token and nonce to `/auth/apple/native`. TAuth validates the token and nonce. It then sets the same cookies and profile data as the other providers.
 
 For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. When `account_management.enabled` is also true, verified provider and password identities resolve to persisted opaque 128-bit base64url subjects. The helper also exposes signup, email verification, reset, password change, identity linking/unlinking, and disable-account methods for the full account lifecycle.
 
@@ -342,8 +346,9 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
 
 1. Create a Sign in with Apple key in Apple Developer and keep the Key ID, Team ID, and downloaded private key PEM.
 2. Create or reuse a Services ID for the web client, then add your TAuth callback URL, for example `https://auth.example.com/auth/apple/callback`.
-3. Add the matching `apple_oauth` block to the tenant config and keep `private_key` or `private_key_base64` in an environment variable or secret manager.
-4. Point your UI button at `startAppleLogin()` from `tauth.js` or the URL returned by `getAppleLoginUrl()`.
+3. Group the Services ID with each native App ID in Apple Developer. This association lets Apple return the same subject for browser and native sign-in.
+4. Add the matching `apple_oauth` block to the tenant config. Put native App IDs in `native_client_ids`. Keep `private_key` or `private_key_base64` in an environment variable or secret manager.
+5. Point your web UI button at `startAppleLogin()` from `tauth.js` or the URL returned by `getAppleLoginUrl()`.
 
 Apple redirects back to TAuth with an authorization code. TAuth posts that code to Apple’s token endpoint with an ES256 client secret, validates the returned ID token through Apple JWKS, checks the original nonce, enforces `allowed_users`, issues the standard first-party cookies, and redirects to the signed `return_to` URL when it was provided. Apple access tokens are not returned to the browser or stored.
 
@@ -359,6 +364,21 @@ TAuth also supports installed apps that cannot use the browser popup flow. Nativ
 
 This keeps TAuth authentication-only: Google authorization codes and Google refresh tokens never transit through TAuth.
 TAuth does not return bearer or refresh tokens in the response body for mobile clients. Expo apps should preserve the `Set-Cookie` headers in the native cookie jar and send cookies on calls to TAuth and downstream API hosts. For cross-host use, configure a shared `cookie_domain` such as `.example.com` and have downstream services validate `app_session` with `pkg/sessionvalidator`.
+
+### Native iOS Sign in with Apple
+
+Native iOS apps use the operating-system Apple sign-in control:
+
+Set `enable_tenant_header_override: true` because native requests do not send a browser `Origin`.
+
+1. Fetch `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
+2. Fetch a one-time nonce from `POST /auth/nonce` with the same tenant header.
+3. Pass that nonce to the native Apple authorization request.
+4. Post the token, nonce, and available `fullName` components to `/auth/apple/native`.
+5. Reuse the first-party cookies that TAuth returns.
+
+TAuth accepts only a configured `native_client_ids` audience. It also requires Apple issuer, signature, expiration, verified email, and an exact nonce match. It consumes each nonce once. The mobile app does not receive or store Apple access or refresh tokens.
+TAuth stores the native credential name during the first authorization. Later authorizations keep that stored display name when Apple omits it.
 
 ### Example `/me` payload
 
@@ -436,8 +456,13 @@ Rules enforced by the loader:
 - `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- Unlisted users are rejected during `/auth/google`, `/auth/google/native`, and `/auth/password/login` with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
-- Each tenant must configure at least one auth provider: browser Google via `google_web_client_id`, native Google via `google_native_client_id`/`google_native_clients`, Apple via `apple_oauth.enabled`, or password login via `password_auth.enabled`. `google_native_client_id` and `google_native_clients` enable `GET /auth/google/native/config` plus `POST /auth/google/native` for installed apps; every configured native client ID must be unique across tenants. `apple_oauth.enabled` gates `GET /auth/apple/start` plus `GET`/`POST /auth/apple/callback`; enabled Apple providers require a Services ID client, Team ID, Key ID, PKCS8 ECDSA private key supplied as `private_key` or `private_key_base64`, and HTTPS callback URI. Durations use Go’s `time.ParseDuration` syntax (e.g. `15m`, `720h`); zero or negative values are invalid. `cookie_domain` may be blank to issue host-only cookies (recommended locally); when provided it must be a valid registrable domain (e.g. `.example.com`).
+- Unlisted users are rejected during Google, Apple, and password login with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
+- Each tenant must configure at least one authentication provider. The provider can be browser Google, native Google, Apple, or password login.
+- `google_native_client_id` and `google_native_clients` enable the native Google endpoints. Each native Google client ID must be unique across tenants.
+- `apple_oauth.enabled` gates the browser Apple routes. `apple_oauth.native_client_ids` gates the native Apple routes. Each native Apple client ID must be unique across tenants.
+- Enabled Apple providers require a Services ID, Team ID, and Key ID. They also require a PKCS8 ECDSA private key and an HTTPS callback URI.
+- Durations use Go's `time.ParseDuration` syntax, for example `15m` or `720h`. Zero or negative values are invalid.
+- `cookie_domain` can be blank for host-only cookies. A specified value must be a valid registrable domain, for example `.example.com`.
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
 - `account_management.enabled` enables persisted opaque account IDs, password signup/verification/reset flows, authenticated password changes, provider/password linking, unlinking, and account disablement. Account IDs are generated once as 128-bit base64url values and reused through stored identity links; callers must not derive them from email, provider, subject, tenant values, or `user_id` prefixes. `password_signup.enabled` requires account management to be enabled. Challenge tokens are hashed at rest and single-use; production deployments should keep `return_challenge_tokens` false and deliver tokens through an email adapter or trusted delivery path.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_notes`).
@@ -447,7 +472,7 @@ Rules enforced by the loader:
 The `internal/tenants` package validates the entire file before returning domain objects, so downstream routing relies on trusted tenant definitions. Request routing works as follows:
 
 - The resolver matches tenants by the request’s `Origin` header. Requests without an `Origin` header (or with an unknown origin) are rejected unless you enable the header override.
-- For local development, non-browser clients, or shared origins, enable the optional header override (`enable_tenant_header_override: true`). When enabled, TAuth accepts either a tenant ID (`X-TAuth-Tenant: demo`) or a frontend origin (`X-TAuth-Tenant: http://localhost:8000`) as the override hint. Leave it disabled in production when every tenant owns unique origins.
+- Enable `enable_tenant_header_override` for non-browser clients or shared origins. TAuth then accepts a tenant ID or a frontend origin. Disable it only when every request uses one unique browser `Origin`.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
 - Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
 - Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/auth/session`, `/me`, `/auth/*`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched. Restore hints are scoped by `baseUrl` and tenant id so shared-origin tenants do not reuse each other’s bootstrap state.

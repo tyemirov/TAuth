@@ -76,6 +76,7 @@ func buildAppleOAuthConfig(settings tenants.AppleOAuth) AppleOAuthConfig {
 	return AppleOAuthConfig{
 		Enabled:               settings.Enabled(),
 		ClientID:              settings.ClientID(),
+		NativeClientIDs:       settings.NativeClientIDs(),
 		TeamID:                settings.TeamID(),
 		KeyID:                 settings.KeyID(),
 		PrivateKey:            settings.PrivateKey(),
