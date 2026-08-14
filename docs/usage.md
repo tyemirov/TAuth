@@ -426,7 +426,7 @@ Set `enable_tenant_header_override: true` because native requests do not send a 
 1. Call `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
 2. Call `POST /auth/nonce` with the same tenant header.
 3. Pass the returned nonce to the Apple authorization request.
-4. Post the Apple identity token and nonce to `/auth/apple/native`.
+4. Post the Apple identity token, nonce, and available credential full name to `/auth/apple/native`.
 5. Keep the returned TAuth cookies in the native cookie jar.
 
 An Expo iOS client uses `expo-apple-authentication` for steps 3 and 4:
@@ -455,6 +455,14 @@ const response = await fetch(`${tauthBaseUrl}/auth/apple/native`, {
   body: JSON.stringify({
     apple_id_token: credential.identityToken,
     nonce_token: nonce,
+    full_name: credential.fullName === null ? null : {
+      name_prefix: credential.fullName.namePrefix,
+      given_name: credential.fullName.givenName,
+      middle_name: credential.fullName.middleName,
+      family_name: credential.fullName.familyName,
+      name_suffix: credential.fullName.nameSuffix,
+      nickname: credential.fullName.nickname,
+    },
   }),
 });
 if (!response.ok) {
@@ -463,6 +471,7 @@ if (!response.ok) {
 ```
 
 TAuth validates the native App ID audience, Apple issuer and signature, expiration, verified email, and exact nonce. It consumes the nonce once and applies the tenant allowlist and account-management policy.
+Apple returns `credential.fullName` only during the first authorization. Send all available components so TAuth can store the display name.
 
 ### 5.5 Email/password accounts
 
@@ -672,6 +681,7 @@ Returns the native Apple metadata for the resolved tenant.
 - **Server config**: set `enable_tenant_header_override: true` for native clients.
 - **Headers**: send `X-TAuth-Tenant` when the request does not include a browser `Origin`.
 - **Response**: `200 OK`
+- **Cache control**: `Cache-Control: no-store`
 
   ```json
   {
@@ -696,7 +706,15 @@ Verifies an Apple ID token from the native iOS sign-in sheet and mints the stand
   ```json
   {
     "apple_id_token": "<identity_token_from_apple>",
-    "nonce_token": "<nonce_from_/auth/nonce>"
+    "nonce_token": "<nonce_from_/auth/nonce>",
+    "full_name": {
+      "name_prefix": "Dr.",
+      "given_name": "Example",
+      "middle_name": "Apple",
+      "family_name": "User",
+      "name_suffix": "Jr.",
+      "nickname": "Example"
+    }
   }
   ```
 
@@ -707,8 +725,10 @@ Verifies an Apple ID token from the native iOS sign-in sheet and mints the stand
   - the token must contain a verified email and subject
   - the ID token `nonce` claim must exactly equal `nonce_token`
   - the nonce must be valid, tenant-scoped, and unused
+  - the optional `full_name` object can contain the six Apple credential name components
 
 - **Response**: `200 OK` with the same profile payload and cookies as other login endpoints
+- **Name persistence**: TAuth stores the first supplied full name and keeps it when a later authorization omits `full_name`.
 - **Errors**:
   - `404` with `error: "native_apple_login_not_configured"` when the tenant has no native Apple clients
   - `400` with `error: "invalid_json"` or `error: "missing_nonce"` for malformed input
