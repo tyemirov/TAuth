@@ -143,8 +143,41 @@ type googleLoginInbound struct {
 }
 
 type nativeAppleLoginInbound struct {
-	AppleIDToken string `json:"apple_id_token"`
-	NonceToken   string `json:"nonce_token"`
+	AppleIDToken string                      `json:"apple_id_token"`
+	NonceToken   string                      `json:"nonce_token"`
+	FullName     *nativeAppleFullNameInbound `json:"full_name"`
+}
+
+type nativeAppleFullNameInbound struct {
+	NamePrefix string `json:"name_prefix"`
+	GivenName  string `json:"given_name"`
+	MiddleName string `json:"middle_name"`
+	FamilyName string `json:"family_name"`
+	NameSuffix string `json:"name_suffix"`
+	Nickname   string `json:"nickname"`
+}
+
+func (fullName *nativeAppleFullNameInbound) displayName() string {
+	if fullName == nil {
+		return ""
+	}
+	components := []string{
+		strings.TrimSpace(fullName.NamePrefix),
+		strings.TrimSpace(fullName.GivenName),
+		strings.TrimSpace(fullName.MiddleName),
+		strings.TrimSpace(fullName.FamilyName),
+		strings.TrimSpace(fullName.NameSuffix),
+	}
+	populatedComponents := components[:0]
+	for _, component := range components {
+		if component != "" {
+			populatedComponents = append(populatedComponents, component)
+		}
+	}
+	if len(populatedComponents) != 0 {
+		return strings.Join(populatedComponents, " ")
+	}
+	return strings.TrimSpace(fullName.Nickname)
 }
 
 type passwordLoginInbound struct {
@@ -455,6 +488,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeAppleLoginNotConfigured})
 			return
 		}
+		contextGin.Header("Cache-Control", "no-store")
 		contextGin.JSON(http.StatusOK, nativeAppleConfigResponse{
 			ClientID:        clientIDs[0],
 			ClientIDs:       clientIDs,
@@ -540,14 +574,15 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
 			return
 		}
-		tokenResponse, tokenErr := exchangeAppleAuthorizationCode(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, clock, code)
+		requestContext := contextGin.Request.Context()
+		tokenResponse, tokenErr := exchangeAppleAuthorizationCode(requestContext, resolveAppleOAuthHTTPClient(), config.AppleOAuth, clock, code)
 		if tokenErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.token", tokenErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
 			return
 		}
-		identity, identityErr := validateAppleIDToken(contextGin, resolveAppleOAuthHTTPClient(), config.AppleOAuth, tokenResponse.IDToken)
+		identity, identityErr := validateAppleIDToken(requestContext, resolveAppleOAuthHTTPClient(), config.AppleOAuth, tokenResponse.IDToken)
 		if identityErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.id_token", identityErr)
@@ -663,7 +698,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 		identity, identityErr := validateAppleIDTokenForAudiences(
-			contextGin,
+			contextGin.Request.Context(),
 			resolveAppleOAuthHTTPClient(),
 			config.AppleOAuth,
 			inbound.AppleIDToken,
@@ -699,6 +734,18 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			logAuthWarning("auth.login.apple.native.user_not_allowed", nil)
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
+		}
+		identity.DisplayName = inbound.FullName.displayName()
+		if !config.AccountManagementEnabled && strings.TrimSpace(identity.DisplayName) == "" {
+			applicationUserID := accountProviderApple + ":" + identity.Subject
+			_, storedDisplayName, _, _, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
+			if profileErr != nil && !errors.Is(profileErr, web.ErrUserNotFound) {
+				recordMetric(metricAuthLoginFailure)
+				logAuthError("auth.login.apple.native.profile", profileErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			identity.DisplayName = storedDisplayName
 		}
 		if config.AccountManagementEnabled {
 			if accountStore == nil {

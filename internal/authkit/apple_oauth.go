@@ -28,10 +28,12 @@ const (
 	appleStateNonceClaim        = "nonce"
 	appleStateReturnToClaim     = "return_to"
 	appleDefaultClientSecretTTL = 5 * time.Minute
+	appleOAuthRequestTimeout    = 5 * time.Second
 )
 
 var configuredAppleOAuthHTTPClient *http.Client
 var configuredAppleOAuthHTTPClientMutex sync.RWMutex
+var defaultAppleOAuthHTTPClient = &http.Client{Timeout: appleOAuthRequestTimeout}
 
 var (
 	errAppleOAuthInvalidState = errors.New("auth.apple.invalid_state")
@@ -85,7 +87,7 @@ func resolveAppleOAuthHTTPClient() *http.Client {
 	if client != nil {
 		return client
 	}
-	return http.DefaultClient
+	return defaultAppleOAuthHTTPClient
 }
 
 func buildAppleAuthorizationRedirect(config AppleOAuthConfig, state string, nonce string) (string, error) {

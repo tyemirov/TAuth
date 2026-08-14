@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/api/idtoken"
@@ -126,11 +127,11 @@ func (store *testUserStore) UpsertAccountUser(ctx context.Context, tenantID stri
 func (store *testUserStore) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
 	tenantProfiles, exists := store.profiles[tenantID]
 	if !exists {
-		return "", "", "", nil, errors.New("user_not_found")
+		return "", "", "", nil, web.ErrUserNotFound
 	}
 	profile, ok := tenantProfiles[applicationUserID]
 	if !ok {
-		return "", "", "", nil, errors.New("user_not_found")
+		return "", "", "", nil, web.ErrUserNotFound
 	}
 	return profile.email, profile.display, profile.avatar, profile.roles, nil
 }

@@ -36,6 +36,20 @@ type inProcessTransport struct {
 	handler http.Handler
 }
 
+type cancellationObservingTransport struct {
+	contexts chan context.Context
+}
+
+func (transport *cancellationObservingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.contexts <- request.Context()
+	select {
+	case <-request.Context().Done():
+		return nil, request.Context().Err()
+	case <-time.After(time.Second):
+		return nil, errors.New("apple_transport.cancellation_timeout")
+	}
+}
+
 func (transport *inProcessTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if transport.handler == nil {
 		return nil, errors.New("in_process_transport.handler_missing")
@@ -4336,8 +4350,12 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 		NativeClientIDs: []string{"com.example.ios"},
 		JWKSURL:         appleServer.URL + "/auth/keys",
 	}
+	userStore, userStoreErr := NewDatabaseUserStore(context.Background(), sqliteDatabaseURL(testingHandle))
+	if userStoreErr != nil {
+		testingHandle.Fatalf("create native Apple user store: %v", userStoreErr)
+	}
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil)
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4349,6 +4367,9 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	defer configResponse.Body.Close()
 	if configResponse.StatusCode != http.StatusOK {
 		testingHandle.Fatalf("expected native Apple config status 200, got %d", configResponse.StatusCode)
+	}
+	if cacheControl := configResponse.Header.Get("Cache-Control"); cacheControl != "no-store" {
+		testingHandle.Fatalf("expected native Apple config Cache-Control no-store, got %q", cacheControl)
 	}
 	var configPayload struct {
 		ClientID        string   `json:"client_id"`
@@ -4368,10 +4389,19 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	}
 
 	nonce := issueNonceViaClient(testingHandle, client, server.URL)
-	idToken := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.ios", "native-apple-subject", "native@example.com", "Native Apple User", nonce)
-	loginPayload, marshalErr := json.Marshal(map[string]string{
+	claims := mockAppleIDTokenClaims("com.example.ios", "native-apple-subject", "native@example.com", "", nonce)
+	delete(claims, "name")
+	idToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, claims)
+	loginPayload, marshalErr := json.Marshal(map[string]interface{}{
 		"apple_id_token": idToken,
 		"nonce_token":    nonce,
+		"full_name": map[string]string{
+			"name_prefix": "Dr.",
+			"given_name":  "Native",
+			"middle_name": "Apple",
+			"family_name": "User",
+			"name_suffix": "Jr.",
+		},
 	})
 	if marshalErr != nil {
 		testingHandle.Fatalf("marshal native Apple login payload: %v", marshalErr)
@@ -4393,7 +4423,7 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	if decodeErr := json.NewDecoder(loginResponse.Body).Decode(&profile); decodeErr != nil {
 		testingHandle.Fatalf("decode native Apple profile: %v", decodeErr)
 	}
-	if profile["user_id"] != "apple:native-apple-subject" || profile["user_email"] != "native@example.com" {
+	if profile["user_id"] != "apple:native-apple-subject" || profile["user_email"] != "native@example.com" || profile["display"] != "Dr. Native Apple User Jr." {
 		testingHandle.Fatalf("unexpected native Apple profile: %#v", profile)
 	}
 	cookies := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
@@ -4420,6 +4450,119 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	}
 	if replayPayload["error"] != "invalid_nonce" {
 		testingHandle.Fatalf("expected invalid_nonce replay error, got %#v", replayPayload)
+	}
+
+	secondNonce := issueNonceViaClient(testingHandle, client, server.URL)
+	secondClaims := mockAppleIDTokenClaims("com.example.ios", "native-apple-subject", "native@example.com", "", secondNonce)
+	delete(secondClaims, "name")
+	secondIDToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, secondClaims)
+	secondPayload, secondMarshalErr := json.Marshal(map[string]string{
+		"apple_id_token": secondIDToken,
+		"nonce_token":    secondNonce,
+	})
+	if secondMarshalErr != nil {
+		testingHandle.Fatalf("marshal later native Apple login payload: %v", secondMarshalErr)
+	}
+	secondRequest, secondRequestErr := http.NewRequest(http.MethodPost, server.URL+"/auth/apple/native", bytes.NewReader(secondPayload))
+	if secondRequestErr != nil {
+		testingHandle.Fatalf("build later native Apple login request: %v", secondRequestErr)
+	}
+	secondRequest.Header.Set("Content-Type", "application/json")
+	secondResponse, secondLoginErr := client.Do(secondRequest)
+	if secondLoginErr != nil {
+		testingHandle.Fatalf("later native Apple login request failed: %v", secondLoginErr)
+	}
+	defer secondResponse.Body.Close()
+	if secondResponse.StatusCode != http.StatusOK {
+		testingHandle.Fatalf("expected later native Apple login status 200, got %d", secondResponse.StatusCode)
+	}
+	var secondProfile map[string]interface{}
+	if decodeErr := json.NewDecoder(secondResponse.Body).Decode(&secondProfile); decodeErr != nil {
+		testingHandle.Fatalf("decode later native Apple profile: %v", decodeErr)
+	}
+	if secondProfile["display"] != "Dr. Native Apple User Jr." {
+		testingHandle.Fatalf("expected later native Apple login to keep the full name, got %#v", secondProfile)
+	}
+	_, storedDisplayName, _, _, storedProfileErr := userStore.GetUserProfile(context.Background(), config.TenantID, "apple:native-apple-subject")
+	if storedProfileErr != nil || storedDisplayName != "Dr. Native Apple User Jr." {
+		testingHandle.Fatalf("expected persisted native Apple full name, display=%q err=%v", storedDisplayName, storedProfileErr)
+	}
+}
+
+func TestHTTPNativeAppleLoginCancelsJWKSRequest(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ProvideAppleOAuthHTTPClient(nil)
+	if timeout := resolveAppleOAuthHTTPClient().Timeout; timeout != appleOAuthRequestTimeout {
+		testingHandle.Fatalf("expected production Apple request timeout %s, got %s", appleOAuthRequestTimeout, timeout)
+	}
+
+	observedContexts := make(chan context.Context, 1)
+	ProvideAppleOAuthHTTPClient(&http.Client{Transport: &cancellationObservingTransport{contexts: observedContexts}})
+	defer ProvideAppleOAuthHTTPClient(nil)
+
+	config := newTestServerConfig()
+	config.AppleOAuth = AppleOAuthConfig{
+		Enabled:         true,
+		ClientID:        "com.example.web",
+		NativeClientIDs: []string{"com.example.ios"},
+		JWKSURL:         "https://appleid.example.test/auth/keys",
+	}
+	router := gin.New()
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	server := newInProcessServer(router, true)
+	defer server.Close()
+
+	nonce := issueNonceViaClient(testingHandle, server.Client(), server.URL)
+	payload, marshalErr := json.Marshal(map[string]string{
+		"apple_id_token": "unverified-token",
+		"nonce_token":    nonce,
+	})
+	if marshalErr != nil {
+		testingHandle.Fatalf("marshal native Apple payload: %v", marshalErr)
+	}
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	request, requestErr := http.NewRequestWithContext(requestContext, http.MethodPost, server.URL+"/auth/apple/native", bytes.NewReader(payload))
+	if requestErr != nil {
+		testingHandle.Fatalf("build native Apple request: %v", requestErr)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	type requestResult struct {
+		response *http.Response
+		err      error
+	}
+	requestResults := make(chan requestResult, 1)
+	go func() {
+		response, requestErr := server.Client().Do(request)
+		requestResults <- requestResult{response: response, err: requestErr}
+	}()
+
+	var appleRequestContext context.Context
+	select {
+	case appleRequestContext = <-observedContexts:
+	case <-time.After(time.Second):
+		cancelRequest()
+		testingHandle.Fatal("Apple JWKS request did not start")
+	}
+	if appleRequestContext != requestContext {
+		cancelRequest()
+		testingHandle.Fatal("Apple JWKS request did not receive the inbound request context")
+	}
+	cancelRequest()
+	select {
+	case <-appleRequestContext.Done():
+	case <-time.After(time.Second):
+		testingHandle.Fatal("Apple JWKS request did not receive cancellation")
+	}
+
+	select {
+	case result := <-requestResults:
+		if result.response != nil {
+			result.response.Body.Close()
+		}
+	case <-time.After(time.Second):
+		testingHandle.Fatal("native Apple route did not stop after cancellation")
 	}
 }
 
@@ -4733,14 +4876,24 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	defer server.Close()
 	client := server.Client()
 
-	login := func() map[string]interface{} {
+	login := func(includeFullName bool) map[string]interface{} {
 		testingHandle.Helper()
 		nonce := issueNonceViaClient(testingHandle, client, server.URL)
-		idToken := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.ios", "account-apple-subject", "account@example.com", "Account Apple User", nonce)
-		loginPayload, marshalErr := json.Marshal(map[string]string{
+		claims := mockAppleIDTokenClaims("com.example.ios", "account-apple-subject", "account@example.com", "", nonce)
+		delete(claims, "name")
+		idToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, claims)
+		payload := map[string]interface{}{
 			"apple_id_token": idToken,
 			"nonce_token":    nonce,
-		})
+		}
+		if includeFullName {
+			payload["full_name"] = map[string]string{
+				"given_name":  "Account",
+				"middle_name": "Apple",
+				"family_name": "User",
+			}
+		}
+		loginPayload, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
 			testingHandle.Fatalf("marshal native Apple account payload: %v", marshalErr)
 		}
@@ -4764,8 +4917,8 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 		return profile
 	}
 
-	firstProfile := login()
-	secondProfile := login()
+	firstProfile := login(true)
+	secondProfile := login(false)
 	firstUserID, firstUserIDOK := firstProfile["user_id"].(string)
 	secondUserID, secondUserIDOK := secondProfile["user_id"].(string)
 	if !firstUserIDOK || !secondUserIDOK || firstUserID == "" || firstUserID != secondUserID {
@@ -4773,6 +4926,9 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	}
 	if strings.HasPrefix(firstUserID, "apple:") {
 		testingHandle.Fatalf("expected opaque account id instead of provider id, got %q", firstUserID)
+	}
+	if firstProfile["display"] != "Account Apple User" || secondProfile["display"] != "Account Apple User" {
+		testingHandle.Fatalf("expected account-managed Apple logins to keep the full name, got %#v and %#v", firstProfile, secondProfile)
 	}
 	accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(context.Background(), config.TenantID, AccountProviderIdentity{
 		Provider:  accountProviderApple,
@@ -4784,6 +4940,9 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	}
 	if accountProfile.AccountID != firstUserID {
 		testingHandle.Fatalf("expected Apple identity to resolve account %q, got %#v", firstUserID, accountProfile)
+	}
+	if accountProfile.DisplayName != "Account Apple User" {
+		testingHandle.Fatalf("expected persisted Apple account full name, got %#v", accountProfile)
 	}
 	if _, exists := userStore.profiles[config.TenantID][firstUserID]; !exists {
 		testingHandle.Fatalf("expected account-managed user profile %q to be persisted", firstUserID)
