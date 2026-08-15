@@ -185,6 +185,10 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Resolved 2026-08-09: the implementation passed all development contract and
   acceptance gates. mprlab-gateway F001 and LLM Proxy F021 track the dependent
   feature work.
+  Deployment handoff 2026-08-15: the schema-v4 manifest now owns the typed
+  `tauth_authorization_server`, production issuer paths, metadata limits, and
+  one private-values signing-key reference from the validated gateway F001
+  contract.
 
 - [x] [TA-200] Add Apple Sign in as an additional identity provider while keeping TAuth session cookies/JWT model.
   Add a per-tenant Apple provider block (client_id, team_id, key_id, private_key, redirect_uri, optional scopes, and optional mockable endpoint overrides). Implement `GET /auth/apple/start` to issue state + nonce and redirect to Apple, plus `GET`/`POST /auth/apple/callback` to validate state, exchange the authorization code with Apple using a client-secret JWT, verify the returned Apple ID token against Apple's JWKS, enforce nonce/email/allowed_users, and mint the same `app_session` + `app_refresh` cookies/profile JSON. Apple callback tenant resolution must use the signed state payload because provider callbacks may omit `Origin`. Add account-management support so Apple identities resolve/link as provider `apple`, add `tauth.js` helpers, document configuration and errors, and cover the flow with black-box tests using a mock Apple server.
@@ -339,6 +343,53 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B051] (P1) Allow OAuth provider-first deployment.
+  Goal:
+  TAuth accepts a configured authorization server before an active tenant enables OAuth.
+  Actual result:
+  - The doctor, preflight, and server reject a configured authorization server without an OAuth tenant.
+  - An OAuth tenant deployment also fails until the authorization server is active.
+  Requirements:
+  - Accept the authorization server when no tenant enables OAuth.
+  - Reject an OAuth tenant when the authorization server is absent.
+  - Keep one current configuration contract without a fallback or legacy mode.
+  Validation:
+  - Verify the real doctor command with the authorization server and `tenants: []`.
+  - Verify the real server starts and serves OAuth metadata in this state.
+  - Verify the preflight report accepts this state.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - A configured authorization server now starts before a tenant enables OAuth.
+  - An OAuth tenant still requires the configured authorization server.
+  - The preflight report accepts the provider-first state.
+  - The real doctor, server, health, and OAuth metadata checks passed.
+  - `make ci` passed.
+  - Changed files: `internal/appconfig/oauth_activation.go`, `internal/doctor/doctor.go`,
+    `internal/preflight/report.go`, `internal/preflight/report_test.go`, and `cmd/server/main.go`.
+  - Changed files: `tests/oauth-provider-bootstrap-runtime.sh` and `Makefile`.
+
+- [x] [B052] (P1) Preserve Docker build context exclusions.
+  Goal:
+  Each Docker build context excludes private and unnecessary repository data.
+  Actual result:
+  - Each Dockerfile-specific ignore file replaces the complete root ignore contract.
+  - The root and Pages contexts can include private operator data and unrelated repository files.
+  Requirements:
+  - Use the complete root ignore contract for both Dockerfiles.
+  - Keep private deployment values, Git data, tests, tools, and CI files outside each context.
+  Validation:
+  - Verify no Dockerfile-specific ignore file replaces the root contract.
+  - Verify the root ignore file contains each required exclusion.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed both Dockerfile-specific ignore files.
+  - The root contract now excludes the private deployment input and `node_modules`.
+  - The repository test requires each private and unnecessary data exclusion.
+  - The application image and Pages target builds passed with the root contract.
+  - `make ci` passed.
+  - Changed files: `.dockerignore`, `Dockerfile.dockerignore`,
+    `docker/pages/Dockerfile.dockerignore`, and `tests/repository_neutrality_contract_test.go`.
 
 - [x] [B048] (P1) Bound and cancel Apple provider requests.
   Goal:

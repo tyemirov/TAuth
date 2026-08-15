@@ -191,7 +191,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if loadErr != nil {
 		return loadErr
 	}
-	if oauthConfigErr := validateOAuthConfiguration(appConfig.OAuthServer(), tenantConfig); oauthConfigErr != nil {
+	if oauthConfigErr := appconfig.ValidateOAuthActivation(appConfig.OAuthServer(), tenantConfig); oauthConfigErr != nil {
 		return oauthConfigErr
 	}
 	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
@@ -342,22 +342,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 		return fmt.Errorf("listen error: %w", err)
 	}
 	shutdownServer()
-	return nil
-}
-
-func validateOAuthConfiguration(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config) error {
-	enabledTenants := 0
-	for _, tenant := range tenantConfig.Tenants() {
-		if tenant.OAuthAuthorization().Enabled() {
-			enabledTenants++
-		}
-	}
-	if serverConfig.Enabled() && enabledTenants == 0 {
-		return fmt.Errorf("config.oauth_missing_tenant: enable OAuth for at least one tenant")
-	}
-	if !serverConfig.Enabled() && enabledTenants != 0 {
-		return fmt.Errorf("config.oauth_server_required: enabled_tenants=%d", enabledTenants)
-	}
 	return nil
 }
 

@@ -5,6 +5,10 @@ mprlab_resources:
   release:
     scheme: semver
   resources:
+    - kind: private_values
+      id: oauth-private
+      bindings:
+        oauth-signing-key: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
     - kind: compose_project
       id: runtime
       retired_services:
@@ -91,6 +95,31 @@ mprlab_resources:
         protocol: http
         path: /health
         expected_status: 200
+    - kind: tauth_authorization_server
+      id: oauth-server
+      capability: tauth.oauth
+      version: 1
+      server:
+        issuer: https://tauth-api.mprlab.com
+        authorization_endpoint: https://tauth-api.mprlab.com/oauth/authorize
+        token_endpoint: https://tauth-api.mprlab.com/oauth/token
+        revocation_endpoint: https://tauth-api.mprlab.com/oauth/revoke
+        jwks_uri: https://tauth-api.mprlab.com/oauth/jwks
+        login_endpoint: https://tauth-api.mprlab.com/oauth/login
+        consent_endpoint: https://tauth-api.mprlab.com/oauth/consent
+        authorization_request_ttl: 5m
+        authorization_code_ttl: 1m
+        active_signing_key_id: oauth-2026-08
+        signing_keys:
+          - id: oauth-2026-08
+            private_key:
+              resource: oauth-private
+              output: oauth-signing-key
+        client_metadata:
+          request_timeout: 3s
+          maximum_bytes: 5120
+          minimum_cache_ttl: 1m
+          maximum_cache_ttl: 1h
     - kind: caddy_route
       id: public-api
       hostname: tauth-api.mprlab.com

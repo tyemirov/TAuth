@@ -95,9 +95,11 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 		"compose_project/runtime",
 		"github_pages/browser-helper",
 		"health_check/public-health",
+		"private_values/oauth-private",
 		"runtime_capability/http",
 		"runtime_capability/oauth",
 		"runtime_capability/tenants",
+		"tauth_authorization_server/oauth-server",
 	}
 	if !slices.Equal(resourceIdentities, expectedResourceIdentities) {
 		t.Fatalf("application resource identities do not match the TAuth lifecycle: %#v", resourceIdentities)
@@ -267,6 +269,41 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 	}
 	if !strings.HasSuffix(string(dockerIgnoreDocument), "\n!docs/\n!docs/**\n") {
 		t.Fatalf("Docker ignore contract does not expose the complete Pages docs source")
+	}
+}
+
+func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	for _, relativePath := range []string{
+		"Dockerfile.dockerignore",
+		"docker/pages/Dockerfile.dockerignore",
+	} {
+		_, statErr := os.Stat(filepath.Join(repositoryRoot, filepath.FromSlash(relativePath)))
+		if !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("Dockerfile-specific ignore file replaces the root contract: %s", relativePath)
+		}
+	}
+
+	dockerIgnoreBytes, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))
+	if readErr != nil {
+		t.Fatalf("read Docker ignore contract: %v", readErr)
+	}
+	exclusions := make(map[string]struct{})
+	for _, line := range strings.Split(string(dockerIgnoreBytes), "\n") {
+		exclusions[line] = struct{}{}
+	}
+	for _, required := range []string{
+		".git",
+		".env*",
+		"tests/",
+		"tools/",
+		".github/",
+		"node_modules/",
+		".mprlab/deploy/.env",
+	} {
+		if _, exists := exclusions[required]; !exists {
+			t.Errorf("Docker ignore contract lacks required exclusion %q", required)
+		}
 	}
 }
 

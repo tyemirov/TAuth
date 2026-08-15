@@ -5,9 +5,9 @@ STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
 
-.PHONY: ci format lint test-go test-js test-empty-tenant-bootstrap-runtime
+.PHONY: ci format lint test-go test-js test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js test-empty-tenant-bootstrap-runtime
+ci: format lint test-go test-js test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
@@ -27,6 +27,9 @@ test-js:
 
 test-empty-tenant-bootstrap-runtime:
 	bash tests/empty-tenant-bootstrap-runtime.sh
+
+test-oauth-provider-bootstrap-runtime:
+	bash tests/oauth-provider-bootstrap-runtime.sh
 
 .PHONY: release publish deploy
 
