@@ -4,6 +4,7 @@
 .idea
 .vscode
 .env*
+.mprlab/deploy/.env
 data/
 tests/
 tools/
