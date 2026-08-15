@@ -10,9 +10,11 @@ tools/
 docs/
 .cache/
 .github/
+node_modules/
 *.db
 *.sqlite
 Makefile
 issues.md/
+.mprlab/deploy/.env
 !docs/
 !docs/**
