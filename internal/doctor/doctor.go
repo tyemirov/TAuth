@@ -174,15 +174,9 @@ func validateConfig(ctx context.Context, configPath string, checkDatabase bool) 
 }
 
 func validateOAuthConfig(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config, result *DiagnosticResult) {
-	enabledTenants := 0
-	for _, tenant := range tenantConfig.Tenants() {
-		if tenant.OAuthAuthorization().Enabled() {
-			enabledTenants++
-		}
-	}
-	if serverConfig.Enabled() != (enabledTenants != 0) {
+	if activationErr := appconfig.ValidateOAuthActivation(serverConfig, tenantConfig); activationErr != nil {
 		result.Valid = false
-		result.Errors = append(result.Errors, "oauth: issuer and tenant OAuth enablement must be configured together")
+		result.Errors = append(result.Errors, fmt.Sprintf("oauth: %v", activationErr))
 		return
 	}
 	if !serverConfig.Enabled() {

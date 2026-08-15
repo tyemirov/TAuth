@@ -205,14 +205,8 @@ func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error
 }
 
 func validateOAuth(serverConfig appconfig.OAuthServerConfig, tenantConfig tenants.Config) error {
-	enabledTenants := 0
-	for _, tenant := range tenantConfig.Tenants() {
-		if tenant.OAuthAuthorization().Enabled() {
-			enabledTenants++
-		}
-	}
-	if serverConfig.Enabled() != (enabledTenants != 0) {
-		return fmt.Errorf("issuer and tenant OAuth enablement must be configured together")
+	if activationErr := appconfig.ValidateOAuthActivation(serverConfig, tenantConfig); activationErr != nil {
+		return activationErr
 	}
 	if !serverConfig.Enabled() {
 		return nil

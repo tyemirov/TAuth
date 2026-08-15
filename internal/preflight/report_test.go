@@ -241,15 +241,7 @@ func TestBuildFullReportIncludesOrigins(testingHandle *testing.T) {
 }
 
 func TestBuildReportIncludesOAuthPolicyWithoutPrivateKey(t *testing.T) {
-	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if keyErr != nil {
-		t.Fatalf("generate OAuth key: %v", keyErr)
-	}
-	keyDER, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
-	if marshalErr != nil {
-		t.Fatalf("marshal OAuth key: %v", marshalErr)
-	}
-	keyBase64 := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	keyBase64 := testOAuthPrivateKeyBase64(t)
 	config := fmt.Sprintf(`server:
   listen_addr: ":8080"
   database_url: ""
@@ -324,6 +316,59 @@ tenants:
 	if oauth["enabled"] != true || oauth["active_signing_key_id"] != "active" || len(oauth["signing_keys"].([]any)) != 1 {
 		t.Fatalf("unexpected OAuth preflight payload: %#v", oauth)
 	}
+}
+
+func TestBuildReportAllowsOAuthServerBeforeTenantOAuth(t *testing.T) {
+	config := fmt.Sprintf(`server:
+  listen_addr: ":8080"
+  database_url: ""
+oauth:
+  enabled: true
+  issuer: "https://auth.example.com"
+  authorization_endpoint: "https://auth.example.com/oauth/authorize"
+  token_endpoint: "https://auth.example.com/oauth/token"
+  revocation_endpoint: "https://auth.example.com/oauth/revoke"
+  jwks_uri: "https://auth.example.com/oauth/jwks"
+  login_endpoint: "https://auth.example.com/oauth/login"
+  consent_endpoint: "https://auth.example.com/oauth/consent"
+  authorization_request_ttl: "5m"
+  authorization_code_ttl: "1m"
+  active_signing_key_id: "active"
+  signing_keys:
+    - id: "active"
+      private_key_base64: %q
+  client_metadata:
+    request_timeout: "2s"
+    maximum_bytes: 5120
+    minimum_cache_ttl: "1m"
+    maximum_cache_ttl: "1h"
+tenants:
+  - id: "existing"
+    tenant_origins: ["https://existing.example.com"]
+    google_web_client_id: "existing.apps.googleusercontent.com"
+    jwt_signing_key: "session-signing-key"
+    session_cookie_name: "session_existing"
+    refresh_cookie_name: "refresh_existing"
+    session_ttl: "15m"
+    refresh_ttl: "24h"
+    nonce_ttl: "5m"
+`, testOAuthPrivateKeyBase64(t))
+	if _, reportErr := BuildRedactedReport(writeConfigFile(t, config)); reportErr != nil {
+		t.Fatalf("build provider-first OAuth report: %v", reportErr)
+	}
+}
+
+func testOAuthPrivateKeyBase64(t *testing.T) string {
+	t.Helper()
+	privateKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		t.Fatalf("generate OAuth key: %v", keyErr)
+	}
+	keyDER, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
+	if marshalErr != nil {
+		t.Fatalf("marshal OAuth key: %v", marshalErr)
+	}
+	return base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
 }
 
 func TestBuildReportRejectsInvalidDatabaseURL(testingHandle *testing.T) {
