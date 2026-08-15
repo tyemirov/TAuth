@@ -272,6 +272,41 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 	}
 }
 
+func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	for _, relativePath := range []string{
+		"Dockerfile.dockerignore",
+		"docker/pages/Dockerfile.dockerignore",
+	} {
+		_, statErr := os.Stat(filepath.Join(repositoryRoot, filepath.FromSlash(relativePath)))
+		if !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("Dockerfile-specific ignore file replaces the root contract: %s", relativePath)
+		}
+	}
+
+	dockerIgnoreBytes, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))
+	if readErr != nil {
+		t.Fatalf("read Docker ignore contract: %v", readErr)
+	}
+	exclusions := make(map[string]struct{})
+	for _, line := range strings.Split(string(dockerIgnoreBytes), "\n") {
+		exclusions[line] = struct{}{}
+	}
+	for _, required := range []string{
+		".git",
+		".env*",
+		"tests/",
+		"tools/",
+		".github/",
+		"node_modules/",
+		".mprlab/deploy/.env",
+	} {
+		if _, exists := exclusions[required]; !exists {
+			t.Errorf("Docker ignore contract lacks required exclusion %q", required)
+		}
+	}
+}
+
 func TestRepositoryDelegatesOnlyThreeProductionLifecycleCommands(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	makefileDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, "Makefile"))
