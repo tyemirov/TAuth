@@ -95,9 +95,11 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 		"compose_project/runtime",
 		"github_pages/browser-helper",
 		"health_check/public-health",
+		"private_values/oauth-private",
 		"runtime_capability/http",
 		"runtime_capability/oauth",
 		"runtime_capability/tenants",
+		"tauth_authorization_server/oauth-server",
 	}
 	if !slices.Equal(resourceIdentities, expectedResourceIdentities) {
 		t.Fatalf("application resource identities do not match the TAuth lifecycle: %#v", resourceIdentities)
