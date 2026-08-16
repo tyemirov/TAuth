@@ -10,6 +10,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Removed the application-owned Pages marker so the gateway can generate its release metadata.
 - Prevented shared caches from storing tenant-specific native Apple config responses.
 - Stored native Apple full-name components from the first authorization and kept the display name on later authorizations.
 - Bounded Apple provider requests and propagated inbound request cancellation to token and JWKS requests.
