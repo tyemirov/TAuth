@@ -7,7 +7,6 @@
 data/
 tests/
 tools/
-docs/
 .cache/
 .github/
 node_modules/
@@ -16,5 +15,3 @@ node_modules/
 Makefile
 issues.md/
 .mprlab/deploy/.env
-!docs/
-!docs/**
