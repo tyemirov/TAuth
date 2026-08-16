@@ -243,7 +243,6 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 		"",
 		"COPY docs/ /",
 		"COPY web/tauth.js /tauth.js",
-		"COPY web/.nojekyll /.nojekyll",
 		"",
 		"FROM scratch AS pages",
 		"",
@@ -255,12 +254,8 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 	}
 
 	noJekyllPath := filepath.Join(repositoryRoot, "web", ".nojekyll")
-	noJekyllInfo, statErr := os.Stat(noJekyllPath)
-	if statErr != nil {
-		t.Fatalf("inspect Pages .nojekyll marker: %v", statErr)
-	}
-	if !noJekyllInfo.Mode().IsRegular() || noJekyllInfo.Size() != 0 {
-		t.Fatalf("Pages .nojekyll marker must be an empty regular file: mode=%s size=%d", noJekyllInfo.Mode(), noJekyllInfo.Size())
+	if _, statErr := os.Stat(noJekyllPath); !os.IsNotExist(statErr) {
+		t.Fatalf("TAuth must not contain the gateway-owned Pages .nojekyll marker: %v", statErr)
 	}
 
 	dockerIgnoreDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))

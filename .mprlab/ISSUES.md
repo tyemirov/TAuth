@@ -344,6 +344,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B053] (P0) Remove the application-owned Pages marker.
+  Goal:
+  The gateway owns each GitHub Pages metadata file in the release artifact.
+  Actual result:
+  - The TAuth Pages image contains `.nojekyll`.
+  - The current gateway rejects this reserved path during release assembly.
+  - A new TAuth release cannot complete.
+  Requirements:
+  - Remove `.nojekyll` from the TAuth Pages image source.
+  - Remove the obsolete tracked marker file.
+  - Keep gateway marker generation as the only active contract.
+  Validation:
+  - Verify that the repository rejects an application-owned `.nojekyll`.
+  - Build the Pages image.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed `.nojekyll` from the Pages image and the TAuth repository.
+  - The repository contract test now rejects the gateway-owned marker.
+  - The Pages target image build passed.
+  - `make test-go` and `make ci` passed.
+  - Changed files: `docker/pages/Dockerfile`, `web/.nojekyll`,
+    `tests/repository_neutrality_contract_test.go`, and `CHANGELOG.md`.
+
 - [x] [B051] (P1) Allow OAuth provider-first deployment.
   Goal:
   TAuth accepts a configured authorization server before an active tenant enables OAuth.
