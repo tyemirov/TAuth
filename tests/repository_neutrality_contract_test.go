@@ -257,14 +257,6 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 	if _, statErr := os.Stat(noJekyllPath); !os.IsNotExist(statErr) {
 		t.Fatalf("TAuth must not contain the gateway-owned Pages .nojekyll marker: %v", statErr)
 	}
-
-	dockerIgnoreDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, ".dockerignore"))
-	if readErr != nil {
-		t.Fatalf("read Docker ignore contract: %v", readErr)
-	}
-	if !strings.HasSuffix(string(dockerIgnoreDocument), "\n!docs/\n!docs/**\n") {
-		t.Fatalf("Docker ignore contract does not expose the complete Pages docs source")
-	}
 }
 
 func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
@@ -285,7 +277,13 @@ func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
 	}
 	exclusions := make(map[string]struct{})
 	for _, line := range strings.Split(string(dockerIgnoreBytes), "\n") {
+		if strings.HasPrefix(line, "!") {
+			t.Errorf("Docker ignore contract contains negation %q", line)
+		}
 		exclusions[line] = struct{}{}
+	}
+	if _, excludesPagesSource := exclusions["docs/"]; excludesPagesSource {
+		t.Error("Docker ignore contract excludes the required Pages docs source")
 	}
 	for _, required := range []string{
 		".git",

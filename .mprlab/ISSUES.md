@@ -344,6 +344,28 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B054] (P0) Remove ambiguous Docker ignore rules.
+  Goal:
+  Each Docker context excludes the private deployment input with one clear rule.
+  Actual result:
+  - The shared Docker ignore file contains two negated documentation rules.
+  - Deployment cannot prove that the private input stays excluded.
+  - The deployment stops before production convergence.
+  Requirements:
+  - Keep the documentation source in the shared context without negation.
+  - Keep the exact private input exclusion.
+  - Reject every Docker ignore negation in the repository contract test.
+  Validation:
+  - Build the application image and the Pages image.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed the documentation exclusion and its two negated rules.
+  - The documentation source remains available to the Pages image.
+  - The repository contract test now rejects every negated rule.
+  - Both image builds, `make test-go`, and `make ci` passed.
+  - Changed files: `.dockerignore`, `tests/repository_neutrality_contract_test.go`,
+    and `CHANGELOG.md`.
+
 - [x] [B053] (P0) Remove the application-owned Pages marker.
   Goal:
   The gateway owns each GitHub Pages metadata file in the release artifact.
