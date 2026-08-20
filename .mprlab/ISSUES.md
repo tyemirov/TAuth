@@ -258,9 +258,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Resolution:
   - The manifest preserves the SemVer release scheme without a schema number.
   - The compiled repository contract rejects a `schema_version` field.
-  - `make test-go` and all 44 JavaScript tests passed. The final `make ci`
-    reached image acceptance and stopped because Docker returned HTTP 500 from
-    its local API socket.
+  - `make test-go`, all 44 JavaScript tests, and the final `make ci` passed.
 
 - [x] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
   Goal:
