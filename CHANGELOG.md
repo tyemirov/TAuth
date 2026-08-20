@@ -28,12 +28,13 @@
 - Generate persisted opaque 128-bit base64url account-management subjects instead of deterministic tenant/provider/email hashes, migrate stored account references once, and revoke refresh tokens tied to the old account subjects.
 
 ### Improvements
-- Moved the SemVer release policy into the schema-4 resource manifest and removed the obsolete `.mprlab/release.yml` file.
+- Removed schema versioning from the selected application manifest while preserving the explicit SemVer release policy.
+- Moved the SemVer release policy into the current resource manifest and removed the obsolete `.mprlab/release.yml` file.
 - Added the `tauth.oauth` deployment capability, config/preflight schema v7, HTTP contract v3, and OAuth OpenAPI. Added security guidance, key-rotation guidance, and black-box HTTP and Chromium acceptance coverage.
 - Aligned authorization-code exchange with the current OAuth 2.1 request shape. Accepted the MCP refresh-token grant declaration in Client ID Metadata Documents.
-- Declared a canonical container-built GitHub Pages resource that assembles the documentation site and `web/tauth.js` in the schema-v3 lifecycle manifest, and removed the obsolete `tauth.mprlab.com` Caddy route.
-- Declare the complete schema-v3 TAuth runtime, service placement, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
-- Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the schema-v3 cutover.
+- Declared a canonical container-built GitHub Pages resource that assembles the documentation site and `web/tauth.js` in the current lifecycle manifest, and removed the obsolete `tauth.mprlab.com` Caddy route.
+- Declare the complete TAuth runtime, service placement, retained data, gateway-managed tenant config, `tauth.http` and `tauth.tenants` capabilities, public routes, and health check for the sibling gateway lifecycle.
+- Declare bounded retirement of the legacy `mprlab-nginx-gateway/tauth-api` container while preserving its retained data volume during the lifecycle cutover.
 - Delegate only `make release`, `make publish`, and `make deploy` to the exact sibling `../mprlab-gateway`, removing the app-owned release, publication, deployment, and local-controller implementations.
 - Documented Apple OAuth tenant configuration, browser redirect flow, callback endpoints, and provider-generic account identity behavior.
 - Documented the password-auth tenant config, helper flow, persistence table, and endpoint behavior across README, architecture, and usage docs.

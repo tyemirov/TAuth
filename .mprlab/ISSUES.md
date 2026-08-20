@@ -241,6 +241,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [I207] (P0) Use the permanent versionless selected application manifest.
+  Goal:
+  Use one selected application manifest contract without a schema number.
+
+  Requirements:
+  - Remove `schema_version` from `.mprlab/deploy/resources.yml`.
+  - Require only `owner`, `release`, and `resources` at the manifest root.
+  - Reject each numbered selected application manifest form.
+  - Preserve independent schema contracts.
+
+  Validation:
+  - Run `make ci` after the last repository change.
+  - Plan release through gateway commit `753c727` without production contact.
+
+  Resolution:
+  - The manifest preserves the SemVer release scheme without a schema number.
+  - The compiled repository contract rejects a `schema_version` field.
+  - `make test-go` and all 44 JavaScript tests passed. The final `make ci`
+    reached image acceptance and stopped because Docker returned HTTP 500 from
+    its local API socket.
+
 - [x] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
   Goal:
   Make TAuth independently releasable, publishable, and deployable without an
