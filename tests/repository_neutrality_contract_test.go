@@ -30,7 +30,7 @@ var expectedGatewayWrapper = strings.Join([]string{
 	"\t\tMPRLAB_APP_ROOT=\"$${application_root}\"",
 }, "\n")
 
-func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
+func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
 	manifestDocument, readErr := os.ReadFile(manifestPath)
@@ -49,9 +49,6 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 	if !available {
 		t.Fatalf("application resource manifest has no mprlab_resources mapping: %#v", document)
 	}
-	if schemaVersion, available := resourcesDocument["schema_version"].(int); !available || schemaVersion != 4 {
-		t.Fatalf("application resource manifest has unexpected schema version: %#v", resourcesDocument["schema_version"])
-	}
 	if owner, available := resourcesDocument["owner"].(string); !available || owner != "tauth" {
 		t.Fatalf("application resource manifest has unexpected owner: %#v", resourcesDocument["owner"])
 	}
@@ -64,8 +61,8 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 		resourceKeys = append(resourceKeys, resourceKey)
 	}
 	slices.Sort(resourceKeys)
-	if !slices.Equal(resourceKeys, []string{"owner", "release", "resources", "schema_version"}) {
-		t.Fatalf("application resource manifest root is not the exact schema-v4 contract: %#v", resourceKeys)
+	if !slices.Equal(resourceKeys, []string{"owner", "release", "resources"}) {
+		t.Fatalf("application resource manifest root is not the exact versionless contract: %#v", resourceKeys)
 	}
 
 	resources, available := resourcesDocument["resources"].([]any)
@@ -148,7 +145,7 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 	}
 	placement, available := runtimeService["placement"].(map[string]any)
 	if !available || len(placement) != 2 {
-		t.Fatalf("runtime Compose service must declare exact schema-v4 placement: %#v", runtimeService["placement"])
+		t.Fatalf("runtime Compose service must declare exact placement: %#v", runtimeService["placement"])
 	}
 	if group := stringField(t, placement, "group"); group != "gateway" {
 		t.Fatalf("runtime Compose service has unexpected placement group: %q", group)
@@ -198,9 +195,7 @@ func TestRepositoryOwnsSchemaV4ApplicationResources(t *testing.T) {
 		t.Errorf("application resource manifest must use /health at four backend readiness boundaries, got %d", healthPathCount)
 	}
 	for _, obsoleteContract := range []string{
-		"schema_version: 1",
-		"schema_version: 2",
-		"schema_version: 3",
+		"schema_version:",
 		"dependencies:",
 		"profiles:",
 		"environment_files:",
