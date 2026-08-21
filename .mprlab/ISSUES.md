@@ -363,6 +363,262 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [ ] [B055] (P1) Stop OAuth access for disabled accounts.
+  Goal:
+  A disabled account cannot get a new OAuth authorization code, access token, or refresh token.
+  The OAuth browser session resolver accepts a pre-disable session, and account disablement does not revoke OAuth grants.
+  Codex Security assigns medium severity, high confidence, and CWE-862.
+  This issue tracks finding `csf_61243b622b8fa29760a82c4a`.
+  The source fingerprint is `codex-security/v1:sha256:4a463921a15bc6bab15fd3ed109bc759b84bedd832f83ca93df7d45eb98184d5`.
+  The root control is `internal/authkit/oauth_browser_sessions.go:71-82`.
+  Requirements:
+  - Require active account state before each OAuth authorization, code exchange, and refresh exchange.
+  - Revoke all OAuth consent and refresh token families during account disablement.
+  - Add one tenant and user revocation operation to each OAuth store.
+  - Keep one current revocation contract without a fallback.
+  Deliverables:
+  - Active-account checks in the OAuth browser session and token paths.
+  - User-wide OAuth revocation in the memory store and the database store.
+  - Public contract tests for browser sessions and OAuth refresh tokens.
+  Validation:
+  - Disable an account with two browser sessions.
+  - Verify that the second session cannot authorize a client.
+  - Verify that an existing OAuth refresh token cannot rotate.
+  - Run `make ci`.
+
+- [ ] [B056] (P1) Make application refresh token rotation atomic.
+  Goal:
+  One application refresh token creates at most one active successor.
+  The session and refresh routes issue a new token before they revoke the old token.
+  Concurrent requests can create multiple active successors.
+  Codex Security assigns medium severity, high confidence, and CWE-367.
+  This issue tracks finding `csf_71f227920624a974608811e6`.
+  The source fingerprint is `codex-security/v1:sha256:1f311fdff73d248a386a557c0b157c77c3a9641da7fdbbae62c0643c9ac9cbed`.
+  The root control is `internal/authkit/routes.go:1314-1411`.
+  Requirements:
+  - Replace the separate validate, issue, and revoke operations with one atomic rotation operation.
+  - Consume the old token and create the new token in one store transaction.
+  - Revoke the token family after reuse of an old token.
+  - Use the same rotation contract for `GET /auth/session` and `POST /auth/refresh`.
+  Deliverables:
+  - One narrow rotation operation in the refresh token store interface.
+  - Atomic memory and database implementations.
+  - Concurrent public route tests for both rotation paths.
+  Validation:
+  - Race one token through `POST /auth/refresh`.
+  - Race one token through `GET /auth/session`.
+  - Verify that exactly one request succeeds for each store.
+  - Run `make ci`.
+
+- [ ] [B057] (P1) Reject replayed native Google ID tokens.
+  Goal:
+  One native Google authorization can create one TAuth credential set.
+  The native handler compares two client-supplied nonce values and does not consume server nonce state.
+  Codex Security assigns medium severity, high confidence, and CWE-294.
+  This issue tracks finding `csf_d6e4bf7dad4f4c56abec9f2f`.
+  The source fingerprint is `codex-security/v1:sha256:c407b035b40e30b85d52bacd193e45b56717c4fe4887a9a6eadb97d1f3e33b2c`.
+  The root control is `internal/authkit/routes.go:1165-1312`.
+  Requirements:
+  - Issue one tenant nonce before native Google authorization.
+  - Require the Google ID token nonce claim to match the issued nonce.
+  - Consume the nonce atomically before account or credential changes.
+  - Reject unknown, expired, cross-tenant, and used nonces.
+  - Remove the client-only nonce contract.
+  Deliverables:
+  - One server nonce contract for native Google login.
+  - Memory and database nonce integration.
+  - Public replay tests for the native Google route.
+  Validation:
+  - Complete one native Google login with an issued nonce.
+  - Replay the same token and nonce.
+  - Verify that the replay returns `invalid_nonce`.
+  - Run `make ci`.
+
+- [ ] [B058] (P1) Bind Apple OAuth state to the first browser.
+  Goal:
+  Only the browser that starts Apple login can complete that login.
+  The signed Apple state has no secret that identifies the first browser.
+  Codex Security assigns medium severity, high confidence, and CWE-352.
+  This issue tracks finding `csf_50cabd4e6537d3cce9337670`.
+  The source fingerprint is `codex-security/v1:sha256:04d87320a65d88f30a09c77353c4a57e656fc922bf9ebd7c76b8b5d08c2640db`.
+  The root control is `internal/authkit/apple_oauth.go:110-129`.
+  Requirements:
+  - Set a short-lived browser correlation cookie at Apple login start.
+  - Set `Secure`, `HttpOnly`, and the correct `SameSite` value on the cookie.
+  - Bind the correlation value to the signed state.
+  - Require and clear the cookie before the callback token exchange.
+  - Reject a callback from a different browser.
+  Deliverables:
+  - One browser-bound Apple state contract.
+  - Cookie and callback integration tests.
+  Validation:
+  - Start Apple login in browser A.
+  - Submit its callback in browser B and verify rejection.
+  - Submit its callback in browser A and verify success.
+  - Verify that TAuth clears the correlation cookie.
+  - Run `make ci`.
+
+- [ ] [B059] (P1) Consume persistent one-time tokens atomically.
+  Goal:
+  One persistent nonce or account challenge can complete one credential operation.
+  The database consumers read unused state before a separate mutation that does not verify one changed row.
+  Codex Security assigns medium severity, high confidence, and CWE-362.
+  This issue tracks finding `csf_ebd0e75221eb3a92fe3bbf67`.
+  The source fingerprint is `codex-security/v1:sha256:d4c129002353347b3d2fa6decb780837539be11c170c110250ae53fa8ba990c9`.
+  The root controls are `internal/authkit/database_nonce_store.go:92-134` and `internal/authkit/database_user_store.go:1042-1061`.
+  Requirements:
+  - Use one conditional delete or update for each token consumption.
+  - Include tenant, token, token type, unused state, and expiry in the condition.
+  - Require exactly one changed row.
+  - Keep password changes and token consumption in one database transaction.
+  - Reject each concurrent loser before credential issuance.
+  Deliverables:
+  - Atomic nonce consumption in the database nonce store.
+  - Atomic account challenge consumption in the database user store.
+  - Concurrent provider, reset, and verification tests.
+  Validation:
+  - Race one database nonce through provider login.
+  - Race one password reset challenge.
+  - Race one email verification challenge.
+  - Verify that one request succeeds in each test.
+  - Run `make ci`.
+
+- [ ] [B060] (P1) Limit password guesses and reject weak passwords.
+  Goal:
+  Password authentication resists repeated online guesses and trivial user passwords.
+  The login path has no attempt limit, and the password policy accepts one-byte passwords.
+  Codex Security assigns medium severity, high confidence, CWE-307, and CWE-521.
+  This issue tracks finding `csf_04c887ceb1ca32c26b210d36`.
+  The source fingerprint is `codex-security/v1:sha256:edb749db4592eb8e71fc6009e8fd0350079544e5394bdb94c2b9d446864b4952`.
+  The root control is `internal/authkit/password_credentials.go:223-230`.
+  Requirements:
+  - Limit attempts by tenant, account, request, and source before bcrypt work.
+  - Add a progressive time delay after repeated failures.
+  - Keep one uniform invalid credential response.
+  - Define one current minimum password length.
+  - Enforce the minimum on signup, reset, change, and link operations.
+  Deliverables:
+  - One shared password attempt limiter.
+  - One password strength contract at each password creation boundary.
+  - Public route tests for attempt limits and password length.
+  Validation:
+  - Verify that repeated failures activate the limit before bcrypt work.
+  - Verify that each password creation path rejects a one-byte password.
+  - Verify that valid passwords continue to work.
+  - Run `make ci`.
+
+- [ ] [B061] (P1) Bound public authentication request bodies.
+  Goal:
+  Each public authentication request has a finite body size and read time.
+  The authentication parsers have no body size limit, and the HTTP server has no body read time limit.
+  Codex Security assigns medium severity, high confidence, and CWE-400.
+  This issue tracks finding `csf_573c8eeaeb08df5704dce67a`.
+  The source fingerprint is `codex-security/v1:sha256:7fde80bd99ff48058f93b94711e3cec484bb7b1f5dc5783e07303c55bfe41eb4`.
+  The root controls are `internal/authkit/routes.go:1605-1718` and `cmd/server/main.go:318-322`.
+  Requirements:
+  - Apply a small route-specific body limit before each parser.
+  - Return HTTP 413 before the parser accepts an oversized body.
+  - Configure finite read, write, and idle time limits on the HTTP server.
+  - Keep the existing OAuth form body limit.
+  Deliverables:
+  - Shared authentication body limit controls.
+  - Complete HTTP server time limits.
+  - Public route tests for large and slow bodies.
+  Validation:
+  - Verify that oversized JSON returns HTTP 413.
+  - Verify that slow bodies stop at the configured time limit.
+  - Verify that normal provider and password bodies succeed.
+  - Run `make ci`.
+
+- [ ] [B062] (P1) Bound transient state storage.
+  Goal:
+  Public authorization and account flows cannot increase transient state without a limit.
+  The memory and database stores have no complete capacity or expiry cleanup contract.
+  Codex Security assigns medium severity, high confidence, and CWE-400.
+  This issue tracks finding `csf_0fa410caf8792c8c0cfebc8f`.
+  The source fingerprint is `codex-security/v1:sha256:0004926fcf44f441ed4afede3b70435e83c228e1725883d958b2826d662e8141`.
+  The root controls include `internal/oauthserver/memory_store.go:63-99` and `internal/oauthserver/database_store.go:114-140`.
+  Requirements:
+  - Enforce atomic tenant and global capacity limits before state creation.
+  - Limit public authorization, signup, and reset initiation requests.
+  - Remove expired records during creation and access.
+  - Add scheduled cleanup for persistent records.
+  - Remove consumed challenges when replay evidence does not require retention.
+  Deliverables:
+  - Capacity limits for the memory and database stores.
+  - One physical retention and cleanup contract.
+  - Sustained request tests for public state creation.
+  Validation:
+  - Send requests beyond each configured state limit.
+  - Verify that memory and database record counts stay bounded.
+  - Advance time and verify physical removal of expired records.
+  - Run `make ci`.
+
+- [ ] [B063] (P2) Synchronize the in-memory user store.
+  Goal:
+  Concurrent HTTP requests cannot cause a fatal map access in the in-memory user store.
+  The store reads and writes shared nested maps without a lock.
+  Codex Security assigns low severity, high confidence, and CWE-362.
+  This issue tracks finding `csf_3273d1b7b5bef5965ae694dc`.
+  The source fingerprint is `codex-security/v1:sha256:9222bcfa4a1aa6594100016196cb4a8cc68e626962d59dcf88b8a48a3110dc25`.
+  The root control is `internal/web/users.go:28-97`.
+  Requirements:
+  - Protect each map read and write with one `RWMutex`.
+  - Copy mutable role slices on input and output.
+  - Keep the current in-memory store contract for local and demo use.
+  Deliverables:
+  - Synchronized in-memory user storage.
+  - Concurrent read and write coverage.
+  Validation:
+  - Run concurrent user updates and profile reads with the race detector.
+  - Run parallel login requests with the in-memory store.
+  - Run `make ci`.
+
+- [ ] [B064] (P2) Hide account identity in password reset responses.
+  Goal:
+  Password reset initiation returns the same public response for known and unknown accounts.
+  The current response returns a stable account ID only for a known account.
+  Codex Security assigns low severity, high confidence, and CWE-203.
+  This issue tracks finding `csf_b66d799ea14c915e50b0f677`.
+  The source fingerprint is `codex-security/v1:sha256:da724e9d301ce1fe04387f3dac5fac36649844b49edf7b7e30ee8a5cd2853b04`.
+  The root control is `internal/authkit/routes.go:1943-1960`.
+  Requirements:
+  - Return one constant public reset initiation response.
+  - Remove account identity fields from this response.
+  - Deliver the actual challenge only through the trusted recovery channel.
+  - Keep status and timing behavior uniform.
+  Deliverables:
+  - One identity-neutral password reset response.
+  - Public response comparison tests.
+  Validation:
+  - Compare responses for known and unknown accounts.
+  - Verify that all public fields are equal.
+  - Verify that the trusted recovery channel still receives the challenge.
+  - Run `make ci`.
+
+- [ ] [B065] (P2) Use trusted HTTPS signals for credential routes.
+  Goal:
+  Only TLS or a trusted proxy can satisfy the HTTPS-only tenant contract.
+  The current guard trusts client headers and `Host`, and password reset completion has no guard.
+  Codex Security assigns low severity, high confidence, CWE-345, and CWE-319.
+  This issue tracks finding `csf_7c671ee325b061a85a04440b`.
+  The source fingerprint is `codex-security/v1:sha256:cf5365bb25c8a8c6948052b40370eb8dfdaf60cda7e2309c1ab181cbf8faa6b2`.
+  The root control is `internal/authkit/routes.go:2493-2509`.
+  Requirements:
+  - Define the trusted proxy peers in the server contract.
+  - Accept forwarded scheme data only from these peers.
+  - Parse each forwarded scheme value strictly.
+  - Remove the `Host` localhost exception.
+  - Apply one transport guard to every credential route.
+  Deliverables:
+  - One trusted proxy and transport classification contract.
+  - Complete credential route coverage.
+  Validation:
+  - Send forged forwarding headers from an untrusted peer and verify rejection.
+  - Send a forged localhost `Host` value and verify rejection.
+  - Verify that password reset completion rejects direct plaintext.
+  - Run `make ci`.
+
 - [x] [B054] (P0) Remove ambiguous Docker ignore rules.
   Goal:
   Each Docker context excludes the private deployment input with one clear rule.
@@ -781,6 +1037,8 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Rerun the repository-native audit, lint, or dependency checks used for the pass.
   - Confirm every finding is either filed, fixed under a separate issue, or explicitly marked not applicable with evidence.
   - Confirm no secrets or private payloads were written into the tracker.
+
+  Last run 2026-08-21: A Codex Security source scan created issues B055 through B065.
 
 - [ ] [M404R] (P1) CI, release, and artifact health
   Goal:
