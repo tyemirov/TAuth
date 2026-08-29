@@ -10,6 +10,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Added the production LoopAware site identity to each published TAuth page.
 - Removed redundant Docker ignore negations so deployment can prove that private input stays outside each image context.
 - Removed the application-owned Pages marker so the gateway can generate its release metadata.
 - Prevented shared caches from storing tenant-specific native Apple config responses.

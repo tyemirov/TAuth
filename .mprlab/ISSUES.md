@@ -363,6 +363,24 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B066] (P1) Track each published TAuth page with its production site identity.
+  Goal:
+  Each published TAuth page sends visits to the current LoopAware site.
+  The Pages artifact does not load the LoopAware pixel.
+  Requirements:
+  - Load the LoopAware pixel one time on each published HTML page.
+  - Use the production TAuth site identity.
+  Deliverables:
+  - Update the landing page and the usage page.
+  - Add artifact contract coverage for the current site identity.
+  Validation:
+  - Run the focused Pages artifact test.
+  - Run `make ci`.
+  Resolution 2026-08-28:
+  - Added the current production site identity to both published pages.
+  - Added contract coverage for one exact pixel on each page.
+  - The focused test, assembled Pages image check, and `make ci` passed.
+
 - [ ] [B055] (P1) Stop OAuth access for disabled accounts.
   Goal:
   A disabled account cannot get a new OAuth authorization code, access token, or refresh token.

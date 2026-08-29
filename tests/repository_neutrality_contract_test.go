@@ -254,6 +254,24 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 	}
 }
 
+func TestPagesArtifactUsesProductionLoopAwareIdentity(t *testing.T) {
+	repositoryRoot := testRepositoryRoot(t)
+	const pixelURL = "https://loopaware.mprlab.com/pixel.js?site_id=fe20ae87-c3fc-4347-a76f-dcceb4143e92"
+	for _, relativePath := range []string{"docs/index.html", "docs/usage.html"} {
+		pageDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(relativePath)))
+		if readErr != nil {
+			t.Fatalf("read published page %s: %v", relativePath, readErr)
+		}
+		pageText := string(pageDocument)
+		if strings.Count(pageText, "https://loopaware.mprlab.com/pixel.js") != 1 {
+			t.Errorf("published page %s must contain one LoopAware pixel", relativePath)
+		}
+		if !strings.Contains(pageText, pixelURL) {
+			t.Errorf("published page %s does not use the production TAuth site identity", relativePath)
+		}
+	}
+}
+
 func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	for _, relativePath := range []string{
