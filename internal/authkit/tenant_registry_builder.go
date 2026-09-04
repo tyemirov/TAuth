@@ -51,6 +51,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.AccountManagementEnabled = accountManagement.Enabled()
 		tenantServerConfig.PasswordSignupEnabled = accountManagement.PasswordSignupEnabled()
 		tenantServerConfig.ReturnChallengeTokens = accountManagement.ReturnChallengeTokens()
+		tenantServerConfig.EmailDeliveryEnabled = accountManagement.EmailDelivery().Enabled()
 		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
 		tenantServerConfig.SessionCookieName = tenant.SessionCookieName()
@@ -60,7 +61,10 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
 		tenantServerConfig.NonceTTL = tenant.NonceTTL()
 		tenantServerConfig.EmailVerificationTTL = accountManagement.EmailVerificationTTL()
+		tenantServerConfig.EmailVerificationURL = accountManagement.EmailDelivery().EmailVerificationURL()
 		tenantServerConfig.PasswordResetTTL = accountManagement.PasswordResetTTL()
+		tenantServerConfig.PasswordResetURL = accountManagement.EmailDelivery().PasswordResetURL()
+		tenantServerConfig.PasswordLinkURL = accountManagement.EmailDelivery().PasswordLinkURL()
 		tenantServerConfig.AllowInsecureHTTP = tenant.AllowInsecureHTTP()
 		tenantServerConfig.SameSiteMode = sameSiteResolver(tenant.AllowInsecureHTTP())
 		configs[tenantServerConfig.TenantID] = tenantServerConfig

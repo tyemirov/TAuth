@@ -133,12 +133,15 @@ TAuth does not expose Apple access tokens to JavaScript and does not store Apple
 Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a persisted tenant-scoped opaque 128-bit base64url value as the session subject and stores provider identities separately.
 
 1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>`. With account management, verified credentials return their linked bare opaque account ID.
-2. Public signup is gated by `account_management.password_signup.enabled`. `POST /auth/password/signup` creates a pending account, stores only the bcrypt password hash, and creates a single-use email verification challenge whose raw token is never stored.
-3. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard access and refresh cookies.
-4. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified password accounts receive a reset challenge; unknown accounts receive a synthetic accepted response.
-5. `POST /auth/password/reset/complete` consumes the reset challenge, rotates the bcrypt hash, revokes all account refresh sessions, and issues fresh cookies.
-6. Authenticated `/auth/account/*` endpoints require a bare opaque account-ID session. They support password change, password link verification, Google identity linking, provider unlinking with last-identity rejection, and account disablement.
-7. Google and Apple login also participate in account management when enabled: linked `google:<sub>` and `apple:<sub>` identities resolve to the account, and a first provider login creates an active account with that provider identity.
+2. Public signup is gated by `account_management.password_signup.enabled`.
+3. `POST /auth/password/signup` creates a pending account and a single-use email verification challenge. TAuth stores the password hash and challenge hash.
+4. TAuth sends the public verification link to Pinguin. Pinguin queues the email for the configured tenant.
+5. Production responses do not contain the raw challenge token.
+6. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard cookies.
+7. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified accounts receive a reset challenge.
+8. `POST /auth/password/reset/complete` consumes the reset challenge, changes the password hash, revokes account sessions, and issues fresh cookies.
+9. Authenticated `/auth/account/*` endpoints require a bare opaque account-ID session. They support password and identity management.
+10. Google and Apple login also use account management. A linked provider identity resolves to its account.
 
 ### 3.7 Browser helper handshake
 
@@ -342,10 +345,15 @@ routes, and health contract without containing secret bytes or host paths.
 
 The root `make release`, `make publish`, and `make deploy` entrypoints delegate
 the exact selected Git root to the required sibling `../mprlab-gateway`.
-Gateway-owned Ansible validates the schema, assembles shared tenant state from
-application contributions, generates Compose and Caddy state, manages
-immutable lifecycle receipts, and performs convergence. TAuth carries no
-production lifecycle script or alternate controller.
+Gateway-owned Ansible validates the `resources.yml` schema, resolves declared
+outputs, manages immutable lifecycle receipts, and performs convergence. The
+gateway sends complete TAuth contributions and output envelopes to
+`tauth render-deployment-config` through standard input. TAuth owns the strict
+render request, TAuth defaults, output-name resolution, native config assembly,
+and native validation. The command returns the complete native YAML through
+standard output. TAuth carries no production lifecycle script or alternative
+controller. The README defines the render request envelope. It does not define
+a second `resources.yml` schema.
 
 ### 5.1 Multi-tenant configuration file
 
@@ -392,6 +400,14 @@ tenants:
         enabled: true
       return_challenge_tokens: false
       email_verification_ttl: "30m"
+      email_delivery:
+        server_address: "pinguin-grpc:50051"
+        api_key: "${PINGUIN_TENANT_API_KEY}"
+        email_verification_url: "https://app.example.com/verify-email"
+        password_reset_url: "https://app.example.com/reset-password"
+        password_link_url: "https://app.example.com/link-password"
+        connection_timeout_seconds: 3
+        operation_timeout_seconds: 5
       password_reset_ttl: "15m"
     jwt_signing_key: "demo-signing-key"
     cookie_domain: "demo.example.com"
@@ -415,7 +431,12 @@ Validation rules baked into the loader:
 - Native Apple IDs must be nonempty and unique. A native Apple ID must also be unique across tenants.
 - Enabled Apple providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and HTTPS callback URI.
 - Optional endpoint overrides support local provider tests. These overrides must be absolute HTTP(S) URLs. Production overrides must use HTTPS.
-- `password_auth.enabled` gates `/auth/password/login`; configured users require unique normalized emails and valid bcrypt hashes. `account_management.enabled` gates persisted opaque account IDs and account lifecycle endpoints. `account_management.password_signup.enabled` cannot be true unless account management is enabled. `return_challenge_tokens` is intended for tests or trusted non-email delivery integrations. Each tenant also requires its own `jwt_signing_key`; the server rejects definitions that omit it. TTLs follow Go’s `time.ParseDuration` syntax. `cookie_domain` may be blank to emit host-only cookies (required for `localhost`); otherwise provide a registrable domain (e.g. `.example.com`). `session_cookie_name` / `refresh_cookie_name` are mandatory; set them explicitly per tenant (for example `app_session_notes`, `app_refresh_notes`). Reuse the legacy `app_session`/`app_refresh` names only when you intentionally want multiple tenants to share the same cookies.
+- `password_auth.enabled` gates `/auth/password/login`. Each configured user requires a normalized email and a bcrypt hash.
+- `account_management.enabled` gates persisted account IDs and account routes. Public signup also requires `password_signup.enabled`.
+- Production account management requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
+- `return_challenge_tokens` is for tests. Production responses do not contain challenge tokens. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments.
+- Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
+- Cookie names are mandatory. Use a different name for each tenant that shares a cookie domain.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
 - String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 

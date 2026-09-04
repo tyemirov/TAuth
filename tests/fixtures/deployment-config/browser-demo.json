@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "contributions": [
+    {
+      "owner": "tauth",
+      "id": "oauth-server",
+      "kind": "tauth_authorization_server",
+      "desired": {
+        "kind": "tauth_authorization_server",
+        "id": "oauth-server",
+        "capability": "tauth.oauth",
+        "version": 1,
+        "server": {
+          "issuer": "https://auth.example.invalid",
+          "authorization_endpoint": "https://auth.example.invalid/oauth/authorize",
+          "token_endpoint": "https://auth.example.invalid/oauth/token",
+          "revocation_endpoint": "https://auth.example.invalid/oauth/revoke",
+          "jwks_uri": "https://auth.example.invalid/oauth/jwks",
+          "login_endpoint": "https://auth.example.invalid/oauth/login",
+          "consent_endpoint": "https://auth.example.invalid/oauth/consent",
+          "authorization_request_ttl": "5m",
+          "authorization_code_ttl": "1m",
+          "active_signing_key_id": "oauth-current",
+          "signing_keys": [
+            {
+              "id": "oauth-current",
+              "private_key": {
+                "resource": "private",
+                "output": "oauth-signing-key"
+              }
+            }
+          ],
+          "client_metadata": {
+            "request_timeout": "3s",
+            "maximum_bytes": 5120,
+            "minimum_cache_ttl": "1m",
+            "maximum_cache_ttl": "1h"
+          }
+        }
+      },
+      "outputs": {
+        "signing-key-oauth-current": {
+          "value": "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZ090WDREYm9PKzNFSzNRaUkKZ2N5ZDRSNWtDRXZpMXRwVWUvS1VZTXpSNmFXaFJBTkNBQVJQU3diWVZwZWNJOUczVVc1TUZxKzRneC9Qa1dBQwpZMmM5MVowZkhIOU41UFJWVU5Gb2xVZHhGbWM4ZFI2QXYvZHBVVk9pY3FjYzBIVDlEcFFmSVBlVAotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="
+        }
+      }
+    },
+    {
+      "owner": "browser-demo",
+      "id": "authentication",
+      "kind": "tauth_tenant",
+      "desired": {
+        "kind": "tauth_tenant",
+        "id": "authentication",
+        "capability": "tauth.tenants",
+        "version": 1,
+        "tenant": {
+          "id": "browser-demo",
+          "display_name": "Browser demo",
+          "origins": [
+            "http://127.0.0.1:4443",
+            "http://localhost:4443",
+            "https://ui.example.invalid"
+          ],
+          "google_web_client_id": {
+            "resource": "private",
+            "output": "google-web-client-id"
+          },
+          "google_native_clients": [
+            {
+              "platform": "ios",
+              "client_id": {
+                "resource": "private",
+                "output": "google-native-ios-client-id"
+              },
+              "redirect_uris": ["com.example.browser-demo:/oauth/google"]
+            }
+          ],
+          "apple_oauth": {
+            "client_id": "com.example.browser-demo.web",
+            "native_client_ids": ["com.example.browser-demo.ios"],
+            "team_id": "FIXTURE123",
+            "key_id": "KEYFIXTURE",
+            "private_key": {
+              "resource": "private",
+              "output": "apple-private-key"
+            },
+            "redirect_uri": "https://ui.example.invalid/auth/apple/callback"
+          },
+          "password_auth": {
+            "enabled": true
+          },
+          "account_management": {
+            "enabled": true,
+            "password_signup": {
+              "enabled": true
+            },
+            "return_challenge_tokens": false,
+            "email_verification_ttl": "30m",
+            "email_delivery": {
+              "server_address": "pinguin:50051",
+              "api_key": {
+                "resource": "private",
+                "output": "email-delivery-api-key"
+              },
+              "email_verification_url": "https://ui.example.invalid/verify-email",
+              "password_reset_url": "https://ui.example.invalid/reset-password",
+              "password_link_url": "https://ui.example.invalid/link-password",
+              "connection_timeout_seconds": 3,
+              "operation_timeout_seconds": 5
+            },
+            "password_reset_ttl": "15m"
+          },
+          "jwt_signing_key": {
+            "resource": "private",
+            "output": "jwt-signing-key"
+          },
+          "cookie": {
+            "domain": ".example.invalid",
+            "session_name": "app_session_browser_demo",
+            "refresh_name": "app_refresh_browser_demo"
+          },
+          "oauth": {
+            "access_token_ttl": "5m",
+            "refresh_token_ttl": "720h",
+            "consent_ttl": "720h",
+            "allow_client_metadata_documents": false,
+            "resources": [
+              {
+                "identifier": "https://api.example.invalid",
+                "display_name": "Example API",
+                "scopes": [
+                  {
+                    "identifier": "example:use",
+                    "display_name": "Use example",
+                    "description": "Use the example API."
+                  }
+                ]
+              }
+            ],
+            "clients": [
+              {
+                "id": "example-client",
+                "display_name": "Example client",
+                "application_type": "web",
+                "redirect_uris": ["https://ui.example.invalid/oauth/callback"],
+                "grants": [
+                  {
+                    "resource": "https://api.example.invalid",
+                    "scopes": ["example:use"]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "outputs": {
+        "google-web-client-id": {
+          "value": "fixture.apps.googleusercontent.com"
+        },
+        "google-native-ios-client-id": {
+          "value": "fixture-ios.apps.googleusercontent.com"
+        },
+        "apple-private-key": {
+          "value": "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZ090WDREYm9PKzNFSzNRaUkKZ2N5ZDRSNWtDRXZpMXRwVWUvS1VZTXpSNmFXaFJBTkNBQVJQU3diWVZwZWNJOUczVVc1TUZxKzRneC9Qa1dBQwpZMmM5MVowZkhIOU41UFJWVU5Gb2xVZHhGbWM4ZFI2QXYvZHBVVk9pY3FjYzBIVDlEcFFmSVBlVAotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="
+        },
+        "jwt-signing-key": {
+          "value": "fixture-renderer-secret-at-least-32-characters"
+        },
+        "email-delivery-api-key": {
+          "value": "fixture-email-delivery-api-key"
+        }
+      }
+    }
+  ]
+}

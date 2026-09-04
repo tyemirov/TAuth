@@ -23,7 +23,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v7"
+const ConfigSchemaVersion = "tauth.config.v9"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
@@ -90,7 +90,11 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 	if readErr != nil {
 		return nil, fmt.Errorf("%s: read %s: %w", ErrorCodeMissingConfigFile, cleanedPath, readErr)
 	}
+	return ParseConfig(payload)
+}
 
+// ParseConfig decodes and validates one config.yaml payload.
+func ParseConfig(payload []byte) (*ApplicationConfig, error) {
 	var document ApplicationConfig
 	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
 	decoder.KnownFields(true)

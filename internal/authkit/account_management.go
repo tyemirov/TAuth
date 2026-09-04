@@ -175,6 +175,43 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Con
 	return AccountChallenge{AccountID: accountID, Token: token, ExpiresUnix: expiresUnix}, nil
 }
 
+// CancelPasswordSignup removes a pending signup after delivery fails.
+func (store *MemoryPasswordCredentialStore) CancelPasswordSignup(_ context.Context, tenantID string, accountID string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.ensureAccountMaps(tenantID)
+	account, exists := store.accounts[tenantID][accountID]
+	if !exists || account.state != accountStatePendingVerification {
+		return fmt.Errorf("account.signup_cancel.invalid_state")
+	}
+	delete(store.accounts[tenantID], accountID)
+	for userEmail, credential := range store.tenants[tenantID] {
+		if credential.accountID == accountID {
+			delete(store.tenants[tenantID], userEmail)
+		}
+	}
+	for tokenHash, challenge := range store.challenges[tenantID] {
+		if challenge.accountID == accountID && challenge.kind == accountChallengeEmailVerification {
+			delete(store.challenges[tenantID], tokenHash)
+		}
+	}
+	return nil
+}
+
+// CancelAccountChallenge removes one unconsumed reset or link challenge.
+func (store *MemoryPasswordCredentialStore) CancelAccountChallenge(_ context.Context, tenantID string, accountID string, token string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.ensureAccountMaps(tenantID)
+	tokenHash := hashOpaque(strings.TrimSpace(token))
+	challenge := store.challenges[tenantID][tokenHash]
+	if challenge == nil || challenge.accountID != accountID || (challenge.kind != accountChallengePasswordReset && challenge.kind != accountChallengePasswordLink) {
+		return fmt.Errorf("account.challenge_cancel.invalid")
+	}
+	delete(store.challenges[tenantID], tokenHash)
+	return nil
+}
+
 // VerifyEmailChallenge activates a pending signup.
 func (store *MemoryPasswordCredentialStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
 	store.mu.Lock()

@@ -1,6 +1,7 @@
 package authkit
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -15,6 +16,7 @@ type ServerConfig struct {
 	AccountManagementEnabled bool
 	PasswordSignupEnabled    bool
 	ReturnChallengeTokens    bool
+	EmailDeliveryEnabled     bool
 	AppJWTSigningKey         []byte
 	AppJWTIssuer             string
 	TenantID                 string
@@ -27,9 +29,38 @@ type ServerConfig struct {
 	RefreshTTL               time.Duration
 	NonceTTL                 time.Duration
 	EmailVerificationTTL     time.Duration
+	EmailVerificationURL     string
 	PasswordResetTTL         time.Duration
+	PasswordResetURL         string
+	PasswordLinkURL          string
 	SameSiteMode             http.SameSite
 	AllowInsecureHTTP        bool
+}
+
+// EmailChallengeKind identifies one password-account email challenge.
+type EmailChallengeKind string
+
+const (
+	// EmailChallengeKindVerification activates a new password account.
+	EmailChallengeKindVerification EmailChallengeKind = "email_verification"
+	// EmailChallengeKindPasswordReset authorizes a password reset.
+	EmailChallengeKindPasswordReset EmailChallengeKind = "password_reset"
+	// EmailChallengeKindPasswordLink authorizes a password identity link.
+	EmailChallengeKindPasswordLink EmailChallengeKind = "password_link"
+)
+
+// EmailChallengeRequest contains one password-account email delivery request.
+type EmailChallengeRequest struct {
+	Kind      EmailChallengeKind
+	TenantID  string
+	Recipient string
+	PublicURL string
+	ExpiresAt time.Time
+}
+
+// EmailChallengeSender delivers password-account challenge emails.
+type EmailChallengeSender interface {
+	SendEmailChallenge(ctx context.Context, request EmailChallengeRequest) error
 }
 
 // NativeGoogleClientConfig configures one accepted native Google OAuth client.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/notification"
 	"github.com/tyemirov/tauth/internal/oauthserver"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
@@ -54,6 +56,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().String("config", "config.yaml", "Path to application config file (overridden by TAUTH_CONFIG_FILE env)")
 	rootCmd.AddCommand(newPreflightCommand())
 	rootCmd.AddCommand(newDoctorCommand())
+	rootCmd.AddCommand(newRenderDeploymentConfigCommand())
 
 	return rootCmd
 }
@@ -206,6 +209,21 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if registryErr != nil {
 		return registryErr
 	}
+	var emailChallengeSender authkit.EmailChallengeSender
+	pinguinConfigs := buildPinguinTenantConfigs(tenantConfig)
+	if len(pinguinConfigs) > 0 {
+		pinguinLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+		pinguinSender, pinguinSenderErr := notification.NewPinguinEmailChallengeSender(pinguinLogger, pinguinConfigs)
+		if pinguinSenderErr != nil {
+			return pinguinSenderErr
+		}
+		defer func() {
+			if closeErr := pinguinSender.Close(); closeErr != nil {
+				logger.Error("close Pinguin notification client", zap.Error(closeErr))
+			}
+		}()
+		emailChallengeSender = pinguinSender
+	}
 	resolverOptions := []tenants.ResolverOption{}
 	if enableTenantHeaderOverride {
 		resolverOptions = append(resolverOptions, tenants.WithHeaderOverride(""))
@@ -309,7 +327,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))
@@ -343,6 +361,25 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 	shutdownServer()
 	return nil
+}
+
+func buildPinguinTenantConfigs(tenantConfig tenants.Config) []notification.PinguinTenantConfig {
+	configuredTenants := tenantConfig.Tenants()
+	pinguinConfigs := make([]notification.PinguinTenantConfig, 0, len(configuredTenants))
+	for _, tenant := range configuredTenants {
+		emailDelivery := tenant.AccountManagement().EmailDelivery()
+		if !emailDelivery.Enabled() {
+			continue
+		}
+		pinguinConfigs = append(pinguinConfigs, notification.PinguinTenantConfig{
+			TenantID:                 string(tenant.ID()),
+			ServerAddress:            emailDelivery.ServerAddress(),
+			APIKey:                   emailDelivery.APIKey(),
+			ConnectionTimeoutSeconds: emailDelivery.ConnectionTimeoutSeconds(),
+			OperationTimeoutSeconds:  emailDelivery.OperationTimeoutSeconds(),
+		})
+	}
+	return pinguinConfigs
 }
 
 func oauthBrowserEndpointPaths(config appconfig.OAuthServerConfig) map[string]struct{} {

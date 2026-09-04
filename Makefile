@@ -5,9 +5,9 @@ STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
 
-.PHONY: ci format lint test-go test-js test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
+.PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
+ci: format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
@@ -24,6 +24,9 @@ test-go:
 
 test-js:
 	npm test
+
+test-deployment-config-renderer:
+	bash tests/deployment-config-renderer.sh
 
 test-empty-tenant-bootstrap-runtime:
 	bash tests/empty-tenant-bootstrap-runtime.sh

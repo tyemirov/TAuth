@@ -455,7 +455,7 @@ func TestPasswordLoginLifecycle(testingHandle *testing.T) {
 	}
 
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, passwordStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, passwordStore, nil)
 
 	body, marshalErr := json.Marshal(map[string]string{
 		"email":    "USER@example.com",
@@ -500,7 +500,7 @@ func TestPasswordLoginRejectsInvalidCredentials(testingHandle *testing.T) {
 	config.PasswordAuthEnabled = true
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil)
 
 	body := []byte(`{"email":"missing@example.com","password":"wrong-password"}`)
 	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
@@ -526,7 +526,7 @@ func TestPasswordLoginDisabledReturnsNotFound(testingHandle *testing.T) {
 	config := newTestServerConfig()
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil)
 
 	body := []byte(`{"email":"user@example.com","password":"correct horse battery staple"}`)
 	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
@@ -561,7 +561,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil)
 
 	signupBody := []byte(`{"email":"New@Example.com","password":"correct horse battery staple","display_name":"New User"}`)
 	signupResponse := httptest.NewRecorder()
@@ -668,7 +668,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"New@Example.com","password":"correct horse battery staple"}`)))
@@ -755,7 +755,7 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 		testingHandle.Fatalf("failed to seed password credential: %v", credentialErr)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil)
 
 	loginResponse := httptest.NewRecorder()
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer([]byte(`{"email":"seeded@example.com","password":"correct horse battery staple"}`)))
@@ -865,7 +865,7 @@ func TestAccountManagementRejectsMalformedAccountSession(testingHandle *testing.
 		config.AccountManagementEnabled = true
 		registry := singleTenantRegistry(config)
 		router := gin.New()
-		MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+		MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil)
 		sessionToken, _, tokenErr := MintAppJWT(NewSystemClock(), config.TenantID, sessionSubject, "account@example.com", "Account User", "https://example.com/account.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 		if tokenErr != nil {
 			testingHandle.Fatalf("failed to mint malformed account session: %v", tokenErr)
@@ -904,7 +904,7 @@ func TestAccountManagementRejectsUnlinkingLastIdentity(testingHandle *testing.T)
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"solo@example.com","password":"correct horse battery staple"}`)))

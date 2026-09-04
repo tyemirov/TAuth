@@ -91,7 +91,19 @@ type AccountManagement struct {
 	passwordSignupEnabled bool
 	returnChallengeTokens bool
 	emailVerificationTTL  time.Duration
+	emailDelivery         EmailDelivery
 	passwordResetTTL      time.Duration
+}
+
+// EmailDelivery represents tenant-level notification service settings.
+type EmailDelivery struct {
+	serverAddress            string
+	apiKey                   string
+	emailVerificationURL     string
+	passwordResetURL         string
+	passwordLinkURL          string
+	connectionTimeoutSeconds int
+	operationTimeoutSeconds  int
 }
 
 type tenantCookieScope struct {
@@ -141,6 +153,10 @@ const (
 	errorCodeInvalidPasswordHash         = "tenant.invalid_password_hash"
 	errorCodeAccountManagementDisabled   = "tenant.account_management_disabled"
 	errorCodeInvalidEmailVerificationTTL = "tenant.invalid_email_verification_ttl"
+	errorCodeInvalidEmailVerificationURL = "tenant.invalid_email_verification_url"
+	errorCodeInvalidPasswordResetURL     = "tenant.invalid_password_reset_url"
+	errorCodeInvalidPasswordLinkURL      = "tenant.invalid_password_link_url"
+	errorCodeInvalidEmailDelivery        = "tenant.invalid_email_delivery"
 	errorCodeInvalidPasswordResetTTL     = "tenant.invalid_password_reset_ttl"
 	errorCodeInvalidSessionTTL           = "tenant.invalid_session_ttl"
 	errorCodeInvalidRefreshTTL           = "tenant.invalid_refresh_ttl"
@@ -503,6 +519,51 @@ func (settings AccountManagement) EmailVerificationTTL() time.Duration {
 	return settings.emailVerificationTTL
 }
 
+// EmailDelivery returns the tenant notification service settings.
+func (settings AccountManagement) EmailDelivery() EmailDelivery {
+	return settings.emailDelivery
+}
+
+// Enabled indicates whether email delivery is configured.
+func (settings EmailDelivery) Enabled() bool {
+	return settings.serverAddress != ""
+}
+
+// ServerAddress returns the Pinguin gRPC server address.
+func (settings EmailDelivery) ServerAddress() string {
+	return settings.serverAddress
+}
+
+// APIKey returns the tenant Pinguin API key.
+func (settings EmailDelivery) APIKey() string {
+	return settings.apiKey
+}
+
+// EmailVerificationURL returns the public email-verification page URL.
+func (settings EmailDelivery) EmailVerificationURL() string {
+	return settings.emailVerificationURL
+}
+
+// PasswordResetURL returns the public password-reset page URL.
+func (settings EmailDelivery) PasswordResetURL() string {
+	return settings.passwordResetURL
+}
+
+// PasswordLinkURL returns the public password-link page URL.
+func (settings EmailDelivery) PasswordLinkURL() string {
+	return settings.passwordLinkURL
+}
+
+// ConnectionTimeoutSeconds returns the Pinguin connection timeout.
+func (settings EmailDelivery) ConnectionTimeoutSeconds() int {
+	return settings.connectionTimeoutSeconds
+}
+
+// OperationTimeoutSeconds returns the Pinguin operation timeout.
+func (settings EmailDelivery) OperationTimeoutSeconds() int {
+	return settings.operationTimeoutSeconds
+}
+
 // PasswordResetTTL returns the password-reset challenge lifetime.
 func (settings AccountManagement) PasswordResetTTL() time.Duration {
 	return settings.passwordResetTTL
@@ -619,7 +680,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if !tenantHasAuthProvider(googleWebClientID, nativeGoogleClients, appleOAuth, passwordAuthEnabled) {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingAuthProvider, tenantID)
 	}
-	accountManagement, accountManagementErr := parseAccountManagement(raw.AccountManagement, tenantID)
+	accountManagement, accountManagementErr := parseAccountManagement(raw.AccountManagement, tenantID, bool(raw.AllowInsecureHTTP))
 	if accountManagementErr != nil {
 		return Tenant{}, nil, accountManagementErr
 	}
@@ -1095,7 +1156,7 @@ func parsePasswordUser(raw FilePasswordUser, tenantID TenantID) (PasswordUser, e
 	}, nil
 }
 
-func parseAccountManagement(raw FileAccountManagement, tenantID TenantID) (AccountManagement, error) {
+func parseAccountManagement(raw FileAccountManagement, tenantID TenantID, allowInsecureHTTP bool) (AccountManagement, error) {
 	enabled := bool(raw.Enabled)
 	passwordSignupEnabled := bool(raw.PasswordSignup.Enabled)
 	if !enabled && passwordSignupEnabled {
@@ -1117,12 +1178,53 @@ func parseAccountManagement(raw FileAccountManagement, tenantID TenantID) (Accou
 		}
 		passwordResetTTL = parsedTTL
 	}
+	emailDelivery, emailDeliveryErr := parseEmailDelivery(raw.EmailDelivery, tenantID, allowInsecureHTTP, enabled && !bool(raw.ReturnChallengeTokens))
+	if emailDeliveryErr != nil {
+		return AccountManagement{}, emailDeliveryErr
+	}
 	return AccountManagement{
 		enabled:               enabled,
 		passwordSignupEnabled: passwordSignupEnabled,
 		returnChallengeTokens: bool(raw.ReturnChallengeTokens),
 		emailVerificationTTL:  emailVerificationTTL,
+		emailDelivery:         emailDelivery,
 		passwordResetTTL:      passwordResetTTL,
+	}, nil
+}
+
+func parseEmailDelivery(raw FileEmailDelivery, tenantID TenantID, allowInsecureHTTP bool, required bool) (EmailDelivery, error) {
+	serverAddress := strings.TrimSpace(raw.ServerAddress)
+	apiKey := strings.TrimSpace(raw.APIKey)
+	emailVerificationURL := strings.TrimSpace(raw.EmailVerificationURL)
+	passwordResetURL := strings.TrimSpace(raw.PasswordResetURL)
+	passwordLinkURL := strings.TrimSpace(raw.PasswordLinkURL)
+	configured := serverAddress != "" || apiKey != "" || emailVerificationURL != "" || passwordResetURL != "" || passwordLinkURL != "" || raw.ConnectionTimeoutSeconds != 0 || raw.OperationTimeoutSeconds != 0
+	if !configured && !required {
+		return EmailDelivery{}, nil
+	}
+	if serverAddress == "" || apiKey == "" || raw.ConnectionTimeoutSeconds <= 0 || raw.OperationTimeoutSeconds <= 0 {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidEmailDelivery, tenantID)
+	}
+	normalizedVerificationURL, verificationURLErr := normalizeAppleRedirectURI(emailVerificationURL, allowInsecureHTTP)
+	if verificationURLErr != nil {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidEmailVerificationURL, tenantID, emailVerificationURL, verificationURLErr)
+	}
+	normalizedPasswordResetURL, passwordResetURLErr := normalizeAppleRedirectURI(passwordResetURL, allowInsecureHTTP)
+	if passwordResetURLErr != nil {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordResetURL, tenantID, passwordResetURL, passwordResetURLErr)
+	}
+	normalizedPasswordLinkURL, passwordLinkURLErr := normalizeAppleRedirectURI(passwordLinkURL, allowInsecureHTTP)
+	if passwordLinkURLErr != nil {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordLinkURL, tenantID, passwordLinkURL, passwordLinkURLErr)
+	}
+	return EmailDelivery{
+		serverAddress:            serverAddress,
+		apiKey:                   apiKey,
+		emailVerificationURL:     normalizedVerificationURL,
+		passwordResetURL:         normalizedPasswordResetURL,
+		passwordLinkURL:          normalizedPasswordLinkURL,
+		connectionTimeoutSeconds: raw.ConnectionTimeoutSeconds,
+		operationTimeoutSeconds:  raw.OperationTimeoutSeconds,
 	}, nil
 }
 
@@ -1459,6 +1561,11 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.PasswordAuth.Users[index].PasswordHash = expandPasswordHashEnv(tenant.PasswordAuth.Users[index].PasswordHash)
 	}
 	tenant.AccountManagement.EmailVerificationTTL = os.ExpandEnv(tenant.AccountManagement.EmailVerificationTTL)
+	tenant.AccountManagement.EmailDelivery.ServerAddress = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.ServerAddress)
+	tenant.AccountManagement.EmailDelivery.APIKey = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.APIKey)
+	tenant.AccountManagement.EmailDelivery.EmailVerificationURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.EmailVerificationURL)
+	tenant.AccountManagement.EmailDelivery.PasswordResetURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.PasswordResetURL)
+	tenant.AccountManagement.EmailDelivery.PasswordLinkURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.PasswordLinkURL)
 	tenant.AccountManagement.PasswordResetTTL = os.ExpandEnv(tenant.AccountManagement.PasswordResetTTL)
 	tenant.OAuth = expandFileOAuthAuthorizationEnv(tenant.OAuth)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
@@ -1556,7 +1663,19 @@ type FileAccountManagement struct {
 	PasswordSignup        FilePasswordSignup `json:"password_signup" yaml:"password_signup"`
 	ReturnChallengeTokens yamlBool           `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
 	EmailVerificationTTL  string             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	EmailDelivery         FileEmailDelivery  `json:"email_delivery" yaml:"email_delivery"`
 	PasswordResetTTL      string             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+}
+
+// FileEmailDelivery represents raw tenant notification service settings.
+type FileEmailDelivery struct {
+	ServerAddress            string `json:"server_address" yaml:"server_address"`
+	APIKey                   string `json:"api_key" yaml:"api_key"`
+	EmailVerificationURL     string `json:"email_verification_url" yaml:"email_verification_url"`
+	PasswordResetURL         string `json:"password_reset_url" yaml:"password_reset_url"`
+	PasswordLinkURL          string `json:"password_link_url" yaml:"password_link_url"`
+	ConnectionTimeoutSeconds int    `json:"connection_timeout_seconds" yaml:"connection_timeout_seconds"`
+	OperationTimeoutSeconds  int    `json:"operation_timeout_seconds" yaml:"operation_timeout_seconds"`
 }
 
 // FilePasswordSignup represents the raw public signup toggle.

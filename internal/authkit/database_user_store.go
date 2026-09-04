@@ -468,6 +468,48 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 	return AccountChallenge{AccountID: accountID, Token: token, ExpiresUnix: expiresUnix}, nil
 }
 
+// CancelPasswordSignup removes a pending signup after delivery fails.
+func (store *DatabaseUserStore) CancelPasswordSignup(ctx context.Context, tenantID string, accountID string) error {
+	cancelErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var account databaseAccountRecord
+		accountErr := tx.Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStatePendingVerification).Take(&account).Error
+		if accountErr != nil {
+			return accountErr
+		}
+		if deleteErr := tx.Where("tenant_id = ? AND account_id = ? AND challenge_kind = ?", tenantID, accountID, accountChallengeEmailVerification).Delete(&databaseAccountChallengeRecord{}).Error; deleteErr != nil {
+			return deleteErr
+		}
+		if deleteErr := tx.Where("tenant_id = ? AND account_id = ?", tenantID, accountID).Delete(&passwordCredentialRecord{}).Error; deleteErr != nil {
+			return deleteErr
+		}
+		return tx.Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStatePendingVerification).Delete(&databaseAccountRecord{}).Error
+	})
+	if cancelErr != nil {
+		return fmt.Errorf("%s.account_signup_cancel.%s: %w", userStoreErrorPrefix, store.driverLabel, cancelErr)
+	}
+	return nil
+}
+
+// CancelAccountChallenge removes one unconsumed reset or link challenge.
+func (store *DatabaseUserStore) CancelAccountChallenge(ctx context.Context, tenantID string, accountID string, token string) error {
+	deleteResult := store.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND account_id = ? AND token_hash = ? AND challenge_kind IN ? AND consumed_at_unix = 0",
+			tenantID,
+			accountID,
+			hashOpaque(strings.TrimSpace(token)),
+			[]string{accountChallengePasswordReset, accountChallengePasswordLink},
+		).
+		Delete(&databaseAccountChallengeRecord{})
+	if deleteResult.Error != nil {
+		return fmt.Errorf("%s.account_challenge_cancel.%s: %w", userStoreErrorPrefix, store.driverLabel, deleteResult.Error)
+	}
+	if deleteResult.RowsAffected != 1 {
+		return fmt.Errorf("%s.account_challenge_cancel.%s: challenge_not_found", userStoreErrorPrefix, store.driverLabel)
+	}
+	return nil
+}
+
 // VerifyEmailChallenge activates a pending signup.
 func (store *DatabaseUserStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
 	var profile AccountProfile

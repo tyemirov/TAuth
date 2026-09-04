@@ -261,6 +261,46 @@ func TestLoadConfigParsesAccountManagement(testingHandle *testing.T) {
 	}
 }
 
+func TestLoadConfigParsesEmailVerificationDelivery(testingHandle *testing.T) {
+	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
+	tenant.AccountManagement = FileAccountManagement{
+		Enabled: true,
+		PasswordSignup: FilePasswordSignup{
+			Enabled: true,
+		},
+		EmailDelivery: FileEmailDelivery{
+			ServerAddress:            "pinguin:50051",
+			APIKey:                   "tenant-api-key",
+			EmailVerificationURL:     "https://ui.example.com/verify-email",
+			PasswordResetURL:         "https://ui.example.com/reset-password",
+			PasswordLinkURL:          "https://ui.example.com/link-password",
+			ConnectionTimeoutSeconds: 3,
+			OperationTimeoutSeconds:  5,
+		},
+	}
+	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
+	if loadErr != nil {
+		testingHandle.Fatalf("expected config to load, got error: %v", loadErr)
+	}
+	loadedTenant, exists := config.TenantByID("demo")
+	if !exists {
+		testingHandle.Fatalf("expected tenant to exist")
+	}
+	emailDelivery := loadedTenant.AccountManagement().EmailDelivery()
+	if emailDelivery.ServerAddress() != "pinguin:50051" || emailDelivery.APIKey() != "tenant-api-key" {
+		testingHandle.Fatalf("unexpected email delivery service settings: %#v", emailDelivery)
+	}
+	if emailDelivery.EmailVerificationURL() != "https://ui.example.com/verify-email" {
+		testingHandle.Fatalf("unexpected email verification URL: %s", emailDelivery.EmailVerificationURL())
+	}
+	if emailDelivery.PasswordResetURL() != "https://ui.example.com/reset-password" || emailDelivery.PasswordLinkURL() != "https://ui.example.com/link-password" {
+		testingHandle.Fatalf("unexpected password challenge URLs: %#v", emailDelivery)
+	}
+	if emailDelivery.ConnectionTimeoutSeconds() != 3 || emailDelivery.OperationTimeoutSeconds() != 5 {
+		testingHandle.Fatalf("unexpected email delivery timeouts: %#v", emailDelivery)
+	}
+}
+
 func TestLoadConfigParsesAppleOAuth(testingHandle *testing.T) {
 	tenant := buildTestTenant("demo", []string{"https://demo.localhost"}, "demo.localhost", "app_session_demo", "app_refresh_demo", "demo-key")
 	tenant.AppleOAuth = FileAppleOAuth{

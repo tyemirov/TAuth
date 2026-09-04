@@ -6,6 +6,36 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F003] (P0) Deliver account challenge email through a notification service.
+  Goal:
+  TAuth delivers each email verification challenge without returning its token to the browser.
+  Requirements:
+  - Add one injected notification adapter for account challenge email.
+  - Configure the notification service address and the public verification URL.
+  - Deliver a verification link after TAuth creates a password account.
+  - Return an error when the notification service rejects the email.
+  - Keep challenge tokens out of production HTTP responses.
+  Deliverables:
+  - Add the notification adapter, config, server wiring, documentation, and black-box tests.
+  Validation:
+  - Verify that password signup sends one email with the correct verification link.
+  - Verify that the HTTP response does not contain the challenge token.
+  - Verify that notification errors do not return a successful signup response.
+  - Run `make ci`.
+
+  Resolution 2026-09-03:
+  - Added tenant-specific Pinguin configuration and an injected email sender.
+  - Added a public verification link to each queued signup email.
+  - Removed failed pending signups so the user can try again.
+  - Added HTTP, gRPC, config, server, and deployment-renderer tests.
+  - `make ci` passed.
+  - Changed files: auth routes, tenant config, server wiring, deployment config, tests, and public documentation.
+
+  Stack validation 2026-09-04:
+  - Merged I208 into F003 with a forward-only merge.
+  - Preserved optional account settings and email delivery fields in the renderer.
+  - The renderer target and `make ci` passed with both contracts.
+
 - [x] [F002] (P0) Add native Sign in with Apple authentication.
   Goal:
   TAuth accepts Apple ID tokens from iOS clients and issues the same tenant session as other identity providers.
@@ -241,6 +271,33 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [I208] (P1) Own the deployment config renderer.
+  Goal:
+  TAuth converts selected resource contributions into its native config.
+
+  Requirements:
+  - Add one versioned render request contract.
+  - Read the render request from standard input.
+  - Resolve each declared TAuth output inside TAuth.
+  - Validate the complete native config before output.
+  - Keep private values out of errors and normal logs.
+
+  Deliverables:
+  - Add the provider render command.
+  - Add public CLI integration coverage.
+  - Document the provider-owned deployment boundary.
+
+  Validation:
+  - Render one complete browser demo config.
+  - Reject an unknown request field.
+  - Reject a missing private output.
+  - `make ci` passed after the last source change.
+
+  Completion evidence:
+  - The README documents the exact schema-v1 request envelope.
+  - The architecture assigns native config assembly and validation to TAuth.
+  - The gateway remains the owner of the `resources.yml` schema.
+
 - [x] [I207] (P0) Use the permanent versionless selected application manifest.
   Goal:
   Use one selected application manifest contract without a schema number.
@@ -362,6 +419,64 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B070] (P2) Select account email delivery for each tenant.
+  Goal:
+  Tenants that return challenge tokens work beside tenants that use email delivery.
+  The shared sender currently sends challenges for tenants without email delivery config.
+  Requirements:
+  - Select delivery from the resolved tenant config for signup, password reset, and password linking.
+  - Preserve token responses for tenants without email delivery.
+  - Keep email delivery active when a configured tenant also returns tokens.
+  Validation:
+  - Complete all three account flows through HTTP in a mixed-tenant server.
+  - Run `make test-go` and `make ci`.
+  Resolution 2026-09-04:
+  - The tenant registry carries the native email delivery setting into each route config.
+  - Signup, reset, and password linking use that tenant setting before email delivery.
+  - Nine HTTP cases cover email-only, token-only, and combined modes, including challenge completion.
+  - All three token-only cases failed before the fix. `make test-go` and `make ci` passed after the fix.
+
+- [x] [B069] (P2) Validate disabled account settings during config conversion.
+  Goal:
+  The renderer cannot silently remove requested password signup.
+  Requirements:
+  - Preserve supplied account settings for native validation.
+  - Reject password signup when account management is disabled.
+  - Reject invalid TTL values in disabled account settings.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer preserves supplied account settings for native validation.
+  - CLI tests cover contradictory signup, invalid TTLs, valid disabled settings, and absent settings.
+  - The renderer target and `make ci` passed.
+
+- [x] [B068] (P2) Require the contributions array in each render request.
+  Goal:
+  An incomplete render request cannot remove the tenant config.
+  Requirements:
+  - Reject a missing or null contributions array.
+  - Accept an explicit empty array for bootstrap.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The request decoder rejects missing and null contributions.
+  - CLI tests confirm rejection without config output and acceptance of an explicit empty array.
+  - The renderer target and `make ci` passed.
+
+- [x] [B067] (P1) Enable tenant selection for shared browser origins.
+  Goal:
+  The deployment config renderer supports browser tenants that share an origin.
+  Requirements:
+  - Enable tenant header overrides when multiple tenants own one origin.
+  - Use the native origin rules.
+  - Keep the override disabled for distinct browser origins.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer uses native origin ownership to enable tenant header overrides.
+  - CLI tests cover shared origins, hostname case, distinct origins, and the Google CORS exception.
+  - The renderer target and `make ci` passed.
 
 - [x] [B066] (P1) Track each published TAuth page with its production site identity.
   Goal:
