@@ -145,3 +145,14 @@ Read these files before editing:
 Do not create `.mprlab/AGENTS.md`. Scoped guidance belongs in `.mprlab/AGENTS.*.md` files.
 If guidance conflicts, follow `.mprlab/POLICY.md` first, then root `AGENTS.md`, then the relevant scoped guide.
 <!-- END MPRLAB-GOVERNANCE -->
+
+<!-- BEGIN ISSUES.MD MANAGED ONBOARDING -->
+## ISSUES.md repository workflow
+
+ISSUES.md manages this repository through the current application contract.
+
+- Use `.mprlab/ISSUES.md` as the repository issue tracker.
+- Follow `.mprlab/issues-md-format.md` for issue syntax and identifiers.
+- Use `.mprlab/runtime.yml` as the repository execution contract.
+- Keep these required documents current through the ISSUES.md onboarding pull request.
+<!-- END ISSUES.MD MANAGED ONBOARDING -->
