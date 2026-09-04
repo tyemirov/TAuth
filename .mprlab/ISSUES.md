@@ -31,6 +31,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - `make ci` passed.
   - Changed files: auth routes, tenant config, server wiring, deployment config, tests, and public documentation.
 
+  Stack validation 2026-09-04:
+  - Merged I208 into F003 with a forward-only merge.
+  - Preserved optional account settings and email delivery fields in the renderer.
+  - The renderer target and `make ci` passed with both contracts.
+
 - [x] [F002] (P0) Add native Sign in with Apple authentication.
   Goal:
   TAuth accepts Apple ID tokens from iOS clients and issues the same tenant session as other identity providers.
@@ -288,6 +293,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Reject a missing private output.
   - `make ci` passed after the last source change.
 
+  Completion evidence:
+  - The README documents the exact schema-v1 request envelope.
+  - The architecture assigns native config assembly and validation to TAuth.
+  - The gateway remains the owner of the `resources.yml` schema.
+
 - [x] [I207] (P0) Use the permanent versionless selected application manifest.
   Goal:
   Use one selected application manifest contract without a schema number.
@@ -409,6 +419,47 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B069] (P2) Validate disabled account settings during config conversion.
+  Goal:
+  The renderer cannot silently remove requested password signup.
+  Requirements:
+  - Preserve supplied account settings for native validation.
+  - Reject password signup when account management is disabled.
+  - Reject invalid TTL values in disabled account settings.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer preserves supplied account settings for native validation.
+  - CLI tests cover contradictory signup, invalid TTLs, valid disabled settings, and absent settings.
+  - The renderer target and `make ci` passed.
+
+- [x] [B068] (P2) Require the contributions array in each render request.
+  Goal:
+  An incomplete render request cannot remove the tenant config.
+  Requirements:
+  - Reject a missing or null contributions array.
+  - Accept an explicit empty array for bootstrap.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The request decoder rejects missing and null contributions.
+  - CLI tests confirm rejection without config output and acceptance of an explicit empty array.
+  - The renderer target and `make ci` passed.
+
+- [x] [B067] (P1) Enable tenant selection for shared browser origins.
+  Goal:
+  The deployment config renderer supports browser tenants that share an origin.
+  Requirements:
+  - Enable tenant header overrides when multiple tenants own one origin.
+  - Use the native origin rules.
+  - Keep the override disabled for distinct browser origins.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer uses native origin ownership to enable tenant header overrides.
+  - CLI tests cover shared origins, hostname case, distinct origins, and the Google CORS exception.
+  - The renderer target and `make ci` passed.
 
 - [x] [B066] (P1) Track each published TAuth page with its production site identity.
   Goal:

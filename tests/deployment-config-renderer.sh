@@ -61,4 +61,6 @@ if grep -Fq "${fixture_secret}" "${stderr_path}" || grep -Fq "${missing_fixture_
   exit 1
 fi
 
+node tests/deployment-config-renderer-cases.mjs "${binary_path}" "${valid_fixture}"
+
 printf '%s\n' 'TAUTH_DEPLOYMENT_CONFIG_RENDERER_OK'
