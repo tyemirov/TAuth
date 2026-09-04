@@ -942,7 +942,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, signupErr)
 			return
 		}
-		if emailChallengeSender != nil {
+		if config.EmailDeliveryEnabled && emailChallengeSender != nil {
 			verificationURL, verificationURLErr := buildEmailChallengeURL(config.EmailVerificationURL, challenge.Token)
 			if verificationURLErr != nil {
 				cancelPasswordSignup(contextGin, store, tenantID, challenge.AccountID)
@@ -1021,7 +1021,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				return
 			}
 			challenge = fakeChallenge(expiresAt.Unix())
-		} else if emailChallengeSender != nil {
+		} else if config.EmailDeliveryEnabled && emailChallengeSender != nil {
 			resetURL, resetURLErr := buildEmailChallengeURL(config.PasswordResetURL, challenge.Token)
 			if resetURLErr != nil {
 				cancelAccountChallenge(contextGin, store, tenantID, challenge)
@@ -1530,7 +1530,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, linkErr)
 			return
 		}
-		if emailChallengeSender != nil {
+		if config.EmailDeliveryEnabled && emailChallengeSender != nil {
 			expiresAt := time.Unix(challenge.ExpiresUnix, 0).UTC()
 			linkURL, linkURLErr := buildEmailChallengeURL(config.PasswordLinkURL, challenge.Token)
 			if linkURLErr != nil {

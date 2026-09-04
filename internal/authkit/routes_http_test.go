@@ -4967,6 +4967,7 @@ func TestHTTPPasswordSignupQueuesVerificationEmail(testingHandle *testing.T) {
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
+	config.EmailDeliveryEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/verify-email"
 	accountStore := NewMemoryPasswordCredentialStore()
 	emailSender := &recordingEmailChallengeSender{}
@@ -5032,6 +5033,7 @@ func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
+	config.EmailDeliveryEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/verify-email"
 	emailSender := &recordingEmailChallengeSender{err: errors.New("notification unavailable")}
 	router := gin.New()
@@ -5065,6 +5067,7 @@ func TestHTTPPasswordChallengesQueueEmailWithoutReturningTokens(testingHandle *t
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
+	config.EmailDeliveryEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/auth?auth_action=verify-email"
 	config.PasswordResetURL = "https://ui.example.com/auth?auth_action=reset-complete"
 	config.PasswordLinkURL = "https://ui.example.com/auth?auth_action=password-link-verify"
@@ -5122,6 +5125,7 @@ func TestHTTPPasswordChallengeDeliveryFailuresCancelTokens(testingHandle *testin
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
+	config.EmailDeliveryEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/auth?auth_action=verify-email"
 	config.PasswordResetURL = "https://ui.example.com/auth?auth_action=reset-complete"
 	config.PasswordLinkURL = "https://ui.example.com/auth?auth_action=password-link-verify"

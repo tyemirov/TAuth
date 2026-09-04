@@ -16,6 +16,7 @@ type ServerConfig struct {
 	AccountManagementEnabled bool
 	PasswordSignupEnabled    bool
 	ReturnChallengeTokens    bool
+	EmailDeliveryEnabled     bool
 	AppJWTSigningKey         []byte
 	AppJWTIssuer             string
 	TenantID                 string
