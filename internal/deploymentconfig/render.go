@@ -49,12 +49,12 @@ func Render(reader io.Reader) ([]byte, error) {
 	if buildErr != nil {
 		return nil, buildErr
 	}
+	if finalizeErr := finalizeDocument(&document); finalizeErr != nil {
+		return nil, finalizeErr
+	}
 	payload, marshalErr := yaml.Marshal(document)
 	if marshalErr != nil {
 		return nil, fmt.Errorf("%w: encode native config: %v", errInvalidConfig, marshalErr)
-	}
-	if validateErr := validateDocument(payload); validateErr != nil {
-		return nil, validateErr
 	}
 	return payload, nil
 }
@@ -130,7 +130,7 @@ type tenantSettings struct {
 	GoogleNativeClients []nativeClientResource `json:"google_native_clients,omitempty"`
 	AppleOAuth          *appleOAuthResource    `json:"apple_oauth,omitempty"`
 	PasswordAuth        passwordAuthResource   `json:"password_auth,omitempty"`
-	AccountManagement   accountManagement      `json:"account_management,omitempty"`
+	AccountManagement   *accountManagement     `json:"account_management,omitempty"`
 	JWTSigningKey       resourceReference      `json:"jwt_signing_key"`
 	Cookie              cookieSettings         `json:"cookie"`
 	OAuth               *tenantOAuth           `json:"oauth,omitempty"`
@@ -303,6 +303,9 @@ func decodeRequest(reader io.Reader) (request, error) {
 	if decoded.SchemaVersion != RequestSchemaVersion {
 		return request{}, fmt.Errorf("%w: schema_version must be %d", errInvalidRequest, RequestSchemaVersion)
 	}
+	if decoded.Contributions == nil {
+		return request{}, fmt.Errorf("%w: contributions must be an array", errInvalidRequest)
+	}
 	return decoded, nil
 }
 
@@ -469,8 +472,8 @@ func buildTenant(item contribution) (nativeTenant, error) {
 	if resource.Tenant.PasswordAuth.Enabled {
 		tenant.PasswordAuth = &nativePasswordAuth{Enabled: true}
 	}
-	if resource.Tenant.AccountManagement.Enabled {
-		account := resource.Tenant.AccountManagement
+	if resource.Tenant.AccountManagement != nil {
+		account := *resource.Tenant.AccountManagement
 		if strings.TrimSpace(account.EmailVerificationTTL) == "" {
 			account.EmailVerificationTTL = "30m"
 		}
@@ -495,7 +498,11 @@ func requireOutput(item contribution, name string) (string, error) {
 	return output.Value, nil
 }
 
-func validateDocument(payload []byte) error {
+func finalizeDocument(document *nativeDocument) error {
+	payload, marshalErr := yaml.Marshal(document)
+	if marshalErr != nil {
+		return fmt.Errorf("%w: encode native config: %v", errInvalidConfig, marshalErr)
+	}
 	config, configErr := appconfig.ParseConfig(payload)
 	if configErr != nil {
 		return fmt.Errorf("%w: %v", errInvalidConfig, configErr)
@@ -503,6 +510,13 @@ func validateDocument(payload []byte) error {
 	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
 	if tenantErr != nil {
 		return fmt.Errorf("%w: %v", errInvalidConfig, tenantErr)
+	}
+	for _, tenant := range tenantConfig.Tenants() {
+		for _, origin := range tenant.Origins() {
+			if tenantConfig.OriginIsAmbiguous(origin) {
+				document.Server.EnableTenantHeaderOverride = true
+			}
+		}
 	}
 	if corsErr := appconfig.ValidateCORSAllowlist(config.Server, tenantConfig); corsErr != nil {
 		return fmt.Errorf("%w: %v", errInvalidConfig, corsErr)
