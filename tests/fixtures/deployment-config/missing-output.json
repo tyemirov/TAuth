@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "contributions": [
+    {
+      "owner": "browser-demo",
+      "id": "authentication",
+      "kind": "tauth_tenant",
+      "desired": {
+        "kind": "tauth_tenant",
+        "id": "authentication",
+        "capability": "tauth.tenants",
+        "version": 1,
+        "tenant": {
+          "id": "browser-demo",
+          "display_name": "Browser demo",
+          "origins": ["https://ui.example.invalid"],
+          "google_web_client_id": {
+            "resource": "private",
+            "output": "google-web-client-id"
+          },
+          "jwt_signing_key": {
+            "resource": "private",
+            "output": "jwt-signing-key"
+          },
+          "cookie": {
+            "domain": ".example.invalid",
+            "session_name": "app_session_browser_demo",
+            "refresh_name": "app_refresh_browser_demo"
+          }
+        }
+      },
+      "outputs": {
+        "jwt-signing-key": {
+          "value": "fixture-missing-output-secret-at-least-32-characters"
+        }
+      }
+    }
+  ]
+}

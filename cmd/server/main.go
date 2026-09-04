@@ -54,6 +54,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().String("config", "config.yaml", "Path to application config file (overridden by TAUTH_CONFIG_FILE env)")
 	rootCmd.AddCommand(newPreflightCommand())
 	rootCmd.AddCommand(newDoctorCommand())
+	rootCmd.AddCommand(newRenderDeploymentConfigCommand())
 
 	return rootCmd
 }

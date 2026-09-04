@@ -241,6 +241,28 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [I208] (P1) Own the deployment config renderer.
+  Goal:
+  TAuth converts selected resource contributions into its native config.
+
+  Requirements:
+  - Add one versioned render request contract.
+  - Read the render request from standard input.
+  - Resolve each declared TAuth output inside TAuth.
+  - Validate the complete native config before output.
+  - Keep private values out of errors and normal logs.
+
+  Deliverables:
+  - Add the provider render command.
+  - Add public CLI integration coverage.
+  - Document the provider-owned deployment boundary.
+
+  Validation:
+  - Render one complete browser demo config.
+  - Reject an unknown request field.
+  - Reject a missing private output.
+  - `make ci` passed after the last source change.
+
 - [x] [I207] (P0) Use the permanent versionless selected application manifest.
   Goal:
   Use one selected application manifest contract without a schema number.

@@ -99,8 +99,22 @@ company owns that file, every tenant value, all secrets, routing, and deployment
 orchestration. This repository ships the generic service, configuration schema,
 neutral examples, and validation commands. For the MPR Lab deployment, the
 tracked `.mprlab/deploy/resources.yml` declares only desired resources and
-secret identities; the exact sibling `../mprlab-gateway` owns Ansible,
-operator values, release sealing, publication, and convergence.
+secret identities. The exact sibling `../mprlab-gateway` owns generic Ansible
+orchestration, operator values, release sealing, publication, and convergence.
+The TAuth artifact converts the declared TAuth resources to its native config.
+
+The `render-deployment-config` command reads one strict schema-v1 JSON request
+from standard input. The request contains complete TAuth resource contributions
+and their resolved output envelopes. The command writes one validated native
+YAML config to standard output. Unknown request fields, unsupported resource
+kinds, missing outputs, and invalid native config cause a nonzero exit.
+
+```bash
+tauth render-deployment-config < deployment-request.json > config.yaml
+```
+
+The gateway treats the request and response as private values. It does not
+interpret TAuth fields or write secret values to normal logs.
 
 ### 1. Describe your tenants
 

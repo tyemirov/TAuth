@@ -342,10 +342,14 @@ routes, and health contract without containing secret bytes or host paths.
 
 The root `make release`, `make publish`, and `make deploy` entrypoints delegate
 the exact selected Git root to the required sibling `../mprlab-gateway`.
-Gateway-owned Ansible validates the schema, assembles shared tenant state from
-application contributions, generates Compose and Caddy state, manages
-immutable lifecycle receipts, and performs convergence. TAuth carries no
-production lifecycle script or alternate controller.
+Gateway-owned Ansible validates the `resources.yml` schema, resolves declared
+outputs, manages immutable lifecycle receipts, and performs convergence. The
+gateway sends complete TAuth contributions and output envelopes to
+`tauth render-deployment-config` through standard input. TAuth owns the strict
+render request, TAuth defaults, output-name resolution, native config assembly,
+and native validation. The command returns the complete native YAML through
+standard output. TAuth carries no production lifecycle script or alternative
+controller.
 
 ### 5.1 Multi-tenant configuration file
 
