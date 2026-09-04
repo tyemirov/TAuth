@@ -209,11 +209,11 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if registryErr != nil {
 		return registryErr
 	}
-	var emailVerificationSender authkit.EmailVerificationSender
+	var emailChallengeSender authkit.EmailChallengeSender
 	pinguinConfigs := buildPinguinTenantConfigs(tenantConfig)
 	if len(pinguinConfigs) > 0 {
 		pinguinLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		pinguinSender, pinguinSenderErr := notification.NewPinguinEmailVerificationSender(pinguinLogger, pinguinConfigs)
+		pinguinSender, pinguinSenderErr := notification.NewPinguinEmailChallengeSender(pinguinLogger, pinguinConfigs)
 		if pinguinSenderErr != nil {
 			return pinguinSenderErr
 		}
@@ -222,7 +222,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 				logger.Error("close Pinguin notification client", zap.Error(closeErr))
 			}
 		}()
-		emailVerificationSender = pinguinSender
+		emailChallengeSender = pinguinSender
 	}
 	resolverOptions := []tenants.ResolverOption{}
 	if enableTenantHeaderOverride {
@@ -327,7 +327,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailVerificationSender)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))

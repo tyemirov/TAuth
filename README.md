@@ -167,6 +167,8 @@ tenants:
         server_address: "pinguin-grpc:50051"
         api_key: "${PINGUIN_TENANT_API_KEY}"
         email_verification_url: "https://app.example.com/verify-email"
+        password_reset_url: "https://app.example.com/reset-password"
+        password_link_url: "https://app.example.com/link-password"
         connection_timeout_seconds: 3
         operation_timeout_seconds: 5
       password_reset_ttl: "15m"
@@ -195,7 +197,7 @@ Each entry defines:
 - `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`. Configure the Services ID, Team ID, and Key ID. Provide a PKCS8 ECDSA private key and an HTTPS callback URI. Add each native iOS App ID under `native_client_ids`. Each native ID must be unique across tenants.
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
 - `account_management` – optional first-party account lifecycle. Enable it for persisted account IDs and account routes.
-- `email_delivery` – required Pinguin settings when public signup does not return test tokens.
+- `email_delivery` – required Pinguin settings and public challenge pages when account management does not return test tokens.
 - `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The issuer-owned login page uses the tenant's configured Google browser provider, password provider, or both.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.example.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
@@ -464,6 +466,8 @@ tenants:
         server_address: "pinguin-grpc:50051"
         api_key: "${PINGUIN_TENANT_API_KEY}"
         email_verification_url: "https://demo.example.com/verify-email"
+        password_reset_url: "https://demo.example.com/reset-password"
+        password_link_url: "https://demo.example.com/link-password"
         connection_timeout_seconds: 3
         operation_timeout_seconds: 5
       password_reset_ttl: "15m"
@@ -493,8 +497,8 @@ Rules enforced by the loader:
 - `cookie_domain` can be blank for host-only cookies. A specified value must be a valid registrable domain, for example `.example.com`.
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
 - `account_management.enabled` enables the complete account lifecycle. `password_signup.enabled` requires account management.
-- `email_delivery` configures Pinguin for signup verification. The API key selects the Pinguin tenant. The public URL receives the single-use token.
-- Keep `return_challenge_tokens` false outside tests. TAuth then requires complete `email_delivery` settings and does not return the token to the browser.
+- `email_delivery` configures Pinguin for signup verification, password reset, and password linking. The API key selects the Pinguin tenant. TAuth adds the single-use token to the URL fragment of the matching public page.
+- Keep `return_challenge_tokens` false outside tests. TAuth then requires all Pinguin settings and challenge URLs. It does not return challenge tokens in HTTP response bodies.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_notes`).
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.

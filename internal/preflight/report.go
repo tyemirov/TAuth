@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	reportSchemaVersion        = "tauth.preflight.v7"
-	endpointContractVersion    = "tauth.http.v3"
+	reportSchemaVersion        = "tauth.preflight.v8"
+	endpointContractVersion    = "tauth.http.v4"
 	errorCodeLoadConfig        = "preflight.load_config"
 	errorCodeLoadTenants       = "preflight.load_tenants"
 	errorCodeValidateCORS      = "preflight.validate_cors"
@@ -109,6 +109,8 @@ type tenantPayload struct {
 	EmailVerificationTTL       string                      `json:"email_verification_ttl"`
 	EmailDeliveryConfigured    bool                        `json:"email_delivery_configured"`
 	EmailVerificationURL       string                      `json:"email_verification_url,omitempty"`
+	PasswordResetURL           string                      `json:"password_reset_url,omitempty"`
+	PasswordLinkURL            string                      `json:"password_link_url,omitempty"`
 	PasswordResetTTL           string                      `json:"password_reset_ttl"`
 	CookieDomain               string                      `json:"cookie_domain"`
 	SessionCookieName          string                      `json:"session_cookie_name"`
@@ -297,6 +299,8 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			EmailVerificationTTL:       tenant.AccountManagement().EmailVerificationTTL().String(),
 			EmailDeliveryConfigured:    tenant.AccountManagement().EmailDelivery().Enabled(),
 			EmailVerificationURL:       tenant.AccountManagement().EmailDelivery().EmailVerificationURL(),
+			PasswordResetURL:           tenant.AccountManagement().EmailDelivery().PasswordResetURL(),
+			PasswordLinkURL:            tenant.AccountManagement().EmailDelivery().PasswordLinkURL(),
 			PasswordResetTTL:           tenant.AccountManagement().PasswordResetTTL().String(),
 			CookieDomain:               tenant.CookieDomain(),
 			SessionCookieName:          tenant.SessionCookieName(),

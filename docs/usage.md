@@ -59,7 +59,7 @@ Key notes:
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
 - **Apple OAuth**: Set `apple_oauth.enabled: true` to expose the browser Apple endpoints. Add native iOS App IDs under `native_client_ids` to expose the native Apple endpoints. Enabled providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and registered HTTPS callback URI.
 - **Account management**: Set `account_management.enabled: true` to use persisted account IDs and account routes.
-- **Signup delivery**: Set `email_delivery` for production signup. Keep `return_challenge_tokens` false outside tests.
+- **Challenge delivery**: Set `email_delivery` for production account management. Keep `return_challenge_tokens` false outside tests.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 - **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google browser authentication, password authentication, or both for the TAuth-owned login page.
 - **OAuth persistence**: When `database_url` is set, TAuth stores pending requests and authorization-code digests. It also stores consent grants and refresh-token digests in the same SQLite or Postgres database. Without a database URL, these records are process-local and disappear at restart.
@@ -496,6 +496,8 @@ account_management:
     server_address: "pinguin-grpc:50051"
     api_key: "${PINGUIN_TENANT_API_KEY}"
     email_verification_url: "https://app.example.com/verify-email"
+    password_reset_url: "https://app.example.com/reset-password"
+    password_link_url: "https://app.example.com/link-password"
     connection_timeout_seconds: 3
     operation_timeout_seconds: 5
   password_reset_ttl: "15m"
@@ -512,9 +514,9 @@ const profile = await exchangePasswordCredential({
 
 Or call `POST /auth/password/login` directly with `credentials: "include"`. The response and cookies match Google login. When `allowed_users` is configured, the normalized email must also be in that allowlist.
 
-Public signup and reset flows use tenant-specific, single-use challenge tokens. TAuth stores only challenge hashes.
+Signup, reset, and password-link flows use tenant-specific, single-use challenge tokens. TAuth stores only challenge hashes.
 
-For signup, production config must set `return_challenge_tokens: false`. It must also contain the complete `email_delivery` block. TAuth sends the verification link through Pinguin.
+Production config must set `return_challenge_tokens: false`. It must also contain the complete `email_delivery` block. TAuth sends each challenge link through Pinguin and puts the token in the URL fragment.
 
 ```js
 await signupPasswordCredential({
@@ -523,7 +525,7 @@ await signupPasswordCredential({
   displayName: form.displayName.value,
 });
 
-const token = new URL(window.location.href).searchParams.get("token");
+const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
 const profile = await verifyPasswordEmail({ token });
 
 await startPasswordReset({ email: form.email.value });
@@ -824,13 +826,13 @@ Starts a password signup when `account_management.enabled` and `account_manageme
 
   Tests can set `return_challenge_tokens: true`. That mode also returns `verification_token`.
 
-  Production config keeps this value false. TAuth queues one Pinguin email that contains the public verification URL.
+  Production config keeps this value false. TAuth queues one Pinguin email that contains the public verification URL and a fragment token.
 
 - **Errors**:
   - `404` with `error: "account_management_not_configured"` when account management is disabled
   - `404` with `error: "password_signup_not_configured"` when public signup is disabled
   - `409` with `error: "account_exists"` when the password identity is already linked
-  - `502` with `error: "email_verification_delivery_failed"` when Pinguin rejects the request
+  - `502` with `error: "email_challenge_delivery_failed"` when Pinguin rejects the request
   - `503` with `error: "email_verification_delivery_not_configured"` when server composition omitted the required sender
 
 ### 6.2g `POST /auth/password/verify-email`
@@ -856,7 +858,7 @@ Starts password reset. The response shape is intentionally the same for known an
   { "email": "user@example.com" }
   ```
 
-- **Response**: `202 Accepted` with `status`, `account_id` when known, and `expires_unix`. When `return_challenge_tokens: true`, known accounts receive `reset_token`.
+- **Response**: `202 Accepted` with `status`, `account_id` when known, and `expires_unix`. When `return_challenge_tokens: true`, known accounts receive `reset_token`. Production sends known-account reset links through Pinguin and keeps the same response shape for unknown accounts.
 
 ### 6.2i `POST /auth/password/reset/complete`
 
@@ -881,7 +883,7 @@ All `/auth/account/*` endpoints require the current `app_session` cookie and onl
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |
 | `POST` | `/auth/account/password/change` | `{ "current_password": "...", "new_password": "..." }` | `200` profile, refresh sessions revoked and reissued |
-| `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` verification challenge metadata |
+| `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` metadata. Production sends the link through Pinguin. |
 | `POST` | `/auth/account/password/link/verify` | `{ "token": "..." }` | `200` profile |
 | `POST` | `/auth/account/google/link` | `{ "google_id_token": "...", "nonce_token": "..." }` | `200` profile |
 | `POST` | `/auth/account/unlink` | `{ "provider": "password|google|apple", "provider_id": "..." }` | `200` profile, refresh sessions revoked and reissued |

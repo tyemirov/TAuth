@@ -103,6 +103,8 @@
                 "output": "email-delivery-api-key"
               },
               "email_verification_url": "https://ui.example.invalid/verify-email",
+              "password_reset_url": "https://ui.example.invalid/reset-password",
+              "password_link_url": "https://ui.example.invalid/link-password",
               "connection_timeout_seconds": 3,
               "operation_timeout_seconds": 5
             },

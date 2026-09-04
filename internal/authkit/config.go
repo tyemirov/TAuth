@@ -30,21 +30,36 @@ type ServerConfig struct {
 	EmailVerificationTTL     time.Duration
 	EmailVerificationURL     string
 	PasswordResetTTL         time.Duration
+	PasswordResetURL         string
+	PasswordLinkURL          string
 	SameSiteMode             http.SameSite
 	AllowInsecureHTTP        bool
 }
 
-// EmailVerificationRequest contains one verification email delivery request.
-type EmailVerificationRequest struct {
-	TenantID        string
-	Recipient       string
-	VerificationURL string
-	ExpiresAt       time.Time
+// EmailChallengeKind identifies one password-account email challenge.
+type EmailChallengeKind string
+
+const (
+	// EmailChallengeKindVerification activates a new password account.
+	EmailChallengeKindVerification EmailChallengeKind = "email_verification"
+	// EmailChallengeKindPasswordReset authorizes a password reset.
+	EmailChallengeKindPasswordReset EmailChallengeKind = "password_reset"
+	// EmailChallengeKindPasswordLink authorizes a password identity link.
+	EmailChallengeKindPasswordLink EmailChallengeKind = "password_link"
+)
+
+// EmailChallengeRequest contains one password-account email delivery request.
+type EmailChallengeRequest struct {
+	Kind      EmailChallengeKind
+	TenantID  string
+	Recipient string
+	PublicURL string
+	ExpiresAt time.Time
 }
 
-// EmailVerificationSender delivers an account verification email.
-type EmailVerificationSender interface {
-	SendEmailVerification(ctx context.Context, request EmailVerificationRequest) error
+// EmailChallengeSender delivers password-account challenge emails.
+type EmailChallengeSender interface {
+	SendEmailChallenge(ctx context.Context, request EmailChallengeRequest) error
 }
 
 // NativeGoogleClientConfig configures one accepted native Google OAuth client.

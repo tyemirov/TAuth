@@ -252,6 +252,8 @@ func TestRunServerQueuesPasswordSignupVerificationEmail(testingHandle *testing.T
 			ServerAddress:            listener.Addr().String(),
 			APIKey:                   "test-api-key",
 			EmailVerificationURL:     "http://alpha.localhost/verify-email",
+			PasswordResetURL:         "http://alpha.localhost/reset-password",
+			PasswordLinkURL:          "http://alpha.localhost/link-password",
 			ConnectionTimeoutSeconds: 2,
 			OperationTimeoutSeconds:  2,
 		},

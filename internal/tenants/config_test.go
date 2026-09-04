@@ -272,6 +272,8 @@ func TestLoadConfigParsesEmailVerificationDelivery(testingHandle *testing.T) {
 			ServerAddress:            "pinguin:50051",
 			APIKey:                   "tenant-api-key",
 			EmailVerificationURL:     "https://ui.example.com/verify-email",
+			PasswordResetURL:         "https://ui.example.com/reset-password",
+			PasswordLinkURL:          "https://ui.example.com/link-password",
 			ConnectionTimeoutSeconds: 3,
 			OperationTimeoutSeconds:  5,
 		},
@@ -290,6 +292,9 @@ func TestLoadConfigParsesEmailVerificationDelivery(testingHandle *testing.T) {
 	}
 	if emailDelivery.EmailVerificationURL() != "https://ui.example.com/verify-email" {
 		testingHandle.Fatalf("unexpected email verification URL: %s", emailDelivery.EmailVerificationURL())
+	}
+	if emailDelivery.PasswordResetURL() != "https://ui.example.com/reset-password" || emailDelivery.PasswordLinkURL() != "https://ui.example.com/link-password" {
+		testingHandle.Fatalf("unexpected password challenge URLs: %#v", emailDelivery)
 	}
 	if emailDelivery.ConnectionTimeoutSeconds() != 3 || emailDelivery.OperationTimeoutSeconds() != 5 {
 		testingHandle.Fatalf("unexpected email delivery timeouts: %#v", emailDelivery)

@@ -34,15 +34,15 @@ func (service *recordingNotificationService) SendNotification(ctx context.Contex
 	}, nil
 }
 
-func TestPinguinSenderQueuesEmailVerification(testingHandle *testing.T) {
+func TestPinguinSenderQueuesPasswordChallengeEmails(testingHandle *testing.T) {
 	listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
 	if listenErr != nil {
 		testingHandle.Fatalf("listen for Pinguin test service: %v", listenErr)
 	}
 	grpcServer := grpc.NewServer()
 	recordingService := &recordingNotificationService{
-		requests:      make(chan *grpcapi.NotificationRequest, 1),
-		authorization: make(chan string, 1),
+		requests:      make(chan *grpcapi.NotificationRequest, 3),
+		authorization: make(chan string, 3),
 	}
 	grpcapi.RegisterNotificationServiceServer(grpcServer, recordingService)
 	go func() {
@@ -50,7 +50,7 @@ func TestPinguinSenderQueuesEmailVerification(testingHandle *testing.T) {
 	}()
 	defer grpcServer.Stop()
 
-	sender, senderErr := NewPinguinEmailVerificationSender(slog.Default(), []PinguinTenantConfig{{
+	sender, senderErr := NewPinguinEmailChallengeSender(slog.Default(), []PinguinTenantConfig{{
 		TenantID:                 "tenant-a",
 		ServerAddress:            listener.Addr().String(),
 		APIKey:                   "test-api-key",
@@ -62,37 +62,53 @@ func TestPinguinSenderQueuesEmailVerification(testingHandle *testing.T) {
 	}
 	defer sender.Close()
 
-	verificationRequest := authkit.EmailVerificationRequest{
-		TenantID:        "tenant-a",
-		Recipient:       "new@example.com",
-		VerificationURL: "https://ui.example.com/verify-email?token=secret-token",
-		ExpiresAt:       time.Now().UTC().Add(30 * time.Minute),
+	testCases := []struct {
+		name    string
+		kind    authkit.EmailChallengeKind
+		subject string
+	}{
+		{name: "email verification", kind: authkit.EmailChallengeKindVerification, subject: "Verify your email"},
+		{name: "password reset", kind: authkit.EmailChallengeKindPasswordReset, subject: "Reset your password"},
+		{name: "password link", kind: authkit.EmailChallengeKindPasswordLink, subject: "Confirm your email"},
 	}
-	if deliveryErr := sender.SendEmailVerification(context.Background(), verificationRequest); deliveryErr != nil {
-		testingHandle.Fatalf("queue verification email: %v", deliveryErr)
+	for _, testCase := range testCases {
+		testingHandle.Run(testCase.name, func(testingHandle *testing.T) {
+			deliveryRequest := authkit.EmailChallengeRequest{
+				Kind:      testCase.kind,
+				TenantID:  "tenant-a",
+				Recipient: "new@example.com",
+				PublicURL: "https://ui.example.com/auth#secret-token",
+				ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
+			}
+			if deliveryErr := sender.SendEmailChallenge(context.Background(), deliveryRequest); deliveryErr != nil {
+				testingHandle.Fatalf("queue challenge email: %v", deliveryErr)
+			}
+
+			select {
+			case request := <-recordingService.requests:
+				if request.NotificationType != grpcapi.NotificationType_EMAIL || request.Recipient != deliveryRequest.Recipient {
+					testingHandle.Fatalf("unexpected Pinguin request: %#v", request)
+				}
+				if request.Subject != testCase.subject {
+					testingHandle.Fatalf("unexpected challenge subject: %q", request.Subject)
+				}
+				if !strings.Contains(request.Message, deliveryRequest.PublicURL) {
+					testingHandle.Fatalf("challenge message has no public URL: %q", request.Message)
+				}
+			case <-time.After(time.Second):
+				testingHandle.Fatal("Pinguin did not receive a challenge request")
+			}
+		})
 	}
 
-	select {
-	case request := <-recordingService.requests:
-		if request.NotificationType != grpcapi.NotificationType_EMAIL || request.Recipient != verificationRequest.Recipient {
-			testingHandle.Fatalf("unexpected Pinguin request: %#v", request)
+	for range testCases {
+		select {
+		case authorization := <-recordingService.authorization:
+			if authorization != "Bearer test-api-key" {
+				testingHandle.Fatalf("unexpected Pinguin authorization: %q", authorization)
+			}
+		case <-time.After(time.Second):
+			testingHandle.Fatal("Pinguin did not receive authorization metadata")
 		}
-		if request.Subject != "Verify your email" {
-			testingHandle.Fatalf("unexpected verification subject: %q", request.Subject)
-		}
-		if !strings.Contains(request.Message, verificationRequest.VerificationURL) {
-			testingHandle.Fatalf("verification message has no public URL: %q", request.Message)
-		}
-	case <-time.After(time.Second):
-		testingHandle.Fatal("Pinguin did not receive a verification request")
-	}
-
-	select {
-	case authorization := <-recordingService.authorization:
-		if authorization != "Bearer test-api-key" {
-			testingHandle.Fatalf("unexpected Pinguin authorization: %q", authorization)
-		}
-	case <-time.After(time.Second):
-		testingHandle.Fatal("Pinguin did not receive authorization metadata")
 	}
 }

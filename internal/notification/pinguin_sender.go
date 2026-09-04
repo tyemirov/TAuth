@@ -16,7 +16,22 @@ import (
 const (
 	emailVerificationSubject = "Verify your email"
 	emailVerificationMessage = "Verify your email address with this link: %s\n\nThis link expires at %s."
+	passwordResetSubject     = "Reset your password"
+	passwordResetMessage     = "Reset your password with this link: %s\n\nThis link expires at %s."
+	passwordLinkSubject      = "Confirm your email"
+	passwordLinkMessage      = "Confirm this email address for your account with this link: %s\n\nThis link expires at %s."
 )
+
+type emailChallengeTemplate struct {
+	subject string
+	message string
+}
+
+var emailChallengeTemplates = map[authkit.EmailChallengeKind]emailChallengeTemplate{
+	authkit.EmailChallengeKindVerification:  {subject: emailVerificationSubject, message: emailVerificationMessage},
+	authkit.EmailChallengeKindPasswordReset: {subject: passwordResetSubject, message: passwordResetMessage},
+	authkit.EmailChallengeKindPasswordLink:  {subject: passwordLinkSubject, message: passwordLinkMessage},
+}
 
 // PinguinTenantConfig configures one tenant connection to Pinguin.
 type PinguinTenantConfig struct {
@@ -32,13 +47,13 @@ type pinguinTenantClient struct {
 	operationTimeout time.Duration
 }
 
-// PinguinEmailVerificationSender queues verification email through Pinguin.
-type PinguinEmailVerificationSender struct {
+// PinguinEmailChallengeSender queues password-account email through Pinguin.
+type PinguinEmailChallengeSender struct {
 	clients map[string]pinguinTenantClient
 }
 
-// NewPinguinEmailVerificationSender creates a tenant-specific Pinguin sender.
-func NewPinguinEmailVerificationSender(logger *slog.Logger, configs []PinguinTenantConfig) (*PinguinEmailVerificationSender, error) {
+// NewPinguinEmailChallengeSender creates a tenant-specific Pinguin sender.
+func NewPinguinEmailChallengeSender(logger *slog.Logger, configs []PinguinTenantConfig) (*PinguinEmailChallengeSender, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("notification.pinguin.logger_missing")
 	}
@@ -73,22 +88,26 @@ func NewPinguinEmailVerificationSender(logger *slog.Logger, configs []PinguinTen
 			operationTimeout: settings.OperationTimeout(),
 		}
 	}
-	return &PinguinEmailVerificationSender{clients: clients}, nil
+	return &PinguinEmailChallengeSender{clients: clients}, nil
 }
 
-// SendEmailVerification queues one email verification notification.
-func (sender *PinguinEmailVerificationSender) SendEmailVerification(ctx context.Context, request authkit.EmailVerificationRequest) error {
+// SendEmailChallenge queues one password-account email notification.
+func (sender *PinguinEmailChallengeSender) SendEmailChallenge(ctx context.Context, request authkit.EmailChallengeRequest) error {
 	tenantClient, exists := sender.clients[request.TenantID]
 	if !exists {
 		return fmt.Errorf("notification.pinguin.tenant_not_configured: %s", request.TenantID)
+	}
+	template, exists := emailChallengeTemplates[request.Kind]
+	if !exists {
+		return fmt.Errorf("notification.pinguin.challenge_kind_invalid: %s", request.Kind)
 	}
 	requestContext, cancelRequest := context.WithTimeout(ctx, tenantClient.operationTimeout)
 	defer cancelRequest()
 	response, sendErr := tenantClient.client.SendNotification(requestContext, &grpcapi.NotificationRequest{
 		NotificationType: grpcapi.NotificationType_EMAIL,
 		Recipient:        request.Recipient,
-		Subject:          emailVerificationSubject,
-		Message:          fmt.Sprintf(emailVerificationMessage, request.VerificationURL, request.ExpiresAt.Format(time.RFC3339)),
+		Subject:          template.subject,
+		Message:          fmt.Sprintf(template.message, request.PublicURL, request.ExpiresAt.Format(time.RFC3339)),
 	})
 	if sendErr != nil {
 		return fmt.Errorf("notification.pinguin.send tenant=%s: %w", request.TenantID, sendErr)
@@ -100,7 +119,7 @@ func (sender *PinguinEmailVerificationSender) SendEmailVerification(ctx context.
 }
 
 // Close releases all Pinguin connections.
-func (sender *PinguinEmailVerificationSender) Close() error {
+func (sender *PinguinEmailChallengeSender) Close() error {
 	return closePinguinClients(sender.clients)
 }
 

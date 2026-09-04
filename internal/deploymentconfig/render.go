@@ -173,6 +173,8 @@ type emailDeliveryResource struct {
 	ServerAddress            string            `json:"server_address"`
 	APIKey                   resourceReference `json:"api_key"`
 	EmailVerificationURL     string            `json:"email_verification_url"`
+	PasswordResetURL         string            `json:"password_reset_url"`
+	PasswordLinkURL          string            `json:"password_link_url"`
 	ConnectionTimeoutSeconds int               `json:"connection_timeout_seconds"`
 	OperationTimeoutSeconds  int               `json:"operation_timeout_seconds"`
 }
@@ -305,6 +307,8 @@ type nativeEmailDelivery struct {
 	ServerAddress            string `yaml:"server_address"`
 	APIKey                   string `yaml:"api_key"`
 	EmailVerificationURL     string `yaml:"email_verification_url"`
+	PasswordResetURL         string `yaml:"password_reset_url"`
+	PasswordLinkURL          string `yaml:"password_link_url"`
 	ConnectionTimeoutSeconds int    `yaml:"connection_timeout_seconds"`
 	OperationTimeoutSeconds  int    `yaml:"operation_timeout_seconds"`
 }
@@ -519,6 +523,8 @@ func buildTenant(item contribution) (nativeTenant, error) {
 				ServerAddress:            account.EmailDelivery.ServerAddress,
 				APIKey:                   apiKey,
 				EmailVerificationURL:     account.EmailDelivery.EmailVerificationURL,
+				PasswordResetURL:         account.EmailDelivery.PasswordResetURL,
+				PasswordLinkURL:          account.EmailDelivery.PasswordLinkURL,
 				ConnectionTimeoutSeconds: account.EmailDelivery.ConnectionTimeoutSeconds,
 				OperationTimeoutSeconds:  account.EmailDelivery.OperationTimeoutSeconds,
 			}

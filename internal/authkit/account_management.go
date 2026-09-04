@@ -198,6 +198,20 @@ func (store *MemoryPasswordCredentialStore) CancelPasswordSignup(_ context.Conte
 	return nil
 }
 
+// CancelAccountChallenge removes one unconsumed reset or link challenge.
+func (store *MemoryPasswordCredentialStore) CancelAccountChallenge(_ context.Context, tenantID string, accountID string, token string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.ensureAccountMaps(tenantID)
+	tokenHash := hashOpaque(strings.TrimSpace(token))
+	challenge := store.challenges[tenantID][tokenHash]
+	if challenge == nil || challenge.accountID != accountID || (challenge.kind != accountChallengePasswordReset && challenge.kind != accountChallengePasswordLink) {
+		return fmt.Errorf("account.challenge_cancel.invalid")
+	}
+	delete(store.challenges[tenantID], tokenHash)
+	return nil
+}
+
 // VerifyEmailChallenge activates a pending signup.
 func (store *MemoryPasswordCredentialStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
 	store.mu.Lock()

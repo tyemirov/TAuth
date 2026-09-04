@@ -20,7 +20,7 @@ import (
 
 const (
 	reportSchemaVersion     = "tauth.doctor.v2"
-	endpointContractVersion = "tauth.http.v3"
+	endpointContractVersion = "tauth.http.v4"
 )
 
 var errDoctor = errors.New("doctor.invalid")

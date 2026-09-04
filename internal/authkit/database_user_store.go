@@ -490,6 +490,26 @@ func (store *DatabaseUserStore) CancelPasswordSignup(ctx context.Context, tenant
 	return nil
 }
 
+// CancelAccountChallenge removes one unconsumed reset or link challenge.
+func (store *DatabaseUserStore) CancelAccountChallenge(ctx context.Context, tenantID string, accountID string, token string) error {
+	deleteResult := store.db.WithContext(ctx).
+		Where(
+			"tenant_id = ? AND account_id = ? AND token_hash = ? AND challenge_kind IN ? AND consumed_at_unix = 0",
+			tenantID,
+			accountID,
+			hashOpaque(strings.TrimSpace(token)),
+			[]string{accountChallengePasswordReset, accountChallengePasswordLink},
+		).
+		Delete(&databaseAccountChallengeRecord{})
+	if deleteResult.Error != nil {
+		return fmt.Errorf("%s.account_challenge_cancel.%s: %w", userStoreErrorPrefix, store.driverLabel, deleteResult.Error)
+	}
+	if deleteResult.RowsAffected != 1 {
+		return fmt.Errorf("%s.account_challenge_cancel.%s: challenge_not_found", userStoreErrorPrefix, store.driverLabel)
+	}
+	return nil
+}
+
 // VerifyEmailChallenge activates a pending signup.
 func (store *DatabaseUserStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
 	var profile AccountProfile

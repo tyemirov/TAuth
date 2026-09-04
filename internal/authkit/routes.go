@@ -118,7 +118,7 @@ const (
 	errorPasswordCredentialInvalid         = "invalid_credentials"
 	errorAccountManagementNotConfigured    = "account_management_not_configured"
 	errorPasswordSignupNotConfigured       = "password_signup_not_configured"
-	errorEmailVerificationDeliveryFailed   = "email_verification_delivery_failed"
+	errorEmailChallengeDeliveryFailed      = "email_challenge_delivery_failed"
 	errorEmailVerificationDeliveryMissing  = "email_verification_delivery_not_configured"
 	errorAccountExists                     = "account_exists"
 	errorAccountChallengeInvalid           = "invalid_challenge"
@@ -298,7 +298,7 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
-func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailVerificationSender EmailVerificationSender) {
+func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender) {
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -909,7 +909,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorPasswordSignupNotConfigured})
 			return
 		}
-		if !config.ReturnChallengeTokens && (emailVerificationSender == nil || strings.TrimSpace(config.EmailVerificationURL) == "") {
+		if !config.ReturnChallengeTokens && (emailChallengeSender == nil || strings.TrimSpace(config.EmailVerificationURL) == "") {
 			contextGin.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": errorEmailVerificationDeliveryMissing})
 			return
 		}
@@ -942,24 +942,25 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, signupErr)
 			return
 		}
-		if emailVerificationSender != nil {
-			verificationURL, verificationURLErr := buildEmailVerificationURL(config.EmailVerificationURL, challenge.Token)
+		if emailChallengeSender != nil {
+			verificationURL, verificationURLErr := buildEmailChallengeURL(config.EmailVerificationURL, challenge.Token)
 			if verificationURLErr != nil {
 				cancelPasswordSignup(contextGin, store, tenantID, challenge.AccountID)
 				logAuthError("auth.account.email_verification_url", verificationURLErr)
-				contextGin.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": errorEmailVerificationDeliveryFailed})
+				contextGin.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
 			}
-			deliveryErr := emailVerificationSender.SendEmailVerification(contextGin, EmailVerificationRequest{
-				TenantID:        tenantID,
-				Recipient:       normalizedEmail,
-				VerificationURL: verificationURL,
-				ExpiresAt:       expiresAt,
+			deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
+				Kind:      EmailChallengeKindVerification,
+				TenantID:  tenantID,
+				Recipient: normalizedEmail,
+				PublicURL: verificationURL,
+				ExpiresAt: expiresAt,
 			})
 			if deliveryErr != nil {
 				cancelPasswordSignup(contextGin, store, tenantID, challenge.AccountID)
 				logAuthError("auth.account.email_verification_delivery", deliveryErr)
-				contextGin.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": errorEmailVerificationDeliveryFailed})
+				contextGin.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
 			}
 		}
@@ -1011,14 +1012,32 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		challenge, resetErr := store.StartPasswordReset(contextGin, tenantID, inbound.Email, clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute)).Unix())
+		expiresAt := clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute))
+		challenge, resetErr := store.StartPasswordReset(contextGin, tenantID, inbound.Email, expiresAt.Unix())
 		if resetErr != nil {
 			if !errors.Is(resetErr, ErrAccountNotFound) && !errors.Is(resetErr, ErrPasswordCredentialInvalid) {
 				logAuthError("auth.account.reset_start", resetErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
-			challenge = fakeChallenge(clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute)).Unix())
+			challenge = fakeChallenge(expiresAt.Unix())
+		} else if emailChallengeSender != nil {
+			resetURL, resetURLErr := buildEmailChallengeURL(config.PasswordResetURL, challenge.Token)
+			if resetURLErr != nil {
+				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				logAuthError("auth.account.password_reset_url", resetURLErr)
+				challenge = fakeChallenge(expiresAt.Unix())
+			} else if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
+				Kind:      EmailChallengeKindPasswordReset,
+				TenantID:  tenantID,
+				Recipient: strings.TrimSpace(strings.ToLower(inbound.Email)),
+				PublicURL: resetURL,
+				ExpiresAt: expiresAt,
+			}); deliveryErr != nil {
+				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				logAuthError("auth.account.password_reset_delivery", deliveryErr)
+				challenge = fakeChallenge(expiresAt.Unix())
+			}
 		}
 		contextGin.JSON(http.StatusAccepted, challengePayload(config, "reset_token", challenge))
 	})
@@ -1511,6 +1530,28 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, linkErr)
 			return
 		}
+		if emailChallengeSender != nil {
+			expiresAt := time.Unix(challenge.ExpiresUnix, 0).UTC()
+			linkURL, linkURLErr := buildEmailChallengeURL(config.PasswordLinkURL, challenge.Token)
+			if linkURLErr != nil {
+				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				logAuthError("auth.account.password_link_url", linkURLErr)
+				contextGin.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": errorEmailChallengeDeliveryFailed})
+				return
+			}
+			if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
+				Kind:      EmailChallengeKindPasswordLink,
+				TenantID:  tenantID,
+				Recipient: strings.TrimSpace(strings.ToLower(inbound.Email)),
+				PublicURL: linkURL,
+				ExpiresAt: expiresAt,
+			}); deliveryErr != nil {
+				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				logAuthError("auth.account.password_link_delivery", deliveryErr)
+				contextGin.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": errorEmailChallengeDeliveryFailed})
+				return
+			}
+		}
 		contextGin.JSON(http.StatusAccepted, challengePayload(config, "verification_token", challenge))
 	})
 
@@ -1981,20 +2022,26 @@ func challengePayload(config ServerConfig, tokenField string, challenge AccountC
 	return payload
 }
 
-func buildEmailVerificationURL(baseURL string, token string) (string, error) {
-	verificationURL, parseErr := url.Parse(baseURL)
+func buildEmailChallengeURL(baseURL string, token string) (string, error) {
+	challengeURL, parseErr := url.Parse(baseURL)
 	if parseErr != nil {
-		return "", fmt.Errorf("parse email verification URL: %w", parseErr)
+		return "", fmt.Errorf("parse email challenge URL: %w", parseErr)
 	}
-	query := verificationURL.Query()
-	query.Set("token", token)
-	verificationURL.RawQuery = query.Encode()
-	return verificationURL.String(), nil
+	fragment := url.Values{}
+	fragment.Set("token", token)
+	challengeURL.Fragment = fragment.Encode()
+	return challengeURL.String(), nil
 }
 
 func cancelPasswordSignup(ctx context.Context, store AccountManagementStore, tenantID string, accountID string) {
 	if cancelErr := store.CancelPasswordSignup(ctx, tenantID, accountID); cancelErr != nil {
 		logAuthError("auth.account.signup_cancel", cancelErr)
+	}
+}
+
+func cancelAccountChallenge(ctx context.Context, store AccountManagementStore, tenantID string, challenge AccountChallenge) {
+	if cancelErr := store.CancelAccountChallenge(ctx, tenantID, challenge.AccountID, challenge.Token); cancelErr != nil {
+		logAuthError("auth.account.challenge_cancel", cancelErr)
 	}
 }
 

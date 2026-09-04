@@ -100,6 +100,8 @@ type EmailDelivery struct {
 	serverAddress            string
 	apiKey                   string
 	emailVerificationURL     string
+	passwordResetURL         string
+	passwordLinkURL          string
 	connectionTimeoutSeconds int
 	operationTimeoutSeconds  int
 }
@@ -152,6 +154,8 @@ const (
 	errorCodeAccountManagementDisabled   = "tenant.account_management_disabled"
 	errorCodeInvalidEmailVerificationTTL = "tenant.invalid_email_verification_ttl"
 	errorCodeInvalidEmailVerificationURL = "tenant.invalid_email_verification_url"
+	errorCodeInvalidPasswordResetURL     = "tenant.invalid_password_reset_url"
+	errorCodeInvalidPasswordLinkURL      = "tenant.invalid_password_link_url"
 	errorCodeInvalidEmailDelivery        = "tenant.invalid_email_delivery"
 	errorCodeInvalidPasswordResetTTL     = "tenant.invalid_password_reset_ttl"
 	errorCodeInvalidSessionTTL           = "tenant.invalid_session_ttl"
@@ -538,6 +542,16 @@ func (settings EmailDelivery) APIKey() string {
 // EmailVerificationURL returns the public email-verification page URL.
 func (settings EmailDelivery) EmailVerificationURL() string {
 	return settings.emailVerificationURL
+}
+
+// PasswordResetURL returns the public password-reset page URL.
+func (settings EmailDelivery) PasswordResetURL() string {
+	return settings.passwordResetURL
+}
+
+// PasswordLinkURL returns the public password-link page URL.
+func (settings EmailDelivery) PasswordLinkURL() string {
+	return settings.passwordLinkURL
 }
 
 // ConnectionTimeoutSeconds returns the Pinguin connection timeout.
@@ -1164,7 +1178,7 @@ func parseAccountManagement(raw FileAccountManagement, tenantID TenantID, allowI
 		}
 		passwordResetTTL = parsedTTL
 	}
-	emailDelivery, emailDeliveryErr := parseEmailDelivery(raw.EmailDelivery, tenantID, allowInsecureHTTP, passwordSignupEnabled && !bool(raw.ReturnChallengeTokens))
+	emailDelivery, emailDeliveryErr := parseEmailDelivery(raw.EmailDelivery, tenantID, allowInsecureHTTP, enabled && !bool(raw.ReturnChallengeTokens))
 	if emailDeliveryErr != nil {
 		return AccountManagement{}, emailDeliveryErr
 	}
@@ -1182,7 +1196,9 @@ func parseEmailDelivery(raw FileEmailDelivery, tenantID TenantID, allowInsecureH
 	serverAddress := strings.TrimSpace(raw.ServerAddress)
 	apiKey := strings.TrimSpace(raw.APIKey)
 	emailVerificationURL := strings.TrimSpace(raw.EmailVerificationURL)
-	configured := serverAddress != "" || apiKey != "" || emailVerificationURL != "" || raw.ConnectionTimeoutSeconds != 0 || raw.OperationTimeoutSeconds != 0
+	passwordResetURL := strings.TrimSpace(raw.PasswordResetURL)
+	passwordLinkURL := strings.TrimSpace(raw.PasswordLinkURL)
+	configured := serverAddress != "" || apiKey != "" || emailVerificationURL != "" || passwordResetURL != "" || passwordLinkURL != "" || raw.ConnectionTimeoutSeconds != 0 || raw.OperationTimeoutSeconds != 0
 	if !configured && !required {
 		return EmailDelivery{}, nil
 	}
@@ -1193,10 +1209,20 @@ func parseEmailDelivery(raw FileEmailDelivery, tenantID TenantID, allowInsecureH
 	if verificationURLErr != nil {
 		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidEmailVerificationURL, tenantID, emailVerificationURL, verificationURLErr)
 	}
+	normalizedPasswordResetURL, passwordResetURLErr := normalizeAppleRedirectURI(passwordResetURL, allowInsecureHTTP)
+	if passwordResetURLErr != nil {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordResetURL, tenantID, passwordResetURL, passwordResetURLErr)
+	}
+	normalizedPasswordLinkURL, passwordLinkURLErr := normalizeAppleRedirectURI(passwordLinkURL, allowInsecureHTTP)
+	if passwordLinkURLErr != nil {
+		return EmailDelivery{}, fmt.Errorf("%w: %s tenant=%s url=%s reason=%s", ErrInvalidTenantConfig, errorCodeInvalidPasswordLinkURL, tenantID, passwordLinkURL, passwordLinkURLErr)
+	}
 	return EmailDelivery{
 		serverAddress:            serverAddress,
 		apiKey:                   apiKey,
 		emailVerificationURL:     normalizedVerificationURL,
+		passwordResetURL:         normalizedPasswordResetURL,
+		passwordLinkURL:          normalizedPasswordLinkURL,
 		connectionTimeoutSeconds: raw.ConnectionTimeoutSeconds,
 		operationTimeoutSeconds:  raw.OperationTimeoutSeconds,
 	}, nil
@@ -1538,6 +1564,8 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.AccountManagement.EmailDelivery.ServerAddress = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.ServerAddress)
 	tenant.AccountManagement.EmailDelivery.APIKey = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.APIKey)
 	tenant.AccountManagement.EmailDelivery.EmailVerificationURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.EmailVerificationURL)
+	tenant.AccountManagement.EmailDelivery.PasswordResetURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.PasswordResetURL)
+	tenant.AccountManagement.EmailDelivery.PasswordLinkURL = os.ExpandEnv(tenant.AccountManagement.EmailDelivery.PasswordLinkURL)
 	tenant.AccountManagement.PasswordResetTTL = os.ExpandEnv(tenant.AccountManagement.PasswordResetTTL)
 	tenant.OAuth = expandFileOAuthAuthorizationEnv(tenant.OAuth)
 	tenant.JWTSigningKey = os.ExpandEnv(tenant.JWTSigningKey)
@@ -1644,6 +1672,8 @@ type FileEmailDelivery struct {
 	ServerAddress            string `json:"server_address" yaml:"server_address"`
 	APIKey                   string `json:"api_key" yaml:"api_key"`
 	EmailVerificationURL     string `json:"email_verification_url" yaml:"email_verification_url"`
+	PasswordResetURL         string `json:"password_reset_url" yaml:"password_reset_url"`
+	PasswordLinkURL          string `json:"password_link_url" yaml:"password_link_url"`
 	ConnectionTimeoutSeconds int    `json:"connection_timeout_seconds" yaml:"connection_timeout_seconds"`
 	OperationTimeoutSeconds  int    `json:"operation_timeout_seconds" yaml:"operation_timeout_seconds"`
 }

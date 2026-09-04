@@ -403,6 +403,8 @@ tenants:
         server_address: "pinguin-grpc:50051"
         api_key: "${PINGUIN_TENANT_API_KEY}"
         email_verification_url: "https://app.example.com/verify-email"
+        password_reset_url: "https://app.example.com/reset-password"
+        password_link_url: "https://app.example.com/link-password"
         connection_timeout_seconds: 3
         operation_timeout_seconds: 5
       password_reset_ttl: "15m"
@@ -430,8 +432,8 @@ Validation rules baked into the loader:
 - Optional endpoint overrides support local provider tests. These overrides must be absolute HTTP(S) URLs. Production overrides must use HTTPS.
 - `password_auth.enabled` gates `/auth/password/login`. Each configured user requires a normalized email and a bcrypt hash.
 - `account_management.enabled` gates persisted account IDs and account routes. Public signup also requires `password_signup.enabled`.
-- Production signup requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
-- `return_challenge_tokens` is for tests. Production responses do not contain challenge tokens.
+- Production account management requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
+- `return_challenge_tokens` is for tests. Production responses do not contain challenge tokens. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments.
 - Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
 - Cookie names are mandatory. Use a different name for each tenant that shares a cookie domain.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.

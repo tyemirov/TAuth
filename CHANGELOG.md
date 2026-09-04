@@ -1,5 +1,7 @@
 # Changelog
 
+- Added Pinguin delivery and public URLs for all password-account email challenges. Each link carries its token in the URL fragment.
+
 ## Unreleased
 
 ### Features

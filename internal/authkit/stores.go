@@ -30,6 +30,7 @@ type PasswordCredentialStore interface {
 type AccountManagementStore interface {
 	CreatePasswordSignup(ctx context.Context, tenantID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error)
 	CancelPasswordSignup(ctx context.Context, tenantID string, accountID string) error
+	CancelAccountChallenge(ctx context.Context, tenantID string, accountID string, token string) error
 	VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error)
 	StartPasswordReset(ctx context.Context, tenantID string, userEmail string, expiresUnix int64) (AccountChallenge, error)
 	CompletePasswordReset(ctx context.Context, tenantID string, token string, password string) (AccountProfile, error)

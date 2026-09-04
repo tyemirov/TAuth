@@ -129,6 +129,8 @@ type testTenantPayload struct {
 	EmailVerificationTTL       string                          `json:"email_verification_ttl"`
 	EmailDeliveryConfigured    bool                            `json:"email_delivery_configured"`
 	EmailVerificationURL       string                          `json:"email_verification_url"`
+	PasswordResetURL           string                          `json:"password_reset_url"`
+	PasswordLinkURL            string                          `json:"password_link_url"`
 	PasswordResetTTL           string                          `json:"password_reset_ttl"`
 	CookieDomain               string                          `json:"cookie_domain"`
 	SessionCookieName          string                          `json:"session_cookie_name"`

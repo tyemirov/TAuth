@@ -40,12 +40,12 @@ type cancellationObservingTransport struct {
 	contexts chan context.Context
 }
 
-type recordingEmailVerificationSender struct {
-	requests []EmailVerificationRequest
+type recordingEmailChallengeSender struct {
+	requests []EmailChallengeRequest
 	err      error
 }
 
-func (sender *recordingEmailVerificationSender) SendEmailVerification(_ context.Context, request EmailVerificationRequest) error {
+func (sender *recordingEmailChallengeSender) SendEmailChallenge(_ context.Context, request EmailChallengeRequest) error {
 	sender.requests = append(sender.requests, request)
 	return sender.err
 }
@@ -4969,7 +4969,7 @@ func TestHTTPPasswordSignupQueuesVerificationEmail(testingHandle *testing.T) {
 	config.PasswordSignupEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/verify-email"
 	accountStore := NewMemoryPasswordCredentialStore()
-	emailSender := &recordingEmailVerificationSender{}
+	emailSender := &recordingEmailChallengeSender{}
 	router := gin.New()
 	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
 	server := newInProcessServer(router, false)
@@ -4998,16 +4998,20 @@ func TestHTTPPasswordSignupQueuesVerificationEmail(testingHandle *testing.T) {
 	if verificationRequest.TenantID != config.TenantID || verificationRequest.Recipient != "new@example.com" {
 		testingHandle.Fatalf("unexpected verification email request: %#v", verificationRequest)
 	}
-	verificationURL, parseErr := url.Parse(verificationRequest.VerificationURL)
+	verificationURL, parseErr := url.Parse(verificationRequest.PublicURL)
 	if parseErr != nil {
 		testingHandle.Fatalf("parse verification URL: %v", parseErr)
 	}
 	if verificationURL.Scheme != "https" || verificationURL.Host != "ui.example.com" || verificationURL.Path != "/verify-email" {
-		testingHandle.Fatalf("unexpected verification URL: %s", verificationRequest.VerificationURL)
+		testingHandle.Fatalf("unexpected verification URL: %s", verificationRequest.PublicURL)
 	}
-	verificationToken := verificationURL.Query().Get("token")
+	verificationFragment, fragmentErr := url.ParseQuery(verificationURL.Fragment)
+	if fragmentErr != nil {
+		testingHandle.Fatalf("parse verification fragment: %v", fragmentErr)
+	}
+	verificationToken := verificationFragment.Get("token")
 	if verificationToken == "" {
-		testingHandle.Fatalf("verification URL has no token: %s", verificationRequest.VerificationURL)
+		testingHandle.Fatalf("verification URL has no token: %s", verificationRequest.PublicURL)
 	}
 	verifyPayload := []byte(`{"token":"` + verificationToken + `"}`)
 	verifyResponse, verifyErr := server.Client().Post(server.URL+"/auth/password/verify-email", "application/json", bytes.NewReader(verifyPayload))
@@ -5029,7 +5033,7 @@ func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
 	config.EmailVerificationURL = "https://ui.example.com/verify-email"
-	emailSender := &recordingEmailVerificationSender{err: errors.New("notification unavailable")}
+	emailSender := &recordingEmailChallengeSender{err: errors.New("notification unavailable")}
 	router := gin.New()
 	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), emailSender)
 	server := newInProcessServer(router, false)
@@ -5041,7 +5045,7 @@ func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing
 		testingHandle.Fatalf("password signup request failed: %v", requestErr)
 	}
 	defer response.Body.Close()
-	assertJSONErrorResponse(testingHandle, response, http.StatusBadGateway, errorEmailVerificationDeliveryFailed)
+	assertJSONErrorResponse(testingHandle, response, http.StatusBadGateway, errorEmailChallengeDeliveryFailed)
 	emailSender.err = nil
 	retryResponse, retryErr := server.Client().Post(server.URL+"/auth/password/signup", "application/json", bytes.NewReader(requestBody))
 	if retryErr != nil {
@@ -5050,6 +5054,154 @@ func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing
 	defer retryResponse.Body.Close()
 	if retryResponse.StatusCode != http.StatusAccepted {
 		testingHandle.Fatalf("expected retry signup 202, got %d", retryResponse.StatusCode)
+	}
+}
+
+func TestHTTPPasswordChallengesQueueEmailWithoutReturningTokens(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = true
+	config.PasswordAuthEnabled = true
+	config.AccountManagementEnabled = true
+	config.PasswordSignupEnabled = true
+	config.EmailVerificationURL = "https://ui.example.com/auth?auth_action=verify-email"
+	config.PasswordResetURL = "https://ui.example.com/auth?auth_action=reset-complete"
+	config.PasswordLinkURL = "https://ui.example.com/auth?auth_action=password-link-verify"
+	accountStore := NewMemoryPasswordCredentialStore()
+	emailSender := &recordingEmailChallengeSender{}
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+
+	signupResponse := httptest.NewRecorder()
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", strings.NewReader(`{"email":"new@example.com","password":"correct horse battery staple"}`))
+	signupRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(signupResponse, signupRequest)
+	if signupResponse.Code != http.StatusAccepted || len(emailSender.requests) != 1 {
+		testingHandle.Fatalf("expected signup email, status=%d requests=%#v", signupResponse.Code, emailSender.requests)
+	}
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[0], EmailChallengeKindVerification)
+
+	verifyResponse := httptest.NewRecorder()
+	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/password/verify-email", strings.NewReader(`{"token":"`+verificationToken+`"}`))
+	verifyRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(verifyResponse, verifyRequest)
+	if verifyResponse.Code != http.StatusOK {
+		testingHandle.Fatalf("expected verification 200, got %d: %s", verifyResponse.Code, verifyResponse.Body.String())
+	}
+
+	resetResponse := httptest.NewRecorder()
+	resetRequest := httptest.NewRequest(http.MethodPost, "/auth/password/reset/start", strings.NewReader(`{"email":"new@example.com"}`))
+	resetRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resetResponse, resetRequest)
+	if resetResponse.Code != http.StatusAccepted || len(emailSender.requests) != 2 {
+		testingHandle.Fatalf("expected reset email, status=%d requests=%#v", resetResponse.Code, emailSender.requests)
+	}
+	assertResponseOmitsField(testingHandle, resetResponse.Body.Bytes(), "reset_token")
+	challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[1], EmailChallengeKindPasswordReset)
+
+	linkResponse := httptest.NewRecorder()
+	linkRequest := httptest.NewRequest(http.MethodPost, "/auth/account/password/link/start", strings.NewReader(`{"email":"linked@example.com","password":"another correct horse battery staple"}`))
+	linkRequest.Header.Set("Content-Type", "application/json")
+	for _, responseCookie := range verifyResponse.Result().Cookies() {
+		linkRequest.AddCookie(responseCookie)
+	}
+	router.ServeHTTP(linkResponse, linkRequest)
+	if linkResponse.Code != http.StatusAccepted || len(emailSender.requests) != 3 {
+		testingHandle.Fatalf("expected password-link email, status=%d requests=%#v", linkResponse.Code, emailSender.requests)
+	}
+	assertResponseOmitsField(testingHandle, linkResponse.Body.Bytes(), "verification_token")
+	challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[2], EmailChallengeKindPasswordLink)
+}
+
+func TestHTTPPasswordChallengeDeliveryFailuresCancelTokens(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = true
+	config.PasswordAuthEnabled = true
+	config.AccountManagementEnabled = true
+	config.PasswordSignupEnabled = true
+	config.EmailVerificationURL = "https://ui.example.com/auth?auth_action=verify-email"
+	config.PasswordResetURL = "https://ui.example.com/auth?auth_action=reset-complete"
+	config.PasswordLinkURL = "https://ui.example.com/auth?auth_action=password-link-verify"
+	accountStore := NewMemoryPasswordCredentialStore()
+	emailSender := &recordingEmailChallengeSender{}
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+
+	signupResponse := httptest.NewRecorder()
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", strings.NewReader(`{"email":"new@example.com","password":"correct horse battery staple"}`))
+	signupRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(signupResponse, signupRequest)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[0], EmailChallengeKindVerification)
+
+	verifyResponse := httptest.NewRecorder()
+	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/password/verify-email", strings.NewReader(`{"token":"`+verificationToken+`"}`))
+	verifyRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(verifyResponse, verifyRequest)
+	if verifyResponse.Code != http.StatusOK {
+		testingHandle.Fatalf("expected verification 200, got %d: %s", verifyResponse.Code, verifyResponse.Body.String())
+	}
+
+	emailSender.err = errors.New("notification unavailable")
+	resetResponse := httptest.NewRecorder()
+	resetRequest := httptest.NewRequest(http.MethodPost, "/auth/password/reset/start", strings.NewReader(`{"email":"new@example.com"}`))
+	resetRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resetResponse, resetRequest)
+	if resetResponse.Code != http.StatusAccepted {
+		testingHandle.Fatalf("expected enumeration-safe reset 202, got %d: %s", resetResponse.Code, resetResponse.Body.String())
+	}
+	resetToken := challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[1], EmailChallengeKindPasswordReset)
+	resetCompleteResponse := httptest.NewRecorder()
+	resetCompleteRequest := httptest.NewRequest(http.MethodPost, "/auth/password/reset/complete", strings.NewReader(`{"token":"`+resetToken+`","password":"replacement correct horse battery staple"}`))
+	resetCompleteRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resetCompleteResponse, resetCompleteRequest)
+	assertJSONErrorResponse(testingHandle, resetCompleteResponse.Result(), http.StatusUnauthorized, errorAccountChallengeInvalid)
+
+	linkResponse := httptest.NewRecorder()
+	linkRequest := httptest.NewRequest(http.MethodPost, "/auth/account/password/link/start", strings.NewReader(`{"email":"linked@example.com","password":"another correct horse battery staple"}`))
+	linkRequest.Header.Set("Content-Type", "application/json")
+	for _, responseCookie := range verifyResponse.Result().Cookies() {
+		linkRequest.AddCookie(responseCookie)
+	}
+	router.ServeHTTP(linkResponse, linkRequest)
+	assertJSONErrorResponse(testingHandle, linkResponse.Result(), http.StatusBadGateway, errorEmailChallengeDeliveryFailed)
+	linkToken := challengeTokenFromDeliveryURL(testingHandle, emailSender.requests[2], EmailChallengeKindPasswordLink)
+	linkVerifyResponse := httptest.NewRecorder()
+	linkVerifyRequest := httptest.NewRequest(http.MethodPost, "/auth/account/password/link/verify", strings.NewReader(`{"token":"`+linkToken+`"}`))
+	linkVerifyRequest.Header.Set("Content-Type", "application/json")
+	for _, responseCookie := range verifyResponse.Result().Cookies() {
+		linkVerifyRequest.AddCookie(responseCookie)
+	}
+	router.ServeHTTP(linkVerifyResponse, linkVerifyRequest)
+	assertJSONErrorResponse(testingHandle, linkVerifyResponse.Result(), http.StatusUnauthorized, errorAccountChallengeInvalid)
+}
+
+func challengeTokenFromDeliveryURL(testingHandle *testing.T, request EmailChallengeRequest, expectedKind EmailChallengeKind) string {
+	testingHandle.Helper()
+	if request.Kind != expectedKind {
+		testingHandle.Fatalf("expected challenge kind %q, got %#v", expectedKind, request)
+	}
+	publicURL, parseErr := url.Parse(request.PublicURL)
+	if parseErr != nil {
+		testingHandle.Fatalf("expected fragment challenge token, got %q: %v", request.PublicURL, parseErr)
+	}
+	fragment, fragmentErr := url.ParseQuery(publicURL.Fragment)
+	if fragmentErr != nil || fragment.Get("token") == "" {
+		testingHandle.Fatalf("expected fragment challenge token, got %q: %v", request.PublicURL, fragmentErr)
+	}
+	return fragment.Get("token")
+}
+
+func assertResponseOmitsField(testingHandle *testing.T, payload []byte, field string) {
+	testingHandle.Helper()
+	var responsePayload map[string]interface{}
+	if decodeErr := json.Unmarshal(payload, &responsePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode response: %v", decodeErr)
+	}
+	if _, present := responsePayload[field]; present {
+		testingHandle.Fatalf("response exposed %s: %#v", field, responsePayload)
 	}
 }
 
