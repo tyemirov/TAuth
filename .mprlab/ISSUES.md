@@ -420,6 +420,23 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B070] (P2) Select account email delivery for each tenant.
+  Goal:
+  Tenants that return challenge tokens work beside tenants that use email delivery.
+  The shared sender currently sends challenges for tenants without email delivery config.
+  Requirements:
+  - Select delivery from the resolved tenant config for signup, password reset, and password linking.
+  - Preserve token responses for tenants without email delivery.
+  - Keep email delivery active when a configured tenant also returns tokens.
+  Validation:
+  - Complete all three account flows through HTTP in a mixed-tenant server.
+  - Run `make test-go` and `make ci`.
+  Resolution 2026-09-04:
+  - The tenant registry carries the native email delivery setting into each route config.
+  - Signup, reset, and password linking use that tenant setting before email delivery.
+  - Nine HTTP cases cover email-only, token-only, and combined modes, including challenge completion.
+  - All three token-only cases failed before the fix. `make test-go` and `make ci` passed after the fix.
+
 - [x] [B069] (P2) Validate disabled account settings during config conversion.
   Goal:
   The renderer cannot silently remove requested password signup.
