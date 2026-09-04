@@ -352,7 +352,8 @@ gateway sends complete TAuth contributions and output envelopes to
 render request, TAuth defaults, output-name resolution, native config assembly,
 and native validation. The command returns the complete native YAML through
 standard output. TAuth carries no production lifecycle script or alternative
-controller.
+controller. The README defines the render request envelope. It does not define
+a second `resources.yml` schema.
 
 ### 5.1 Multi-tenant configuration file
 

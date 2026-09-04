@@ -113,6 +113,26 @@ kinds, missing outputs, and invalid native config cause a nonzero exit.
 tauth render-deployment-config < deployment-request.json > config.yaml
 ```
 
+The render request has this envelope schema:
+
+| Path | Type | Requirement |
+| --- | --- | --- |
+| `schema_version` | integer | Required. The value is `1`. |
+| `contributions` | array | Required. The array contains complete contributions. |
+| `contributions[].owner` | string | Required application owner. |
+| `contributions[].id` | string | Required resource ID. |
+| `contributions[].kind` | string | Required `tauth_authorization_server` or `tauth_tenant`. |
+| `contributions[].desired` | object | Required normalized resource from the gateway schema. |
+| `contributions[].outputs` | object | Required map with output names as keys. |
+| `contributions[].outputs.*.value` | string | Required resolved output value. |
+| `contributions[].outputs.*.digest` | string | Optional output digest. |
+| `contributions[].outputs.*.visibility` | string | Optional output visibility. |
+
+The decoder rejects unknown fields in the envelope and nested resource data.
+The gateway owns the `resources.yml` resource schema and canonical defaults.
+This document does not define a second resource schema. TAuth owns the mapping
+from each accepted normalized resource to its native config.
+
 The gateway treats the request and response as private values. It does not
 interpret TAuth fields or write secret values to normal logs.
 

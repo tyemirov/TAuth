@@ -22,3 +22,8 @@
   - Run `make ci`.
   Resolution 2026-09-03:
   TAuth now sends verification, reset, and password-link challenges through one Pinguin adapter. Each configured public URL carries its token in a fragment. Production responses contain no challenge tokens. A failed delivery cancels the real challenge. Reset failures keep the enumeration-safe accepted response. Black-box tests cover delivery, token secrecy, and cancellation. `make ci` passed.
+
+  Stack validation 2026-09-04:
+  - Merged updated F003 into F004 with a forward-only merge.
+  - Preserved password reset and password link config with the I208 renderer fixes.
+  - The renderer target and `make ci` passed on the combined source.
