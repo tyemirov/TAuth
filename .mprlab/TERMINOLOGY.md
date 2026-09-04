@@ -80,12 +80,16 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `access token`: A short-lived signed token that permits an exact client grant at one protected resource.
 - `authorization code`: A short-lived one-time value that a client exchanges for tokens with PKCE.
 - `authorization server`: The TAuth component that gets user consent and issues resource-bound tokens.
+- `deployment config renderer`: The TAuth CLI command that converts normalized
+  resource contributions into one validated native config.
 - `Client ID Metadata Document`: An HTTPS JSON document that describes one public OAuth client.
 - `consent grant`: A time-bounded user approval for one client, resource, and scope set.
 - `JWKS`: A JSON Web Key Set that contains the public OAuth verification keys.
 - `OAuth`: The authorization protocol that TAuth uses to issue first-party resource tokens.
 - `PKCE`: The Proof Key for Code Exchange binding between an authorization request and a token request.
 - `protected resource`: A service that accepts a resource-bound TAuth access token.
+- `render request`: The schema-v1 JSON document that contains normalized TAuth
+  resource contributions and resolved output envelopes.
 - `refresh-token family`: The sequence of opaque rotating refresh tokens for one consent grant.
 - `resource indicator`: The exact protected-resource identifier that becomes the access-token audience.
 

@@ -263,6 +263,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Reject a missing private output.
   - `make ci` passed after the last source change.
 
+  Completion evidence:
+  - The README documents the exact schema-v1 request envelope.
+  - The architecture assigns native config assembly and validation to TAuth.
+  - The gateway remains the owner of the `resources.yml` schema.
+
 - [x] [I207] (P0) Use the permanent versionless selected application manifest.
   Goal:
   Use one selected application manifest contract without a schema number.
