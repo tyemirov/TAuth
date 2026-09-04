@@ -141,6 +141,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
 github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
+github.com/tyemirov/pinguin v1.0.4 h1:l72QYHnb9xlQdm96hrPQCjHXMwMnVfJaxGiCKOhcPq8=
+github.com/tyemirov/pinguin v1.0.4/go.mod h1:iT8/QB57ehsIcgN1CYm/W4PuQb2fXi6e9tCENm6O6S8=
 github.com/tyemirov/utils v0.17.0 h1:IT8AS/V6ynVNPJEX7OCFKLI67tBGBVvR2HrRlnAiwJ0=
 github.com/tyemirov/utils v0.17.0/go.mod h1:jMqN4oFMIFZD+gfAHtb45/p5yAMwTKNOFvOjDGT5dqM=
 github.com/ugorji/go/codec v1.3.1 h1:waO7eEiFDwidsBN6agj1vJQ4AG7lh2yqXyOXqhgQuyY=

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,14 +17,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"github.com/tyemirov/pinguin/pkg/grpcapi"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
 	"google.golang.org/api/idtoken"
+	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 )
+
+type mainRecordingNotificationService struct {
+	grpcapi.UnimplementedNotificationServiceServer
+	requests chan *grpcapi.NotificationRequest
+}
+
+func (service *mainRecordingNotificationService) SendNotification(_ context.Context, request *grpcapi.NotificationRequest) (*grpcapi.NotificationResponse, error) {
+	service.requests <- request
+	return &grpcapi.NotificationResponse{NotificationId: "notification-one", NotificationType: grpcapi.NotificationType_EMAIL, Status: grpcapi.Status_QUEUED}, nil
+}
 
 func TestZapLoggerMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -184,6 +198,68 @@ func TestRunServerSuccess(t *testing.T) {
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
+	}
+}
+
+func TestRunServerQueuesPasswordSignupVerificationEmail(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+	if listenErr != nil {
+		testingHandle.Fatalf("listen for Pinguin test service: %v", listenErr)
+	}
+	grpcServer := grpc.NewServer()
+	recordingService := &mainRecordingNotificationService{requests: make(chan *grpcapi.NotificationRequest, 1)}
+	grpcapi.RegisterNotificationServiceServer(grpcServer, recordingService)
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	defer grpcServer.Stop()
+
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		signupRecorder := httptest.NewRecorder()
+		signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBufferString(`{"email":"new@example.com","password":"correct horse battery staple"}`))
+		signupRequest.Header.Set("Content-Type", "application/json")
+		signupRequest.Header.Set("Origin", "http://alpha.localhost")
+		server.Handler.ServeHTTP(signupRecorder, signupRequest)
+		if signupRecorder.Code != http.StatusAccepted {
+			testingHandle.Fatalf("expected password signup 202, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+		}
+		select {
+		case notificationRequest := <-recordingService.requests:
+			if notificationRequest.Recipient != "new@example.com" {
+				testingHandle.Fatalf("unexpected notification request: %#v", notificationRequest)
+			}
+		case <-time.After(time.Second):
+			testingHandle.Fatal("Pinguin did not receive the signup verification email")
+		}
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+
+	restoreValidator := withGoogleValidatorBuilderStub(func(ctx context.Context) (authkit.GoogleTokenValidator, error) {
+		return noopGoogleValidator{}, nil
+	})
+	defer restoreValidator()
+
+	config := sampleApplicationConfig()
+	config.Tenants[0].TenantOrigins = []string{"http://alpha.localhost"}
+	config.Tenants[0].PasswordAuth = tenants.FilePasswordAuth{Enabled: true}
+	config.Tenants[0].AccountManagement = tenants.FileAccountManagement{
+		Enabled:        true,
+		PasswordSignup: tenants.FilePasswordSignup{Enabled: true},
+		EmailDelivery: tenants.FileEmailDelivery{
+			ServerAddress:            listener.Addr().String(),
+			APIKey:                   "test-api-key",
+			EmailVerificationURL:     "http://alpha.localhost/verify-email",
+			ConnectionTimeoutSeconds: 2,
+			OperationTimeoutSeconds:  2,
+		},
+	}
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &config))
+	if runErr := runServer(command, nil); runErr != nil {
+		testingHandle.Fatalf("expected runServer to queue verification email, got %v", runErr)
 	}
 }
 

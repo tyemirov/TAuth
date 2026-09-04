@@ -52,6 +52,7 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `mobile store artifact`: A signed `.ipa` or `.aab` file for store publication.
 - `native toolchain`: The platform tools that build and sign a mobile store artifact.
 - `payload`: Structured data that crosses a system boundary.
+- `Pinguin`: The MPR Lab notification service that queues email and SMS delivery.
 - `PDF`: A file that uses the Portable Document Format.
 - `PRD`: A product requirement document.
 - `producing agent`: The agent that creates or changes technical prose.

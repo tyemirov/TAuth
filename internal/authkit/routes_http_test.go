@@ -40,6 +40,16 @@ type cancellationObservingTransport struct {
 	contexts chan context.Context
 }
 
+type recordingEmailVerificationSender struct {
+	requests []EmailVerificationRequest
+	err      error
+}
+
+func (sender *recordingEmailVerificationSender) SendEmailVerification(_ context.Context, request EmailVerificationRequest) error {
+	sender.requests = append(sender.requests, request)
+	return sender.err
+}
+
 func (transport *cancellationObservingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	transport.contexts <- request.Context()
 	select {
@@ -4871,7 +4881,7 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	accountStore := NewMemoryPasswordCredentialStore()
 	userStore := newTestUserStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, accountStore)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, accountStore, nil)
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4946,6 +4956,100 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	}
 	if _, exists := userStore.profiles[config.TenantID][firstUserID]; !exists {
 		testingHandle.Fatalf("expected account-managed user profile %q to be persisted", firstUserID)
+	}
+}
+
+func TestHTTPPasswordSignupQueuesVerificationEmail(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = true
+	config.PasswordAuthEnabled = true
+	config.AccountManagementEnabled = true
+	config.PasswordSignupEnabled = true
+	config.EmailVerificationURL = "https://ui.example.com/verify-email"
+	accountStore := NewMemoryPasswordCredentialStore()
+	emailSender := &recordingEmailVerificationSender{}
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+	server := newInProcessServer(router, false)
+	defer server.Close()
+
+	requestBody := []byte(`{"email":"New@Example.com","password":"correct horse battery staple","display_name":"New User"}`)
+	response, requestErr := server.Client().Post(server.URL+"/auth/password/signup", "application/json", bytes.NewReader(requestBody))
+	if requestErr != nil {
+		testingHandle.Fatalf("password signup request failed: %v", requestErr)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		testingHandle.Fatalf("expected signup 202, got %d", response.StatusCode)
+	}
+	var responsePayload map[string]interface{}
+	if decodeErr := json.NewDecoder(response.Body).Decode(&responsePayload); decodeErr != nil {
+		testingHandle.Fatalf("decode password signup response: %v", decodeErr)
+	}
+	if _, present := responsePayload["verification_token"]; present {
+		testingHandle.Fatalf("signup response exposed verification token: %#v", responsePayload)
+	}
+	if len(emailSender.requests) != 1 {
+		testingHandle.Fatalf("expected one verification email, got %#v", emailSender.requests)
+	}
+	verificationRequest := emailSender.requests[0]
+	if verificationRequest.TenantID != config.TenantID || verificationRequest.Recipient != "new@example.com" {
+		testingHandle.Fatalf("unexpected verification email request: %#v", verificationRequest)
+	}
+	verificationURL, parseErr := url.Parse(verificationRequest.VerificationURL)
+	if parseErr != nil {
+		testingHandle.Fatalf("parse verification URL: %v", parseErr)
+	}
+	if verificationURL.Scheme != "https" || verificationURL.Host != "ui.example.com" || verificationURL.Path != "/verify-email" {
+		testingHandle.Fatalf("unexpected verification URL: %s", verificationRequest.VerificationURL)
+	}
+	verificationToken := verificationURL.Query().Get("token")
+	if verificationToken == "" {
+		testingHandle.Fatalf("verification URL has no token: %s", verificationRequest.VerificationURL)
+	}
+	verifyPayload := []byte(`{"token":"` + verificationToken + `"}`)
+	verifyResponse, verifyErr := server.Client().Post(server.URL+"/auth/password/verify-email", "application/json", bytes.NewReader(verifyPayload))
+	if verifyErr != nil {
+		testingHandle.Fatalf("email verification request failed: %v", verifyErr)
+	}
+	defer verifyResponse.Body.Close()
+	if verifyResponse.StatusCode != http.StatusOK {
+		testingHandle.Fatalf("expected email verification 200, got %d", verifyResponse.StatusCode)
+	}
+}
+
+func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := newTestServerConfig()
+	config.AllowInsecureHTTP = true
+	config.PasswordAuthEnabled = true
+	config.AccountManagementEnabled = true
+	config.PasswordSignupEnabled = true
+	config.EmailVerificationURL = "https://ui.example.com/verify-email"
+	emailSender := &recordingEmailVerificationSender{err: errors.New("notification unavailable")}
+	router := gin.New()
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), emailSender)
+	server := newInProcessServer(router, false)
+	defer server.Close()
+
+	requestBody := []byte(`{"email":"new@example.com","password":"correct horse battery staple"}`)
+	response, requestErr := server.Client().Post(server.URL+"/auth/password/signup", "application/json", bytes.NewReader(requestBody))
+	if requestErr != nil {
+		testingHandle.Fatalf("password signup request failed: %v", requestErr)
+	}
+	defer response.Body.Close()
+	assertJSONErrorResponse(testingHandle, response, http.StatusBadGateway, errorEmailVerificationDeliveryFailed)
+	emailSender.err = nil
+	retryResponse, retryErr := server.Client().Post(server.URL+"/auth/password/signup", "application/json", bytes.NewReader(requestBody))
+	if retryErr != nil {
+		testingHandle.Fatalf("retry password signup request failed: %v", retryErr)
+	}
+	defer retryResponse.Body.Close()
+	if retryResponse.StatusCode != http.StatusAccepted {
+		testingHandle.Fatalf("expected retry signup 202, got %d", retryResponse.StatusCode)
 	}
 }
 

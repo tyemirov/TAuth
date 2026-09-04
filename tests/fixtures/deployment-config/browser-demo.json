@@ -94,8 +94,18 @@
             "password_signup": {
               "enabled": true
             },
-            "return_challenge_tokens": true,
+            "return_challenge_tokens": false,
             "email_verification_ttl": "30m",
+            "email_delivery": {
+              "server_address": "pinguin:50051",
+              "api_key": {
+                "resource": "private",
+                "output": "email-delivery-api-key"
+              },
+              "email_verification_url": "https://ui.example.invalid/verify-email",
+              "connection_timeout_seconds": 3,
+              "operation_timeout_seconds": 5
+            },
             "password_reset_ttl": "15m"
           },
           "jwt_signing_key": {
@@ -154,6 +164,9 @@
         },
         "jwt-signing-key": {
           "value": "fixture-renderer-secret-at-least-32-characters"
+        },
+        "email-delivery-api-key": {
+          "value": "fixture-email-delivery-api-key"
         }
       }
     }

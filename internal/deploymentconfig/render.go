@@ -123,17 +123,17 @@ type tenantResource struct {
 }
 
 type tenantSettings struct {
-	ID                  string                 `json:"id"`
-	DisplayName         string                 `json:"display_name"`
-	Origins             []string               `json:"origins"`
-	GoogleWebClientID   resourceReference      `json:"google_web_client_id"`
-	GoogleNativeClients []nativeClientResource `json:"google_native_clients,omitempty"`
-	AppleOAuth          *appleOAuthResource    `json:"apple_oauth,omitempty"`
-	PasswordAuth        passwordAuthResource   `json:"password_auth,omitempty"`
-	AccountManagement   accountManagement      `json:"account_management,omitempty"`
-	JWTSigningKey       resourceReference      `json:"jwt_signing_key"`
-	Cookie              cookieSettings         `json:"cookie"`
-	OAuth               *tenantOAuth           `json:"oauth,omitempty"`
+	ID                  string                    `json:"id"`
+	DisplayName         string                    `json:"display_name"`
+	Origins             []string                  `json:"origins"`
+	GoogleWebClientID   resourceReference         `json:"google_web_client_id"`
+	GoogleNativeClients []nativeClientResource    `json:"google_native_clients,omitempty"`
+	AppleOAuth          *appleOAuthResource       `json:"apple_oauth,omitempty"`
+	PasswordAuth        passwordAuthResource      `json:"password_auth,omitempty"`
+	AccountManagement   accountManagementResource `json:"account_management,omitempty"`
+	JWTSigningKey       resourceReference         `json:"jwt_signing_key"`
+	Cookie              cookieSettings            `json:"cookie"`
+	OAuth               *tenantOAuth              `json:"oauth,omitempty"`
 }
 
 type resourceReference struct {
@@ -160,12 +160,21 @@ type passwordAuthResource struct {
 	Enabled bool `json:"enabled"`
 }
 
-type accountManagement struct {
-	Enabled               bool           `json:"enabled" yaml:"enabled"`
-	PasswordSignup        passwordSignup `json:"password_signup,omitempty" yaml:"password_signup"`
-	ReturnChallengeTokens bool           `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
-	EmailVerificationTTL  string         `json:"email_verification_ttl" yaml:"email_verification_ttl"`
-	PasswordResetTTL      string         `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+type accountManagementResource struct {
+	Enabled               bool                   `json:"enabled" yaml:"enabled"`
+	PasswordSignup        passwordSignup         `json:"password_signup,omitempty" yaml:"password_signup"`
+	ReturnChallengeTokens bool                   `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
+	EmailVerificationTTL  string                 `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	EmailDelivery         *emailDeliveryResource `json:"email_delivery,omitempty"`
+	PasswordResetTTL      string                 `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+}
+
+type emailDeliveryResource struct {
+	ServerAddress            string            `json:"server_address"`
+	APIKey                   resourceReference `json:"api_key"`
+	EmailVerificationURL     string            `json:"email_verification_url"`
+	ConnectionTimeoutSeconds int               `json:"connection_timeout_seconds"`
+	OperationTimeoutSeconds  int               `json:"operation_timeout_seconds"`
 }
 
 type passwordSignup struct {
@@ -248,23 +257,23 @@ type nativeSigningKey struct {
 }
 
 type nativeTenant struct {
-	ID                  string               `yaml:"id"`
-	DisplayName         string               `yaml:"display_name"`
-	TenantOrigins       []string             `yaml:"tenant_origins"`
-	GoogleWebClientID   string               `yaml:"google_web_client_id"`
-	GoogleNativeClients []nativeGoogleClient `yaml:"google_native_clients,omitempty"`
-	AppleOAuth          *nativeAppleOAuth    `yaml:"apple_oauth,omitempty"`
-	PasswordAuth        *nativePasswordAuth  `yaml:"password_auth,omitempty"`
-	AccountManagement   *accountManagement   `yaml:"account_management,omitempty"`
-	OAuth               *tenantOAuth         `yaml:"oauth,omitempty"`
-	JWTSigningKey       string               `yaml:"jwt_signing_key"`
-	CookieDomain        string               `yaml:"cookie_domain"`
-	SessionCookieName   string               `yaml:"session_cookie_name"`
-	RefreshCookieName   string               `yaml:"refresh_cookie_name"`
-	SessionTTL          string               `yaml:"session_ttl"`
-	RefreshTTL          string               `yaml:"refresh_ttl"`
-	NonceTTL            string               `yaml:"nonce_ttl"`
-	AllowInsecureHTTP   bool                 `yaml:"allow_insecure_http"`
+	ID                  string                   `yaml:"id"`
+	DisplayName         string                   `yaml:"display_name"`
+	TenantOrigins       []string                 `yaml:"tenant_origins"`
+	GoogleWebClientID   string                   `yaml:"google_web_client_id"`
+	GoogleNativeClients []nativeGoogleClient     `yaml:"google_native_clients,omitempty"`
+	AppleOAuth          *nativeAppleOAuth        `yaml:"apple_oauth,omitempty"`
+	PasswordAuth        *nativePasswordAuth      `yaml:"password_auth,omitempty"`
+	AccountManagement   *nativeAccountManagement `yaml:"account_management,omitempty"`
+	OAuth               *tenantOAuth             `yaml:"oauth,omitempty"`
+	JWTSigningKey       string                   `yaml:"jwt_signing_key"`
+	CookieDomain        string                   `yaml:"cookie_domain"`
+	SessionCookieName   string                   `yaml:"session_cookie_name"`
+	RefreshCookieName   string                   `yaml:"refresh_cookie_name"`
+	SessionTTL          string                   `yaml:"session_ttl"`
+	RefreshTTL          string                   `yaml:"refresh_ttl"`
+	NonceTTL            string                   `yaml:"nonce_ttl"`
+	AllowInsecureHTTP   bool                     `yaml:"allow_insecure_http"`
 }
 
 type nativeGoogleClient struct {
@@ -281,6 +290,23 @@ type nativeAppleOAuth struct {
 	KeyID            string   `yaml:"key_id"`
 	PrivateKeyBase64 string   `yaml:"private_key_base64"`
 	RedirectURI      string   `yaml:"redirect_uri"`
+}
+
+type nativeAccountManagement struct {
+	Enabled               bool                 `yaml:"enabled"`
+	PasswordSignup        passwordSignup       `yaml:"password_signup"`
+	ReturnChallengeTokens bool                 `yaml:"return_challenge_tokens"`
+	EmailVerificationTTL  string               `yaml:"email_verification_ttl"`
+	EmailDelivery         *nativeEmailDelivery `yaml:"email_delivery,omitempty"`
+	PasswordResetTTL      string               `yaml:"password_reset_ttl"`
+}
+
+type nativeEmailDelivery struct {
+	ServerAddress            string `yaml:"server_address"`
+	APIKey                   string `yaml:"api_key"`
+	EmailVerificationURL     string `yaml:"email_verification_url"`
+	ConnectionTimeoutSeconds int    `yaml:"connection_timeout_seconds"`
+	OperationTimeoutSeconds  int    `yaml:"operation_timeout_seconds"`
 }
 
 type nativePasswordAuth struct {
@@ -477,7 +503,27 @@ func buildTenant(item contribution) (nativeTenant, error) {
 		if strings.TrimSpace(account.PasswordResetTTL) == "" {
 			account.PasswordResetTTL = "15m"
 		}
-		tenant.AccountManagement = &account
+		nativeAccount := &nativeAccountManagement{
+			Enabled:               account.Enabled,
+			PasswordSignup:        account.PasswordSignup,
+			ReturnChallengeTokens: account.ReturnChallengeTokens,
+			EmailVerificationTTL:  account.EmailVerificationTTL,
+			PasswordResetTTL:      account.PasswordResetTTL,
+		}
+		if account.EmailDelivery != nil {
+			apiKey, outputErr := requireOutput(item, "email-delivery-api-key")
+			if outputErr != nil {
+				return nativeTenant{}, outputErr
+			}
+			nativeAccount.EmailDelivery = &nativeEmailDelivery{
+				ServerAddress:            account.EmailDelivery.ServerAddress,
+				APIKey:                   apiKey,
+				EmailVerificationURL:     account.EmailDelivery.EmailVerificationURL,
+				ConnectionTimeoutSeconds: account.EmailDelivery.ConnectionTimeoutSeconds,
+				OperationTimeoutSeconds:  account.EmailDelivery.OperationTimeoutSeconds,
+			}
+		}
+		tenant.AccountManagement = nativeAccount
 	}
 	if resource.Tenant.OAuth != nil {
 		oauth := *resource.Tenant.OAuth

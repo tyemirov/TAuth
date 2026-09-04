@@ -1,6 +1,7 @@
 package authkit
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -27,9 +28,23 @@ type ServerConfig struct {
 	RefreshTTL               time.Duration
 	NonceTTL                 time.Duration
 	EmailVerificationTTL     time.Duration
+	EmailVerificationURL     string
 	PasswordResetTTL         time.Duration
 	SameSiteMode             http.SameSite
 	AllowInsecureHTTP        bool
+}
+
+// EmailVerificationRequest contains one verification email delivery request.
+type EmailVerificationRequest struct {
+	TenantID        string
+	Recipient       string
+	VerificationURL string
+	ExpiresAt       time.Time
+}
+
+// EmailVerificationSender delivers an account verification email.
+type EmailVerificationSender interface {
+	SendEmailVerification(ctx context.Context, request EmailVerificationRequest) error
 }
 
 // NativeGoogleClientConfig configures one accepted native Google OAuth client.

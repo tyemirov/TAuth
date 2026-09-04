@@ -60,6 +60,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.RefreshTTL = tenant.RefreshTTL()
 		tenantServerConfig.NonceTTL = tenant.NonceTTL()
 		tenantServerConfig.EmailVerificationTTL = accountManagement.EmailVerificationTTL()
+		tenantServerConfig.EmailVerificationURL = accountManagement.EmailDelivery().EmailVerificationURL()
 		tenantServerConfig.PasswordResetTTL = accountManagement.PasswordResetTTL()
 		tenantServerConfig.AllowInsecureHTTP = tenant.AllowInsecureHTTP()
 		tenantServerConfig.SameSiteMode = sameSiteResolver(tenant.AllowInsecureHTTP())
