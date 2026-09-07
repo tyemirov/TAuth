@@ -90,6 +90,11 @@ contract is in [docs/openapi.yaml](docs/openapi.yaml). Protected Go services
 use [pkg/oauthvalidator](pkg/oauthvalidator/README.md) to validate issuer,
 signature, resource audience, expiry, and scopes.
 
+TAuth rejects OAuth authorization and token exchanges for disabled accounts.
+The account disable endpoint revokes consent grants and refresh-token families
+and removes outstanding authorization codes for that tenant and account.
+Existing access tokens remain valid until their configured expiry.
+
 ---
 
 ## Deploy TAuth for a hosted product
