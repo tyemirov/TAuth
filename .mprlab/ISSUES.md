@@ -536,6 +536,26 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Changed files: `internal/authkit/routes_http_test.go`, `internal/authkit/routes_integration_test.go`, and `internal/authkit/mixed_tenant_delivery_http_test.go`.
   - Changed files: `README.md` and `.mprlab/ISSUES.md`.
 
+  Review repair:
+  - Four HTTP scenarios reproduced credential loss after an account lookup failure.
+  - Eight HTTP scenarios reproduced failed disable retries and unsafe account reactivation.
+  - Both OAuth stores now verify account access before they consume a code or rotate a refresh token.
+  - Account lookup failures leave these credentials available for a subsequent request.
+  - Account disablement now records `disabling` state before credential revocation.
+  - This state blocks account access and reactivation until OAuth and application refresh revocation both succeed.
+  - Authenticated disable requests can resume incomplete revocation.
+  - Server startup also resumes persisted disablements before the server accepts traffic.
+  - Startup opens the persisted OAuth store even when the OAuth issuer is disabled.
+  - Added tests for OAuth revocation, application refresh revocation, and final state update failures.
+  - Added a server startup test with persisted pending revocation and a real HTTP health request.
+  - Baseline and final `make ci`, focused `make test-go`, and `make test-go GOFLAGS=-race` passed.
+  - Changed files: `cmd/server/main.go`, `cmd/server/account_disablement_test.go`, and `internal/authkit/account_disablement.go`.
+  - Changed files: `internal/authkit/account_management.go`, `internal/authkit/database_user_store.go`, and `internal/authkit/database_user_store_test.go`.
+  - Changed files: `internal/authkit/routes.go` and `internal/authkit/stores.go`.
+  - Changed files: `internal/oauthserver/model.go`, `internal/oauthserver/server.go`, `internal/oauthserver/memory_store.go`, and `internal/oauthserver/database_store.go`.
+  - Changed files: `internal/oauthserver/account_disablement_integration_test.go` and `internal/oauthserver/store_contract_test.go`.
+  - Changed files: `README.md`, `docs/usage.md`, and `.mprlab/ISSUES.md`.
+
 - [ ] [B056] (P1) Make application refresh token rotation atomic.
   Goal:
   One application refresh token creates at most one active successor.
