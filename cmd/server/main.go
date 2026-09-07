@@ -286,6 +286,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	router.GET(healthEndpointPath, web.HandleHealth)
+	var oauthStore oauthserver.Store
 	if appConfig.OAuthServer().Enabled() {
 		oauthRegistry, oauthRegistryErr := oauthserver.NewRegistry(tenantConfig)
 		if oauthRegistryErr != nil {
@@ -295,7 +296,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 		if oauthSignerErr != nil {
 			return oauthSignerErr
 		}
-		var oauthStore oauthserver.Store
 		if databaseURL != "" {
 			persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
 			if oauthStoreErr != nil {
@@ -327,7 +327,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))
