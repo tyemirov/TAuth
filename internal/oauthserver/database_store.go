@@ -222,7 +222,7 @@ func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant Au
 	return code, nil
 }
 
-func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange) (AuthorizationGrant, error) {
+func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error) {
 	var grant AuthorizationGrant
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		var record databaseAuthorizationCode
@@ -235,6 +235,9 @@ func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code st
 		}
 		if record.ConsumedAtUnix != 0 || record.ExpiresAtUnix <= exchange.NowUnix || record.ClientID != exchange.ClientID || record.Resource != exchange.Resource || !pkceVerifierMatches(record.CodeChallenge, exchange.CodeVerifier) {
 			return ErrAuthorizationCodeInvalid
+		}
+		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
+			return err
 		}
 		update := transaction.Model(&databaseAuthorizationCode{}).Where("code_hash = ? AND consumed_at_unix = 0", record.CodeHash).Update("consumed_at_unix", exchange.NowUnix)
 		if update.Error != nil {
@@ -274,7 +277,7 @@ func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant Refresh
 	return token, nil
 }
 
-func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64) (RefreshGrant, string, error) {
+func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64, authorize AccountAuthorization) (RefreshGrant, string, error) {
 	var grant RefreshGrant
 	var newToken string
 	reused := false
@@ -317,6 +320,9 @@ func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken
 		}
 		if consentErr != nil {
 			return consentErr
+		}
+		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
+			return err
 		}
 		generatedToken, generatedDigest, tokenErr := newOpaqueToken("refresh_token")
 		if tokenErr != nil {

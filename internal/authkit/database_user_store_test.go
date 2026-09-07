@@ -230,7 +230,10 @@ func TestDatabaseUserStoreAccountManagementLifecycle(testContext *testing.T) {
 		testContext.Fatalf("expected unlinked password to be rejected, got %v", unlinkedPasswordErr)
 	}
 
-	disabledProfile, disableErr := store.DisableAccount(ctx, "tenant-a", expectedAccountID)
+	if _, err := store.BeginAccountDisable(ctx, "tenant-a", expectedAccountID); err != nil {
+		testContext.Fatal(err)
+	}
+	disabledProfile, disableErr := store.CompleteAccountDisable(ctx, "tenant-a", expectedAccountID)
 	if disableErr != nil {
 		testContext.Fatalf("failed to disable account: %v", disableErr)
 	}
@@ -305,8 +308,11 @@ func TestDatabaseUserStoreEnsuresSeededPasswordAccount(testContext *testing.T) {
 		testContext.Fatalf("expected reopened account id %s, got %#v", expectedAccountID, reopenedPasswordProfile)
 	}
 
-	if _, disableErr := store.DisableAccount(ctx, "tenant-a", expectedAccountID); disableErr != nil {
+	if _, disableErr := store.BeginAccountDisable(ctx, "tenant-a", expectedAccountID); disableErr != nil {
 		testContext.Fatalf("failed to disable account: %v", disableErr)
+	}
+	if _, err := store.CompleteAccountDisable(ctx, "tenant-a", expectedAccountID); err != nil {
+		testContext.Fatal(err)
 	}
 	if _, disabledChangeErr := store.ChangePassword(ctx, "tenant-a", expectedAccountID, "correct horse battery staple", "disabled account password"); !errors.Is(disabledChangeErr, ErrAccountDisabled) {
 		testContext.Fatalf("expected disabled account password change rejection, got %v", disabledChangeErr)

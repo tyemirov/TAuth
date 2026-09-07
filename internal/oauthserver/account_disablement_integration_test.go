@@ -24,7 +24,8 @@ type accountCredentialStore interface {
 
 type accountLookupStore struct {
 	accountCredentialStore
-	lookupErr error
+	lookupErr   error
+	completeErr error
 }
 
 func (store *accountLookupStore) ResolveAccountProfile(ctx context.Context, tenantID string, userID string) (authkit.AccountProfile, error) {
@@ -32,6 +33,13 @@ func (store *accountLookupStore) ResolveAccountProfile(ctx context.Context, tena
 		return authkit.AccountProfile{}, store.lookupErr
 	}
 	return store.accountCredentialStore.ResolveAccountProfile(ctx, tenantID, userID)
+}
+
+func (store *accountLookupStore) CompleteAccountDisable(ctx context.Context, tenantID string, userID string) (authkit.AccountProfile, error) {
+	if store.completeErr != nil {
+		return authkit.AccountProfile{}, store.completeErr
+	}
+	return store.accountCredentialStore.CompleteAccountDisable(ctx, tenantID, userID)
 }
 
 type revocationStore struct {
@@ -46,10 +54,24 @@ func (store *revocationStore) RevokeUser(ctx context.Context, tenantID string, u
 	return store.Store.RevokeUser(ctx, tenantID, userID, nowUnix)
 }
 
+type applicationRevocationStore struct {
+	authkit.RefreshTokenStore
+	revokeErr error
+}
+
+func (store *applicationRevocationStore) RevokeUser(ctx context.Context, tenantID string, userID string) error {
+	if store.revokeErr != nil {
+		return store.revokeErr
+	}
+	return store.RefreshTokenStore.RevokeUser(ctx, tenantID, userID)
+}
+
 type accountOAuthFixture struct {
-	issuer   string
-	store    *revocationStore
-	accounts *accountLookupStore
+	issuer      string
+	store       *revocationStore
+	accounts    *accountLookupStore
+	refresh     *applicationRevocationStore
+	databaseURL string
 }
 
 func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
@@ -68,9 +90,10 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 	accountConfig := registry.DefaultConfig()
 	accountConfig.AccountManagementEnabled = true
 	registry = authkit.NewSingleTenantRegistry(accountConfig)
+	databaseURL := "sqlite://" + filepath.Join(t.TempDir(), "tauth.db")
 	var credentials accountCredentialStore = authkit.NewMemoryPasswordCredentialStore()
 	if storage == "sqlite" {
-		credentials, err = authkit.NewDatabaseUserStore(context.Background(), "sqlite://"+filepath.Join(t.TempDir(), "accounts.db"))
+		credentials, err = authkit.NewDatabaseUserStore(context.Background(), databaseURL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +110,7 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 	}
 	store := &revocationStore{Store: NewMemoryStore()}
 	if storage == "sqlite" {
-		store.Store, err = NewDatabaseStore(context.Background(), "sqlite://"+filepath.Join(t.TempDir(), "oauth.db"))
+		store.Store, err = NewDatabaseStore(context.Background(), databaseURL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +124,13 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 		t.Fatal(err)
 	}
 	users := web.NewInMemoryUsers()
-	refresh := authkit.NewMemoryRefreshTokenStore()
+	refresh := &applicationRevocationStore{RefreshTokenStore: authkit.NewMemoryRefreshTokenStore()}
+	if storage == "sqlite" {
+		refresh.RefreshTokenStore, err = authkit.NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	nonces := authkit.NewMemoryNonceStore(time.Minute)
 	sessions := authkit.NewOAuthBrowserSessions(registry, users, refresh, nonces, accounts)
 	server, err := NewServer(config.OAuthServer(), oauthRegistry, store, signer, fixtureMetadataResolver{}, sessions)
@@ -116,7 +145,7 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 	httpServer := &http.Server{Handler: router, ReadHeaderTimeout: time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 	t.Cleanup(func() { _ = httpServer.Shutdown(context.Background()) })
-	return accountOAuthFixture{issuer: issuer, store: store, accounts: accounts}
+	return accountOAuthFixture{issuer: issuer, store: store, accounts: accounts, refresh: refresh, databaseURL: databaseURL}
 }
 
 func (fixture accountOAuthFixture) browser(t *testing.T) *http.Client {
@@ -179,7 +208,7 @@ func TestDisabledAccountOAuthHTTP(t *testing.T) {
 					t.Fatal(err)
 				}
 				if strings.HasPrefix(operation, "direct_") {
-					if _, err := fixture.accounts.DisableAccount(context.Background(), "demo", profile.AccountID); err != nil {
+					if _, err := fixture.accounts.BeginAccountDisable(context.Background(), "demo", profile.AccountID); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -272,5 +301,119 @@ func TestAccountOAuthStoreFailuresHTTP(t *testing.T) {
 				t.Fatal("unsafe OAuth store failure response")
 			}
 		})
+	}
+}
+
+func TestOAuthExchangeRetryAfterAccountLookupFailure(t *testing.T) {
+	for _, storage := range []string{"memory", "sqlite"} {
+		for _, operation := range []string{"code", "refresh"} {
+			t.Run(storage+"/"+operation, func(t *testing.T) {
+				fixture := newAccountOAuthFixture(t, storage)
+				client := fixture.browser(t)
+				form := codeTokenForm(fixture.code(t, client), strings.Repeat("a", 43))
+				if operation == "refresh" {
+					tokens := decodeTokenResponse(t, doRequest(t, client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(form.Encode())))
+					form = url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}, "client_id": {testOAuthClient}, "resource": {testOAuthResource}}
+				}
+				fixture.accounts.lookupErr = errors.New("fixture.account_store_unavailable")
+				response := doRequest(t, client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(form.Encode()))
+				assertStatus(t, response, http.StatusInternalServerError)
+				readBody(t, response)
+				fixture.accounts.lookupErr = nil
+				response = doRequest(t, client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(form.Encode()))
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("credential retry after recovery returned %d", response.StatusCode)
+				}
+				tokens := decodeTokenResponse(t, response)
+				form = url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}, "client_id": {testOAuthClient}, "resource": {testOAuthResource}}
+				response = doRequest(t, client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(form.Encode()))
+				assertStatus(t, response, http.StatusOK)
+				readBody(t, response)
+			})
+		}
+	}
+}
+
+func TestAccountDisablementRecoveryHTTP(t *testing.T) {
+	for _, storage := range []string{"memory", "sqlite"} {
+		for _, failure := range []string{"oauth", "application", "completion"} {
+			for _, recovery := range []string{"retry", "reactivation", "resume"} {
+				t.Run(storage+"/"+failure+"/"+recovery, func(t *testing.T) {
+					fixture := newAccountOAuthFixture(t, storage)
+					client := fixture.browser(t)
+					second := fixture.browser(t)
+					profile, err := fixture.accounts.EnsurePasswordAccount(context.Background(), "demo", "user@example.com")
+					if err != nil {
+						t.Fatal(err)
+					}
+					code := fixture.code(t, client)
+					tokens := decodeTokenResponse(t, doRequest(t, client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(codeTokenForm(code, strings.Repeat("a", 43)).Encode())))
+					applicationURL, err := url.Parse(fixture.issuer + "/auth/refresh")
+					if err != nil {
+						t.Fatal(err)
+					}
+					var applicationRefresh string
+					for _, cookie := range second.Jar.Cookies(applicationURL) {
+						if cookie.Name == "app_refresh_demo" {
+							applicationRefresh = cookie.Value
+						}
+					}
+					if applicationRefresh == "" {
+						t.Fatal("missing application refresh cookie")
+					}
+					switch failure {
+					case "oauth":
+						fixture.store.revokeErr = errors.New("fixture.oauth_store_unavailable")
+					case "application":
+						fixture.refresh.revokeErr = errors.New("fixture.refresh_store_unavailable")
+					case "completion":
+						fixture.accounts.completeErr = errors.New("fixture.account_store_unavailable")
+					}
+					response := doRequest(t, client, http.MethodPost, fixture.issuer+"/auth/account/disable", nil)
+					assertStatus(t, response, http.StatusInternalServerError)
+					readBody(t, response)
+					if recovery == "reactivation" {
+						if _, err := fixture.accounts.ReactivateAccount(context.Background(), "demo", profile.AccountID); !errors.Is(err, authkit.ErrAccountNotActive) {
+							t.Fatalf("incomplete disablement accepted reactivation: %v", err)
+						}
+						return
+					}
+					if recovery == "resume" {
+						if err := authkit.ResumeAccountDisablements(context.Background(), fixture.accounts, fixture.refresh, fixture.store, time.Now().UTC().Unix()); err == nil {
+							t.Fatal("resume ignored a store failure")
+						}
+					}
+					fixture.store.revokeErr = nil
+					fixture.refresh.revokeErr = nil
+					fixture.accounts.completeErr = nil
+					if recovery == "resume" {
+						if storage == "sqlite" {
+							reopened, err := authkit.NewDatabaseUserStore(context.Background(), fixture.databaseURL)
+							if err != nil {
+								t.Fatal(err)
+							}
+							fixture.accounts.accountCredentialStore = reopened
+						}
+						if err := authkit.ResumeAccountDisablements(context.Background(), fixture.accounts, fixture.refresh, fixture.store, time.Now().UTC().Unix()); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						response = doRequest(t, client, http.MethodPost, fixture.issuer+"/auth/account/disable", nil)
+						if response.StatusCode != http.StatusNoContent {
+							t.Fatalf("disable retry returned %d", response.StatusCode)
+						}
+						readBody(t, response)
+					}
+					if _, err := fixture.accounts.ReactivateAccount(context.Background(), "demo", profile.AccountID); err != nil {
+						t.Fatal(err)
+					}
+					form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}, "client_id": {testOAuthClient}, "resource": {testOAuthResource}}
+					assertOAuthError(t, doRequest(t, second, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(form.Encode())), "invalid_grant")
+					if _, _, _, err := fixture.refresh.Validate(context.Background(), "demo", applicationRefresh); err == nil {
+						t.Fatal("application refresh survived disable retry")
+					}
+				})
+			}
+		}
 	}
 }

@@ -1057,17 +1057,34 @@ func (store *DatabaseUserStore) UnlinkIdentity(ctx context.Context, tenantID str
 	return store.ResolveAccountProfile(ctx, tenantID, accountID)
 }
 
-// DisableAccount marks an account disabled.
-func (store *DatabaseUserStore) DisableAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
-	if err := store.updateAccountState(ctx, tenantID, accountID, accountStateDisabled); err != nil {
+// BeginAccountDisable blocks account access and records pending credential revocation.
+func (store *DatabaseUserStore) BeginAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
+	if err := store.updateAccountState(ctx, tenantID, accountID, []string{accountStateActive, accountStateDisabling, accountStateDisabled}, accountStateDisabling); err != nil {
 		return AccountProfile{}, err
 	}
 	return store.ResolveAccountProfile(ctx, tenantID, accountID)
 }
 
+// CompleteAccountDisable records successful credential revocation.
+func (store *DatabaseUserStore) CompleteAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
+	if err := store.updateAccountState(ctx, tenantID, accountID, []string{accountStateDisabling, accountStateDisabled}, accountStateDisabled); err != nil {
+		return AccountProfile{}, err
+	}
+	return store.ResolveAccountProfile(ctx, tenantID, accountID)
+}
+
+// PendingAccountDisablements returns persisted accounts whose credential revocation is incomplete.
+func (store *DatabaseUserStore) PendingAccountDisablements(ctx context.Context) ([]AccountReference, error) {
+	var pending []AccountReference
+	if err := store.db.WithContext(ctx).Model(&databaseAccountRecord{}).Select("tenant_id", "account_id").Where("account_state = ?", accountStateDisabling).Scan(&pending).Error; err != nil {
+		return nil, fmt.Errorf("%s.account_disable_pending.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
+	}
+	return pending, nil
+}
+
 // ReactivateAccount marks an account active.
 func (store *DatabaseUserStore) ReactivateAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
-	if err := store.updateAccountState(ctx, tenantID, accountID, accountStateActive); err != nil {
+	if err := store.updateAccountState(ctx, tenantID, accountID, []string{accountStateDisabled}, accountStateActive); err != nil {
 		return AccountProfile{}, err
 	}
 	return store.ResolveAccountProfile(ctx, tenantID, accountID)
@@ -1143,15 +1160,15 @@ func (store *DatabaseUserStore) identityCountWithTx(ctx context.Context, tx *gor
 	return count, nil
 }
 
-func (store *DatabaseUserStore) updateAccountState(ctx context.Context, tenantID string, accountID string, state string) error {
+func (store *DatabaseUserStore) updateAccountState(ctx context.Context, tenantID string, accountID string, previousStates []string, state string) error {
 	result := store.db.WithContext(ctx).Model(&databaseAccountRecord{}).
-		Where("tenant_id = ? AND account_id = ?", tenantID, accountID).
+		Where("tenant_id = ? AND account_id = ? AND account_state IN ?", tenantID, accountID, previousStates).
 		Updates(map[string]interface{}{"account_state": state, "last_updated_unix": store.now().UTC().Unix()})
 	if result.Error != nil {
 		return fmt.Errorf("%s.account_state.%s: %w", userStoreErrorPrefix, store.driverLabel, result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrAccountNotFound
+		return ErrAccountNotActive
 	}
 	return nil
 }

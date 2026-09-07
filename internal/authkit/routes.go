@@ -1652,24 +1652,17 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 	})
 
 	accountRoutes.POST("/disable", func(contextGin *gin.Context) {
-		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
+		tenantID, config, accountID, store, ok := currentAccountDisableContext(contextGin, registry, accountStore)
 		if !ok {
 			return
 		}
-		profile, disableErr := store.DisableAccount(contextGin, tenantID, accountID)
+		profile, disableErr := store.BeginAccountDisable(contextGin, tenantID, accountID)
 		if disableErr != nil {
 			writeAccountError(contextGin, disableErr)
 			return
 		}
-		if oauthGrants != nil {
-			if revokeErr := oauthGrants.RevokeUser(contextGin, tenantID, profile.AccountID, clock.Now().UTC().Unix()); revokeErr != nil {
-				logAuthError("auth.account.disable_oauth_revoke", revokeErr)
-				contextGin.AbortWithStatus(http.StatusInternalServerError)
-				return
-			}
-		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
-			logAuthError("auth.account.disable_revoke", revokeErr)
+		if err := completeAccountDisablement(contextGin, store, refreshTokens, oauthGrants, AccountReference{TenantID: tenantID, AccountID: profile.AccountID}, clock.Now().UTC().Unix()); err != nil {
+			logAuthError("auth.account.disable_cleanup", err)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
@@ -2161,35 +2154,43 @@ func isInactiveAccountSessionError(err error) bool {
 	return errors.Is(err, ErrAccountDisabled) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrAccountInvalidID)
 }
 
-func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {
+func currentAccountProfile(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, AccountProfile, AccountManagementStore, bool) {
 	tenantID, resolved := resolveTenantIDRequired(contextGin, registry)
 	if !resolved {
 		contextGin.AbortWithStatus(http.StatusInternalServerError)
-		return "", ServerConfig{}, "", nil, false
+		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
 	config := registry.Config(tenantID)
 	store, ok := requireAccountManagementStore(contextGin, config, accountStore)
 	if !ok {
-		return "", ServerConfig{}, "", nil, false
+		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
 	claimsValue, exists := contextGin.Get("auth_claims")
 	if !exists {
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
-		return "", ServerConfig{}, "", nil, false
+		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
 	claims, ok := claimsValue.(*JwtCustomClaims)
 	if !ok {
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
-		return "", ServerConfig{}, "", nil, false
+		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
 	accountID := claims.GetUserID()
 	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
 		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
-		return "", ServerConfig{}, "", nil, false
+		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
 	profile, profileErr := store.ResolveAccountProfile(contextGin, tenantID, accountID)
 	if profileErr != nil {
 		writeAccountError(contextGin, profileErr)
+		return "", ServerConfig{}, AccountProfile{}, nil, false
+	}
+	return tenantID, config, profile, store, true
+}
+
+func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {
+	tenantID, config, profile, store, ok := currentAccountProfile(contextGin, registry, accountStore)
+	if !ok {
 		return "", ServerConfig{}, "", nil, false
 	}
 	if profile.State == accountStateDisabled {
@@ -2200,7 +2201,21 @@ func currentAccountContext(contextGin *gin.Context, registry TenantRegistry, acc
 		writeAccountError(contextGin, ErrAccountNotActive)
 		return "", ServerConfig{}, "", nil, false
 	}
-	return tenantID, config, accountID, store, true
+	return tenantID, config, profile.AccountID, store, true
+}
+
+func currentAccountDisableContext(contextGin *gin.Context, registry TenantRegistry, accountStore AccountManagementStore) (string, ServerConfig, string, AccountManagementStore, bool) {
+	tenantID, config, profile, store, ok := currentAccountProfile(contextGin, registry, accountStore)
+	if !ok {
+		return "", ServerConfig{}, "", nil, false
+	}
+	switch profile.State {
+	case accountStateActive, accountStateDisabling, accountStateDisabled:
+		return tenantID, config, profile.AccountID, store, true
+	default:
+		writeAccountError(contextGin, ErrAccountNotActive)
+		return "", ServerConfig{}, "", nil, false
+	}
 }
 
 func resolveAppleStartTenantID(contextGin *gin.Context, registry TenantRegistry) (string, bool) {

@@ -12,6 +12,7 @@ const (
 	accountStatePendingVerification   = "pending_verification"
 	accountStateActive                = "active"
 	accountStateDisabled              = "disabled"
+	accountStateDisabling             = "disabling"
 	accountProviderPassword           = "password"
 	accountProviderGoogle             = "google"
 	accountProviderApple              = "apple"
@@ -579,16 +580,51 @@ func (store *MemoryPasswordCredentialStore) UnlinkIdentity(ctx context.Context, 
 	return profileFromAccount(account), nil
 }
 
-// DisableAccount marks an account disabled.
-func (store *MemoryPasswordCredentialStore) DisableAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
+// BeginAccountDisable blocks account access and records pending credential revocation.
+func (store *MemoryPasswordCredentialStore) BeginAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
 	}
+	switch account.state {
+	case accountStateActive, accountStateDisabling, accountStateDisabled:
+		account.state = accountStateDisabling
+	default:
+		return AccountProfile{}, ErrAccountNotActive
+	}
+	return profileFromAccount(account), nil
+}
+
+// CompleteAccountDisable records successful credential revocation.
+func (store *MemoryPasswordCredentialStore) CompleteAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	account := store.accounts[tenantID][accountID]
+	if account == nil {
+		return AccountProfile{}, ErrAccountNotFound
+	}
+	if account.state != accountStateDisabling && account.state != accountStateDisabled {
+		return AccountProfile{}, ErrAccountNotActive
+	}
 	account.state = accountStateDisabled
 	return profileFromAccount(account), nil
+}
+
+// PendingAccountDisablements returns accounts whose credential revocation is incomplete.
+func (store *MemoryPasswordCredentialStore) PendingAccountDisablements(ctx context.Context) ([]AccountReference, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	var pending []AccountReference
+	for tenantID, accounts := range store.accounts {
+		for accountID, account := range accounts {
+			if account.state == accountStateDisabling {
+				pending = append(pending, AccountReference{TenantID: tenantID, AccountID: accountID})
+			}
+		}
+	}
+	return pending, nil
 }
 
 // ReactivateAccount marks an account active.
@@ -598,6 +634,9 @@ func (store *MemoryPasswordCredentialStore) ReactivateAccount(ctx context.Contex
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
+	}
+	if account.state != accountStateDisabled {
+		return AccountProfile{}, ErrAccountNotActive
 	}
 	account.state = accountStateActive
 	return profileFromAccount(account), nil

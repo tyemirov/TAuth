@@ -367,17 +367,17 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 	grant, redeemErr := server.store.RedeemAuthorizationCode(request.Context(), request.PostForm.Get("code"), CodeExchange{
 		ClientID: clientID, Resource: resourceID,
 		CodeVerifier: request.PostForm.Get("code_verifier"), NowUnix: now.Unix(),
-	})
+	}, server.requireActiveUser)
 	if redeemErr != nil {
-		if errors.Is(redeemErr, ErrAuthorizationCodeInvalid) {
+		if errors.Is(redeemErr, ErrAuthorizationCodeInvalid) || errors.Is(redeemErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.UserID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
-		if errors.Is(policyErr, ErrInvalidScope) || errors.Is(policyErr, errInactiveUser) {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -416,19 +416,19 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 		return
 	}
 	now := server.now().UTC()
-	grant, rotatedToken, rotateErr := server.store.RotateRefreshToken(request.Context(), request.PostForm.Get("refresh_token"), clientID, resourceID, requestedScope, now.Unix())
+	grant, rotatedToken, rotateErr := server.store.RotateRefreshToken(request.Context(), request.PostForm.Get("refresh_token"), clientID, resourceID, requestedScope, now.Unix(), server.requireActiveUser)
 	if rotateErr != nil {
 		if errors.Is(rotateErr, ErrRefreshTokenScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_scope")
-		} else if errors.Is(rotateErr, ErrRefreshTokenInvalid) || errors.Is(rotateErr, ErrRefreshTokenReuse) {
+		} else if errors.Is(rotateErr, ErrRefreshTokenInvalid) || errors.Is(rotateErr, ErrRefreshTokenReuse) || errors.Is(rotateErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.UserID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
-		if errors.Is(policyErr, ErrInvalidScope) || errors.Is(policyErr, errInactiveUser) {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -503,19 +503,20 @@ func (server *Server) resolveTokenClient(policy TenantPolicy, clientID string) (
 	return Client{ID: clientID, Source: clientSourceMetadata}, nil
 }
 
-func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, userID string, consentID string, scope string, nowUnix int64) error {
-	if tenantID != policy.TenantID {
-		return ErrInvalidScope
-	}
-	active, activeErr := server.browserSessions.ActiveUser(ctx, tenantID, userID)
-	if activeErr != nil {
-		return activeErr
+func (server *Server) requireActiveUser(ctx context.Context, tenantID string, userID string) error {
+	active, err := server.browserSessions.ActiveUser(ctx, tenantID, userID)
+	if err != nil {
+		return err
 	}
 	if !active {
-		if revokeErr := server.store.RevokeUser(ctx, tenantID, userID, nowUnix); revokeErr != nil {
-			return fmt.Errorf("oauth.user.revoke: %w", revokeErr)
-		}
 		return errInactiveUser
+	}
+	return nil
+}
+
+func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, consentID string, scope string, nowUnix int64) error {
+	if tenantID != policy.TenantID {
+		return ErrInvalidScope
 	}
 	if _, _, scopeErr := validateRequestedScopes(resource, client, scope); scopeErr == nil {
 		return nil
