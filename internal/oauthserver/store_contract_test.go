@@ -21,6 +21,7 @@ func TestOAuthStoreContract(t *testing.T) {
 	for name, constructor := range constructors {
 		t.Run(name, func(t *testing.T) {
 			assertOAuthStoreContract(t, constructor(t))
+			t.Run("user revocation", func(t *testing.T) { assertOAuthUserRevocation(t, constructor(t)) })
 		})
 	}
 }
@@ -150,5 +151,74 @@ func assertOAuthStoreContract(t *testing.T, store Store) {
 	}
 	if _, _, expiryErr := store.RotateRefreshToken(ctx, expiringRefresh, grant.ClientID, grant.Resource, "", 400); !errors.Is(expiryErr, ErrRefreshTokenInvalid) {
 		t.Fatalf("expected refresh expiry, got %v", expiryErr)
+	}
+}
+
+func assertOAuthUserRevocation(t *testing.T, store Store) {
+	t.Helper()
+	ctx := context.Background()
+	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
+	type issuedGrant struct {
+		key           ConsentKey
+		code          string
+		refreshTokens []string
+	}
+	var issued []issuedGrant
+	for _, key := range []ConsentKey{
+		{TenantID: "tenant-a", UserID: "user-a", ClientID: "client-a", Resource: "https://resource.example", Scope: "resource:use"},
+		{TenantID: "tenant-a", UserID: "user-a", ClientID: "client-b", Resource: "https://other.example", Scope: "other:use"},
+		{TenantID: "tenant-b", UserID: "user-a", ClientID: "client-a", Resource: "https://resource.example", Scope: "resource:use"},
+		{TenantID: "tenant-a", UserID: "user-b", ClientID: "client-a", Resource: "https://resource.example", Scope: "resource:use"},
+	} {
+		consent, err := store.SaveConsent(ctx, Consent{ConsentKey: key, CreatedAtUnix: 100, ExpiresAtUnix: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, err := store.IssueAuthorizationCode(ctx, AuthorizationGrant{
+			ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID,
+			Resource: key.Resource, Scope: key.Scope, CodeChallenge: pkceChallenge(verifier), ExpiresAtUnix: 1000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		grant := issuedGrant{key: key, code: code}
+		for family := 0; family < 2; family++ {
+			refresh, err := store.IssueRefreshToken(ctx, RefreshGrant{
+				ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID,
+				Resource: key.Resource, Scope: key.Scope, ExpiresAtUnix: 1000,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, rotated, err := store.RotateRefreshToken(ctx, refresh, key.ClientID, key.Resource, key.Scope, 150)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant.refreshTokens = append(grant.refreshTokens, rotated)
+		}
+		issued = append(issued, grant)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := store.RevokeUser(ctx, "tenant-a", "user-a", 200); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, grant := range issued {
+		revoked := grant.key.TenantID == "tenant-a" && grant.key.UserID == "user-a"
+		if _, exists, err := store.FindConsent(ctx, grant.key, 201); err != nil || exists == revoked {
+			t.Fatalf("consent revocation isolation: revoked=%v exists=%v error=%v", revoked, exists, err)
+		}
+		_, err := store.RedeemAuthorizationCode(ctx, grant.code, CodeExchange{
+			ClientID: grant.key.ClientID, Resource: grant.key.Resource, CodeVerifier: verifier, NowUnix: 201,
+		})
+		if revoked && !errors.Is(err, ErrAuthorizationCodeInvalid) || !revoked && err != nil {
+			t.Fatalf("code revocation isolation: %v", err)
+		}
+		for _, refresh := range grant.refreshTokens {
+			_, _, err := store.RotateRefreshToken(ctx, refresh, grant.key.ClientID, grant.key.Resource, grant.key.Scope, 201)
+			if revoked && !errors.Is(err, ErrRefreshTokenInvalid) || !revoked && err != nil {
+				t.Fatalf("refresh revocation isolation: %v", err)
+			}
+		}
 	}
 }

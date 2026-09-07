@@ -292,13 +292,18 @@ func logAuthError(code string, err error, fields ...zap.Field) {
 	configuredLogger.Error("auth", logFields...)
 }
 
+// OAuthGrantRevoker revokes OAuth grants for one tenant and account.
+type OAuthGrantRevoker interface {
+	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
+}
+
 // MountAuthRoutes registers /auth endpoints and session helpers.
 func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
-	MountAuthRoutesWithPassword(router, registry, users, refreshTokens, nonces, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, users, refreshTokens, nonces, nil, nil, nil)
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
-func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender) {
+func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -1656,6 +1661,13 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, disableErr)
 			return
 		}
+		if oauthGrants != nil {
+			if revokeErr := oauthGrants.RevokeUser(contextGin, tenantID, profile.AccountID, clock.Now().UTC().Unix()); revokeErr != nil {
+				logAuthError("auth.account.disable_oauth_revoke", revokeErr)
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+		}
 		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
 			logAuthError("auth.account.disable_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -2118,7 +2130,7 @@ func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, confi
 	}, nil
 }
 
-func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, accountID string) (AccountProfile, error) {
+func activeAccountProfileForSession(ctx context.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, accountID string) (AccountProfile, error) {
 	if !config.AccountManagementEnabled {
 		return AccountProfile{}, ErrAccountNotActive
 	}
@@ -2128,7 +2140,7 @@ func activeAccountProfileForSession(contextGin *gin.Context, config ServerConfig
 	if accountStore == nil {
 		return AccountProfile{}, fmt.Errorf("auth.account.store_missing")
 	}
-	profile, profileErr := accountStore.ResolveAccountProfile(contextGin, tenantID, accountID)
+	profile, profileErr := accountStore.ResolveAccountProfile(ctx, tenantID, accountID)
 	if profileErr != nil {
 		return AccountProfile{}, profileErr
 	}

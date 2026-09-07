@@ -4881,7 +4881,7 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	accountStore := NewMemoryPasswordCredentialStore()
 	userStore := newTestUserStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, accountStore, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, accountStore, nil, nil)
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4972,7 +4972,7 @@ func TestHTTPPasswordSignupQueuesVerificationEmail(testingHandle *testing.T) {
 	accountStore := NewMemoryPasswordCredentialStore()
 	emailSender := &recordingEmailChallengeSender{}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender, nil)
 	server := newInProcessServer(router, false)
 	defer server.Close()
 
@@ -5037,7 +5037,7 @@ func TestHTTPPasswordSignupRejectsFailedVerificationEmail(testingHandle *testing
 	config.EmailVerificationURL = "https://ui.example.com/verify-email"
 	emailSender := &recordingEmailChallengeSender{err: errors.New("notification unavailable")}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), emailSender)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), emailSender, nil)
 	server := newInProcessServer(router, false)
 	defer server.Close()
 
@@ -5074,7 +5074,7 @@ func TestHTTPPasswordChallengesQueueEmailWithoutReturningTokens(testingHandle *t
 	accountStore := NewMemoryPasswordCredentialStore()
 	emailSender := &recordingEmailChallengeSender{}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", strings.NewReader(`{"email":"new@example.com","password":"correct horse battery staple"}`))
@@ -5132,7 +5132,7 @@ func TestHTTPPasswordChallengeDeliveryFailuresCancelTokens(testingHandle *testin
 	accountStore := NewMemoryPasswordCredentialStore()
 	emailSender := &recordingEmailChallengeSender{}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, emailSender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", strings.NewReader(`{"email":"new@example.com","password":"correct horse battery staple"}`))

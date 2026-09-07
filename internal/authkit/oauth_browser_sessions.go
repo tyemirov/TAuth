@@ -9,12 +9,8 @@ import (
 	"time"
 )
 
-var (
-	// ErrOAuthBrowserSessionMissing means the request has no valid tenant session.
-	ErrOAuthBrowserSessionMissing = errors.New("oauth.browser_session_missing")
-	// ErrOAuthBrowserLoginInvalid means the supplied browser login was not accepted.
-	ErrOAuthBrowserLoginInvalid = errors.New("oauth.browser_login_invalid")
-)
+// ErrOAuthBrowserLoginInvalid means the supplied browser login was not accepted.
+var ErrOAuthBrowserLoginInvalid = errors.New("oauth.browser_login_invalid")
 
 // OAuthBrowserSessions resolves and creates the normal TAuth browser session for OAuth pages.
 type OAuthBrowserSessions struct {
@@ -69,16 +65,42 @@ func (sessions *OAuthBrowserSessions) IssueGoogleNonce(ctx context.Context, tena
 }
 
 // Resolve returns the authenticated application user for one exact tenant.
-func (sessions *OAuthBrowserSessions) Resolve(request *http.Request, tenantID string) (string, error) {
+func (sessions *OAuthBrowserSessions) Resolve(request *http.Request, tenantID string) (string, bool, error) {
 	config, exists := sessions.registry.ConfigByID(tenantID)
 	if !exists {
-		return "", ErrOAuthBrowserSessionMissing
+		return "", false, nil
 	}
 	claims, validateErr := validateSessionRequest(request, config)
 	if validateErr != nil || claims.GetTenantID() != tenantID || strings.TrimSpace(claims.GetUserID()) == "" {
-		return "", ErrOAuthBrowserSessionMissing
+		return "", false, nil
 	}
-	return claims.GetUserID(), nil
+	active, activeErr := sessions.ActiveUser(request.Context(), tenantID, claims.GetUserID())
+	if activeErr != nil {
+		return "", false, activeErr
+	}
+	if !active {
+		return "", false, nil
+	}
+	return claims.GetUserID(), true, nil
+}
+
+// ActiveUser checks the current account state for an OAuth subject.
+func (sessions *OAuthBrowserSessions) ActiveUser(ctx context.Context, tenantID string, userID string) (bool, error) {
+	config, exists := sessions.registry.ConfigByID(tenantID)
+	if !exists {
+		return false, nil
+	}
+	if !config.AccountManagementEnabled && !isAccountSessionID(userID) {
+		return true, nil
+	}
+	_, profileErr := activeAccountProfileForSession(ctx, config, sessions.accountStore, tenantID, userID)
+	if isInactiveAccountSessionError(profileErr) {
+		return false, nil
+	}
+	if profileErr != nil {
+		return false, fmt.Errorf("oauth.account.resolve: %w", profileErr)
+	}
+	return true, nil
 }
 
 // LoginPassword verifies credentials and writes the standard TAuth session cookies.

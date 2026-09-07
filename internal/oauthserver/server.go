@@ -17,6 +17,8 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 )
 
+var errInactiveUser = errors.New("oauth.user.inactive")
+
 const authorizationServerMetadataPath = "/.well-known/oauth-authorization-server"
 
 const (
@@ -26,7 +28,8 @@ const (
 
 // BrowserSessions connects issuer-owned browser pages to normal TAuth sessions.
 type BrowserSessions interface {
-	Resolve(request *http.Request, tenantID string) (string, error)
+	ActiveUser(ctx context.Context, tenantID string, userID string) (bool, error)
+	Resolve(request *http.Request, tenantID string) (userID string, authenticated bool, err error)
 	LoginMethods(tenantID string) (passwordEnabled bool, googleWebClientID string, err error)
 	IssueGoogleNonce(ctx context.Context, tenantID string) (string, error)
 	LoginPassword(ctx context.Context, response http.ResponseWriter, request *http.Request, tenantID string, email string, password string) (accepted bool, err error)
@@ -176,8 +179,12 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 		writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		return
 	}
-	userID, sessionErr := server.browserSessions.Resolve(request, policy.TenantID)
+	userID, authenticated, sessionErr := server.browserSessions.Resolve(request, policy.TenantID)
 	if sessionErr != nil {
+		writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if !authenticated {
 		redirectIssuerPage(response, server.config.LoginEndpoint(), requestToken)
 		return
 	}
@@ -206,7 +213,12 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 	if !ok {
 		return
 	}
-	if _, resolveErr := server.browserSessions.Resolve(request, pending.TenantID); resolveErr == nil {
+	_, authenticated, resolveErr := server.browserSessions.Resolve(request, pending.TenantID)
+	if resolveErr != nil {
+		writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if authenticated {
 		redirectIssuerPage(response, server.config.ConsentEndpoint(), requestToken)
 		return
 	}
@@ -256,8 +268,12 @@ func (server *Server) handleConsent(response http.ResponseWriter, request *http.
 	if !ok {
 		return
 	}
-	userID, sessionErr := server.browserSessions.Resolve(request, pending.TenantID)
+	userID, authenticated, sessionErr := server.browserSessions.Resolve(request, pending.TenantID)
 	if sessionErr != nil {
+		writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if !authenticated {
 		redirectIssuerPage(response, server.config.LoginEndpoint(), requestToken)
 		return
 	}
@@ -360,8 +376,8 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
-		if errors.Is(policyErr, ErrInvalidScope) {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.UserID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) || errors.Is(policyErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -411,8 +427,8 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
-		if errors.Is(policyErr, ErrInvalidScope) {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.UserID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+		if errors.Is(policyErr, ErrInvalidScope) || errors.Is(policyErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -487,9 +503,19 @@ func (server *Server) resolveTokenClient(policy TenantPolicy, clientID string) (
 	return Client{ID: clientID, Source: clientSourceMetadata}, nil
 }
 
-func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, consentID string, scope string, nowUnix int64) error {
+func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, userID string, consentID string, scope string, nowUnix int64) error {
 	if tenantID != policy.TenantID {
 		return ErrInvalidScope
+	}
+	active, activeErr := server.browserSessions.ActiveUser(ctx, tenantID, userID)
+	if activeErr != nil {
+		return activeErr
+	}
+	if !active {
+		if revokeErr := server.store.RevokeUser(ctx, tenantID, userID, nowUnix); revokeErr != nil {
+			return fmt.Errorf("oauth.user.revoke: %w", revokeErr)
+		}
+		return errInactiveUser
 	}
 	if _, _, scopeErr := validateRequestedScopes(resource, client, scope); scopeErr == nil {
 		return nil

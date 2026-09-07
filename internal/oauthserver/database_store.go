@@ -382,6 +382,27 @@ func (store *DatabaseStore) RevokeConsent(ctx context.Context, consentID string,
 	return nil
 }
 
+// RevokeUser atomically revokes consents and refresh tokens and removes codes for one tenant and user.
+func (store *DatabaseStore) RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error {
+	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := transaction.Model(&databaseConsent{}).
+			Where("tenant_id = ? AND user_id = ? AND revoked_at_unix = 0", tenantID, userID).
+			Update("revoked_at_unix", nowUnix).Error; err != nil {
+			return err
+		}
+		if err := transaction.Model(&databaseOAuthRefreshToken{}).
+			Where("tenant_id = ? AND user_id = ?", tenantID, userID).
+			Updates(map[string]any{"status": refreshTokenStatusRevoked, "revoked_at_unix": nowUnix}).Error; err != nil {
+			return err
+		}
+		return transaction.Where("tenant_id = ? AND user_id = ?", tenantID, userID).Delete(&databaseAuthorizationCode{}).Error
+	})
+	if transactionErr != nil {
+		return fmt.Errorf("oauth_store.user.revoke.%s: %w", store.driverLabel, transactionErr)
+	}
+	return nil
+}
+
 func revokeRefreshFamilyDatabase(transaction *gorm.DB, familyID string, consentID string, nowUnix int64) error {
 	query := transaction.Model(&databaseOAuthRefreshToken{})
 	if familyID != "" {

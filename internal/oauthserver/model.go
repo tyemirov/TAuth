@@ -129,6 +129,7 @@ type Store interface {
 	RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64) (RefreshGrant, string, error)
 	RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error
 	RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error
+	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
 }
 
 func (client Client) permits(resource string, scopes []string) bool {

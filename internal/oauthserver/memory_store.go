@@ -228,6 +228,31 @@ func (store *MemoryStore) RevokeConsent(ctx context.Context, consentID string, n
 	return nil
 }
 
+// RevokeUser revokes all consents and refresh tokens and removes outstanding codes for one tenant and user.
+func (store *MemoryStore) RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for consentID, consent := range store.consents {
+		if consent.TenantID == tenantID && consent.UserID == userID && consent.RevokedAtUnix == 0 {
+			consent.RevokedAtUnix = nowUnix
+			store.consents[consentID] = consent
+		}
+	}
+	for digest, record := range store.refreshTokens {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			record.status = refreshTokenStatusRevoked
+			record.revokedAtUnix = nowUnix
+			store.refreshTokens[digest] = record
+		}
+	}
+	for digest, record := range store.codes {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			delete(store.codes, digest)
+		}
+	}
+	return nil
+}
+
 func (store *MemoryStore) consentActiveLocked(consentID string, nowUnix int64) bool {
 	consent, exists := store.consents[consentID]
 	return exists && consent.RevokedAtUnix == 0 && consent.ExpiresAtUnix > nowUnix

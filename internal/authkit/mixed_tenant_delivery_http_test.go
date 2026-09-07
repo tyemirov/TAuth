@@ -100,7 +100,7 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
 				sender := &tenantSelectiveEmailSender{requests: make(chan EmailChallengeRequest, 1)}
 				router := gin.New()
 				router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-				MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, sender)
+				MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, sender, nil)
 				server := httptest.NewServer(router)
 				defer server.Close()
 				client := server.Client()
