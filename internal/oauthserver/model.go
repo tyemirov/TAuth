@@ -116,6 +116,10 @@ type CodeExchange struct {
 	NowUnix      int64
 }
 
+// AccountAuthorization verifies account access before a credential is consumed.
+// It must not call the OAuth store that invokes it.
+type AccountAuthorization func(ctx context.Context, tenantID string, userID string) error
+
 // Store owns pending requests, codes, consents, and refresh-token families.
 type Store interface {
 	CreateAuthorizationRequest(ctx context.Context, request AuthorizationRequest) (string, error)
@@ -124,11 +128,12 @@ type Store interface {
 	FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error)
 	SaveConsent(ctx context.Context, consent Consent) (Consent, error)
 	IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error)
-	RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange) (AuthorizationGrant, error)
+	RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error)
 	IssueRefreshToken(ctx context.Context, grant RefreshGrant) (string, error)
-	RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64) (RefreshGrant, string, error)
+	RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64, authorize AccountAuthorization) (RefreshGrant, string, error)
 	RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error
 	RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error
+	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
 }
 
 func (client Client) permits(resource string, scopes []string) bool {

@@ -286,6 +286,19 @@ func runServer(command *cobra.Command, arguments []string) error {
 	}
 
 	router.GET(healthEndpointPath, web.HandleHealth)
+	var oauthStore oauthserver.Store
+	if databaseURL != "" {
+		persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
+		if oauthStoreErr != nil {
+			return oauthStoreErr
+		}
+		oauthStore = persistentOAuthStore
+		logger.Info("using persistent OAuth store", zap.String("driver", persistentOAuthStore.Driver()))
+	} else if appConfig.OAuthServer().Enabled() {
+		oauthStore = oauthserver.NewMemoryStore()
+		logger.Info("using in-memory OAuth store")
+	}
+
 	if appConfig.OAuthServer().Enabled() {
 		oauthRegistry, oauthRegistryErr := oauthserver.NewRegistry(tenantConfig)
 		if oauthRegistryErr != nil {
@@ -294,18 +307,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 		oauthSigner, oauthSignerErr := oauthserver.NewSigner(appConfig.OAuthServer())
 		if oauthSignerErr != nil {
 			return oauthSignerErr
-		}
-		var oauthStore oauthserver.Store
-		if databaseURL != "" {
-			persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
-			if oauthStoreErr != nil {
-				return oauthStoreErr
-			}
-			oauthStore = persistentOAuthStore
-			logger.Info("using persistent OAuth store", zap.String("driver", persistentOAuthStore.Driver()))
-		} else {
-			oauthStore = oauthserver.NewMemoryStore()
-			logger.Info("using in-memory OAuth store")
 		}
 		oauthHandler, oauthHandlerErr := oauthserver.NewServer(
 			appConfig.OAuthServer(),
@@ -323,11 +324,15 @@ func runServer(command *cobra.Command, arguments []string) error {
 		}
 	}
 
+	if err := authkit.ResumeAccountDisablements(shutdownContext, passwordCredentialStore.(authkit.AccountManagementStore), refreshStore, oauthStore, time.Now().UTC().Unix()); err != nil {
+		return err
+	}
+
 	tenantRouter := router.Group("/")
 	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
 	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))

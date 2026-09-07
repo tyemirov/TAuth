@@ -42,7 +42,9 @@ type AccountManagementStore interface {
 	UpsertProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, error)
 	LinkProviderIdentity(ctx context.Context, tenantID string, accountID string, identity AccountProviderIdentity) (AccountProfile, error)
 	UnlinkIdentity(ctx context.Context, tenantID string, accountID string, provider string, providerID string) (AccountProfile, error)
-	DisableAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+	BeginAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+	CompleteAccountDisable(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
+	PendingAccountDisablements(ctx context.Context) ([]AccountReference, error)
 	ReactivateAccount(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
 	ResolveAccountProfile(ctx context.Context, tenantID string, accountID string) (AccountProfile, error)
 }

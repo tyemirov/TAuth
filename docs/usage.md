@@ -891,6 +891,15 @@ All `/auth/account/*` endpoints require the current `app_session` cookie and onl
 
 Common account errors include `403 account_not_active`, `403 account_disabled`, `409 last_identity`, `409 account_exists`, and `401 invalid_challenge`.
 
+The disable endpoint first records `disabling` state, which blocks account access
+and reactivation. It then revokes OAuth grants and application refresh tokens.
+After both revocations succeed, it records `disabled` state and returns `204`.
+
+If a store operation fails, it returns `500`. The authenticated request can
+resume the operation while its session cookie remains valid. Server startup
+also resumes persisted disablements before the server accepts traffic, including
+when the OAuth issuer is disabled. Startup fails if this revocation cannot finish.
+
 ### 6.3 `GET /auth/session`
 
 Returns the current browser session profile for startup/bootstrap without using 401 as an expected signed-out signal.

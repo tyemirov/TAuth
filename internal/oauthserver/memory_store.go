@@ -140,7 +140,7 @@ func (store *MemoryStore) IssueAuthorizationCode(ctx context.Context, grant Auth
 }
 
 // RedeemAuthorizationCode atomically validates every code binding and consumes the code.
-func (store *MemoryStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange) (AuthorizationGrant, error) {
+func (store *MemoryStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error) {
 	digest := digestToken(code)
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -153,6 +153,9 @@ func (store *MemoryStore) RedeemAuthorizationCode(ctx context.Context, code stri
 	}
 	if !pkceVerifierMatches(record.grant.CodeChallenge, exchange.CodeVerifier) {
 		return AuthorizationGrant{}, ErrAuthorizationCodeInvalid
+	}
+	if err := authorize(ctx, record.grant.TenantID, record.grant.UserID); err != nil {
+		return AuthorizationGrant{}, err
 	}
 	record.consumedAtUnix = exchange.NowUnix
 	store.codes[digest] = record
@@ -179,7 +182,7 @@ func (store *MemoryStore) IssueRefreshToken(ctx context.Context, grant RefreshGr
 }
 
 // RotateRefreshToken rotates an active family member and detects family reuse.
-func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64) (RefreshGrant, string, error) {
+func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64, authorize AccountAuthorization) (RefreshGrant, string, error) {
 	digest := digestToken(refreshToken)
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -196,6 +199,9 @@ func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken s
 	}
 	if record.status != refreshTokenStatusActive || !store.consentActiveLocked(record.grant.ConsentID, nowUnix) {
 		return RefreshGrant{}, "", ErrRefreshTokenInvalid
+	}
+	if err := authorize(ctx, record.grant.TenantID, record.grant.UserID); err != nil {
+		return RefreshGrant{}, "", err
 	}
 	newToken, newDigest, tokenErr := newOpaqueToken("refresh_token")
 	if tokenErr != nil {
@@ -225,6 +231,31 @@ func (store *MemoryStore) RevokeConsent(ctx context.Context, consentID string, n
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.revokeRefreshFamilyLocked("", consentID, nowUnix)
+	return nil
+}
+
+// RevokeUser revokes all consents and refresh tokens and removes outstanding codes for one tenant and user.
+func (store *MemoryStore) RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for consentID, consent := range store.consents {
+		if consent.TenantID == tenantID && consent.UserID == userID && consent.RevokedAtUnix == 0 {
+			consent.RevokedAtUnix = nowUnix
+			store.consents[consentID] = consent
+		}
+	}
+	for digest, record := range store.refreshTokens {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			record.status = refreshTokenStatusRevoked
+			record.revokedAtUnix = nowUnix
+			store.refreshTokens[digest] = record
+		}
+	}
+	for digest, record := range store.codes {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			delete(store.codes, digest)
+		}
+	}
 	return nil
 }
 
