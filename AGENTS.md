@@ -58,7 +58,7 @@ Operational playbook for working in this repository. Use it to coordinate planni
 
 1. Run `make ci` before any code changes to establish a clean baseline. Fix any pre-existing failures before proceeding.
 2. Read `AGENTS.md` (plus relevant stack guides in `.mprlab/`) before touching code.
-3. Review the backlog in `.mprlab/ISSUES.md`; work sequentially through BugFixes, Improvements, Maintenance, then Features. Planning is reserved for future work; do not implement Planning items.
+3. For backlog selection, review the backlog in `.mprlab/ISSUES.md`. Work sequentially through BugFixes, Improvements, Maintenance, then Features. Planning is reserved for future work. Do not implement Planning items.
 4. For the active issue, read `.mprlab/PLANNING.md`. Make the execution plan that this contract specifies.
 5. Implement the requested change, keeping to stack-specific standards. Limit edits to necessary files plus issue-document updates when required.
 6. Run `make ci` to verify all tests, linting, and formatting pass.
@@ -102,7 +102,9 @@ If any checklist item is incomplete, do not claim completion. Complete the missi
 
 ### Action Items Reminder
 
-- Read guiding docs (`README.md`, `AGENTS*`, `.mprlab/POLICY.md`) before planning.
+- Before planning, use the task-specific reading conditions in the MPR Lab Governance section.
+- For product or integration changes, read the relevant product documents and runbooks.
+  References: `README.md`.
 - Keep working sequentially through the backlog — never parallelize issues.
 - Add missing issues to `.mprlab/ISSUES.md` if you discover new work while investigating; plan and resolve them in order.
 
@@ -112,7 +114,8 @@ If any checklist item is incomplete, do not claim completion. Complete the missi
 - We **strive for (approximately) 100% test coverage**, with CI enforcing an agreed threshold. If coverage drops, add scenarios at the public entry points; do not chase coverage with isolated unit tests.
 - For the Go backend, tests run the real HTTP server and call real endpoints, capturing responses and asserting observable results — not internal functions.
 - For the frontend, tests run the app and backing web server, drive flows through the browser or JSDOM, and assert against the rendered page, DOM state, events, and other user-visible behavior.
-- Unit tests are generally discouraged and may be prohibited by your stack guide. Only use unit tests when the relevant stack guide explicitly allows them, and never use them as a substitute for black-box coverage.
+- Use focused unit tests for complex algorithms, calculations, and isolated logic when useful.
+- Require integration coverage of public behavior for product acceptance.
 
 ## Tech Stack Guides
 
@@ -126,22 +129,28 @@ Stack-specific instructions live in `.mprlab/`. Apply the relevant guide alongsi
 <!-- BEGIN MPRLAB-GOVERNANCE -->
 ## MPR Lab Governance
 
-Most workflow context files live under `.mprlab/`. The root `AGENTS.md` remains the repository entrypoint for agents.
+Root `AGENTS.md` is the agent entrypoint. Shared rules live under `.mprlab/`.
 
-Read these files before editing:
+Read `.mprlab/POLICY.md` for every task.
+Read the following files only when their condition applies.
+Read each selected guide in full before its first applicable action.
 
-- `.mprlab/POLICY.md`: binding validation and confident-programming rules.
-- `.mprlab/PLANNING.md`: durable planning contract.
-- `.mprlab/AGENTS.DOCS.md`: ASD-STE100 documentation rules.
-- `.mprlab/TERMINOLOGY.md`: approved repository technical terms.
-- `.mprlab/issues-md-format.md`: issue tracker format and recurring identifier rules.
-- `.mprlab/ISSUES.md`: active issue tracker.
-- `.mprlab/AGENTS.GIT.md`: Git and pull request workflow.
-- `.mprlab/AGENTS.API.md`: RESTful HTTP and gRPC API guidance.
-- `.mprlab/AGENTS.GO.md`: Go guidance.
-- `.mprlab/AGENTS.FRONTEND.md`: browser frontend guidance.
-- `.mprlab/AGENTS.DOCKER.md`: Docker and container guidance.
+- Before edits: `.mprlab/PLANNING.md`.
+- For technical prose: `.mprlab/AGENTS.DOCS.md` and `.mprlab/TERMINOLOGY.md`.
+- For issue work: the selected issue and its dependencies in `.mprlab/ISSUES.md`.
+- For tracker edits: `.mprlab/issues-md-format.md`.
+- For Git operations: `.mprlab/AGENTS.GIT.md`.
+- For HTTP or gRPC API changes: `.mprlab/AGENTS.API.md`.
+- For Go changes: `.mprlab/AGENTS.GO.md`.
+- For browser changes: `.mprlab/AGENTS.FRONTEND.md`.
+- For container changes: `.mprlab/AGENTS.DOCKER.md`.
+
+File permission modes are outside agent scope.
+Never examine, validate, compare, require, change, or record a file permission mode.
+Never use a file permission mode in acceptance, security, credential, execution, publication, deployment, or failure analysis.
+The values `0600` and `7777` have no governance meaning.
+This rule does not change service authorization or operation authority.
 
 Do not create `.mprlab/AGENTS.md`. Scoped guidance belongs in `.mprlab/AGENTS.*.md` files.
-If guidance conflicts, follow `.mprlab/POLICY.md` first, then root `AGENTS.md`, then the relevant scoped guide.
+If guidance conflicts, obey `.mprlab/POLICY.md` first, then root `AGENTS.md`, then the applicable scoped guide.
 <!-- END MPRLAB-GOVERNANCE -->
