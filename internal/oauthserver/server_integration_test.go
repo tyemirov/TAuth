@@ -409,7 +409,7 @@ func loadOAuthTestConfig(t *testing.T, issuer string) (*appconfig.ApplicationCon
   database_url: ""
 oauth:
   enabled: true
-  allow_insecure_http: true
+  allow_insecure_http: %t
   issuer: %q
   authorization_endpoint: %q
   token_endpoint: %q
@@ -464,7 +464,7 @@ tenants:
     refresh_ttl: "1h"
     nonce_ttl: "5m"
     allow_insecure_http: true
-`, listenerAddress(issuer), issuer, issuer+"/oauth/authorize", issuer+"/oauth/token", issuer+"/oauth/revoke", issuer+"/oauth/jwks", issuer+"/oauth/login", issuer+"/oauth/consent", keyBase64, testGoogleClientID, testOAuthResource, testOAuthScope, testOAuthClient, testOAuthRedirect, testOAuthResource, testOAuthScope)
+`, listenerAddress(issuer), strings.HasPrefix(issuer, "http://"), issuer, issuer+"/oauth/authorize", issuer+"/oauth/token", issuer+"/oauth/revoke", issuer+"/oauth/jwks", issuer+"/oauth/login", issuer+"/oauth/consent", keyBase64, testGoogleClientID, testOAuthResource, testOAuthScope, testOAuthClient, testOAuthRedirect, testOAuthResource, testOAuthScope)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	if writeErr := os.WriteFile(configPath, []byte(config), 0o600); writeErr != nil {
 		t.Fatalf("write config: %v", writeErr)
@@ -480,7 +480,7 @@ tenants:
 	return appConfig, tenantConfig
 }
 
-func listenerAddress(issuer string) string { return strings.TrimPrefix(issuer, "http://") }
+func listenerAddress(issuer string) string { parsed, _ := url.Parse(issuer); return parsed.Host }
 
 func authorizationURL(issuer string, challenge string, state string, redirectURI string, resource string, scope string, clientID string) string {
 	values := url.Values{

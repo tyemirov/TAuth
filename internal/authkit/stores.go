@@ -28,6 +28,7 @@ type PasswordCredentialStore interface {
 
 // AccountManagementStore manages first-party account lifecycle records.
 type AccountManagementStore interface {
+	AccountIdentities(ctx context.Context, tenantID string, accountID string) ([]AccountIdentity, error)
 	CreatePasswordSignup(ctx context.Context, tenantID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error)
 	CancelPasswordSignup(ctx context.Context, tenantID string, accountID string) error
 	CancelAccountChallenge(ctx context.Context, tenantID string, accountID string, token string) error

@@ -6,6 +6,277 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F005] (P0) {F001,B055} Add GitHub login for browser sessions and OAuth resource clients.
+  Goal:
+  A user can authenticate with GitHub without a Google account, a password account, or manual token entry.
+  The same GitHub login can complete browser authentication and a pending OAuth authorization request.
+  Authorized resources can receive the verified GitHub identity without a separate manual account-link procedure.
+  This feature expands and replaces the unresolved TA-433 request under the current issue identifier contract.
+  `F008@https://github.com/MarcoPoloResearchLab/ISSUES.md` is the consuming MCP feature.
+  GitHub repository authorization remains the consuming application's responsibility.
+  Requirements:
+  - Use one GitHub provider implementation for ordinary browser login, account linking, and the OAuth login page.
+  - Preserve the current TAuth session cookies, refresh lifecycle, profile envelope, and account subject rules.
+  - Support GitHub-only tenants without Google or password configuration.
+  - Support mixed tenants through explicit provider controls on the login page.
+  - Complete repeat access through the existing TAuth session and OAuth refresh mechanisms.
+  - Keep GitHub approval and resource-client consent explicit when either approval is required.
+  - Do not require repeated GitHub authentication for each MCP tool call.
+  - Keep all provider routes in TAuth and all repository credentials in the consuming application.
+  - Keep TAuth free of ISSUES.md-specific hosts, scopes, repository IDs, or callback behavior.
+  Provider configuration:
+  - Add one optional per-tenant `github_oauth` block with an explicit disabled default.
+  - Require `enabled`, `client_id`, `client_secret`, and an exact HTTPS `redirect_uri` for an enabled provider.
+  - Use a dedicated GitHub OAuth App for identity authentication on GitHub.com.
+  - Require the closed identity scope set `read:user user:email`.
+  - Reject repository, organization, workflow, and `offline_access` scope requests in this provider contract.
+  - Require a verified primary email for the current email and `allowed_users` contracts.
+  - Preserve the current absent, empty, and explicit `allowed_users` semantics.
+  - Reject malformed configuration before the server accepts traffic.
+  - Add GitHub-only capability validation to native config, doctor, preflight, and the deployment config renderer.
+  - Keep provider endpoints fixed to GitHub.com in production configuration.
+  - Inject a local GitHub protocol implementation for tests without exposing caller-controlled provider URLs.
+  - Keep GitHub Enterprise and GitHub repository token custody outside this feature.
+  Login transaction:
+  - Add `GET /auth/github/start` and `GET /auth/github/callback` as provider protocol routes.
+  - Create an opaque state value and a PKCE `S256` verifier for each start request.
+  - Store the verifier only in the server-side login transaction.
+  - Bind the transaction to its initiating browser with a secure browser cookie and CSRF protection.
+  - Record tenant, provider client, redirect URI, creation time, expiry, operation, and approved completion destination.
+  - Use a closed operation type for session login, account linking, or OAuth authorization continuation.
+  - Set a five-minute transaction lifetime and atomically claim each callback once.
+  - Use the configured database for transactions when database persistence is enabled.
+  - Bound the lifetime and capacity of the in-memory transaction store.
+  - Resolve the callback tenant from the validated transaction, not the callback `Origin` header.
+  - Reject missing, expired, replayed, mismatched, or foreign-browser transactions before the GitHub token exchange.
+  - Exchange the code with the configured client secret, exact redirect URI, and original PKCE verifier.
+  - Reject an ambiguous token exchange without automatic code resubmission.
+  - Retrieve `/user` and `/user/emails` through the returned GitHub token.
+  - Validate each provider response at the HTTP boundary with bounded body sizes and request deadlines.
+  - Use the immutable numeric GitHub user ID as the provider subject, serialized as an exact decimal string.
+  - Require a positive user ID and one verified primary email from the email response.
+  - Treat GitHub login names, display names, avatars, and emails as mutable profile data.
+  - Reject a token response or identity response that cannot prove the requested login.
+  - Recheck provider enablement, tenant policy, and account state before session issuance.
+  - Complete the transaction before any successful browser redirect or popup notification.
+  Browser completion:
+  - Permit a `return_to` destination only within the resolved tenant's exact configured origins.
+  - Preserve full-page redirect login and explicit popup login as supported user experiences.
+  - Send popup completion only to the initiating window's exact origin with its transaction correlation value.
+  - Validate the message origin, source window, and correlation value in the browser helper.
+  - Return only completion status through popup messages, never credentials or authorization codes.
+  - Restore the current profile through the authenticated session endpoint after completion.
+  - Show a clear error when a popup is blocked or closed before completion.
+  - Add `getGitHubLoginUrl()` and `startGitHubLogin()` to the shipped browser helper.
+  - Keep both provider credentials and TAuth tokens out of JavaScript storage and browser messages.
+  Account identity:
+  - Add the canonical provider value `github` to the existing provider identity contract.
+  - Resolve identity with the exact tenant, provider, and immutable provider subject tuple.
+  - Reuse the current account stores for creation, lookup, explicit linking, unlinking, and account disablement.
+  - Keep the opaque account ID as the session and OAuth subject for account-managed tenants.
+  - Use the current UserStore contract when account management is disabled.
+  - Require an active authenticated account and fresh GitHub proof for explicit account linking.
+  - Bind linking intent to that account before the provider redirect.
+  - Never merge accounts because their emails or display names match.
+  - Reject linking when the GitHub identity already belongs to another account in the same tenant.
+  - Preserve the existing restriction against removal of the last login method.
+  - Preserve disabled-account rejection and credential revocation behavior from B055.
+  - Preserve account identity when GitHub login names or primary emails change.
+  OAuth continuation:
+  - Extend `OAuthBrowserSessions` and the OAuth login renderer with a typed provider capability contract.
+  - Replace the password/Google-only `LoginMethods` tuple with the complete current provider representation.
+  - Bind GitHub login to the existing pending OAuth authorization request.
+  - Preserve its client ID, resource, redirect URI, requested scopes, and client PKCE challenge across the GitHub redirect.
+  - Keep the GitHub PKCE verifier separate from the MCP client's PKCE verifier.
+  - Resume TAuth consent after GitHub authentication without another identity login or account-selection step.
+  - Reject expired, cancelled, mismatched, or consumed OAuth authorization requests before continuation.
+  - Keep client registration, metadata validation, resource audiences, consent, signing, and refresh ownership in the existing OAuth server.
+  - Never substitute the GitHub access token for a TAuth OAuth access token.
+  Verified identity disclosure:
+  - Add a resource-scope configuration field `identity_providers` with an empty default.
+  - Permit `github` as the provider value required by this feature.
+  - Disclose provider identities only when a granted scope explicitly requires them.
+  - Add a signed `provider_identities` claim containing records with exactly `provider` and `provider_id` fields.
+  - Use `github` and the verified decimal GitHub user ID for the GitHub record.
+  - Derive each record from the authenticated identity store, never from request fields or an email match.
+  - Bind identity disclosure to the existing resource audience, client grant, tenant, and consent policy.
+  - Describe identity disclosure on the resource consent page.
+  - Reject authorization when the requested identity cannot be proven for the current subject.
+  - Recompute identity claims during code exchange and refresh from current account and tenant state.
+  - Reject refresh when unlinking or account disablement invalidates a required identity.
+  - Extend `pkg/oauthvalidator` with typed identity claims and validation of their canonical shape.
+  - Verify that a consuming Go resource can read the GitHub identity only after normal token validation.
+  - Document the bounded validity of already issued identity claims until access-token expiry.
+  Credential and error boundaries:
+  - Keep the GitHub token in process memory only while the provider identity is retrieved.
+  - Do not retain or return GitHub access tokens or refresh tokens after login completion.
+  - Do not request repository access or execute repository operations during TAuth login.
+  - Keep codes, verifiers, secrets, tokens, and provider response bodies out of logs and error output.
+  - Redact callback code and state query values in application and configured access logs.
+  - Return stable errors for denied consent, invalid state, provider rejection, missing email, disallowed users, and store failure.
+  - Include safe operation context and a correlation ID in diagnostics.
+  - Do not issue a session or OAuth code when identity persistence or required policy validation fails.
+  - Preserve Google, Apple, password, session refresh, logout, and account-management behavior.
+  Deliverables:
+  - Add typed GitHub config and the provider adapter in the current tenant and authkit owners.
+  - Add atomic login transaction storage for the current database and memory implementations.
+  - Add browser provider routes, popup completion, helper methods, and OAuth continuation.
+  - Add account identity integration, resource-scope identity disclosure, and typed validator output.
+  - Update native config, deployment rendering, doctor, preflight, and startup validation together.
+  - Update `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, `docs/openapi.yaml`, examples, and release notes.
+  - Document the GitHub OAuth App registration procedure and exact callback URL.
+  - Document the consuming application's separate repository authorization and credential responsibilities.
+  - Add focused Make targets for GitHub HTTP, browser, OAuth continuation, and provider config integration.
+  - Start implementation with failing public-entrypoint scenarios before production code changes.
+  Validation:
+  - Start real TAuth servers with a deterministic GitHub HTTP provider and both current persistence implementations.
+  - Complete GitHub-only full-page login and popup login through a real browser.
+  - Verify private-email login through `/user/emails` when `/user` contains no public email.
+  - Verify absent, unverified, duplicate-primary, and changed email responses against the declared policy.
+  - Verify changed GitHub names, concurrent first login, exact provider IDs, and stable account subjects.
+  - Verify state replay, cross-browser replay, concurrent callbacks, wrong tenant, invalid PKCE, and expired transactions.
+  - Verify malicious return destinations, forged popup messages, blocked popups, and callback requests without `Origin`.
+  - Verify provider denial, malformed responses, insufficient identity scope, rate limits, deadlines, and ambiguous token exchange.
+  - Verify explicit linking, identity collisions, unlinking restrictions, and disabled-account rejection.
+  - Verify database failures, transaction expiry, process restart, and session-write failures without success responses.
+  - Complete OAuth discovery, GitHub login, resource consent, code exchange, and token refresh through public endpoints.
+  - Verify no Google login, password entry, or manual token copying occurs in the GitHub-only flow.
+  - Verify isolation between the two PKCE exchanges and between simultaneous resource-client authorization requests.
+  - Verify signed identity claims at a real protected Go resource through `pkg/oauthvalidator`.
+  - Verify absent disclosure scopes, wrong audiences, stale identity links, revoked grants, and bounded access-token expiry.
+  - Verify client registration and Client ID Metadata Documents through the existing authorization server.
+  - Verify browser and MCP resource access resolve the same GitHub identity without manual account linking.
+  - Verify that GitHub identity claims do not authorize repository operations or disclose provider tokens.
+  - Verify GitHub-only config through doctor, preflight, deployment rendering, and real server startup.
+  - Run current provider regression targets and `make ci` after implementation.
+  Evidence:
+  `internal/authkit/oauth_browser_sessions.go` exposes only password and Google methods to the OAuth login page.
+  `internal/oauthserver/server.go` consumes that two-provider tuple for login and capability validation.
+  `internal/authkit/account_management.go` owns provider identity resolution and explicit account links.
+  `README.md` and `docs/usage.md` require Google or password configuration for current OAuth tenants.
+  The initial source review on 2026-09-07 identified the missing GitHub capability.
+  Cross-repository context:
+  - Consumer: `F008@https://github.com/MarcoPoloResearchLab/ISSUES.md`.
+  - Format reference: `F009@https://github.com/MarcoPoloResearchLab/ISSUES.md` defines qualified dependency references.
+  - These body references identify related work. They do not add prerequisites to F005.
+  - Keep F001 and B055 as the prerequisites. The consuming MCP implementation needs this GitHub identity capability.
+  - Use the [ISSUES.md MCP design](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/docs/design/mcp-issue-access.md) for the consuming resource contract.
+  Reuse assessment:
+  - Reviewed ISSUES.md revision `d07f3573d363ddcc9b98ee55157096df0b126e2b` on 2026-09-07.
+  - Adapt the provider protocol code into TAuth's existing `internal/authkit` owner. Do not import the ISSUES.md application or its internal packages.
+  - Reuse the query construction in `buildGitHubAuthorizeURL` and the SHA-256 PKCE calculation in `authorizationURL`.
+  - Adapt `exchangeCodeForToken` for the form request, exact redirect URI, original verifier, HTTP headers, and injected HTTP client.
+  - Adapt `fetchGitHubUser` for the authenticated `/user` request and typed numeric ID response.
+  - Use `createSession` and `consumeSession` as references for one-time state and expiry checks.
+  - Keep the new transaction store in TAuth. Add the required tenant binding, browser binding, capacity bound, and database persistence.
+  - ISSUES.md stores login transactions in memory with a ten-minute lifetime. F005 requires five minutes and restart support with database persistence.
+  - The ISSUES.md callback uses the session ID stored with state. It does not compare the callback browser cookie with that ID.
+  - Add an explicit callback browser check before token exchange. The existing callback is not evidence for the F005 browser-binding requirement.
+  Required adaptations:
+  - Replace the ISSUES.md `read:user repo` scope configuration with the F005 identity scope contract.
+  - Add `/user/emails` retrieval. The existing `/user` request does not establish a verified primary email.
+  - Require a positive GitHub user ID and exact decimal serialization. `githubauth.NewUser` currently requires only a nonempty login name.
+  - Validate the returned token type and granted identity scopes before identity retrieval.
+  - Bound provider response sizes. The existing token and user helpers use `io.ReadAll` without a size limit.
+  - Replace provider response bodies in errors with safe diagnostics. Both existing helpers include non-success response bodies in errors.
+  - Resolve configuration from the validated tenant transaction. Do not copy request-derived callback URLs or configurable production provider hosts.
+  - Replace `canonicalGitHubReturnTarget` with TAuth's approved tenant destinations. Its current contract accepts only ISSUES.md application routes.
+  - Keep `githubAuthStore` credential persistence, execution credential replacement, and repository selection in ISSUES.md.
+  - Keep TAuth session issuance, account identity, consent, signing, and refresh in their current TAuth owners.
+  TAuth integration owners:
+  - Extend `internal/authkit/oauth_browser_sessions.go` for GitHub session issuance and typed provider capabilities.
+  - Extend `internal/authkit/account_management.go` and `internal/authkit/database_user_store.go` for the GitHub provider identity.
+  - Extend `internal/oauthserver/server.go` for login continuation. Extend `internal/oauthserver/token.go` and `signer.go` for authorized identity disclosure.
+  - Extend `internal/tenants`, `internal/appconfig`, and `pkg/oauthvalidator` through their existing configuration and validation contracts.
+  - Implement popup completion, verified email retrieval, and identity disclosure as F005 work. The inspected ISSUES.md provider helpers do not implement them.
+  Reusable test scenarios:
+  - Adapt `TestGithubHandler_Callback_Success` and its local GitHub HTTP fixture for token exchange and user retrieval.
+  - Adapt `TestGithubHandler_Callback_ConsumedSession` and the expired-session scenarios for rejected state values.
+  - Adapt `TestGithubHandler_LoginRetainsOnlyCanonicalIssueReturnTargets` for approved tenant destinations and rejected external destinations.
+  - Adapt `TestGithubHandler_CallbackErrorBranches` for provider and persistence failures.
+  - Run the adapted scenarios through real TAuth HTTP listeners and browser clients. Existing handler tests alone do not satisfy F005 acceptance.
+  - Add the F005-specific email, tenant, browser, concurrent callback, database restart, account-link, and OAuth continuation scenarios listed above.
+  - This assessment records the source review before implementation.
+  References:
+  - [ISSUES.md GitHub handlers](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers.go).
+  - [ISSUES.md GitHub identity types](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/githubauth/githubauth.go).
+  - [ISSUES.md callback and redirect tests](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers_test.go).
+  - [ISSUES.md provider failure tests](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers_additional_test.go).
+  - [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+  - [GitHub authenticated user API](https://docs.github.com/en/rest/users/users#get-the-authenticated-user).
+  - [GitHub email API](https://docs.github.com/en/rest/users/emails#list-email-addresses-for-the-authenticated-user).
+
+  Resolution:
+  Completed and verified on 2026-09-07.
+  Implementation:
+  - Added GitHub-only login, explicit account links, and OAuth continuation through one provider adapter.
+  - Added five-minute transactions with browser binding, PKCE S256, atomic consumption, and configured database persistence.
+  - Added scope-controlled identity disclosure for resource scopes and typed claims in the Go validator.
+  - Added native config, doctor, preflight, deployment rendering, browser helpers, API docs, and operator examples.
+  - Preserved the provider tuple, opaque account subjects, tenant email policy, and existing session cookies.
+  - Rejected ambiguous provider responses. Removed callback queries and credential headers before recovery logs.
+  - Recorded the existing concurrent provider-store defects under B071.
+  - Completed the review corrections under B072, B073, B074, and B075.
+  - Final review validation passed: `make ci`, 51 browser/JavaScript tests, and `make verify-js`.
+  Verification:
+  - Baseline `make ci` passed before code changes.
+  - Initial public config, HTTP, OAuth, and validator scenarios failed because GitHub support was absent.
+  - Local tests cover memory and SQLite stores, private email, concurrent callbacks, account links, and required identity removal.
+  - Browser tests cover full-page login, popup login, blocked popups, closed popups, and forged messages.
+  - OAuth tests cover discovery, consent, both PKCE exchanges, refresh, metadata clients, and simultaneous authorization requests.
+  - Public resource tests verify signed identity claims and access-token expiry.
+  - Focused GitHub targets, `make verify-js`, and final `make ci` passed.
+  - Provider qualification uses a local GitHub protocol server. Live GitHub connectivity was not tested.
+  - The changed documentation received language review. Unchanged prose and managed-guide drift remain outside F005.
+  Changed files:
+  - `.mprlab/ISSUES.md`.
+  - `.mprlab/TERMINOLOGY.md`.
+  - `ARCHITECTURE.md`.
+  - `CHANGELOG.md`.
+  - `Makefile`.
+  - `README.md`.
+  - `cmd/server/github_test.go`.
+  - `cmd/server/main.go`.
+  - `docs/openapi.yaml`.
+  - `docs/usage.md`.
+  - `examples/github/config.yaml.example`.
+  - `internal/appconfig/oauth.go`.
+  - `internal/authkit/account_management.go`.
+  - `internal/authkit/config.go`.
+  - `internal/authkit/database_helpers.go`.
+  - `internal/authkit/database_user_store.go`.
+  - `internal/authkit/github_browser_fixture_test.go`.
+  - `internal/authkit/github_http_test.go`.
+  - `internal/authkit/github_login.go`.
+  - `internal/authkit/github_provider.go`.
+  - `internal/authkit/github_transactions.go`.
+  - `internal/authkit/oauth_browser_sessions.go`.
+  - `internal/authkit/provider_identities.go`.
+  - `internal/authkit/stores.go`.
+  - `internal/authkit/tenant_registry_builder.go`.
+  - `internal/deploymentconfig/github_test.go`.
+  - `internal/deploymentconfig/render.go`.
+  - `internal/doctor/doctor.go`.
+  - `internal/oauthserver/github_integration_test.go`.
+  - `internal/oauthserver/model.go`.
+  - `internal/oauthserver/provider_login.go`.
+  - `internal/oauthserver/registry.go`.
+  - `internal/oauthserver/server.go`.
+  - `internal/oauthserver/server_integration_test.go`.
+  - `internal/oauthserver/signer.go`.
+  - `internal/preflight/report.go`.
+  - `internal/tenants/config.go`.
+  - `internal/tenants/github.go`.
+  - `internal/tenants/github_config_test.go`.
+  - `internal/tenants/oauth.go`.
+  - `internal/testsupport/github.go`.
+  - `internal/web/users.go`.
+  - `pkg/oauthvalidator/github_test.go`.
+  - `pkg/oauthvalidator/identities.go`.
+  - `pkg/oauthvalidator/validator.go`.
+  - `tests/github-login.browser.test.js`.
+  - `web/tauth.js`.
+
 - [x] [F003] (P0) Deliver account challenge email through a notification service.
   Goal:
   TAuth delivers each email verification challenge without returning its token to the browser.
@@ -419,6 +690,103 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B072] (P1) Require new consent when identity disclosure changes.
+  Evidence:
+  An existing scope gained `identity_providers: [github]` after the user gave consent.
+  Refresh disclosed the GitHub ID without a new consent page.
+  Requirements:
+  Bind each grant to the disclosure policy that the user approved.
+  Reject old codes and refresh tokens when that policy changes.
+  Require new consent for the new policy.
+  Validation:
+  HTTP regressions failed before the fix and passed after the fix.
+  The tests cover memory, SQLite, pending requests, code exchange, refresh, repeat authorization, and the v1 schema migration.
+  `make test-github-oauth` and final `make ci` passed.
+  Resolution:
+  Added a disclosure policy digest to pending requests, consent keys, codes, and refresh tokens.
+  The v2 OAuth schema adds an empty policy to existing rows. Existing rows cannot approve identity disclosure.
+  Changed files:
+  - `internal/oauthserver/model.go`, `database_store.go`, `provider_login.go`, and `server.go`.
+  - `internal/oauthserver/github_integration_test.go` and `github_disclosure_integration_test.go`.
+  - `internal/authkit/database_helpers.go`.
+
+- [x] [B073] (P1) Complete GitHub OAuth login with Strict session cookies.
+  Evidence:
+  A cross-site GitHub callback returned directly to OAuth consent.
+  Chromium omitted the Strict session cookie and returned to login.
+  Requirements:
+  Return a TAuth document before the browser continues to consent.
+  Keep the current session cookie attributes.
+  Validation:
+  Chromium completes cross-site GitHub login, OAuth consent, and code exchange with CORS and insecure HTTP disabled.
+  The regression failed before the fix and passed after the fix.
+  The browser verifies that session and refresh cookies keep Strict, Secure, and HttpOnly attributes.
+  `make test-github-browser`, `make test-github-oauth`, and final `make ci` passed.
+  Resolution:
+  Returned an HTTP 200 TAuth completion document before navigation to consent.
+  Changed files:
+  - `internal/authkit/github_login.go`.
+  - `internal/oauthserver/github_browser_fixture_test.go`, `github_integration_test.go`, and `server_integration_test.go`.
+  - `internal/oauthserver/github_disclosure_integration_test.go` and `tests/github-oauth.browser.test.js`.
+  - `Makefile`, `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, `docs/openapi.yaml`, and `CHANGELOG.md`.
+
+- [x] [B075] (P1) Correct the OAuth consent form policy for the approved client return.
+  Evidence:
+  The B073 browser flow reached consent with Strict cookies.
+  The consent form policy listed only the TAuth origin and blocked the external client return.
+  Requirements:
+  Add only the validated client origin to the consent form policy.
+  Validation:
+  Chromium reported a `form-action` violation before the fix.
+  The browser now completes consent and public code exchange for the external client.
+  The test verifies the approved origin in the form policy and rejects wildcard policy values.
+  `make test-github-browser` and final `make ci` passed.
+  Resolution:
+  Added only the validated client return origin to the consent form policy.
+  Changed files:
+  - `internal/oauthserver/server.go` and `tests/github-oauth.browser.test.js`.
+  - `ARCHITECTURE.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B074] (P2) Reject a popup return URL on another origin.
+  Evidence:
+  A popup return URL used another approved tenant origin.
+  The browser rejected completion and reported a closed popup after session creation.
+  Requirements:
+  Reject this input before the helper opens a popup or starts authentication.
+  Validation:
+  The browser regression failed before the fix and passed after the fix.
+  It verifies an error before window creation and an absent authenticated session.
+  It also verifies direct helper validation and full-page return URLs on another approved origin.
+  `make test-github-browser`, `make verify-js`, and final `make ci` passed.
+  Resolution:
+  Both GitHub helpers reject popup origin mismatches with `tauth.github_invalid_popup_origin`.
+  Changed files:
+  - `web/tauth.js`, `internal/authkit/github_browser_fixture_test.go`, and `tests/github-login.browser.test.js`.
+  - `README.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+
+- [x] [B071] (P1) Preserve account ownership during concurrent provider login.
+  Evidence:
+  F005 HTTP tests started two first-login callbacks for one provider identity.
+  Both callbacks must resolve one active account without a store error.
+  The existing memory user store had a data race. The existing SQLite account transaction returned a lock error.
+  Implementation:
+  Added locking to the memory user store.
+  Claimed the unique provider tuple before the SQLite account read and write.
+  Removed recursive conflict retries. Kept identity ownership fixed during explicit account linking.
+  Rejected inactive accounts in provider updates and links.
+  Verification:
+  Resolved on 2026-09-07.
+  `make test-github-http` passed with the race detector for memory and SQLite.
+  Final `make ci` passed as part of F005 qualification.
+  Changed files:
+  - `internal/web/users.go`.
+  - `internal/authkit/account_management.go`.
+  - `internal/authkit/database_user_store.go`.
+  - `internal/authkit/github_http_test.go`.
+  - `CHANGELOG.md`.
+
 
 - [x] [B070] (P2) Select account email delivery for each tenant.
   Goal:
@@ -1349,8 +1717,6 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Treated explicit empty allowlists as deny-all, added tests, and documented the 403 user_not_allowed behavior.
 - [x] [TA-432] Production CORS preflight 405 error.
   Root cause: Gravity frontend was calling `tauth.mprlab.com` but the Caddyfile only had `tauth-api.mprlab.com`. DNS for `tauth.mprlab.com` pointed to the Caddy server, but Caddy had no site block for it, causing requests to fail before reaching TAuth (hence no backend logs). Fix: Updated Gravity's `authBaseUrl` to `tauth-api.mprlab.com` and consolidated production config to JSON-only (Gravity PR #181).
-- [ ] [TA-433] (P0) Add GitHub as an additional identity provider (OAuth2 Authorization Code + PKCE) while keeping TAuth session cookies/JWT model.
-  Add a per-tenant GitHub provider block (client_id, client_secret, scopes, callback URL/origin constraints, and email requirements). Implement `GET /auth/github/start` (issue state + PKCE verifier, redirect/popup URL), `GET /auth/github/callback` (validate state + PKCE, exchange code for access token, fetch user identity + verified email via GitHub API, enforce per-tenant allowed_users against the resolved verified email), then mint the same `app_session` + `app_refresh` cookies and return the same profile shape. Note: GitHub requires a redirect round-trip; support popup mode by completing auth on a TAuth-served callback page that communicates success to the opener (postMessage/BroadcastChannel) and closes. Tenant resolution for callback must not rely on `Origin` (GitHub callback requests may omit it); instead encode the tenant in the signed `state` payload (or use tenant-specific callback paths) and re-validate it against config. Document error codes/hints for common failures (missing/invalid state, PKCE mismatch, code exchange failure, missing verified email when email is private, user_not_allowed, misconfigured callback URL, issuer/signing-key mismatch on downstream services). Add integration tests covering the full GitHub flow with a mock GitHub server (no external network) and table-driven cases.
 - [ ] [TA-434] (P1) Add `tauth doctor` to proactively diagnose auth misconfiguration.
   Provide a CLI command that reads `config.yaml` and prints a focused, actionable report (and stable error codes) for common “can’t authenticate” issues: origin not configured/unknown, ambiguous origins requiring tenant override, CORS allowlist missing the frontend origin, cookie scope collisions, cookie_domain/localhost pitfalls, missing/incorrect `enable_tenant_header_override` for shared-origin clients, and JWT validation parameters to sync with downstream services (issuer, session cookie name, tenant signing key fingerprints). Include a dedicated check/hint for issuer mismatch with common downstream validators (e.g. expecting `mprlab-auth` vs TAuth issuer `tauth`).
 - [x] [TA-435] Avoid destructive schema resets during `tauth doctor --check-database`.

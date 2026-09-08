@@ -45,6 +45,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.GoogleWebClientID = tenant.GoogleWebClientID()
 		tenantServerConfig.GoogleNativeClientID = tenant.GoogleNativeClientID()
 		tenantServerConfig.NativeGoogleClients = buildNativeGoogleClientConfigs(tenant.NativeGoogleClients())
+		tenantServerConfig.GitHubOAuth = tenant.GitHubOAuth()
 		tenantServerConfig.AppleOAuth = buildAppleOAuthConfig(tenant.AppleOAuth())
 		tenantServerConfig.PasswordAuthEnabled = tenant.PasswordAuthEnabled()
 		accountManagement := tenant.AccountManagement()

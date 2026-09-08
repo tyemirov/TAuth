@@ -61,7 +61,7 @@ Key notes:
 - **Account management**: Set `account_management.enabled: true` to use persisted account IDs and account routes.
 - **Challenge delivery**: Set `email_delivery` for production account management. Keep `return_challenge_tokens` false outside tests.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
-- **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google browser authentication, password authentication, or both for the TAuth-owned login page.
+- **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google, GitHub, or password authentication for the TAuth login page.
 - **OAuth persistence**: When `database_url` is set, TAuth stores pending requests and authorization-code digests. It also stores consent grants and refresh-token digests in the same SQLite or Postgres database. Without a database URL, these records are process-local and disappear at restart.
 
 ### 2.3 Example: hosted deployment
@@ -547,8 +547,7 @@ The login and consent forms accept POST requests only from the exact issuer
 origin. The client callback includes the one-time code, `state`, and issuer
 identifier `iss`.
 
-The issuer login page renders the tenant's enabled Google browser control,
-password form, or both. Google Identity Services returns an ID token only to
+The OAuth login page shows controls for enabled Google, GitHub, and password providers. Google Identity Services returns an ID token only to
 the issuer page. The page sends it directly to TAuth with a one-time nonce.
 TAuth returns the normal HttpOnly cookies. The page stores no ID token or OAuth
 resource token in browser storage or the DOM.
@@ -1119,3 +1118,96 @@ Use this checklist when integrating:
 
 For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
 - When multiple tenants share the same origin, list each frontend origin under `tenant_origins` so TAuth can resolve the tenant from the `Origin` header. You can override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper only sends `X-TAuth-Tenant` when you opt into an explicit override.
+
+## GitHub login operations
+
+Use a dedicated [GitHub OAuth App](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) for identity authentication.
+Set the registered callback URL and `github_oauth.redirect_uri` to the same HTTPS URL.
+The callback path is `/auth/github/callback`.
+Keep the client secret in the server's private configuration.
+GitHub API access remains inside TAuth during identity retrieval.
+
+`GET /auth/github/start` accepts these query fields:
+
+| Field | Contract |
+| --- | --- |
+| `tenant_id` | Specified tenant ID. Without it, `return_to` must identify one configured tenant origin. |
+| `return_to` | Full product URL within one configured tenant origin. Required for session login and linking. |
+| `operation` | `session`, `link`, or `oauth`. The default is `session`. |
+| `oauth_request` | Current pending authorization request. Required only for `oauth`. |
+| `popup` | `true` selects popup completion for session login or linking. |
+| `correlation` | Random 32-byte base64url value. Required only with `popup=true`. |
+
+The shipped helper creates these fields. Applications can call `getGitHubLoginUrl()` to obtain a full-page destination.
+Call `startGitHubLogin({mode: "popup"})` from a user control to use a popup.
+Use `operation: "link"` only with an active account session.
+A popup failure rejects the returned promise and calls `onAuthError`.
+
+The callback accepts GitHub's `code` and `state`, or a provider denial.
+It checks the transaction and browser cookie before exchange.
+Transactions expire after five minutes. Each callback can claim its transaction once.
+A new login is necessary after an expired transaction, provider rejection, or ambiguous token exchange.
+Do not resubmit an authorization code.
+
+| Error | Meaning |
+| --- | --- |
+| `github_login_not_configured` | The selected tenant has no enabled GitHub provider. |
+| `invalid_state` | The transaction is missing, expired, consumed, or bound to different browser or tenant inputs. |
+| `invalid_return_to` | The destination is outside the tenant's exact origins. |
+| `github_consent_denied` | GitHub did not approve the login. |
+| `github_provider_rejected` | The token or identity response failed validation. |
+| `github_verified_email_required` | GitHub did not return one verified primary email. |
+| `user_not_allowed` | The verified email does not satisfy `allowed_users`. |
+| `account_exists` | The identity belongs to another account in this tenant. |
+| `account_disabled` | The account cannot authenticate or accept a link. |
+| `invalid_oauth_request` | The pending authorization request is expired, consumed, or inconsistent with current client policy. |
+| `store_failure` | A required transaction, identity, profile, or session write failed. |
+
+Provider errors never contain provider response bodies or credentials.
+Application access logs omit query strings. Configure external access logs to omit callback query strings too.
+
+`identity_providers: [github]` on a resource scope requires a verified GitHub identity for that grant.
+The consent page describes disclosure of the immutable user ID.
+The signed claim has this shape:
+
+```json
+{"provider_identities":[{"provider":"github","provider_id":"9007199254740993"}]}
+```
+
+Validate the token's signature, issuer, audience, expiry, and scopes before reading this claim.
+The Go validator returns typed `ProviderIdentities` records only after normal token validation.
+A scope without `identity_providers` does not disclose the identity.
+TAuth rejects code exchange or refresh when the required current identity is absent.
+An existing token can disclose its signed identity until expiry.
+
+Repository access requires separate authorization in the consuming application.
+The consuming application owns repository credentials and permission checks.
+TAuth does not request repository scopes or do repository operations.
+
+Use these local qualification targets:
+
+```bash
+make test-github-config
+make test-github-http
+make test-github-oauth
+make test-github-browser
+make ci
+```
+
+These targets use deterministic local provider responses. They do not prove live GitHub connectivity.
+
+For popup mode, `returnTo` must use the initiating page origin.
+Both GitHub helpers reject another origin with `tauth.github_invalid_popup_origin` before window creation.
+Full-page login can still return to another configured tenant origin.
+
+OAuth login returns an HTTP 200 completion document before the browser navigates to consent.
+The browser can send Strict session cookies to consent after this document loads.
+The consent form policy lists only TAuth and the validated client return origin.
+
+A consent grant records the disclosure policy for its requested scopes.
+If `identity_providers` changes for those scopes, start a new authorization request and approve the new consent page.
+Old codes and refresh tokens return `invalid_grant` when their policy differs from the current policy.
+Pending login or consent requests also fail when their recorded policy changes.
+
+The database upgrade adds an empty disclosure policy to existing OAuth records.
+Those records cannot approve GitHub identity disclosure. New consent is necessary for that disclosure after the upgrade.

@@ -38,6 +38,7 @@ type Tenant struct {
 	googleNativeClientID string
 	nativeGoogleClients  []NativeGoogleClient
 	appleOAuth           AppleOAuth
+	githubOAuth          GitHubOAuth
 	passwordAuthEnabled  bool
 	passwordUsers        []PasswordUser
 	accountManagement    AccountManagement
@@ -672,12 +673,16 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if appleOAuthErr != nil {
 		return Tenant{}, nil, appleOAuthErr
 	}
+	githubOAuth, githubErr := parseGitHubOAuth(raw.GitHubOAuth, tenantID)
+	if githubErr != nil {
+		return Tenant{}, nil, githubErr
+	}
 	passwordAuthEnabled, passwordUsers, passwordAuthErr := parsePasswordAuth(raw.PasswordAuth, tenantID)
 	if passwordAuthErr != nil {
 		return Tenant{}, nil, passwordAuthErr
 	}
 	googleWebClientID := strings.TrimSpace(raw.GoogleWebClientID)
-	if !tenantHasAuthProvider(googleWebClientID, nativeGoogleClients, appleOAuth, passwordAuthEnabled) {
+	if !githubOAuth.Enabled() && !tenantHasAuthProvider(googleWebClientID, nativeGoogleClients, appleOAuth, passwordAuthEnabled) {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeMissingAuthProvider, tenantID)
 	}
 	accountManagement, accountManagementErr := parseAccountManagement(raw.AccountManagement, tenantID, bool(raw.AllowInsecureHTTP))
@@ -688,7 +693,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if oauthAuthorizationErr != nil {
 		return Tenant{}, nil, oauthAuthorizationErr
 	}
-	if oauthAuthorization.Enabled() && !passwordAuthEnabled && googleWebClientID == "" {
+	if oauthAuthorization.Enabled() && !passwordAuthEnabled && googleWebClientID == "" && !githubOAuth.Enabled() {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeOAuthMissingBrowserAuth, tenantID)
 	}
 	cookieDomain := strings.TrimSpace(raw.CookieDomain)
@@ -737,6 +742,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		googleNativeClientID: googleNativeClientID,
 		nativeGoogleClients:  nativeGoogleClients,
 		appleOAuth:           appleOAuth,
+		githubOAuth:          githubOAuth,
 		passwordAuthEnabled:  passwordAuthEnabled,
 		passwordUsers:        passwordUsers,
 		accountManagement:    accountManagement,
@@ -1543,6 +1549,10 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 		tenant.GoogleNativeClients[index].ClientID = os.ExpandEnv(tenant.GoogleNativeClients[index].ClientID)
 		tenant.GoogleNativeClients[index].RedirectURIs = expandEnvSlice(tenant.GoogleNativeClients[index].RedirectURIs)
 	}
+	tenant.GitHubOAuth.ClientID = os.ExpandEnv(tenant.GitHubOAuth.ClientID)
+	tenant.GitHubOAuth.ClientSecret = os.ExpandEnv(tenant.GitHubOAuth.ClientSecret)
+	tenant.GitHubOAuth.RedirectURI = os.ExpandEnv(tenant.GitHubOAuth.RedirectURI)
+	tenant.GitHubOAuth.Scopes = expandEnvSlice(tenant.GitHubOAuth.Scopes)
 	tenant.AppleOAuth.ClientID = os.ExpandEnv(tenant.AppleOAuth.ClientID)
 	tenant.AppleOAuth.NativeClientIDs = expandEnvSlice(tenant.AppleOAuth.NativeClientIDs)
 	tenant.AppleOAuth.TeamID = os.ExpandEnv(tenant.AppleOAuth.TeamID)
@@ -1599,6 +1609,7 @@ func expandEnvSlice(values []string) []string {
 
 // FileTenant represents a single tenant entry inside the YAML document.
 type FileTenant struct {
+	GitHubOAuth          FileGitHubOAuth          `json:"github_oauth" yaml:"github_oauth"`
 	ID                   string                   `json:"id" yaml:"id"`
 	DisplayName          string                   `json:"display_name" yaml:"display_name"`
 	TenantOrigins        []string                 `json:"tenant_origins" yaml:"tenant_origins"`

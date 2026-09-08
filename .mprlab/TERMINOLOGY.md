@@ -92,13 +92,22 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `GitHub identity`: The provider identity whose subject is the immutable numeric GitHub user ID.
+- `provider identity`: A verified provider name and subject associated with one tenant account.
+- `identity claim`: A signed OAuth claim that discloses a verified provider identity to an authorized resource.
+- `login transaction`: A single-use record that binds browser authentication to its tenant, provider, and approved destination.
+- `MCP`: Model Context Protocol, through which an agent discovers and calls application tools.
+- `popup`: A separate browser window that completes an authentication transaction for its initiating page.
+- `CSRF`: Cross-site request forgery, an attack that induces an unauthorized request through another user's browser.
 - `access token`: A short-lived signed token that permits an exact client grant at one protected resource.
 - `authorization code`: A short-lived one-time value that a client exchanges for tokens with PKCE.
 - `authorization server`: The TAuth component that gets user consent and issues resource-bound tokens.
 - `deployment config renderer`: The TAuth CLI command that converts normalized
   resource contributions into one validated native config.
 - `Client ID Metadata Document`: An HTTPS JSON document that describes one public OAuth client.
-- `consent grant`: A time-bounded user approval for one client, resource, and scope set.
+- `consent grant`: A time-bounded user approval for one client, resource, scope set, and disclosure policy.
+- `disclosure policy`: The mapping from requested resource scopes to identity providers presented for user consent.
+- `disclosure policy digest`: The SHA-256 digest that identifies one disclosure policy.
 - `JWKS`: A JSON Web Key Set that contains the public OAuth verification keys.
 - `OAuth`: The authorization protocol that TAuth uses to issue first-party resource tokens.
 - `PKCE`: The Proof Key for Code Exchange binding between an authorization request and a token request.

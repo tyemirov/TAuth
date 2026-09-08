@@ -6,6 +6,104 @@ info:
 servers:
   - url: https://auth.example.com
 paths:
+  /auth/github/start:
+    get:
+      operationId: startGitHubLogin
+      summary: Start GitHub identity authentication.
+      description: Create a five-minute browser-bound transaction and redirect to GitHub with PKCE S256.
+      parameters:
+        - name: tenant_id
+          in: query
+          schema: {type: string}
+          description: Select the specified tenant, or resolve one tenant from the return destination.
+        - name: return_to
+          in: query
+          schema: {type: string, format: uri}
+          description: Use one configured tenant origin. Required for session login and linking.
+        - name: operation
+          in: query
+          schema: {type: string, enum: [session, link, oauth], default: session}
+        - name: oauth_request
+          in: query
+          schema: {type: string}
+          description: Identify the pending OAuth request. Required only for OAuth continuation.
+        - name: popup
+          in: query
+          schema: {type: boolean, const: true}
+          description: Select popup completion for session login or linking.
+        - name: correlation
+          in: query
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+          description: Supply a random 32-byte base64url value for popup completion.
+      responses:
+        "302":
+          description: The browser receives a secure transaction cookie and the GitHub authorization destination.
+          headers:
+            Location:
+              schema: {type: string, format: uri}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        "400":
+          $ref: "#/components/responses/GitHubFailure"
+        "401":
+          $ref: "#/components/responses/GitHubFailure"
+        "404":
+          $ref: "#/components/responses/GitHubFailure"
+        "500":
+          $ref: "#/components/responses/GitHubFailure"
+        "503":
+          $ref: "#/components/responses/GitHubFailure"
+  /auth/github/callback:
+    get:
+      operationId: completeGitHubLogin
+      summary: Complete a GitHub login transaction.
+      description: Claim the browser-bound transaction before exchange. Resolve the tenant without an Origin header.
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+        - name: code
+          in: query
+          schema: {type: string}
+        - name: error
+          in: query
+          schema: {type: string}
+        - name: error_description
+          in: query
+          schema: {type: string}
+        - name: error_uri
+          in: query
+          schema: {type: string}
+        - name: tenant_id
+          in: query
+          schema: {type: string}
+          description: If present, this value must match the transaction tenant.
+      responses:
+        "200":
+          description: >-
+            A popup page sends completion status and correlation to the initiating origin.
+            OAuth continuation returns a TAuth document that starts navigation to consent after the document loads.
+          content:
+            text/html:
+              schema: {type: string}
+        "303":
+          description: Session login or account linking sets TAuth cookies and returns to the approved destination.
+          headers:
+            Location:
+              schema: {type: string, format: uri}
+        "400":
+          $ref: "#/components/responses/GitHubFailure"
+        "401":
+          $ref: "#/components/responses/GitHubFailure"
+        "403":
+          $ref: "#/components/responses/GitHubFailure"
+        "409":
+          $ref: "#/components/responses/GitHubFailure"
+        "500":
+          $ref: "#/components/responses/GitHubFailure"
+        "502":
+          $ref: "#/components/responses/GitHubFailure"
   /.well-known/oauth-authorization-server:
     get:
       operationId: getAuthorizationServerMetadata
@@ -265,6 +363,12 @@ components:
         type: string
         format: uri
   responses:
+    GitHubFailure:
+      description: A stable GitHub login error without provider credentials or response bodies.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GitHubError"
     OAuthError:
       description: A standard OAuth error without account, token, code, or key data.
       content:
@@ -272,6 +376,49 @@ components:
           schema:
             $ref: "#/components/schemas/OAuthError"
   schemas:
+    GitHubError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_request
+            - missing_tenant
+            - github_login_not_configured
+            - https_required
+            - invalid_origin
+            - invalid_return_to
+            - invalid_state
+            - invalid_oauth_request
+            - authentication_required
+            - github_consent_denied
+            - github_provider_rejected
+            - github_verified_email_required
+            - user_not_allowed
+            - account_exists
+            - account_disabled
+            - store_failure
+    ProviderIdentity:
+      type: object
+      additionalProperties: false
+      required: [provider, provider_id]
+      properties:
+        provider:
+          type: string
+          const: github
+        provider_id:
+          type: string
+          pattern: '^[1-9][0-9]{0,19}$'
+          description: The positive decimal GitHub user ID, within the unsigned 64-bit range.
+    ProviderIdentities:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        $ref: "#/components/schemas/ProviderIdentity"
+      description: This signed claim is present only when a granted resource scope requires provider identity disclosure.
     AuthorizationServerMetadata:
       type: object
       required:
@@ -432,6 +579,7 @@ components:
       properties:
         access_token:
           type: string
+          description: A signed TAuth JWT. Its optional provider_identities claim follows the ProviderIdentities schema.
         token_type:
           type: string
           const: Bearer

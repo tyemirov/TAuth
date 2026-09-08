@@ -16,6 +16,7 @@ const (
 	accountProviderPassword           = "password"
 	accountProviderGoogle             = "google"
 	accountProviderApple              = "apple"
+	accountProviderGitHub             = "github"
 	accountChallengeEmailVerification = "email_verification"
 	accountChallengePasswordReset     = "password_reset"
 	accountChallengePasswordLink      = "password_link"
@@ -492,6 +493,9 @@ func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Co
 		if account == nil {
 			return AccountProfile{}, ErrAccountNotFound
 		}
+		if account.state != accountStateActive {
+			return AccountProfile{}, ErrAccountNotActive
+		}
 		account.userEmail = normalizedIdentity.UserEmail
 		account.displayName = defaultDisplayName(normalizedIdentity.DisplayName, normalizedIdentity.UserEmail)
 		account.avatarURL = strings.TrimSpace(normalizedIdentity.AvatarURL)
@@ -535,6 +539,9 @@ func (store *MemoryPasswordCredentialStore) LinkProviderIdentity(ctx context.Con
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
+	}
+	if account.state != accountStateActive {
+		return AccountProfile{}, ErrAccountNotActive
 	}
 	key := identityKey(normalizedIdentity.Provider, normalizedIdentity.Subject)
 	if existingIdentity, exists := store.identities[tenantID][key]; exists && existingIdentity.accountID != accountID {

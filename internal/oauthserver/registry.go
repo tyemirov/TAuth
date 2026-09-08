@@ -51,7 +51,7 @@ func NewRegistry(config tenants.Config) (Registry, error) {
 			}
 			for _, configuredScope := range configuredResource.Scopes() {
 				resource.Scopes[configuredScope.Identifier()] = Scope{
-					Identifier: configuredScope.Identifier(), DisplayName: configuredScope.DisplayName(), Description: configuredScope.Description(),
+					IdentityProviders: configuredScope.IdentityProviders(), Identifier: configuredScope.Identifier(), DisplayName: configuredScope.DisplayName(), Description: configuredScope.Description(),
 				}
 			}
 			policy.Resources[resource.Identifier] = resource

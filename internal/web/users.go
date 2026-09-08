@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,7 @@ var ErrUserNotFound = errors.New("web.user.not_found")
 
 // InMemoryUsers is a simple user store used for demo and local runs.
 type InMemoryUsers struct {
+	mu      sync.RWMutex
 	tenants map[string]map[string]UserProfile
 }
 
@@ -71,6 +73,8 @@ func (store *InMemoryUsers) UpsertAccountUser(ctx context.Context, tenantID stri
 }
 
 func (store *InMemoryUsers) upsertUserProfile(tenantID string, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	record := UserProfile{
 		Email:     userEmail,
 		Display:   userDisplayName,
@@ -86,6 +90,8 @@ func (store *InMemoryUsers) upsertUserProfile(tenantID string, applicationUserID
 
 // GetUserProfile returns a profile by application user id.
 func (store *InMemoryUsers) GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (string, string, string, []string, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 	records, exists := store.tenants[tenantID]
 	if !exists {
 		return "", "", "", nil, ErrUserNotFound

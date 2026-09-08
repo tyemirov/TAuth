@@ -20,68 +20,72 @@ const (
 )
 
 type databaseAuthorizationRequest struct {
-	RequestHash   string `gorm:"column:request_hash;primaryKey"`
-	TenantID      string `gorm:"column:tenant_id;index;not null"`
-	ClientID      string `gorm:"column:client_id;index;not null"`
-	ClientName    string `gorm:"column:client_name;not null"`
-	ClientSource  string `gorm:"column:client_source;not null"`
-	RedirectURI   string `gorm:"column:redirect_uri;not null"`
-	RedirectHost  string `gorm:"column:redirect_host;not null"`
-	Resource      string `gorm:"column:resource;index;not null"`
-	ResourceName  string `gorm:"column:resource_name;not null"`
-	Scope         string `gorm:"column:scope;not null"`
-	State         string `gorm:"column:state;not null"`
-	CodeChallenge string `gorm:"column:code_challenge;not null"`
-	CreatedAtUnix int64  `gorm:"column:created_at_unix;not null"`
-	ExpiresAtUnix int64  `gorm:"column:expires_at_unix;index;not null"`
+	DisclosurePolicy string `gorm:"column:disclosure_policy;not null;default:''"`
+	RequestHash      string `gorm:"column:request_hash;primaryKey"`
+	TenantID         string `gorm:"column:tenant_id;index;not null"`
+	ClientID         string `gorm:"column:client_id;index;not null"`
+	ClientName       string `gorm:"column:client_name;not null"`
+	ClientSource     string `gorm:"column:client_source;not null"`
+	RedirectURI      string `gorm:"column:redirect_uri;not null"`
+	RedirectHost     string `gorm:"column:redirect_host;not null"`
+	Resource         string `gorm:"column:resource;index;not null"`
+	ResourceName     string `gorm:"column:resource_name;not null"`
+	Scope            string `gorm:"column:scope;not null"`
+	State            string `gorm:"column:state;not null"`
+	CodeChallenge    string `gorm:"column:code_challenge;not null"`
+	CreatedAtUnix    int64  `gorm:"column:created_at_unix;not null"`
+	ExpiresAtUnix    int64  `gorm:"column:expires_at_unix;index;not null"`
 }
 
 func (databaseAuthorizationRequest) TableName() string { return oauthAuthorizationRequestsTable }
 
 type databaseAuthorizationCode struct {
-	CodeHash       string `gorm:"column:code_hash;primaryKey"`
-	ConsentID      string `gorm:"column:consent_id;index;not null"`
-	TenantID       string `gorm:"column:tenant_id;index;not null"`
-	UserID         string `gorm:"column:user_id;index;not null"`
-	ClientID       string `gorm:"column:client_id;index;not null"`
-	RedirectURI    string `gorm:"column:redirect_uri;not null"`
-	Resource       string `gorm:"column:resource;index;not null"`
-	Scope          string `gorm:"column:scope;not null"`
-	CodeChallenge  string `gorm:"column:code_challenge;not null"`
-	ExpiresAtUnix  int64  `gorm:"column:expires_at_unix;index;not null"`
-	ConsumedAtUnix int64  `gorm:"column:consumed_at_unix;not null;default:0"`
+	DisclosurePolicy string `gorm:"column:disclosure_policy;not null;default:''"`
+	CodeHash         string `gorm:"column:code_hash;primaryKey"`
+	ConsentID        string `gorm:"column:consent_id;index;not null"`
+	TenantID         string `gorm:"column:tenant_id;index;not null"`
+	UserID           string `gorm:"column:user_id;index;not null"`
+	ClientID         string `gorm:"column:client_id;index;not null"`
+	RedirectURI      string `gorm:"column:redirect_uri;not null"`
+	Resource         string `gorm:"column:resource;index;not null"`
+	Scope            string `gorm:"column:scope;not null"`
+	CodeChallenge    string `gorm:"column:code_challenge;not null"`
+	ExpiresAtUnix    int64  `gorm:"column:expires_at_unix;index;not null"`
+	ConsumedAtUnix   int64  `gorm:"column:consumed_at_unix;not null;default:0"`
 }
 
 func (databaseAuthorizationCode) TableName() string { return oauthAuthorizationCodesTable }
 
 type databaseConsent struct {
-	ID            string `gorm:"column:consent_id;primaryKey"`
-	TenantID      string `gorm:"column:tenant_id;index:idx_oauth_consent_grant,priority:1;not null"`
-	UserID        string `gorm:"column:user_id;index:idx_oauth_consent_grant,priority:2;not null"`
-	ClientID      string `gorm:"column:client_id;index:idx_oauth_consent_grant,priority:3;not null"`
-	Resource      string `gorm:"column:resource;index:idx_oauth_consent_grant,priority:4;not null"`
-	Scope         string `gorm:"column:scope;index:idx_oauth_consent_grant,priority:5;not null"`
-	CreatedAtUnix int64  `gorm:"column:created_at_unix;not null"`
-	ExpiresAtUnix int64  `gorm:"column:expires_at_unix;index;not null"`
-	RevokedAtUnix int64  `gorm:"column:revoked_at_unix;not null;default:0"`
+	DisclosurePolicy string `gorm:"column:disclosure_policy;not null;default:''"`
+	ID               string `gorm:"column:consent_id;primaryKey"`
+	TenantID         string `gorm:"column:tenant_id;index:idx_oauth_consent_grant,priority:1;not null"`
+	UserID           string `gorm:"column:user_id;index:idx_oauth_consent_grant,priority:2;not null"`
+	ClientID         string `gorm:"column:client_id;index:idx_oauth_consent_grant,priority:3;not null"`
+	Resource         string `gorm:"column:resource;index:idx_oauth_consent_grant,priority:4;not null"`
+	Scope            string `gorm:"column:scope;index:idx_oauth_consent_grant,priority:5;not null"`
+	CreatedAtUnix    int64  `gorm:"column:created_at_unix;not null"`
+	ExpiresAtUnix    int64  `gorm:"column:expires_at_unix;index;not null"`
+	RevokedAtUnix    int64  `gorm:"column:revoked_at_unix;not null;default:0"`
 }
 
 func (databaseConsent) TableName() string { return oauthConsentsTable }
 
 type databaseOAuthRefreshToken struct {
-	TokenHash     string `gorm:"column:token_hash;primaryKey"`
-	ConsentID     string `gorm:"column:consent_id;index;not null"`
-	FamilyID      string `gorm:"column:family_id;index;not null"`
-	TenantID      string `gorm:"column:tenant_id;index;not null"`
-	UserID        string `gorm:"column:user_id;index;not null"`
-	ClientID      string `gorm:"column:client_id;index;not null"`
-	Resource      string `gorm:"column:resource;index;not null"`
-	Scope         string `gorm:"column:scope;not null"`
-	ExpiresAtUnix int64  `gorm:"column:expires_at_unix;index;not null"`
-	Status        string `gorm:"column:status;index;not null"`
-	IssuedAtUnix  int64  `gorm:"column:issued_at_unix;not null"`
-	RotatedAtUnix int64  `gorm:"column:rotated_at_unix;not null;default:0"`
-	RevokedAtUnix int64  `gorm:"column:revoked_at_unix;not null;default:0"`
+	DisclosurePolicy string `gorm:"column:disclosure_policy;not null;default:''"`
+	TokenHash        string `gorm:"column:token_hash;primaryKey"`
+	ConsentID        string `gorm:"column:consent_id;index;not null"`
+	FamilyID         string `gorm:"column:family_id;index;not null"`
+	TenantID         string `gorm:"column:tenant_id;index;not null"`
+	UserID           string `gorm:"column:user_id;index;not null"`
+	ClientID         string `gorm:"column:client_id;index;not null"`
+	Resource         string `gorm:"column:resource;index;not null"`
+	Scope            string `gorm:"column:scope;not null"`
+	ExpiresAtUnix    int64  `gorm:"column:expires_at_unix;index;not null"`
+	Status           string `gorm:"column:status;index;not null"`
+	IssuedAtUnix     int64  `gorm:"column:issued_at_unix;not null"`
+	RotatedAtUnix    int64  `gorm:"column:rotated_at_unix;not null;default:0"`
+	RevokedAtUnix    int64  `gorm:"column:revoked_at_unix;not null;default:0"`
 }
 
 func (databaseOAuthRefreshToken) TableName() string { return oauthRefreshTokensTable }
@@ -119,7 +123,7 @@ func (store *DatabaseStore) CreateAuthorizationRequest(ctx context.Context, requ
 	record := databaseAuthorizationRequest{
 		RequestHash: digest, TenantID: request.TenantID, ClientID: request.ClientID, ClientName: request.ClientName,
 		ClientSource: request.ClientSource, RedirectURI: request.RedirectURI, RedirectHost: request.RedirectHost,
-		Resource: request.Resource, ResourceName: request.ResourceName, Scope: request.Scope, State: request.State,
+		Resource: request.Resource, ResourceName: request.ResourceName, Scope: request.Scope, DisclosurePolicy: request.DisclosurePolicy, State: request.State,
 		CodeChallenge: request.CodeChallenge, CreatedAtUnix: request.CreatedAtUnix, ExpiresAtUnix: request.ExpiresAtUnix,
 	}
 	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
@@ -176,7 +180,7 @@ func (store *DatabaseStore) ConsumeAuthorizationRequest(ctx context.Context, req
 func (store *DatabaseStore) FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error) {
 	var record databaseConsent
 	queryErr := store.db.WithContext(ctx).
-		Where("tenant_id = ? AND user_id = ? AND client_id = ? AND resource = ? AND scope = ? AND revoked_at_unix = 0 AND expires_at_unix > ?", key.TenantID, key.UserID, key.ClientID, key.Resource, key.Scope, nowUnix).
+		Where("tenant_id = ? AND user_id = ? AND client_id = ? AND resource = ? AND scope = ? AND disclosure_policy = ? AND revoked_at_unix = 0 AND expires_at_unix > ?", key.TenantID, key.UserID, key.ClientID, key.Resource, key.Scope, key.DisclosurePolicy, nowUnix).
 		Order("created_at_unix DESC").Take(&record).Error
 	if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 		return Consent{}, false, nil
@@ -197,7 +201,7 @@ func (store *DatabaseStore) SaveConsent(ctx context.Context, consent Consent) (C
 	}
 	record := databaseConsent{
 		ID: consent.ID, TenantID: consent.TenantID, UserID: consent.UserID, ClientID: consent.ClientID,
-		Resource: consent.Resource, Scope: consent.Scope, CreatedAtUnix: consent.CreatedAtUnix,
+		Resource: consent.Resource, Scope: consent.Scope, DisclosurePolicy: consent.DisclosurePolicy, CreatedAtUnix: consent.CreatedAtUnix,
 		ExpiresAtUnix: consent.ExpiresAtUnix, RevokedAtUnix: consent.RevokedAtUnix,
 	}
 	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
@@ -213,7 +217,7 @@ func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant Au
 	}
 	record := databaseAuthorizationCode{
 		CodeHash: digest, ConsentID: grant.ConsentID, TenantID: grant.TenantID, UserID: grant.UserID,
-		ClientID: grant.ClientID, RedirectURI: grant.RedirectURI, Resource: grant.Resource, Scope: grant.Scope,
+		ClientID: grant.ClientID, RedirectURI: grant.RedirectURI, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy,
 		CodeChallenge: grant.CodeChallenge, ExpiresAtUnix: grant.ExpiresAtUnix,
 	}
 	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
@@ -431,23 +435,23 @@ func authorizationRequestFromDatabase(record databaseAuthorizationRequest) Autho
 	return AuthorizationRequest{
 		TenantID: record.TenantID, ClientID: record.ClientID, ClientName: record.ClientName, ClientSource: record.ClientSource,
 		RedirectURI: record.RedirectURI, RedirectHost: record.RedirectHost, Resource: record.Resource,
-		ResourceName: record.ResourceName, Scope: record.Scope, State: record.State, CodeChallenge: record.CodeChallenge,
+		ResourceName: record.ResourceName, Scope: record.Scope, DisclosurePolicy: record.DisclosurePolicy, State: record.State, CodeChallenge: record.CodeChallenge,
 		CreatedAtUnix: record.CreatedAtUnix, ExpiresAtUnix: record.ExpiresAtUnix,
 	}
 }
 
 func consentFromDatabase(record databaseConsent) Consent {
-	return Consent{ID: record.ID, ConsentKey: ConsentKey{TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, Resource: record.Resource, Scope: record.Scope}, CreatedAtUnix: record.CreatedAtUnix, ExpiresAtUnix: record.ExpiresAtUnix, RevokedAtUnix: record.RevokedAtUnix}
+	return Consent{ID: record.ID, ConsentKey: ConsentKey{TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, Resource: record.Resource, Scope: record.Scope, DisclosurePolicy: record.DisclosurePolicy}, CreatedAtUnix: record.CreatedAtUnix, ExpiresAtUnix: record.ExpiresAtUnix, RevokedAtUnix: record.RevokedAtUnix}
 }
 
 func authorizationGrantFromDatabase(record databaseAuthorizationCode) AuthorizationGrant {
-	return AuthorizationGrant{ConsentID: record.ConsentID, TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, RedirectURI: record.RedirectURI, Resource: record.Resource, Scope: record.Scope, CodeChallenge: record.CodeChallenge, ExpiresAtUnix: record.ExpiresAtUnix}
+	return AuthorizationGrant{ConsentID: record.ConsentID, TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, RedirectURI: record.RedirectURI, Resource: record.Resource, Scope: record.Scope, DisclosurePolicy: record.DisclosurePolicy, CodeChallenge: record.CodeChallenge, ExpiresAtUnix: record.ExpiresAtUnix}
 }
 
 func refreshRecordFromGrant(tokenHash string, grant RefreshGrant, issuedAtUnix int64) databaseOAuthRefreshToken {
-	return databaseOAuthRefreshToken{TokenHash: tokenHash, ConsentID: grant.ConsentID, FamilyID: grant.FamilyID, TenantID: grant.TenantID, UserID: grant.UserID, ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, ExpiresAtUnix: grant.ExpiresAtUnix, Status: refreshTokenStatusActive, IssuedAtUnix: issuedAtUnix}
+	return databaseOAuthRefreshToken{TokenHash: tokenHash, ConsentID: grant.ConsentID, FamilyID: grant.FamilyID, TenantID: grant.TenantID, UserID: grant.UserID, ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy, ExpiresAtUnix: grant.ExpiresAtUnix, Status: refreshTokenStatusActive, IssuedAtUnix: issuedAtUnix}
 }
 
 func refreshGrantFromDatabase(record databaseOAuthRefreshToken) RefreshGrant {
-	return RefreshGrant{ConsentID: record.ConsentID, FamilyID: record.FamilyID, TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, Resource: record.Resource, Scope: record.Scope, ExpiresAtUnix: record.ExpiresAtUnix}
+	return RefreshGrant{ConsentID: record.ConsentID, FamilyID: record.FamilyID, TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, Resource: record.Resource, Scope: record.Scope, DisclosurePolicy: record.DisclosurePolicy, ExpiresAtUnix: record.ExpiresAtUnix}
 }

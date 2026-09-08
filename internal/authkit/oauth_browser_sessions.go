@@ -42,13 +42,21 @@ func NewOAuthBrowserSessions(
 	}
 }
 
-// LoginMethods returns the issuer-page authentication methods for one tenant.
-func (sessions *OAuthBrowserSessions) LoginMethods(tenantID string) (bool, string, error) {
+// ProviderCapabilities is the current browser provider representation.
+type ProviderCapabilities struct {
+	Password       bool
+	GoogleClientID string
+	Apple          bool
+	GitHub         bool
+}
+
+// LoginMethods returns the typed authentication capabilities for one tenant.
+func (sessions *OAuthBrowserSessions) LoginMethods(tenantID string) (ProviderCapabilities, error) {
 	config, exists := sessions.registry.ConfigByID(tenantID)
 	if !exists {
-		return false, "", ErrOAuthBrowserLoginInvalid
+		return ProviderCapabilities{}, ErrOAuthBrowserLoginInvalid
 	}
-	return config.PasswordAuthEnabled, strings.TrimSpace(config.GoogleWebClientID), nil
+	return ProviderCapabilities{Password: config.PasswordAuthEnabled, GoogleClientID: config.GoogleWebClientID, Apple: config.AppleOAuth.Enabled, GitHub: config.GitHubOAuth.Enabled()}, nil
 }
 
 // IssueGoogleNonce creates the one-time nonce used by Google Identity Services.

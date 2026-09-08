@@ -1,0 +1,21 @@
+server:
+  listen_addr: ":8080"
+  database_url: "sqlite:///data/tauth.db"
+  enable_cors: true
+  cors_allowed_origins: ["https://app.example.com"]
+  enable_tenant_header_override: true
+tenants:
+  - id: github
+    display_name: GitHub application
+    tenant_origins: ["https://app.example.com"]
+    github_oauth:
+      enabled: true
+      client_id: "${GITHUB_CLIENT_ID}"
+      client_secret: "${GITHUB_CLIENT_SECRET}"
+      redirect_uri: "https://auth.example.com/auth/github/callback"
+      scopes: [read:user, user:email]
+    jwt_signing_key: "${SESSION_SIGNING_KEY}"
+    session_cookie_name: app_session_github
+    refresh_cookie_name: app_refresh_github
+    session_ttl: 30m
+    refresh_ttl: 720h

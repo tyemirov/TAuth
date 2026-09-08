@@ -27,7 +27,7 @@ const (
 	refreshStoreSchemaVersion    = 1
 	userStoreSchemaVersion       = 5
 	nonceStoreSchemaVersion      = 1
-	oauthStoreSchemaVersion      = 1
+	oauthStoreSchemaVersion      = 2
 )
 
 var (
@@ -57,6 +57,7 @@ type storeSchemaPolicy struct {
 }
 
 var storeSchemaPolicies = map[string]storeSchemaPolicy{
+	githubStoreErrorPrefix: {StoreName: githubStoreErrorPrefix, Version: 1, AllowDestructiveReset: false},
 	refreshStoreErrorPrefix: {
 		StoreName:             refreshStoreErrorPrefix,
 		Version:               refreshStoreSchemaVersion,

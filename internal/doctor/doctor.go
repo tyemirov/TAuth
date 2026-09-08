@@ -213,7 +213,7 @@ func validateTenantConfig(tenant tenants.Tenant, result *DiagnosticResult) {
 		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: jwt_signing_key is required", tenantID))
 	}
 
-	if tenant.GoogleWebClientID() == "" && len(tenant.NativeGoogleClients()) == 0 && !tenant.AppleOAuth().Enabled() && !tenant.PasswordAuthEnabled() {
+	if tenant.GoogleWebClientID() == "" && len(tenant.NativeGoogleClients()) == 0 && !tenant.AppleOAuth().Enabled() && !tenant.GitHubOAuth().Enabled() && !tenant.PasswordAuthEnabled() {
 		result.Valid = false
 		result.Errors = append(result.Errors, fmt.Sprintf("tenant[%s]: at least one auth provider is required", tenantID))
 	}
