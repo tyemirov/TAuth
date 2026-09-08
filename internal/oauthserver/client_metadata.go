@@ -237,8 +237,13 @@ func validateMetadataRedirectURIs(rawURIs []string, applicationType string) ([]s
 			return nil, fmt.Errorf("%w: redirect_uri", ErrClientMetadataInvalid)
 		}
 		parsed, parseErr := url.Parse(rawURI)
-		if parseErr != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		if parseErr != nil || parsed.Host == "" || parsed.User != nil || strings.Contains(rawURI, "#") || strings.HasSuffix(parsed.Host, ":") {
 			return nil, fmt.Errorf("%w: redirect_uri", ErrClientMetadataInvalid)
+		}
+		if parsed.Port() != "" {
+			if _, portErr := parsePort(parsed.Port()); portErr != nil {
+				return nil, fmt.Errorf("%w: redirect_uri", ErrClientMetadataInvalid)
+			}
 		}
 		validHTTPS := parsed.Scheme == "https"
 		validLoopback := applicationType == "native" && parsed.Scheme == "http" && metadataLoopbackHost(parsed.Hostname())
