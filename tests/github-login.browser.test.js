@@ -64,6 +64,36 @@ test("GitHub browser redirect, popup, and message boundaries", { timeout: 90000 
     } finally { await context.close(); }
   });
 
+  await suite.test("a popup return on another approved origin is rejected before login", async () => {
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      await page.goto(`${issuer}/test/app`);
+      await page.evaluate(() => {
+        const open = window.open.bind(window);
+        window["popupCalls"] = 0;
+        window.open = (...args) => { window["popupCalls"]++; return open(...args); };
+      });
+      await page.click("#popup-other-origin");
+      await page.waitForFunction(() => document.querySelector("#error").textContent.length > 0);
+      assert.equal(await page.evaluate(() => window["popupCalls"]), 0, "invalid popup started authentication");
+      assert.equal(await page.$eval("#error", element => element.textContent), "tauth.github_invalid_popup_origin");
+      const session = await page.evaluate(async () => {
+        const response = await fetch("/auth/session", { credentials: "include", headers: { "X-TAuth-Tenant": "github" } });
+        return { status: response.status, body: await response.text() };
+      });
+      assert.deepEqual(session, { status: 204, body: "" });
+      const result = await page.evaluate(() => {
+        let error = "";
+        try { window["getGitHubLoginUrl"]({ mode: "popup", returnTo: "https://other.example.com/done" }); }
+        catch (failure) { error = failure.message; }
+        return { error, redirect: window["getGitHubLoginUrl"]({ mode: "redirect", returnTo: "https://other.example.com/done" }) };
+      });
+      assert.equal(result.error, "tauth.github_invalid_popup_origin");
+      assert.equal(new URL(result.redirect).searchParams.get("return_to"), "https://other.example.com/done");
+    } finally { await context.close(); }
+  });
+
   await suite.test("blocked popups report a clear error", async () => {
     const context = await browser.createBrowserContext();
     try {
