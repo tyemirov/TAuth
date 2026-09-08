@@ -105,7 +105,9 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `deployment config renderer`: The TAuth CLI command that converts normalized
   resource contributions into one validated native config.
 - `Client ID Metadata Document`: An HTTPS JSON document that describes one public OAuth client.
-- `consent grant`: A time-bounded user approval for one client, resource, and scope set.
+- `consent grant`: A time-bounded user approval for one client, resource, scope set, and disclosure policy.
+- `disclosure policy`: The mapping from requested resource scopes to identity providers presented for user consent.
+- `disclosure policy digest`: The SHA-256 digest that identifies one disclosure policy.
 - `JWKS`: A JSON Web Key Set that contains the public OAuth verification keys.
 - `OAuth`: The authorization protocol that TAuth uses to issue first-party resource tokens.
 - `PKCE`: The Proof Key for Code Exchange binding between an authorization request and a token request.

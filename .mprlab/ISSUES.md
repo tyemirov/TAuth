@@ -216,6 +216,8 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Preserved the provider tuple, opaque account subjects, tenant email policy, and existing session cookies.
   - Rejected ambiguous provider responses. Removed callback queries and credential headers before recovery logs.
   - Recorded the existing concurrent provider-store defects under B071.
+  - Completed the review corrections under B072, B073, B074, and B075.
+  - Final review validation passed: `make ci`, 51 browser/JavaScript tests, and `make verify-js`.
   Verification:
   - Baseline `make ci` passed before code changes.
   - Initial public config, HTTP, OAuth, and validator scenarios failed because GitHub support was absent.
@@ -688,6 +690,81 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B072] (P1) Require new consent when identity disclosure changes.
+  Evidence:
+  An existing scope gained `identity_providers: [github]` after the user gave consent.
+  Refresh disclosed the GitHub ID without a new consent page.
+  Requirements:
+  Bind each grant to the disclosure policy that the user approved.
+  Reject old codes and refresh tokens when that policy changes.
+  Require new consent for the new policy.
+  Validation:
+  HTTP regressions failed before the fix and passed after the fix.
+  The tests cover memory, SQLite, pending requests, code exchange, refresh, repeat authorization, and the v1 schema migration.
+  `make test-github-oauth` and final `make ci` passed.
+  Resolution:
+  Added a disclosure policy digest to pending requests, consent keys, codes, and refresh tokens.
+  The v2 OAuth schema adds an empty policy to existing rows. Existing rows cannot approve identity disclosure.
+  Changed files:
+  - `internal/oauthserver/model.go`, `database_store.go`, `provider_login.go`, and `server.go`.
+  - `internal/oauthserver/github_integration_test.go` and `github_disclosure_integration_test.go`.
+  - `internal/authkit/database_helpers.go`.
+
+- [x] [B073] (P1) Complete GitHub OAuth login with Strict session cookies.
+  Evidence:
+  A cross-site GitHub callback returned directly to OAuth consent.
+  Chromium omitted the Strict session cookie and returned to login.
+  Requirements:
+  Return a TAuth document before the browser continues to consent.
+  Keep the current session cookie attributes.
+  Validation:
+  Chromium completes cross-site GitHub login, OAuth consent, and code exchange with CORS and insecure HTTP disabled.
+  The regression failed before the fix and passed after the fix.
+  The browser verifies that session and refresh cookies keep Strict, Secure, and HttpOnly attributes.
+  `make test-github-browser`, `make test-github-oauth`, and final `make ci` passed.
+  Resolution:
+  Returned an HTTP 200 TAuth completion document before navigation to consent.
+  Changed files:
+  - `internal/authkit/github_login.go`.
+  - `internal/oauthserver/github_browser_fixture_test.go`, `github_integration_test.go`, and `server_integration_test.go`.
+  - `internal/oauthserver/github_disclosure_integration_test.go` and `tests/github-oauth.browser.test.js`.
+  - `Makefile`, `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, `docs/openapi.yaml`, and `CHANGELOG.md`.
+
+- [x] [B075] (P1) Correct the OAuth consent form policy for the approved client return.
+  Evidence:
+  The B073 browser flow reached consent with Strict cookies.
+  The consent form policy listed only the TAuth origin and blocked the external client return.
+  Requirements:
+  Add only the validated client origin to the consent form policy.
+  Validation:
+  Chromium reported a `form-action` violation before the fix.
+  The browser now completes consent and public code exchange for the external client.
+  The test verifies the approved origin in the form policy and rejects wildcard policy values.
+  `make test-github-browser` and final `make ci` passed.
+  Resolution:
+  Added only the validated client return origin to the consent form policy.
+  Changed files:
+  - `internal/oauthserver/server.go` and `tests/github-oauth.browser.test.js`.
+  - `ARCHITECTURE.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B074] (P2) Reject a popup return URL on another origin.
+  Evidence:
+  A popup return URL used another approved tenant origin.
+  The browser rejected completion and reported a closed popup after session creation.
+  Requirements:
+  Reject this input before the helper opens a popup or starts authentication.
+  Validation:
+  The browser regression failed before the fix and passed after the fix.
+  It verifies an error before window creation and an absent authenticated session.
+  It also verifies direct helper validation and full-page return URLs on another approved origin.
+  `make test-github-browser`, `make verify-js`, and final `make ci` passed.
+  Resolution:
+  Both GitHub helpers reject popup origin mismatches with `tauth.github_invalid_popup_origin`.
+  Changed files:
+  - `web/tauth.js`, `internal/authkit/github_browser_fixture_test.go`, and `tests/github-login.browser.test.js`.
+  - `README.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
 
 - [x] [B071] (P1) Preserve account ownership during concurrent provider login.
   Evidence:
