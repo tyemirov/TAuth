@@ -552,6 +552,11 @@ the issuer page. The page sends it directly to TAuth with a one-time nonce.
 TAuth returns the normal HttpOnly cookies. The page stores no ID token or OAuth
 resource token in browser storage or the DOM.
 
+A Google login POST with `Accept: application/json` returns HTTP `200` with a
+JSON `next` URL and `Cache-Control: no-store`. This response also applies when
+the request has a valid TAuth session, such as when another tab completed login.
+The page uses `next` to open consent for the same pending request.
+
 The client exchanges the one-time code with the same client ID, resource, and
 PKCE verifier. The redirect URI remains bound inside the code and is absent
 from the current OAuth 2.1 token request:

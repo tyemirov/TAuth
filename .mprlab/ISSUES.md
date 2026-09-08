@@ -711,6 +711,53 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B077] (P1) Return the Google login continuation for an existing session.
+  Goal:
+  A user with a valid TAuth session can complete Google login from an open OAuth login page.
+  The page must open consent for the same pending request.
+
+  Evidence:
+  - On 2026-09-08, live LLM Proxy MCP acceptance reached the Google account chooser after the issuer origin was registered.
+  - The TAuth page then showed `Google authentication was not accepted.`
+  - A later authorization request reached consent with an existing TAuth session.
+  - After approval, Codex reported `Successfully logged in to MCP server 'llm-proxy'.`
+  - The original failing POST was not captured. The exact trigger for that attempt is unconfirmed.
+  - Local HTTP and browser tests reproduce a response defect that produces the same page error.
+
+  Reproduction:
+  1. Open two OAuth login pages in one browser profile before login.
+  2. Complete login in the first tab to establish a shared TAuth session.
+  3. Complete the Google callback in the second tab.
+  4. Observe `POST /oauth/login` with `provider=google` and `Accept: application/json`.
+  5. TAuth returns HTTP `303`, and fetch follows the redirect to the HTML consent page.
+  6. The callback cannot parse that HTML as JSON and displays the authentication error.
+
+  Cause:
+  The existing-session branch in `handleLogin` returns a redirect before the Google JSON response branch.
+  A newly accepted Google login returns HTTP `200` with a JSON `next` URL.
+  The page requires that same response when its POST includes an existing session.
+
+  Requirements:
+  - Use one successful-login response helper for new and existing sessions.
+  - Return HTTP `200`, JSON `next`, and `Cache-Control: no-store` for the Google JSON request.
+  - Keep the pending request in the consent URL.
+  - Keep the existing session and its user identity.
+  - Keep password login and login-page GET redirects unchanged.
+  - Cover the response through real HTTP and a browser with two login tabs.
+
+  Validation:
+  - Before the fix, `make test-oauth-login-go` failed with `expected status 200, got 303`.
+  - Before the fix, `make test-oauth-login-browser` failed with `303 !== 200` at the Google response assertion.
+  - An initial browser run timed out because the test entered credentials in a background tab.
+  - The test now selects each tab before interaction. The response assertion then reproduces the defect.
+  - Live Google and MCP tool acceptance remain separate from local test results.
+
+  Resolution: 2026-09-08 — Both accepted-login branches now use the same response helper.
+  HTTP and browser regressions pass with the original session and pending consent request.
+  Validation passed: `make test-oauth-login`, `make ci`, `make verify-js`, and the Governor check.
+  The updated API documentation states the response contract for an existing session.
+  Production deployment and a new live browser acceptance run remain operator steps.
+
 - [x] [B076] (P1) Accept native client callback ports from Client ID Metadata Documents.
   Goal:
   An existing LLM Proxy user can connect Codex through the normal browser login and consent flow.

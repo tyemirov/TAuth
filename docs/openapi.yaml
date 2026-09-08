@@ -182,7 +182,10 @@ paths:
                 - $ref: "#/components/schemas/OAuthGoogleLogin"
       responses:
         "200":
-          description: The JSON continuation returned after a Google browser login request.
+          description: >-
+            A Google login POST with Accept application/json returns the next consent URL.
+            This response also applies when the request has a valid TAuth session.
+            The response uses Cache-Control no-store.
           content:
             application/json:
               schema:

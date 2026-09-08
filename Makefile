@@ -26,6 +26,15 @@ test-go:
 test-oauth-metadata:
 	$(GO) test -race ./internal/oauthserver -run 'TestMetadata' -count=1
 
+.PHONY: test-oauth-login test-oauth-login-go test-oauth-login-browser
+test-oauth-login: test-oauth-login-go test-oauth-login-browser
+
+test-oauth-login-go:
+	$(GO) test ./internal/oauthserver -run '^TestAuthorizationServerBrowserPKCERefreshAndRevocation$$' -count=1
+
+test-oauth-login-browser:
+	node --test tests/oauth-authorization.browser.test.js
+
 .PHONY: test-github-http test-github-config test-github-oauth test-github-browser
 
 test-github-http:

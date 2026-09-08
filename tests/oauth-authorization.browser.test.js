@@ -98,17 +98,19 @@ if (!puppeteer) {
     browser = launchedBrowser;
     const page = await launchedBrowser.newPage();
     await page.setRequestInterception(true);
-    page.on("request", (request) => {
+    /** @param {import("puppeteer").HTTPRequest} request */
+    const interceptGoogleScript = async (request) => {
       if (request.url() === "https://accounts.google.com/gsi/client") {
-        request.respond({
+        await request.respond({
           status: 200,
           contentType: "application/javascript",
           body: "window.google={accounts:{id:{initialize:function(options){window.__tauthGoogleCallback=options.callback;},renderButton:function(element){element.textContent='Continue with Google';}}}};",
-        }).catch(() => {});
+        });
         return;
       }
-      request.continue().catch(() => {});
-    });
+      await request.continue();
+    };
+    page.on("request", interceptGoogleScript);
 
     const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
     const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
@@ -129,6 +131,15 @@ if (!puppeteer) {
     await page.waitForFunction(() => document.querySelector("#google-login")?.textContent === "Continue with Google");
     assert.doesNotMatch(await page.content(), /access_token|refresh_token|PRIVATE KEY/);
 
+    // Keep another login page open while this page establishes the shared session.
+    const googlePage = await launchedBrowser.newPage();
+    await googlePage.setRequestInterception(true);
+    googlePage.on("request", interceptGoogleScript);
+    await googlePage.goto(authorize.href, { waitUntil: "load" });
+    await googlePage.waitForFunction(() => typeof window.__tauthGoogleCallback === "function");
+    const pendingGoogleURL = new URL(googlePage.url());
+
+    await page.bringToFront();
     await page.type('input[name="email"]', "browser@example.com");
     await page.type('input[name="password"]', "browser-test-password");
     await Promise.all([
@@ -143,6 +154,22 @@ if (!puppeteer) {
     assert.match(consentText, /Use the browser test resource/);
     assert.doesNotMatch(await page.content(), /access_token|refresh_token|PRIVATE KEY|password/);
 
+    await googlePage.bringToFront();
+    const googleResponsePromise = googlePage.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/oauth/login");
+    await googlePage.evaluate(async () => {
+      await window.__tauthGoogleCallback({ credential: "unused-token-with-existing-session" });
+    });
+    const googleResponse = await googleResponsePromise;
+    assert.equal(googleResponse.status(), 200, "Existing-session Google login must return JSON instead of an HTML redirect");
+    assert.match(googleResponse.headers()["content-type"], /application\/json/);
+    assert.equal(googleResponse.headers()["cache-control"], "no-store");
+    await googlePage.waitForFunction(() => window.location.pathname === "/oauth/consent");
+    assert.equal(new URL(googlePage.url()).searchParams.get("request"), pendingGoogleURL.searchParams.get("request"));
+    assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Authorize access");
+    assert.doesNotMatch(await googlePage.content(), /Google authentication was not accepted/);
+
+    await page.bringToFront();
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
       page.click('button[value="approve"]'),
