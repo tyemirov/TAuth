@@ -126,6 +126,33 @@ Stack-specific instructions live in `.mprlab/`. Apply the relevant guide alongsi
 - Docker and containerization: `.mprlab/AGENTS.DOCKER.md`
 - Git and version control workflow: `.mprlab/AGENTS.GIT.md`
 
+## Issue Classification
+
+Classify each issue by its requested outcome. Priority, urgency, affected code, and title words do not control the section.
+
+Use this ordered test:
+
+1. Use `BugFixes` only for an observed and reproducible violation of a current canonical contract.
+2. Use `Features` for a new user or operator capability, public interface, resource kind, workflow, or product behavior.
+3. Use `Improvements` for a one-time change to an existing capability, architecture, test system, or acceptance boundary.
+4. Use `Maintenance` for repeatable upkeep under an unchanged solution contract. The same activity must remain valid for a future run.
+5. Use `Planning` for analysis, a decision, or a plan that does not authorize implementation.
+
+File each reproducible defect from an acceptance or migration issue as a separate BugFix issue. Split mixed outcomes across their correct sections.
+
+Use priority and blocked state as separate attributes. Correct a misclassified unresolved issue before implementation. Preserve completed issue IDs as historical references.
+
+## Resolved Issue Hygiene
+
+Before archival, review each resolved non-recurring issue for durable product,
+architecture, operator, security, testing, and skill consequences. Update each
+affected source-of-truth document or skill before you move the issue.
+
+Preserve the complete resolved entry and its identifier in the repository
+archive. Keep unresolved, blocked, planning, and recurring issues in the active
+tracker. Validate identifiers, dependencies, and duplicate IDs across both
+files.
+
 <!-- BEGIN MPRLAB-GOVERNANCE -->
 ## MPR Lab Governance
 
@@ -150,6 +177,9 @@ Never examine, validate, compare, require, change, or record a file permission m
 Never use a file permission mode in acceptance, security, credential, execution, publication, deployment, or failure analysis.
 The values `0600` and `7777` have no governance meaning.
 This rule does not change service authorization or operation authority.
+
+Always reference each issue by its ID, for example `B001` or `I027`.
+Never use an `ISSUES.md` file path, line number, or `path:line` syntax as an issue reference.
 
 Do not create `.mprlab/AGENTS.md`. Scoped guidance belongs in `.mprlab/AGENTS.*.md` files.
 If guidance conflicts, obey `.mprlab/POLICY.md` first, then root `AGENTS.md`, then the applicable scoped guide.
