@@ -655,3 +655,15 @@ The identity claims come from current stored bindings at code exchange and refre
 
 The access logger records paths without queries. Callback query values and credential headers are also removed before outer recovery logging.
 Provider tokens, codes, verifiers, secrets, and response bodies are absent from application diagnostics.
+
+The OAuth callback returns a completion document on the TAuth origin before navigation to consent.
+The browser starts this navigation after the document loads. Session cookies keep their configured SameSite attributes.
+The consent form policy lists the issuer origin and the validated client return origin.
+
+Pending requests, consent keys, authorization codes, and refresh tokens record a disclosure policy digest.
+The digest identifies the approved mapping from requested scopes to identity providers.
+A changed mapping invalidates old pending requests and prevents token issuance under old grants.
+A new authorization request requires consent for the new mapping.
+
+The OAuth v2 schema adds an empty policy to existing rows. An empty policy does not authorize identity disclosure.
+Existing grants without a recorded disclosure policy require new consent before GitHub identity disclosure.
