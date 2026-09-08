@@ -17,6 +17,10 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Required new consent when a resource scope changed its identity disclosure policy.
+- Added a TAuth completion document before OAuth consent to keep Strict session cookies after GitHub login.
+- Added the validated client return origin to the OAuth consent form policy.
+- Rejected popup return URLs on another origin before GitHub authentication started.
 - Preserved provider account ownership during concurrent login and identity linking.
 - Added the production LoopAware site identity to each published TAuth page.
 - Removed redundant Docker ignore negations so deployment can prove that private input stays outside each image context.
