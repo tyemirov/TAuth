@@ -298,9 +298,13 @@
     if (input.mode !== undefined && input.mode !== "redirect" && input.mode !== "popup") {
       throw new Error("tauth.github_invalid_mode");
     }
+    var returnTo = input.returnTo === undefined ? currentReturnToUrl() : input.returnTo;
+    if (input.mode === "popup" && new URL(returnTo).origin !== window.location.origin) {
+      throw new Error("tauth.github_invalid_popup_origin");
+    }
     var tenantId = currentTenantId();
     if (tenantId) loginUrl.searchParams.set("tenant_id", tenantId);
-    loginUrl.searchParams.set("return_to", input.returnTo === undefined ? currentReturnToUrl() : input.returnTo);
+    loginUrl.searchParams.set("return_to", returnTo);
     loginUrl.searchParams.set("operation", input.operation || "session");
     return loginUrl.toString();
   }
