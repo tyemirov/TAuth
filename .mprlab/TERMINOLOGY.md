@@ -92,6 +92,13 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `GitHub identity`: The provider identity whose subject is the immutable numeric GitHub user ID.
+- `provider identity`: A verified provider name and subject associated with one tenant account.
+- `identity claim`: A signed OAuth claim that discloses a verified provider identity to an authorized resource.
+- `login transaction`: A single-use record that binds browser authentication to its tenant, provider, and approved destination.
+- `MCP`: Model Context Protocol, through which an agent discovers and calls application tools.
+- `popup`: A separate browser window that completes an authentication transaction for its initiating page.
+- `CSRF`: Cross-site request forgery, an attack that induces an unauthorized request through another user's browser.
 - `access token`: A short-lived signed token that permits an exact client grant at one protected resource.
 - `authorization code`: A short-lived one-time value that a client exchanges for tokens with PKCE.
 - `authorization server`: The TAuth component that gets user consent and issues resource-bound tokens.
