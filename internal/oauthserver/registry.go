@@ -2,6 +2,8 @@ package oauthserver
 
 import (
 	"errors"
+	"net"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -157,8 +159,33 @@ func redirectMatches(client Client, requestedURI string) bool {
 		if registeredURI == requestedURI {
 			return true
 		}
+		if client.ApplicationType == "native" && metadataLoopbackRedirectMatches(registeredURI, requestedURI) {
+			return true
+		}
 	}
 	return false
+}
+
+func metadataLoopbackRedirectMatches(registeredURI string, requestedURI string) bool {
+	registered, registeredErr := url.Parse(registeredURI)
+	requested, requestedErr := url.Parse(requestedURI)
+	if registeredErr != nil || requestedErr != nil || registered.Scheme != "http" || requested.Scheme != "http" || requested.User != nil || strings.Contains(requestedURI, "#") {
+		return false
+	}
+	address, addressErr := netip.ParseAddr(registered.Hostname())
+	if addressErr != nil || !address.IsLoopback() {
+		return false
+	}
+	if _, portErr := parsePort(requested.Port()); portErr != nil {
+		return false
+	}
+	// Replace only the declared authority's port. Preserve every other URI byte.
+	schemePrefix := registeredURI[:len(registered.Scheme)] + "://"
+	registeredPrefix := schemePrefix + registered.Host
+	if !strings.HasPrefix(registeredURI, registeredPrefix) {
+		return false
+	}
+	return requestedURI == schemePrefix+net.JoinHostPort(registered.Hostname(), requested.Port())+strings.TrimPrefix(registeredURI, registeredPrefix)
 }
 
 func loopbackRedirectMatches(registeredURI string, requestedURI string, minimum int, maximum int) bool {

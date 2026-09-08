@@ -284,7 +284,7 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	if metadataValidateErr != nil || metadataClaims.ClientID != testMetadataClient {
 		t.Fatalf("validate metadata-client token: claims=%#v err=%v", metadataClaims, metadataValidateErr)
 	}
-	metadataRedirectMismatch := authorizationURL(issuer, challenge, "state-metadata-mismatch", testOAuthRedirect, testOAuthResource, testOAuthScope, testMetadataClient)
+	metadataRedirectMismatch := authorizationURL(issuer, challenge, "state-metadata-mismatch", testMetadataRedirect+"/undeclared", testOAuthResource, testOAuthScope, testMetadataClient)
 	assertOAuthError(t, doRequest(t, client, http.MethodGet, metadataRedirectMismatch, nil), "invalid_request")
 	invalidScope := doRequest(t, client, http.MethodGet, authorizationURL(issuer, challenge, "state-five", testOAuthRedirect, testOAuthResource, "resource:admin", testOAuthClient), nil)
 	assertStatus(t, invalidScope, http.StatusSeeOther)

@@ -711,7 +711,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
-- [ ] [B076] (P1) Accept native client callback ports from Client ID Metadata Documents.
+- [x] [B076] (P1) Accept native client callback ports from Client ID Metadata Documents.
   Goal:
   An existing LLM Proxy user can connect Codex through the normal browser login and consent flow.
   TAuth accepts the local callback port that the native client selects for each login.
@@ -877,6 +877,43 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Direct HTTP requests independently reproduced the TAuth callback rejection.
   The check issued no access token and completed no authenticated MCP call.
   Production activation remains an operator action after the TAuth correction is validated and released.
+
+  Resolution: 2026-09-08 — Completed the repository correction after the operator selected B076 for implementation.
+  Native metadata clients can select HTTP loopback IP callback ports from 1 through 65535.
+  All URI text except the port must stay the same.
+  IPv4 and IPv6 callbacks each need their own declaration.
+  Registered client port limits and exact matching for other callbacks are unchanged.
+  Metadata validation also rejects empty ports, ports outside the valid range, and empty fragments.
+
+  Review correction:
+  The callback matcher now keeps the original scheme text from the metadata declaration.
+  HTTP regressions first failed for uppercase and mixed-case schemes with a changed port.
+  The focused suite now accepts these callbacks for IPv4 and IPv6.
+  Requests that change the scheme text still fail.
+  The focused suite and final `make ci` passed after this correction.
+
+  Local validation:
+  - The new HTTP tests first returned `400 invalid_request` for valid selected callback ports.
+  - `make test-oauth-metadata` passed with the race detector.
+  - The tests cover IPv4, IPv6, two selected ports, URI rejection, and registered client port limits.
+  - Memory and SQLite tests cover existing GitHub account login, consent approval, and consent denial.
+  - Two open login transactions keep their own callback ports, states, and PKCE challenges.
+  - Token validation confirms the existing account subject, client, tenant, resource, and scope.
+  - Incorrect PKCE and code replay fail. Refresh rotation and revocation pass.
+  - `make ci` passed after correction of an obsolete port-only rejection test.
+  - The Governor check reports no differences or warnings.
+  - Changed prose passed the mechanical language check and the scoped source review.
+  - Unchanged documents still contain language findings outside this correction.
+
+  Evidence limits:
+  The tests use controlled metadata documents, a local GitHub provider, and real TAuth HTTP handlers.
+  Release, publication, deployment, and live Codex acceptance were not run.
+  After deployment, the operator must complete the Codex and tenant-discovery checks above.
+
+  Changed files:
+  `internal/oauthserver/registry.go`, `internal/oauthserver/client_metadata.go`,
+  `internal/oauthserver/metadata_redirect_integration_test.go`, `internal/oauthserver/server_integration_test.go`,
+  `Makefile`, `README.md`, `docs/usage.md`, `docs/openapi.yaml`, and the active issue tracker.
 
 - [x] [B072] (P1) Require new consent when identity disclosure changes.
   Evidence:

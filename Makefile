@@ -22,6 +22,10 @@ lint:
 test-go:
 	$(GO) test ./...
 
+.PHONY: test-oauth-metadata
+test-oauth-metadata:
+	$(GO) test -race ./internal/oauthserver -run 'TestMetadata' -count=1
+
 .PHONY: test-github-http test-github-config test-github-oauth test-github-browser
 
 test-github-http:

@@ -22,9 +22,12 @@ Enable the issuer-level `oauth` block and at least one tenant `oauth` block in
 the same config. The OAuth login page shows controls for enabled Google, GitHub, and password providers. TAuth requires
 authorization code plus PKCE `S256`, one
 RFC 8707 `resource` value, an exact scope set, and an exact registered redirect
-URI. Native clients can declare a bounded loopback-port range. Public clients
-can also use a validated HTTPS Client ID Metadata Document. TAuth does not
-provide Dynamic Client Registration.
+URI. Registered native clients can declare a bounded loopback-port range.
+Public clients can also use a validated HTTPS Client ID Metadata Document.
+Native metadata clients can select a port from 1 through 65535 for a declared HTTP loopback IP callback.
+All other URI text must stay the same. This port rule does not apply to `localhost`.
+See [the usage guide](docs/usage.md#56-oauth-resource-authorization) for the callback rules.
+TAuth does not provide Dynamic Client Registration.
 
 ```yaml
 oauth:
