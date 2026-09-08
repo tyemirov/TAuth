@@ -81,12 +81,14 @@ paths:
           description: If present, this value must match the transaction tenant.
       responses:
         "200":
-          description: A popup page sends only completion status and correlation to the initiating origin.
+          description: >-
+            A popup page sends completion status and correlation to the initiating origin.
+            OAuth continuation returns a TAuth document that starts navigation to consent after the document loads.
           content:
             text/html:
               schema: {type: string}
         "303":
-          description: TAuth sets its session cookies and returns to the approved destination.
+          description: Session login or account linking sets TAuth cookies and returns to the approved destination.
           headers:
             Location:
               schema: {type: string, format: uri}

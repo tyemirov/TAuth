@@ -1195,3 +1195,19 @@ make ci
 ```
 
 These targets use deterministic local provider responses. They do not prove live GitHub connectivity.
+
+For popup mode, `returnTo` must use the initiating page origin.
+Both GitHub helpers reject another origin with `tauth.github_invalid_popup_origin` before window creation.
+Full-page login can still return to another configured tenant origin.
+
+OAuth login returns an HTTP 200 completion document before the browser navigates to consent.
+The browser can send Strict session cookies to consent after this document loads.
+The consent form policy lists only TAuth and the validated client return origin.
+
+A consent grant records the disclosure policy for its requested scopes.
+If `identity_providers` changes for those scopes, start a new authorization request and approve the new consent page.
+Old codes and refresh tokens return `invalid_grant` when their policy differs from the current policy.
+Pending login or consent requests also fail when their recorded policy changes.
+
+The database upgrade adds an empty disclosure policy to existing OAuth records.
+Those records cannot approve GitHub identity disclosure. New consent is necessary for that disclosure after the upgrade.
