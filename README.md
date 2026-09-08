@@ -2,10 +2,10 @@
 
 *Identity sessions and OAuth 2.1 resource authorization for first-party apps*
 
-TAuth lets product teams accept Google Sign-In, Sign in with Apple, or tenant-managed email/password accounts, mint their own cookies, and keep browsers free of token storage. Ship a secure authentication stack by pairing this Go service with the tiny `tauth.js` module.
-TAuth servers are the only place `/auth/*` and `/me` endpoints are implemented; consuming apps call those endpoints rather than hosting their own copies.
+TAuth accepts Google, Apple, GitHub, and tenant-managed password authentication. It issues first-party cookies and keeps provider tokens out of browser storage.
+The Go service owns `/auth/*` and `/me`. Product applications call these endpoints with the shipped `tauth.js` helper.
 
-TAuth validates provider identities and issues first-party session cookies. Its optional OAuth 2.1 authorization server issues TAuth access tokens for declared first-party resources. It does not issue or store Google, Apple, GitHub, or other provider access tokens.
+TAuth validates provider identities and issues first-party session cookies. Its optional OAuth 2.1 authorization server issues TAuth access tokens for declared first-party resources. It does not keep provider access tokens. GitHub and Apple token exchanges occur only on the server.
 
 ---
 
@@ -19,8 +19,7 @@ TAuth validates provider identities and issues first-party session cookies. Its 
 ## Authorize first-party resource clients
 
 Enable the issuer-level `oauth` block and at least one tenant `oauth` block in
-the same config. OAuth tenants use the existing Google browser provider,
-password provider, or both on the TAuth-owned login page. TAuth requires
+the same config. The OAuth login page shows controls for enabled Google, GitHub, and password providers. TAuth requires
 authorization code plus PKCE `S256`, one
 RFC 8707 `resource` value, an exact scope set, and an exact registered redirect
 URI. Native clients can declare a bounded loopback-port range. Public clients
@@ -103,6 +102,64 @@ revocation. Server startup resumes persisted disablements before the server
 accepts traffic. This process also revokes application refresh tokens.
 
 ---
+
+## GitHub login
+
+GitHub-only tenants need no Google or password provider. See [the GitHub example](examples/github/config.yaml.example).
+
+1. Register a dedicated GitHub.com OAuth App for identity authentication.
+2. Set its callback URL to the configured TAuth URL, for example `https://auth.example.com/auth/github/callback`.
+3. Configure the tenant's `github_oauth` block.
+4. Add each product origin to `tenant_origins`.
+5. Run `tauth doctor --json config.yaml` and `tauth --config config.yaml preflight`.
+
+```yaml
+github_oauth:
+  enabled: true
+  client_id: "${GITHUB_CLIENT_ID}"
+  client_secret: "${GITHUB_CLIENT_SECRET}"
+  redirect_uri: "https://auth.example.com/auth/github/callback"
+  scopes: [read:user, user:email]
+```
+
+An absent block disables GitHub login. The required scope set is `read:user user:email`, including when `scopes` is absent.
+TAuth rejects other scopes and configurable provider endpoints. GitHub Enterprise is outside this provider contract.
+TAuth requires one verified primary email from `/user/emails`. A private email is accepted.
+The current `allowed_users` rules apply to this email.
+
+After `initAuthClient`, connect a user control to one of these calls:
+
+```javascript
+await startGitHubLogin(); // Full-page login returns to the current page.
+await startGitHubLogin({ mode: "popup" });
+await startGitHubLogin({ mode: "popup", operation: "link" });
+const loginURL = getGitHubLoginUrl();
+```
+
+A link requires an active account session and fresh GitHub authentication.
+Matching emails never merge accounts. Existing account rules control unlinking and disablement.
+The browser helper restores the profile through `/auth/session` after completion.
+Popup messages contain only status and correlation data. The helper checks the message origin and source window.
+
+A resource scope can request the verified GitHub identity:
+
+```yaml
+scopes:
+  - identifier: resource:use
+    display_name: Use the resource
+    description: Use this resource with your GitHub identity.
+    identity_providers: [github]
+```
+
+Consent describes this disclosure. Signed `provider_identities` records contain only `provider` and `provider_id`.
+The provider ID is the decimal GitHub user ID. Access without a disclosure scope contains no identity claim.
+TAuth checks the current identity at code exchange and refresh. Unlinking a required identity prevents refresh.
+An issued access token can disclose the previous identity until its configured expiry.
+A Go resource reads `claims.ProviderIdentities` after `pkg/oauthvalidator` validates the token.
+
+The consuming application owns GitHub repository authorization and repository credentials.
+A TAuth identity claim grants no GitHub repository permission. TAuth keeps no GitHub provider token after identity retrieval.
+See [GitHub operations and errors](docs/usage.md#github-login-operations) for transaction and error details.
 
 ## Deploy TAuth for a hosted product
 
@@ -223,14 +280,14 @@ Each entry defines:
 - `display_name` – friendly label surfaced in logs and the demo UI.
 - `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header to select a tenant, and can optionally accept an `X-TAuth-Tenant` override when you enable it for shared-origin or non-browser clients.
 - `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
-- `google_web_client_id` – optional OAuth Web client configured in Google Cloud Console for this tenant’s origins. Omit it for Apple-only, password-only, or native-Google-only tenants.
+- `google_web_client_id` – optional OAuth Web client configured in Google Cloud Console for this tenant’s origins. Omit it when the tenant uses GitHub, Apple, password, or native Google authentication without browser Google authentication.
 - `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
 - `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
 - `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`. Configure the Services ID, Team ID, and Key ID. Provide a PKCS8 ECDSA private key and an HTTPS callback URI. Add each native iOS App ID under `native_client_ids`. Each native ID must be unique across tenants.
 - `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
 - `account_management` – optional first-party account lifecycle. Enable it for persisted account IDs and account routes.
 - `email_delivery` – required Pinguin settings and public challenge pages when account management does not return test tokens.
-- `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The issuer-owned login page uses the tenant's configured Google browser provider, password provider, or both.
+- `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The OAuth login page shows controls for enabled Google, GitHub, and password providers.
 - `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
 - `cookie_domain` – registrable domain for cookies (e.g. `.example.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
 - `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
@@ -520,8 +577,8 @@ Rules enforced by the loader:
 - `tenant_origins` entries are validated and normalized as origins (scheme + host + optional port). Add every browser origin that should resolve to this tenant (for example `https://app.example.com`, `http://localhost:8000`). If multiple tenants share the same origin, enable the header override and send `X-TAuth-Tenant`.
 - `allowed_users` is optional; when provided, only those email addresses can log in for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- Unlisted users are rejected during Google, Apple, and password login with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
-- Each tenant must configure at least one authentication provider. The provider can be browser Google, native Google, Apple, or password login.
+- Unlisted users are rejected during Google, Apple, GitHub, and password login with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
+- Each tenant must configure at least one authentication provider. The provider can be browser Google, native Google, Apple, GitHub, or password login.
 - `google_native_client_id` and `google_native_clients` enable the native Google endpoints. Each native Google client ID must be unique across tenants.
 - `apple_oauth.enabled` gates the browser Apple routes. `apple_oauth.native_client_ids` gates the native Apple routes. Each native Apple client ID must be unique across tenants.
 - Enabled Apple providers require a Services ID, Team ID, and Key ID. They also require a PKCS8 ECDSA private key and an HTTPS callback URI.
