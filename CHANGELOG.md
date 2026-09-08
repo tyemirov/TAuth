@@ -5,6 +5,10 @@
 ## Unreleased
 
 ### Features
+- Added GitHub session login, account linking, and OAuth login continuation with separate PKCE exchanges.
+- Added browser-bound login transactions with five-minute expiry and database persistence.
+- Added scope-controlled GitHub identity claims and typed Go validator output.
+- Added GitHub-only config validation, deployment rendering, and browser helpers.
 - Added tenant-specific Pinguin email delivery for password signup verification. Production responses no longer expose verification tokens.
 - Added native Sign in with Apple through `GET /auth/apple/native/config` and `POST /auth/apple/native`. The flow validates tenant App ID audiences, Apple claims, and single-use nonces. It also applies allowlists and account-management identities before it issues the standard TAuth cookies.
 - Added an OAuth 2.1 authorization server for public first-party resource clients. It supports RFC 8414 metadata, RFC 8707 resource binding, and PKCE `S256`. It adds issuer-owned Google and password authentication, consent, ES256 JWKS, refresh rotation, revocation, and strict Client ID Metadata Documents. It also includes the public `pkg/oauthvalidator` protected-resource library.
@@ -13,6 +17,7 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Preserved provider account ownership during concurrent login and identity linking.
 - Added the production LoopAware site identity to each published TAuth page.
 - Removed redundant Docker ignore negations so deployment can prove that private input stays outside each image context.
 - Removed the application-owned Pages marker so the gateway can generate its release metadata.
