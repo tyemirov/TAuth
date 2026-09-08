@@ -327,6 +327,28 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 		t.Fatalf("decode Google login continuation: %v", decodeErr)
 	}
 	_ = googleLoginResponse.Body.Close()
+	// A second login page can submit after another page has established a session.
+	// Its Google callback still expects the same JSON continuation, not an HTML redirect.
+	existingSessionForm := url.Values{
+		"request": {queryValue(t, googleLoginLocation, "request")}, "provider": {"google"},
+		"google_id_token": {"unused-token-with-existing-session"}, "nonce_token": {"unused-nonce-with-existing-session"},
+	}
+	existingSessionResponse := doJSONLoginRequest(t, googleClient, googleLoginLocation, existingSessionForm)
+	assertStatus(t, existingSessionResponse, http.StatusOK)
+	if existingSessionResponse.Header.Get("Content-Type") != "application/json" || existingSessionResponse.Header.Get("Cache-Control") != "no-store" {
+		t.Fatal("existing-session Google login did not return private JSON")
+	}
+	if len(existingSessionResponse.Cookies()) != 0 || existingSessionResponse.Header.Get("Location") != "" {
+		t.Fatal("existing-session Google login changed cookies or returned an HTTP redirect")
+	}
+	var existingSessionContinuation map[string]string
+	if decodeErr := json.NewDecoder(existingSessionResponse.Body).Decode(&existingSessionContinuation); decodeErr != nil {
+		t.Fatalf("decode existing-session Google login continuation: %v", decodeErr)
+	}
+	_ = existingSessionResponse.Body.Close()
+	if existingSessionContinuation["next"] != googleContinuation["next"] {
+		t.Fatal("existing-session Google login changed the pending consent destination")
+	}
 	googleConsent := doRequest(t, googleClient, http.MethodGet, googleContinuation["next"], nil)
 	assertStatus(t, googleConsent, http.StatusOK)
 	_ = readBody(t, googleConsent)

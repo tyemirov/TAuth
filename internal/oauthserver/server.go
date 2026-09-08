@@ -223,7 +223,7 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 		return
 	}
 	if authenticated {
-		redirectIssuerPage(response, server.config.ConsentEndpoint(), requestToken)
+		server.writeLoginContinuation(response, request, loginProvider, requestToken)
 		return
 	}
 	if request.Method == http.MethodGet {
@@ -257,6 +257,10 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 		server.writeLoginPage(response, request, pending, requestToken, http.StatusUnauthorized, "Authentication was not accepted.")
 		return
 	}
+	server.writeLoginContinuation(response, request, loginProvider, requestToken)
+}
+
+func (server *Server) writeLoginContinuation(response http.ResponseWriter, request *http.Request, loginProvider, requestToken string) {
 	if loginProvider == "google" && strings.Contains(request.Header.Get("Accept"), "application/json") {
 		writePrivateJSON(response, http.StatusOK, map[string]string{"next": issuerPageURL(server.config.ConsentEndpoint(), requestToken)})
 		return
