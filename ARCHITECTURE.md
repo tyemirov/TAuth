@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-TAuth is an authentication service that sits between identity providers and your product UI. It verifies Google ID tokens, completes Sign in with Apple redirects, or checks tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The backend is written in Go with Gin. GitHub Pages publishes the companion `web/tauth.js` only at `https://tauth.mprlab.com/tauth.js`.
+TAuth is an authentication service that sits between identity providers and your product UI. It verifies Google ID tokens, completes Apple and GitHub redirects, or checks tenant-managed email/password credentials, issues first-party JWT access cookies, and rotates long-lived refresh tokens. The backend is written in Go with Gin. GitHub Pages publishes the companion `web/tauth.js` only at `https://tauth.mprlab.com/tauth.js`.
 
 ```
 Browser ──(Google ID token)──────────────> TAuth ──(verify)──> Google Identity Services
@@ -319,7 +319,7 @@ type AccountManagementStore interface {
 - `internal/oauthserver` owns issuer discovery, JWKS, client and resource resolution, browser transactions, PKCE, signing, consent, authorization-code, and refresh-token behavior.
 - `MemoryStore` and `DatabaseStore` implement one store contract. The database implementation uses atomic code consumption and refresh rotation for SQLite and Postgres.
 - `ClientMetadataResolver` permits only HTTPS client IDs with a non-root path. It resolves public DNS addresses and dials a validated address. It disables proxy and redirect use and limits response time and size. It validates public-client metadata and bounds valid-document caching.
-- `authkit.OAuthBrowserSessions` resolves and creates the same tenant session used by the existing TAuth routes. The issuer-owned login page accepts the tenant's configured Google browser provider, password provider, or both.
+- `authkit.OAuthBrowserSessions` resolves and creates the same tenant session used by the existing TAuth routes. The OAuth login page shows controls for enabled Google, GitHub, and password providers.
 - `pkg/oauthvalidator` is the public protected-resource library. It accepts only ES256 access tokens with `typ=at+jwt` and a known key ID. It also requires the configured issuer, audience, expiry, and scopes.
 
 ## 5. Configuration Surface
@@ -622,3 +622,36 @@ The following surface area is considered stable across releases:
 - JSON payload fields returned to the client (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`, and `state` for account-management profile responses).
 
 Update the embedded client and bump the service version together when changing these contracts.
+
+## GitHub login transactions
+
+`authkit.GitHubLogin` owns session login, account linking, and OAuth login continuation.
+`GitHubProvider` uses fixed GitHub.com endpoints. Tests inject a local HTTP protocol server.
+The adapter limits response bodies to 64 KiB and provider operations to ten seconds.
+It exchanges each code once. An ambiguous exchange requires a new login transaction.
+
+Each transaction contains a tenant ID, provider client ID, configured callback, operation, destination, creation time, and expiry.
+It also contains the server-side PKCE verifier and a digest of the browser cookie.
+State is opaque. The cookie is host-only, Secure, HttpOnly, and SameSite=Lax.
+Separate cookies permit simultaneous transactions without replacement of another browser binding.
+
+The transaction lifetime is five minutes. The memory store permits at most 4096 outstanding transactions.
+The database store uses `github_login_transactions` in the configured SQLite or PostgreSQL database.
+The callback atomically removes the transaction before the token exchange.
+A foreign browser cannot claim it. A claimed transaction cannot be replayed after failure or process restart.
+An unclaimed database transaction remains available after restart until its expiry.
+
+The callback resolves its tenant from the claimed transaction. It requires no callback Origin header.
+It checks the current provider configuration, approved destination, account state, and pending OAuth request.
+Session login and linking use the existing user and account stores.
+The immutable provider tuple is tenant, `github`, and decimal GitHub user ID.
+Profile fields can change without changing this tuple or an existing opaque account subject.
+
+OAuth continuation keeps the original authorization request in the OAuth store.
+GitHub PKCE and resource-client PKCE use separate verifiers and challenges.
+The OAuth server owns metadata, client policy, consent, signing, and refresh.
+Resource scopes select identity disclosure through `identity_providers`.
+The identity claims come from current stored bindings at code exchange and refresh.
+
+The access logger records paths without queries. Callback query values and credential headers are also removed before outer recovery logging.
+Provider tokens, codes, verifiers, secrets, and response bodies are absent from application diagnostics.
