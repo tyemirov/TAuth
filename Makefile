@@ -36,7 +36,10 @@ test-github-oauth:
 test-github-browser:
 	node --test tests/github*.test.js
 
-.PHONY: test-github-browser-server
+.PHONY: test-github-browser-server test-github-oauth-browser-server
+test-github-oauth-browser-server:
+	$(GO) test ./internal/oauthserver -run '^TestGitHubOAuthBrowserFixture$$' -count=1 -timeout=5m -v
+
 test-github-browser-server:
 	$(GO) test ./internal/authkit -run '^TestGitHubBrowserFixture$$' -count=1 -timeout=5m -v
 
