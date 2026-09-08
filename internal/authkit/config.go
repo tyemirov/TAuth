@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/tyemirov/tauth/internal/tenants"
 )
 
 // ServerConfig configures issuers, cookies, and TTL.
@@ -12,6 +14,7 @@ type ServerConfig struct {
 	GoogleNativeClientID     string
 	NativeGoogleClients      []NativeGoogleClientConfig
 	AppleOAuth               AppleOAuthConfig
+	GitHubOAuth              tenants.GitHubOAuth
 	PasswordAuthEnabled      bool
 	AccountManagementEnabled bool
 	PasswordSignupEnabled    bool

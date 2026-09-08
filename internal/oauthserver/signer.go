@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tyemirov/tauth/internal/appconfig"
+	"github.com/tyemirov/tauth/pkg/oauthvalidator"
 )
 
 const accessTokenType = "at+jwt"
@@ -18,10 +19,11 @@ var ErrInvalidAccessToken = errors.New("oauth.invalid_access_token")
 
 // AccessTokenClaims is the complete first-party resource-token claim set.
 type AccessTokenClaims struct {
-	ClientID string `json:"client_id"`
-	Scope    string `json:"scope"`
-	TenantID string `json:"tenant_id"`
-	GrantID  string `json:"grant_id"`
+	ProviderIdentities oauthvalidator.ProviderIdentities `json:"provider_identities,omitempty"`
+	ClientID           string                            `json:"client_id"`
+	Scope              string                            `json:"scope"`
+	TenantID           string                            `json:"tenant_id"`
+	GrantID            string                            `json:"grant_id"`
 	jwt.RegisteredClaims
 }
 
@@ -91,7 +93,7 @@ func (signer *Signer) JWKS() JWKSet {
 }
 
 // MintAccessToken creates one resource-bound JWT access token.
-func (signer *Signer) MintAccessToken(grant RefreshGrant, issuedAt time.Time, ttl time.Duration) (string, time.Time, error) {
+func (signer *Signer) MintAccessToken(grant RefreshGrant, identities oauthvalidator.ProviderIdentities, issuedAt time.Time, ttl time.Duration) (string, time.Time, error) {
 	if signer == nil || signer.privateKeys[signer.activeKeyID] == nil {
 		return "", time.Time{}, fmt.Errorf("oauth.access_token.signer_uninitialized")
 	}
@@ -102,10 +104,11 @@ func (signer *Signer) MintAccessToken(grant RefreshGrant, issuedAt time.Time, tt
 		return "", time.Time{}, tokenIDErr
 	}
 	claims := AccessTokenClaims{
-		ClientID: grant.ClientID,
-		Scope:    grant.Scope,
-		TenantID: grant.TenantID,
-		GrantID:  grant.ConsentID,
+		ProviderIdentities: identities,
+		ClientID:           grant.ClientID,
+		Scope:              grant.Scope,
+		TenantID:           grant.TenantID,
+		GrantID:            grant.ConsentID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    signer.issuer,
 			Subject:   grant.UserID,

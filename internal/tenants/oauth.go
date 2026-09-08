@@ -61,9 +61,10 @@ type OAuthResource struct {
 
 // OAuthScope is one resource permission displayed during consent.
 type OAuthScope struct {
-	identifier  string
-	displayName string
-	description string
+	identityProviders []string
+	identifier        string
+	displayName       string
+	description       string
 }
 
 // OAuthClient is one explicitly registered public client.
@@ -103,9 +104,10 @@ type FileOAuthResource struct {
 
 // FileOAuthScope represents one raw resource scope.
 type FileOAuthScope struct {
-	Identifier  string `json:"identifier" yaml:"identifier"`
-	DisplayName string `json:"display_name" yaml:"display_name"`
-	Description string `json:"description" yaml:"description"`
+	IdentityProviders []string `json:"identity_providers" yaml:"identity_providers"`
+	Identifier        string   `json:"identifier" yaml:"identifier"`
+	DisplayName       string   `json:"display_name" yaml:"display_name"`
+	Description       string   `json:"description" yaml:"description"`
 }
 
 // FileOAuthClient represents one raw explicitly registered public client.
@@ -190,6 +192,11 @@ func (scope OAuthScope) DisplayName() string { return scope.displayName }
 
 // Description returns the scope description shown during consent.
 func (scope OAuthScope) Description() string { return scope.description }
+
+// IdentityProviders returns provider identities required by this scope.
+func (scope OAuthScope) IdentityProviders() []string {
+	return append([]string(nil), scope.identityProviders...)
+}
 
 // ID returns the exact explicit client identifier.
 func (client OAuthClient) ID() string { return client.id }
@@ -336,7 +343,10 @@ func parseOAuthScopes(rawScopes []FileOAuthScope, tenantID TenantID, resource st
 			return nil, nil, fmt.Errorf("%w: %s tenant=%s resource=%s scope=%s", ErrInvalidTenantConfig, errorCodeOAuthDuplicateScope, tenantID, resource, identifier)
 		}
 		index[identifier] = struct{}{}
-		scopes = append(scopes, OAuthScope{identifier: identifier, displayName: strings.TrimSpace(rawScope.DisplayName), description: strings.TrimSpace(rawScope.Description)})
+		if len(rawScope.IdentityProviders) > 1 || (len(rawScope.IdentityProviders) == 1 && rawScope.IdentityProviders[0] != GitHubProvider) {
+			return nil, nil, fmt.Errorf("%w: tenant.oauth_invalid_identity_provider tenant=%s", ErrInvalidTenantConfig, tenantID)
+		}
+		scopes = append(scopes, OAuthScope{identityProviders: append([]string(nil), rawScope.IdentityProviders...), identifier: identifier, displayName: strings.TrimSpace(rawScope.DisplayName), description: strings.TrimSpace(rawScope.Description)})
 	}
 	sort.Slice(scopes, func(left, right int) bool { return scopes[left].identifier < scopes[right].identifier })
 	return scopes, index, nil

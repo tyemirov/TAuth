@@ -480,7 +480,7 @@ tenants:
 	return appConfig, tenantConfig
 }
 
-func listenerAddress(issuer string) string { return strings.TrimPrefix(issuer, "http://") }
+func listenerAddress(issuer string) string { parsed, _ := url.Parse(issuer); return parsed.Host }
 
 func authorizationURL(issuer string, challenge string, state string, redirectURI string, resource string, scope string, clientID string) string {
 	values := url.Values{

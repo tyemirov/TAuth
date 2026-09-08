@@ -53,6 +53,8 @@ var reservedOAuthEndpointPaths = map[string]struct{}{
 	"/auth/google/native":                {},
 	"/auth/apple/native/config":          {},
 	"/auth/apple/native":                 {},
+	"/auth/github/start":                 {},
+	"/auth/github/callback":              {},
 	"/auth/apple/start":                  {},
 	"/auth/apple/callback":               {},
 	"/auth/password/login":               {},

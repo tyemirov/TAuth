@@ -32,9 +32,10 @@ type Resource struct {
 
 // Scope is one resource permission presented during consent.
 type Scope struct {
-	Identifier  string
-	DisplayName string
-	Description string
+	IdentityProviders []string
+	Identifier        string
+	DisplayName       string
+	Description       string
 }
 
 // TenantPolicy is the complete trusted OAuth policy for one tenant.

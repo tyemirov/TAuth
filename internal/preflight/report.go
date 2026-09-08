@@ -90,6 +90,9 @@ type tenantPayload struct {
 	GoogleNativeClientID       string                      `json:"google_native_client_id"`
 	GoogleNativeClientIDs      []string                    `json:"google_native_client_ids,omitempty"`
 	GoogleNativeClients        []nativeGoogleClientPayload `json:"google_native_clients,omitempty"`
+	GitHubOAuthEnabled         bool                        `json:"github_oauth_enabled"`
+	GitHubClientID             string                      `json:"github_client_id,omitempty"`
+	GitHubRedirectURI          string                      `json:"github_redirect_uri,omitempty"`
 	AppleOAuthEnabled          bool                        `json:"apple_oauth_enabled"`
 	AppleClientID              string                      `json:"apple_client_id,omitempty"`
 	AppleNativeClientIDs       []string                    `json:"apple_native_client_ids,omitempty"`
@@ -281,6 +284,9 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			GoogleNativeClientID:       tenant.GoogleNativeClientID(),
 			GoogleNativeClientIDs:      tenant.NativeGoogleClientIDs(),
 			GoogleNativeClients:        buildNativeGoogleClientPayloads(tenant.NativeGoogleClients()),
+			GitHubOAuthEnabled:         tenant.GitHubOAuth().Enabled(),
+			GitHubClientID:             tenant.GitHubOAuth().ClientID(),
+			GitHubRedirectURI:          tenant.GitHubOAuth().RedirectURI(),
 			AppleOAuthEnabled:          tenant.AppleOAuth().Enabled(),
 			AppleClientID:              tenant.AppleOAuth().ClientID(),
 			AppleNativeClientIDs:       tenant.AppleOAuth().NativeClientIDs(),

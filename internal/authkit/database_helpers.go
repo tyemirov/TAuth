@@ -57,6 +57,7 @@ type storeSchemaPolicy struct {
 }
 
 var storeSchemaPolicies = map[string]storeSchemaPolicy{
+	githubStoreErrorPrefix: {StoreName: githubStoreErrorPrefix, Version: 1, AllowDestructiveReset: false},
 	refreshStoreErrorPrefix: {
 		StoreName:             refreshStoreErrorPrefix,
 		Version:               refreshStoreSchemaVersion,

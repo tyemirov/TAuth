@@ -22,7 +22,6 @@ const (
 )
 
 var errUserStoreRolesScanType = errors.New("user_store.roles.scan_type")
-var errAccountIdentityConflict = errors.New("account.identity_conflict")
 
 // DatabaseUserStore persists user profiles using GORM.
 type DatabaseUserStore struct {
@@ -888,89 +887,42 @@ func (store *DatabaseUserStore) UpsertGoogleAccount(ctx context.Context, tenantI
 
 // UpsertProviderAccount creates or updates an account for a verified external provider identity.
 func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenantID string, identity AccountProviderIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
-	if identityErr != nil {
-		return AccountProfile{}, identityErr
+	normalized, err := normalizeAccountProviderIdentity(identity)
+	if err != nil {
+		return AccountProfile{}, err
 	}
-	var accountID string
+	candidateID, err := newOpaqueAccountID()
+	if err != nil {
+		return AccountProfile{}, err
+	}
 	now := store.now().UTC().Unix()
-	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existingIdentity databaseAccountIdentityRecord
-		identityErr := tx.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject).Take(&existingIdentity).Error
-		if identityErr == nil {
-			accountID = existingIdentity.AccountID
-			if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
-				return validateErr
-			}
-			result := tx.WithContext(ctx).Model(&databaseAccountRecord{}).
-				Where("tenant_id = ? AND account_id = ?", tenantID, accountID).
-				Updates(map[string]interface{}{
-					"user_email":        normalizedIdentity.UserEmail,
-					"user_display_name": normalizedIdentity.DisplayName,
-					"user_avatar_url":   normalizedIdentity.AvatarURL,
-					"last_updated_unix": now,
-				})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected == 0 {
-				return ErrAccountNotFound
-			}
-			return nil
-		}
-		if identityErr != nil && !errors.Is(identityErr, gorm.ErrRecordNotFound) {
-			return identityErr
-		}
-		generatedAccountID, accountIDErr := store.newUniqueOpaqueAccountID(ctx, tx, tenantID)
-		if accountIDErr != nil {
-			return accountIDErr
-		}
-		accountID = generatedAccountID
-		account := databaseAccountRecord{
-			TenantID:        tenantID,
-			AccountID:       accountID,
-			UserEmail:       normalizedIdentity.UserEmail,
-			UserDisplayName: normalizedIdentity.DisplayName,
-			UserAvatarURL:   normalizedIdentity.AvatarURL,
-			AccountState:    accountStateActive,
-			UserRoles:       roleList([]string{defaultUserRole}),
-			CreatedAtUnix:   now,
-			LastUpdatedUnix: now,
-		}
-		if createErr := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "account_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"user_email",
-				"user_display_name",
-				"user_avatar_url",
-				"last_updated_unix",
-			}),
-		}).Create(&account).Error; createErr != nil {
-			return createErr
-		}
-		identityRecord := databaseAccountIdentityRecord{
-			TenantID:        tenantID,
-			Provider:        normalizedIdentity.Provider,
-			ProviderID:      normalizedIdentity.Subject,
-			AccountID:       accountID,
-			CreatedAtUnix:   now,
-			LastUpdatedUnix: now,
-		}
-		result := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "provider"}, {Name: "provider_id"}},
-			DoNothing: true,
-		}).Create(&identityRecord)
+	accountID := candidateID
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Claim the unique provider tuple before reading. This also obtains the
+		// SQLite write reservation without a deferred read-to-write upgrade.
+		record := databaseAccountIdentityRecord{TenantID: tenantID, Provider: normalized.Provider, ProviderID: normalized.Subject, AccountID: candidateID, CreatedAtUnix: now, LastUpdatedUnix: now}
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected == 0 {
-			return errAccountIdentityConflict
+		if result.RowsAffected == 1 {
+			account := databaseAccountRecord{TenantID: tenantID, AccountID: candidateID, UserEmail: normalized.UserEmail, UserDisplayName: normalized.DisplayName, UserAvatarURL: normalized.AvatarURL, AccountState: accountStateActive, UserRoles: roleList{defaultUserRole}, CreatedAtUnix: now, LastUpdatedUnix: now}
+			return tx.Create(&account).Error
+		}
+		if err := tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalized.Provider, normalized.Subject).Take(&record).Error; err != nil {
+			return err
+		}
+		accountID = record.AccountID
+		result = tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStateActive).
+			Updates(map[string]interface{}{"user_email": normalized.UserEmail, "user_display_name": normalized.DisplayName, "user_avatar_url": normalized.AvatarURL, "last_updated_unix": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAccountNotActive
 		}
 		return nil
 	})
-	if errors.Is(err, errAccountIdentityConflict) {
-		return store.UpsertProviderAccount(ctx, tenantID, identity)
-	}
 	if err != nil {
 		return AccountProfile{}, fmt.Errorf("%s.account_provider_upsert.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
@@ -984,35 +936,35 @@ func (store *DatabaseUserStore) LinkGoogleIdentity(ctx context.Context, tenantID
 
 // LinkProviderIdentity links a verified external provider identity to an existing account.
 func (store *DatabaseUserStore) LinkProviderIdentity(ctx context.Context, tenantID string, accountID string, identity AccountProviderIdentity) (AccountProfile, error) {
-	normalizedIdentity, identityErr := normalizeAccountProviderIdentity(identity)
-	if identityErr != nil {
-		return AccountProfile{}, identityErr
+	normalizedIdentity, err := normalizeAccountProviderIdentity(identity)
+	if err != nil {
+		return AccountProfile{}, err
 	}
 	now := store.now().UTC().Unix()
-	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if _, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID); profileErr != nil {
-			return profileErr
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStateActive).Update("last_updated_unix", now)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAccountNotActive
+		}
+		record := databaseAccountIdentityRecord{TenantID: tenantID, Provider: normalizedIdentity.Provider, ProviderID: normalizedIdentity.Subject, AccountID: accountID, CreatedAtUnix: now, LastUpdatedUnix: now}
+		result = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 1 {
+			return nil
 		}
 		var existing databaseAccountIdentityRecord
-		queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject).Take(&existing).Error
-		if queryErr == nil && existing.AccountID != accountID {
+		if err := tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalizedIdentity.Provider, normalizedIdentity.Subject).Take(&existing).Error; err != nil {
+			return err
+		}
+		if existing.AccountID != accountID {
 			return ErrAccountExists
 		}
-		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
-			return queryErr
-		}
-		identityRecord := databaseAccountIdentityRecord{
-			TenantID:        tenantID,
-			Provider:        normalizedIdentity.Provider,
-			ProviderID:      normalizedIdentity.Subject,
-			AccountID:       accountID,
-			CreatedAtUnix:   now,
-			LastUpdatedUnix: now,
-		}
-		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "provider"}, {Name: "provider_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"account_id", "last_updated_unix"}),
-		}).Create(&identityRecord).Error
+		return nil
 	})
 	if err != nil {
 		return AccountProfile{}, fmt.Errorf("%s.account_link_provider.%s: %w", userStoreErrorPrefix, store.driverLabel, err)

@@ -126,8 +126,9 @@ type tenantSettings struct {
 	ID                  string                     `json:"id"`
 	DisplayName         string                     `json:"display_name"`
 	Origins             []string                   `json:"origins"`
-	GoogleWebClientID   resourceReference          `json:"google_web_client_id"`
+	GoogleWebClientID   *resourceReference         `json:"google_web_client_id"`
 	GoogleNativeClients []nativeClientResource     `json:"google_native_clients,omitempty"`
+	GitHubOAuth         *githubOAuthResource       `json:"github_oauth,omitempty"`
 	AppleOAuth          *appleOAuthResource        `json:"apple_oauth,omitempty"`
 	PasswordAuth        passwordAuthResource       `json:"password_auth,omitempty"`
 	AccountManagement   *accountManagementResource `json:"account_management,omitempty"`
@@ -145,6 +146,22 @@ type nativeClientResource struct {
 	Platform     string            `json:"platform"`
 	ClientID     resourceReference `json:"client_id"`
 	RedirectURIs []string          `json:"redirect_uris"`
+}
+
+type githubOAuthResource struct {
+	Enabled      bool              `json:"enabled"`
+	ClientID     resourceReference `json:"client_id"`
+	ClientSecret resourceReference `json:"client_secret"`
+	RedirectURI  string            `json:"redirect_uri"`
+	Scopes       []string          `json:"scopes"`
+}
+
+type nativeGitHubOAuth struct {
+	Enabled      bool     `yaml:"enabled"`
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret string   `yaml:"client_secret"`
+	RedirectURI  string   `yaml:"redirect_uri"`
+	Scopes       []string `yaml:"scopes"`
 }
 
 type appleOAuthResource struct {
@@ -206,9 +223,10 @@ type tenantOAuthResource struct {
 }
 
 type tenantOAuthScope struct {
-	Identifier  string `json:"identifier" yaml:"identifier"`
-	DisplayName string `json:"display_name" yaml:"display_name"`
-	Description string `json:"description" yaml:"description"`
+	IdentityProviders []string `json:"identity_providers,omitempty" yaml:"identity_providers,omitempty"`
+	Identifier        string   `json:"identifier" yaml:"identifier"`
+	DisplayName       string   `json:"display_name" yaml:"display_name"`
+	Description       string   `json:"description" yaml:"description"`
 }
 
 type tenantOAuthClient struct {
@@ -264,6 +282,7 @@ type nativeTenant struct {
 	TenantOrigins       []string                 `yaml:"tenant_origins"`
 	GoogleWebClientID   string                   `yaml:"google_web_client_id"`
 	GoogleNativeClients []nativeGoogleClient     `yaml:"google_native_clients,omitempty"`
+	GitHubOAuth         *nativeGitHubOAuth       `yaml:"github_oauth,omitempty"`
 	AppleOAuth          *nativeAppleOAuth        `yaml:"apple_oauth,omitempty"`
 	PasswordAuth        *nativePasswordAuth      `yaml:"password_auth,omitempty"`
 	AccountManagement   *nativeAccountManagement `yaml:"account_management,omitempty"`
@@ -451,9 +470,13 @@ func buildTenant(item contribution) (nativeTenant, error) {
 	if resource.Kind != resourceKindTenant || resource.ID != item.ID || resource.Version != 1 {
 		return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s identity is inconsistent", errInvalidRequest, item.Owner, item.ID)
 	}
-	googleWebClientID, googleErr := requireOutput(item, googleWebClientOutput)
-	if googleErr != nil {
-		return nativeTenant{}, googleErr
+	googleWebClientID := ""
+	if resource.Tenant.GoogleWebClientID != nil {
+		var googleErr error
+		googleWebClientID, googleErr = requireOutput(item, googleWebClientOutput)
+		if googleErr != nil {
+			return nativeTenant{}, googleErr
+		}
 	}
 	jwtSigningKey, jwtErr := requireOutput(item, jwtSigningKeyOutput)
 	if jwtErr != nil {
@@ -483,6 +506,25 @@ func buildTenant(item contribution) (nativeTenant, error) {
 		RefreshTTL:          "1440h",
 		NonceTTL:            "5m",
 		AllowInsecureHTTP:   false,
+	}
+	if resource.Tenant.GitHubOAuth != nil {
+		settings := resource.Tenant.GitHubOAuth
+		if !settings.Enabled {
+			if settings.ClientID != (resourceReference{}) || settings.ClientSecret != (resourceReference{}) || settings.RedirectURI != "" || len(settings.Scopes) != 0 {
+				return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s has settings for disabled GitHub login", errInvalidRequest, item.Owner, item.ID)
+			}
+			tenant.GitHubOAuth = &nativeGitHubOAuth{}
+		} else {
+			clientID, err := requireOutput(item, "github-client-id")
+			if err != nil {
+				return nativeTenant{}, err
+			}
+			secret, err := requireOutput(item, "github-client-secret")
+			if err != nil {
+				return nativeTenant{}, err
+			}
+			tenant.GitHubOAuth = &nativeGitHubOAuth{Enabled: settings.Enabled, ClientID: clientID, ClientSecret: secret, RedirectURI: settings.RedirectURI, Scopes: settings.Scopes}
+		}
 	}
 	if resource.Tenant.AppleOAuth != nil {
 		privateKey, outputErr := requireOutput(item, applePrivateKeyOutput)
