@@ -22,8 +22,30 @@ lint:
 test-go:
 	$(GO) test ./...
 
+.PHONY: test-github-http test-github-config test-github-oauth test-github-browser
+
+test-github-http:
+	$(GO) test -race ./internal/authkit -run GitHub -count=1
+
+test-github-config:
+	$(GO) test ./internal/tenants ./internal/appconfig ./internal/doctor ./internal/preflight ./internal/deploymentconfig ./cmd/server -run GitHub -count=1
+
+test-github-oauth:
+	$(GO) test ./internal/oauthserver ./pkg/oauthvalidator -run GitHub -count=1
+
+test-github-browser:
+	node --test tests/github*.test.js
+
+.PHONY: test-github-browser-server
+test-github-browser-server:
+	$(GO) test ./internal/authkit -run '^TestGitHubBrowserFixture$$' -count=1 -timeout=5m -v
+
 test-js:
 	npm test
+
+.PHONY: verify-js
+verify-js:
+	npm run verify
 
 test-deployment-config-renderer:
 	bash tests/deployment-config-renderer.sh
