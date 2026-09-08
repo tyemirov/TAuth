@@ -27,7 +27,7 @@ const (
 	refreshStoreSchemaVersion    = 1
 	userStoreSchemaVersion       = 5
 	nonceStoreSchemaVersion      = 1
-	oauthStoreSchemaVersion      = 1
+	oauthStoreSchemaVersion      = 2
 )
 
 var (

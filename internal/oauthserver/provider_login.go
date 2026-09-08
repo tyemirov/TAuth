@@ -2,6 +2,8 @@ package oauthserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"sort"
@@ -21,7 +23,7 @@ func (server *Server) GitHubAuthorization(ctx context.Context, tenantID, request
 		return "", ErrAuthorizationRequestInvalid
 	}
 	policy, resource, err := server.registry.ResolveResource(pending.Resource)
-	if err != nil || policy.TenantID != tenantID {
+	if err != nil || policy.TenantID != tenantID || pending.DisclosurePolicy != identityDisclosurePolicy(resource, pending.Scope) {
 		return "", ErrAuthorizationRequestInvalid
 	}
 	client, err := server.resolveClient(ctx, policy, pending.ClientID)
@@ -59,4 +61,22 @@ func (server *Server) writeIdentityGrantError(response http.ResponseWriter, err 
 		return
 	}
 	writeOAuthError(response, http.StatusInternalServerError, "server_error")
+}
+
+// identityDisclosurePolicy fingerprints the scope-to-provider bindings shown in
+// consent. Empty means no disclosure. Persisted grants never infer new approval
+// from a later resource configuration.
+func identityDisclosurePolicy(resource Resource, scope string) string {
+	bindings := make([]string, 0)
+	for _, identifier := range strings.Fields(scope) {
+		for _, provider := range resource.Scopes[identifier].IdentityProviders {
+			bindings = append(bindings, identifier+"\x00"+provider)
+		}
+	}
+	if len(bindings) == 0 {
+		return ""
+	}
+	sort.Strings(bindings)
+	digest := sha256.Sum256([]byte(strings.Join(bindings, "\x00")))
+	return hex.EncodeToString(digest[:])
 }

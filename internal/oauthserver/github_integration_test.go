@@ -35,16 +35,18 @@ func TestGitHubOAuthLoginAndConsent(t *testing.T) {
 }
 
 type githubOAuthFixture struct {
-	issuer   string
-	client   *http.Client
-	server   *Server
-	provider *testsupport.GitHub
-	sessions *authkit.OAuthBrowserSessions
-	accounts accountCredentialStore
-	signer   *Signer
+	listener    *httptest.Server
+	databaseURL string
+	issuer      string
+	client      *http.Client
+	server      *Server
+	provider    *testsupport.GitHub
+	sessions    *authkit.OAuthBrowserSessions
+	accounts    accountCredentialStore
+	signer      *Signer
 }
 
-func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool) *githubOAuthFixture {
+func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool, configure ...func(*tenants.FileDocument)) *githubOAuthFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -59,11 +61,14 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool) *githubO
 	document.Tenants[0].PasswordAuth = tenants.FilePasswordAuth{}
 	document.Tenants[0].GitHubOAuth = tenants.FileGitHubOAuth{Enabled: true, ClientID: "github-client", ClientSecret: "test-secret", RedirectURI: issuer + tenants.GitHubCallbackPath}
 	document.Tenants[0].AccountManagement = tenants.FileAccountManagement{Enabled: true, ReturnChallengeTokens: true}
+	for _, option := range configure {
+		option(&document)
+	}
 	tenantConfig, err := tenants.LoadConfigFromDocument(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := authkit.BuildTenantRegistry(authkit.ServerConfig{AppJWTIssuer: "tauth"}, tenantConfig, authkit.NewSameSiteResolver(true))
+	registry, err := authkit.BuildTenantRegistry(authkit.ServerConfig{AppJWTIssuer: "tauth"}, tenantConfig, authkit.NewSameSiteResolver(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +78,9 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool) *githubO
 	var accounts accountCredentialStore = authkit.NewMemoryPasswordCredentialStore()
 	var store Store = NewMemoryStore()
 	transactions := authkit.NewMemoryGitHubTransactionStore()
+	databaseURL := ""
 	if storage == "sqlite" {
-		databaseURL := "sqlite://" + filepath.Join(t.TempDir(), "oauth-github.sqlite")
+		databaseURL = "sqlite://" + filepath.Join(t.TempDir(), "oauth-github.sqlite")
 		persistent, err := authkit.NewDatabaseUserStore(context.Background(), databaseURL)
 		if err != nil {
 			t.Fatal(err)
@@ -125,7 +131,7 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool) *githubO
 		t.Fatal(err)
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &githubOAuthFixture{issuer, client, server, provider, sessions, accounts, signer}
+	return &githubOAuthFixture{listener, databaseURL, issuer, client, server, provider, sessions, accounts, signer}
 }
 
 func testGitHubOAuthFlow(t *testing.T, storage string, disclose bool) {
@@ -173,10 +179,7 @@ func testGitHubOAuthFlow(t *testing.T, storage string, disclose bool) {
 	response = doRequest(t, &providerClient, http.MethodGet, provider.Server.URL+providerURL.RequestURI(), nil)
 	callback := response.Header.Get("Location")
 	response.Body.Close()
-	response = doRequest(t, client, http.MethodGet, callback, nil)
-	assertStatus(t, response, 303)
-	consentURL := response.Header.Get("Location")
-	response.Body.Close()
+	consentURL := fixture.callbackDestination(t, callback)
 	response = doRequest(t, client, http.MethodGet, consentURL, nil)
 	assertStatus(t, response, 200)
 	response.Body.Close()
@@ -304,11 +307,8 @@ func (fixture *githubOAuthFixture) begin(t *testing.T, state, verifier, clientID
 
 func (fixture *githubOAuthFixture) complete(t *testing.T, callback string) string {
 	t.Helper()
-	response := doRequest(t, fixture.client, http.MethodGet, callback, nil)
-	assertStatus(t, response, 303)
-	consent := response.Header.Get("Location")
-	response.Body.Close()
-	response = doRequest(t, fixture.client, http.MethodGet, consent, nil)
+	consent := fixture.callbackDestination(t, callback)
+	response := doRequest(t, fixture.client, http.MethodGet, consent, nil)
 	assertStatus(t, response, 200)
 	body, err := io.ReadAll(response.Body)
 	response.Body.Close()
@@ -477,4 +477,23 @@ func TestGitHubOAuthCurrentIdentityBeforeCodeAndExchange(t *testing.T) {
 			})
 		}
 	}
+}
+
+func (fixture *githubOAuthFixture) callbackDestination(t *testing.T, callback string) string {
+	t.Helper()
+	response := doRequest(t, fixture.client, http.MethodGet, callback, nil)
+	assertStatus(t, response, http.StatusOK)
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Referrer-Policy") != "no-referrer" || !strings.Contains(response.Header.Get("Content-Security-Policy"), "script-src 'nonce-") {
+		t.Fatal("OAuth completion document lacks browser policy headers")
+	}
+	match := regexp.MustCompile(`id="github-continue" href="([^"]+)"`).FindSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("OAuth completion destination missing")
+	}
+	return html.UnescapeString(string(match[1]))
 }

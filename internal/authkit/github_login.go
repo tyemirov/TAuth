@@ -283,6 +283,10 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		githubPopup(response, transaction, "complete")
 		return
 	}
+	if transaction.Operation == githubOAuthContinuation {
+		githubOAuthCompletion(response, transaction.ReturnTo)
+		return
+	}
 	http.Redirect(response, request, transaction.ReturnTo, http.StatusSeeOther)
 }
 
@@ -378,6 +382,21 @@ func githubError(response http.ResponseWriter, status int, code string) {
 }
 
 var githubPopupPage = template.Must(template.New("github-popup").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>GitHub sign-in</title><p id="status">{{.Message}}</p><script nonce="{{.Nonce}}">if(window.opener){window.opener.postMessage({type:"tauth:github",correlation:{{.Correlation}},status:{{.Status}}},{{.Origin}});window.close();}</script></html>`))
+
+var githubOAuthCompletionPage = template.Must(template.New("github-oauth-completion").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>GitHub sign-in complete</title><p>GitHub sign-in is complete.</p><a id="github-continue" href="{{.Destination}}">Continue</a><script nonce="{{.Nonce}}">window.addEventListener("pageshow",function(){window.location.replace(document.getElementById("github-continue").href);});</script></html>`))
+
+// A committed TAuth document starts a same-site navigation. A provider redirect
+// chain cannot send Strict session cookies to the consent endpoint.
+func githubOAuthCompletion(response http.ResponseWriter, destination string) {
+	nonce, _, err := generateOpaqueToken(rand.Reader, 32, "github_completion.nonce")
+	if err != nil {
+		githubError(response, http.StatusInternalServerError, "store_failure")
+		return
+	}
+	response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	response.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; frame-ancestors 'none'")
+	_ = githubOAuthCompletionPage.Execute(response, struct{ Nonce, Destination string }{nonce, destination})
+}
 
 func githubPopup(response http.ResponseWriter, transaction githubTransaction, status string) {
 	nonce, _, err := generateOpaqueToken(rand.Reader, 32, "github_popup.nonce")

@@ -174,7 +174,7 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 	pending := AuthorizationRequest{
 		TenantID: policy.TenantID, ClientID: client.ID, ClientName: client.DisplayName,
 		ClientSource: client.Source, RedirectURI: redirectURI, RedirectHost: redirectURL.Host,
-		Resource: resource.Identifier, ResourceName: resource.DisplayName, Scope: normalizedScope,
+		Resource: resource.Identifier, ResourceName: resource.DisplayName, Scope: normalizedScope, DisclosurePolicy: identityDisclosurePolicy(resource, normalizedScope),
 		State: state, CodeChallenge: challenge, CreatedAtUnix: now.Unix(),
 		ExpiresAtUnix: now.Add(server.config.AuthorizationRequestTTL()).Unix(),
 	}
@@ -287,7 +287,8 @@ func (server *Server) handleConsent(response http.ResponseWriter, request *http.
 		return
 	}
 	if request.Method == http.MethodGet {
-		writeBrowserPage(response, consentPage, consentPageDataFor(pending, resource, requestToken))
+		data := consentPageDataFor(pending, resource, requestToken)
+		writeBrowserPage(response, http.StatusOK, consentPage, data, browserPagePolicy{formRedirectOrigin: data.RedirectOrigin})
 		return
 	}
 	decision := request.PostForm.Get("decision")
@@ -380,7 +381,7 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, grant.DisclosurePolicy, now.Unix()); policyErr != nil {
 		if errors.Is(policyErr, ErrInvalidScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
@@ -395,7 +396,7 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 	}
 	refreshGrant := RefreshGrant{
 		ConsentID: grant.ConsentID, TenantID: grant.TenantID, UserID: grant.UserID,
-		ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope,
+		ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy,
 		ExpiresAtUnix: now.Add(policy.RefreshTokenTTL).Unix(),
 	}
 	refreshToken, refreshErr := server.store.IssueRefreshToken(request.Context(), refreshGrant)
@@ -436,7 +437,7 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 		}
 		return
 	}
-	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, now.Unix()); policyErr != nil {
+	if policyErr := server.enforceCurrentGrantPolicy(request.Context(), policy, resource, client, grant.TenantID, grant.ConsentID, grant.Scope, grant.DisclosurePolicy, now.Unix()); policyErr != nil {
 		if errors.Is(policyErr, ErrInvalidScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
@@ -534,11 +535,11 @@ func (server *Server) requireActiveUser(ctx context.Context, tenantID string, us
 	return nil
 }
 
-func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, consentID string, scope string, nowUnix int64) error {
+func (server *Server) enforceCurrentGrantPolicy(ctx context.Context, policy TenantPolicy, resource Resource, client Client, tenantID string, consentID string, scope string, disclosurePolicy string, nowUnix int64) error {
 	if tenantID != policy.TenantID {
 		return ErrInvalidScope
 	}
-	if _, _, scopeErr := validateRequestedScopes(resource, client, scope); scopeErr == nil {
+	if _, _, scopeErr := validateRequestedScopes(resource, client, scope); scopeErr == nil && disclosurePolicy == identityDisclosurePolicy(resource, scope) {
 		return nil
 	}
 	if revokeErr := server.store.RevokeConsent(ctx, consentID, nowUnix); revokeErr != nil {
@@ -560,6 +561,11 @@ func (server *Server) pendingBrowserRequest(response http.ResponseWriter, reques
 	pending, pendingErr := server.store.GetAuthorizationRequest(request.Context(), requestToken, server.now().Unix())
 	if pendingErr != nil {
 		writeAuthorizationRequestStoreError(response, pendingErr)
+		return AuthorizationRequest{}, "", false
+	}
+	policy, resource, resourceErr := server.registry.ResolveResource(pending.Resource)
+	if resourceErr != nil || policy.TenantID != pending.TenantID || pending.DisclosurePolicy != identityDisclosurePolicy(resource, pending.Scope) {
+		writeOAuthError(response, http.StatusBadRequest, "invalid_request")
 		return AuthorizationRequest{}, "", false
 	}
 	return pending, requestToken, true
@@ -596,7 +602,7 @@ func (server *Server) issueCodeAndRedirect(response http.ResponseWriter, request
 	code, issueErr := server.store.IssueAuthorizationCode(request.Context(), AuthorizationGrant{
 		ConsentID: consentID, TenantID: pending.TenantID, UserID: userID,
 		ClientID: pending.ClientID, RedirectURI: pending.RedirectURI, Resource: pending.Resource,
-		Scope: pending.Scope, CodeChallenge: pending.CodeChallenge,
+		Scope: pending.Scope, DisclosurePolicy: pending.DisclosurePolicy, CodeChallenge: pending.CodeChallenge,
 		ExpiresAtUnix: now.Add(server.config.AuthorizationCodeTTL()).Unix(),
 	})
 	if issueErr != nil {
@@ -615,7 +621,7 @@ func writeAuthorizationRequestStoreError(response http.ResponseWriter, storeErr 
 }
 
 func (request AuthorizationRequest) consentKey(userID string) ConsentKey {
-	return ConsentKey{TenantID: request.TenantID, UserID: userID, ClientID: request.ClientID, Resource: request.Resource, Scope: request.Scope}
+	return ConsentKey{TenantID: request.TenantID, UserID: userID, ClientID: request.ClientID, Resource: request.Resource, Scope: request.Scope, DisclosurePolicy: request.DisclosurePolicy}
 }
 
 func endpointPath(address string) string {
@@ -816,6 +822,7 @@ type consentScopeData struct {
 }
 
 type consentPageData struct {
+	RedirectOrigin     string
 	RequestToken       string
 	ClientName         string
 	ClientID           string
@@ -835,27 +842,28 @@ func consentPageDataFor(pending AuthorizationRequest, resource Resource, request
 	}
 	return consentPageData{
 		RequestToken: requestToken, ClientName: pending.ClientName, ClientID: pending.ClientID,
-		ResourceName: pending.ResourceName, RedirectHost: pending.RedirectHost,
-		Loopback:           parsedRedirect != nil && (parsedRedirect.Hostname() == "localhost" || strings.HasPrefix(parsedRedirect.Hostname(), "127.")),
+		ResourceName: pending.ResourceName, RedirectHost: pending.RedirectHost, RedirectOrigin: parsedRedirect.Scheme + "://" + parsedRedirect.Host,
+		Loopback:           parsedRedirect.Hostname() == "localhost" || strings.HasPrefix(parsedRedirect.Hostname(), "127."),
 		Scopes:             scopeData,
 		IdentityDisclosure: len(requiredIdentityProviders(resource, pending.Scope)) != 0,
 	}
 }
 
-func writeBrowserPage(response http.ResponseWriter, page *template.Template, data any) {
-	writeBrowserPageStatus(response, http.StatusOK, page, data)
+type browserPagePolicy struct {
+	scriptNonce        string
+	formRedirectOrigin string
 }
 
-func writeBrowserPageStatus(response http.ResponseWriter, status int, page *template.Template, data any) {
-	writeBrowserPageStatusWithScript(response, status, page, data, "")
-}
-
-func writeBrowserPageStatusWithScript(response http.ResponseWriter, status int, page *template.Template, data any, scriptNonce string) {
+func writeBrowserPage(response http.ResponseWriter, status int, page *template.Template, data any, policy browserPagePolicy) {
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	response.Header().Set("Cache-Control", "no-store")
-	contentSecurityPolicy := "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-	if scriptNonce != "" {
-		contentSecurityPolicy += "; script-src 'nonce-" + scriptNonce + "' https://accounts.google.com; frame-src https://accounts.google.com; connect-src 'self' https://accounts.google.com"
+	formActions := "'self'"
+	if policy.formRedirectOrigin != "" {
+		formActions += " " + policy.formRedirectOrigin
+	}
+	contentSecurityPolicy := "default-src 'none'; style-src 'unsafe-inline'; form-action " + formActions + "; base-uri 'none'; frame-ancestors 'none'"
+	if policy.scriptNonce != "" {
+		contentSecurityPolicy += "; script-src 'nonce-" + policy.scriptNonce + "' https://accounts.google.com; frame-src https://accounts.google.com; connect-src 'self' https://accounts.google.com"
 	}
 	response.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	response.Header().Set("Referrer-Policy", "origin")
@@ -887,7 +895,7 @@ func (server *Server) writeLoginPage(response http.ResponseWriter, request *http
 	if methods.GitHub {
 		data.GitHubURL = tenants.GitHubStartPath + "?" + url.Values{"tenant_id": {pending.TenantID}, "operation": {"oauth"}, "oauth_request": {requestToken}}.Encode()
 	}
-	writeBrowserPageStatusWithScript(response, status, loginPage, data, data.ScriptNonce)
+	writeBrowserPage(response, status, loginPage, data, browserPagePolicy{scriptNonce: data.ScriptNonce})
 }
 
 var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Log in to TAuth</title><style>{{template "style"}}</style>{{if .GoogleClientID}}<script src="https://accounts.google.com/gsi/client" async defer></script>{{end}}</head><body data-request-token="{{.RequestToken}}" data-google-client-id="{{.GoogleClientID}}" data-google-nonce="{{.GoogleNonce}}"><main><h1>Log in</h1><p><strong>{{.ClientName}}</strong> is requesting access to {{.ResourceName}}.</p>{{if .ErrorMessage}}<p role="alert" class="error">{{.ErrorMessage}}</p>{{end}}{{if .GitHubURL}}<p><a href="{{.GitHubURL}}">Continue with GitHub</a></p>{{end}}{{if .GoogleClientID}}<div id="google-login"></div><p id="google-error" role="alert" class="error" hidden>Google authentication was not accepted.</p><script nonce="{{.ScriptNonce}}">window.addEventListener("load",function(){var root=document.body;var error=document.getElementById("google-error");if(!window.google||!google.accounts||!google.accounts.id){error.hidden=false;return;}google.accounts.id.initialize({client_id:root.dataset.googleClientId,nonce:root.dataset.googleNonce,callback:async function(result){try{var response=await fetch(window.location.href,{method:"POST",credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({request:root.dataset.requestToken,provider:"google",google_id_token:result.credential,nonce_token:root.dataset.googleNonce})});if(!response.ok){throw new Error("login rejected");}var payload=await response.json();if(!payload.next){throw new Error("login continuation missing");}window.location.assign(payload.next);}catch(_failure){error.hidden=false;}}});google.accounts.id.renderButton(document.getElementById("google-login"),{theme:"outline",size:"large",width:320});});</script>{{end}}{{if and .GoogleClientID .PasswordLogin}}<p class="separator">or</p>{{end}}{{if .PasswordLogin}}<form method="post"><input type="hidden" name="request" value="{{.RequestToken}}"><input type="hidden" name="provider" value="password"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button type="submit">Continue</button></form>{{end}}</main></body></html>{{define "style"}}:root{color-scheme:dark}body{margin:0;background:#111;color:#eee;font:16px system-ui}main{max-width:30rem;margin:10vh auto;padding:2rem;background:#1b1b1b;border:1px solid #444;border-radius:12px}label{display:block;margin:1rem 0}input,button{box-sizing:border-box;width:100%;padding:.75rem;margin-top:.35rem;background:#242424;color:#fff;border:1px solid #666;border-radius:6px}button{background:#2765d7;border:0;font-weight:700}.error{color:#ff9b9b}.separator{text-align:center;color:#aaa}#google-login{display:flex;justify-content:center;margin:1.25rem 0}{{end}}`))

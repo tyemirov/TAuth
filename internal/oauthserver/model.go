@@ -51,28 +51,30 @@ type TenantPolicy struct {
 
 // AuthorizationRequest is one validated browser authorization transaction.
 type AuthorizationRequest struct {
-	TenantID      string
-	ClientID      string
-	ClientName    string
-	ClientSource  string
-	RedirectURI   string
-	RedirectHost  string
-	Resource      string
-	ResourceName  string
-	Scope         string
-	State         string
-	CodeChallenge string
-	CreatedAtUnix int64
-	ExpiresAtUnix int64
+	DisclosurePolicy string
+	TenantID         string
+	ClientID         string
+	ClientName       string
+	ClientSource     string
+	RedirectURI      string
+	RedirectHost     string
+	Resource         string
+	ResourceName     string
+	Scope            string
+	State            string
+	CodeChallenge    string
+	CreatedAtUnix    int64
+	ExpiresAtUnix    int64
 }
 
 // ConsentKey identifies one exact user-approved client grant.
 type ConsentKey struct {
-	TenantID string
-	UserID   string
-	ClientID string
-	Resource string
-	Scope    string
+	DisclosurePolicy string
+	TenantID         string
+	UserID           string
+	ClientID         string
+	Resource         string
+	Scope            string
 }
 
 // Consent is one time-bounded approval for an exact grant.
@@ -86,27 +88,29 @@ type Consent struct {
 
 // AuthorizationGrant is the immutable grant bound to a code and refresh family.
 type AuthorizationGrant struct {
-	ConsentID     string
-	TenantID      string
-	UserID        string
-	ClientID      string
-	RedirectURI   string
-	Resource      string
-	Scope         string
-	CodeChallenge string
-	ExpiresAtUnix int64
+	DisclosurePolicy string
+	ConsentID        string
+	TenantID         string
+	UserID           string
+	ClientID         string
+	RedirectURI      string
+	Resource         string
+	Scope            string
+	CodeChallenge    string
+	ExpiresAtUnix    int64
 }
 
 // RefreshGrant is the grant returned after refresh-token validation and rotation.
 type RefreshGrant struct {
-	ConsentID     string
-	FamilyID      string
-	TenantID      string
-	UserID        string
-	ClientID      string
-	Resource      string
-	Scope         string
-	ExpiresAtUnix int64
+	DisclosurePolicy string
+	ConsentID        string
+	FamilyID         string
+	TenantID         string
+	UserID           string
+	ClientID         string
+	Resource         string
+	Scope            string
+	ExpiresAtUnix    int64
 }
 
 // CodeExchange contains every value that must match an authorization code.
