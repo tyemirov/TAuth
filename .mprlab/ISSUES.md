@@ -542,6 +542,26 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [I209] (P2) Update four managed governance documents.
+  Goal:
+  The TAuth guidance matches the current Governor templates and retains repository-owned rules.
+  The Governor check identified four managed documents with different content during the B076 report.
+  Requirements:
+  - Update the policy, container guide, issue syntax guide, and main governance block.
+  - Preserve the issue classification and archive rules in the main agent guide.
+  - Preserve B076 and all other existing issue entries.
+  Resolution: 2026-09-08 — Updated the four documents through the Governor normalizer.
+  The policy now includes the versionless manifest contract and current environment-file and validation rules.
+  The container guide now states the versionless manifest requirements and local orchestration boundary.
+  The issue syntax guide now contains the current identifier, reference, and body syntax.
+  The main guide retains the classification and archive rules outside its managed block.
+  Its managed block now requires references by issue ID.
+  Validation:
+  - The Governor check reports no differences or warnings.
+  - The changed prose has no mechanical language findings.
+  - `git diff --check` passed.
+  - All prior tracker content remains unchanged.
+
 - [x] [I208] (P1) Own the deployment config renderer.
   Goal:
   TAuth converts selected resource contributions into its native config.
@@ -690,6 +710,173 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [ ] [B076] (P1) Accept native client callback ports from Client ID Metadata Documents.
+  Goal:
+  An existing LLM Proxy user can connect Codex through the normal browser login and consent flow.
+  TAuth accepts the local callback port that the native client selects for each login.
+  The user authenticates through the same identity provider and account used by the LLM Proxy website.
+  Related work: TAuth F001 and LLM Proxy F021.
+  This issue records a defect in the existing OAuth contract.
+  The requested action on 2026-09-08 was to file this issue only.
+
+  User impact:
+  Codex starts OAuth authorization, but TAuth returns an error before the login screen appears.
+  The user cannot enter credentials, select an existing account, or approve the requested access.
+  The failure prevents authenticated MCP initialization, tenant discovery, and generation through Codex.
+  A successful public metadata response does not prove that a user can connect.
+
+  Environment and evidence:
+  - Observed on 2026-09-08 from macOS during live LLM Proxy acceptance in the Codex desktop task.
+  - The login command used `codex-cli 0.153.4`.
+  - MCP endpoint: `https://llm-proxy-api.mprlab.com/mcp`.
+  - TAuth issuer: `https://tauth-api.mprlab.com`.
+  - OAuth resource and audience: `https://llm-proxy-api.mprlab.com`.
+  - Required scope: `llm-proxy:use`.
+  - Codex client ID: `https://chatgpt.com/oauth/codex/client.json`.
+  - Inspected TAuth source: commit `4884231e7e65ae3c1113b41e1d3a771fe7543355` on the local `master` checkout.
+  - The deployed TAuth revision was not established during this check.
+  - Protected-resource discovery returned HTTP `200` with the expected issuer, resource, and scope.
+  - An unauthenticated `POST /mcp` returned HTTP `401` with the expected Bearer challenge and metadata URL.
+  - TAuth discovery declared `client_id_metadata_document_supported: true` and `token_endpoint_auth_methods_supported: ["none"]`.
+  - TAuth also declared PKCE `S256`, resource parameters, and issuer identification in authorization responses.
+  - The public Codex document returned HTTP `200` and declared `application_type: "native"`.
+  - Its redirect URIs were `http://127.0.0.1/callback` and `http://localhost/callback`.
+  - The document declared authorization-code and refresh-token grants, response type `code`, and authentication method `none`.
+
+  Reproduction:
+  1. Configure the Streamable HTTP server in Codex with the MCP endpoint above.
+  2. Use `codex mcp login llm-proxy` to start a fresh login.
+  3. Inspect the generated authorization URL before any credential entry.
+  4. Confirm that the URL contains exactly one `resource` parameter.
+  5. Keep the native callback port in `redirect_uri` when the browser opens the URL.
+  6. Observe HTTP `400` with `{"error":"invalid_request"}` before any login or consent page.
+  The observed callback was `http://127.0.0.1:51196/callback`.
+  A later login can select another port and must remain valid.
+
+  Diagnostic comparison:
+  The following Python command makes two authorization requests without cookies or credentials.
+  It prints the status, error, and destination path without recording the pending login token.
+  It does not follow redirects or exchange authorization codes.
+  Use the second request only to compare redirect validation, not to complete a Codex login.
+  ```python
+  import base64
+  import hashlib
+  import secrets
+  import urllib.error
+  import urllib.parse
+  import urllib.request
+
+  class NoRedirect(urllib.request.HTTPRedirectHandler):
+      def redirect_request(self, *args, **kwargs):
+          return None
+
+  verifier = secrets.token_urlsafe(32)
+  challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+  parameters = {
+      "response_type": "code",
+      "client_id": "https://chatgpt.com/oauth/codex/client.json",
+      "resource": "https://llm-proxy-api.mprlab.com",
+      "scope": "llm-proxy:use",
+      "state": secrets.token_urlsafe(16),
+      "code_challenge": challenge,
+      "code_challenge_method": "S256",
+  }
+  opener = urllib.request.build_opener(NoRedirect)
+  for callback in ("http://127.0.0.1:51196/callback", "http://127.0.0.1/callback"):
+      query = urllib.parse.urlencode(dict(parameters, redirect_uri=callback))
+      try:
+          response = opener.open("https://tauth-api.mprlab.com/oauth/authorize?" + query, timeout=20)
+      except urllib.error.HTTPError as error:
+          response = error
+      with response:
+          destination = urllib.parse.urlsplit(response.headers.get("Location", "")).path
+          body = response.read().decode() if response.code == 400 else ""
+          print(callback, response.code, destination, body)
+  ```
+  Confirmed results during diagnosis:
+  - With port `51196`: HTTP `400`, `{"error":"invalid_request"}`, and no login redirect.
+  - Without the port: HTTP `303` with destination path `/oauth/login`.
+  The second result proves that TAuth can route the same client and resource to its login endpoint.
+  It does not prove browser rendering, credential acceptance, consent, token exchange, or MCP access.
+
+  Source cause:
+  `internal/oauthserver/server.go`, `handleAuthorize`, calls `redirectMatches` after resource and client resolution.
+  A false result produces HTTP `400 invalid_request` before the server creates a pending login request.
+  `internal/oauthserver/registry.go`, `redirectMatches`, permits port variation only in the `clientSourceRegistered` branch.
+  That branch uses `loopbackRedirectMatches` when an explicit native client has a configured port range.
+  The `clientSourceMetadata` branch accepts only complete string equality with a declared redirect URI.
+  `internal/oauthserver/client_metadata.go`, `parseClientMetadataDocument`, retains the native application type and the document's redirect URIs.
+  It marks the client as `clientSourceMetadata`.
+  Thus, the portless Codex declaration cannot match the callback URL that contains its selected listener port.
+  This source defect explains the repeated live `invalid_request` result.
+
+  Contract references:
+  - [RFC 8252, section 7.3](https://www.rfc-editor.org/rfc/rfc8252.html#section-7.3) requires acceptance of request-selected ports for loopback IP callbacks.
+  - [RFC 8252, section 8.4](https://www.rfc-editor.org/rfc/rfc8252.html#section-8.4) retains exact redirect matching except for the loopback port.
+  - [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) describes portless metadata declarations and a selected local port during login.
+  - TAuth F001 already requires native clients, Client ID Metadata Documents, browser authentication, and OAuth consent.
+
+  Requirements:
+  - Apply the native loopback-port rule to validated Client ID Metadata Documents.
+  - Require `application_type: "native"` for the port exception.
+  - Require the HTTP scheme and a loopback IP literal for the RFC 8252 port exception.
+  - Match the declared host, path, and query exactly while permitting a valid selected port.
+  - Keep IPv4 and IPv6 callback hosts distinct.
+  - Keep exact-match behavior for web clients and non-loopback callbacks.
+  - Keep the current exact-match treatment of `localhost` outside the IP-literal port exception.
+  - Reject user information, fragments, malformed ports, non-loopback hosts, and undeclared destinations.
+  - Keep the existing configured port limits for explicitly registered clients.
+  - Bind the accepted callback, including its actual port, to the pending request and authorization code.
+  - Preserve PKCE, state, issuer identification, resource audiences, scopes, account identity, and consent checks.
+  - Implement one generic native-client rule without Codex-specific hosts, client IDs, fixed ports, or configuration exceptions.
+  - Keep client registration and redirect validation in TAuth.
+  - Keep MCP tools, tenant ownership, and generation policy in LLM Proxy.
+
+  Existing test gap:
+  `TestClientMetadataDocumentContract` declares and requests the same fixed callback port in `internal/oauthserver/client_metadata_test.go`.
+  `fixtureMetadataResolver` also returns a callback with a fixed port in `internal/oauthserver/server_integration_test.go`.
+  `TestAuthorizationServerBrowserPKCERefreshAndRevocation` uses that same callback for its metadata-client flow.
+  These checks prove exact matching but do not exercise a portless declaration with a request-selected port.
+
+  Deliverables:
+  - Add a failing integration test through the real authorization endpoint before the production change.
+  - Use a controlled metadata document with the current Codex native-client shape.
+  - Add the generic redirect correction and focused URI tests where necessary.
+  - Update `docs/usage.md` and the applicable API documentation with the native metadata-client port rule.
+  - Record local validation separately from production deployment and live Codex acceptance.
+
+  Validation:
+  - Run deterministic local tests with a controlled metadata provider and the real TAuth HTTP handlers.
+  - Verify that a portless IPv4 declaration accepts at least two different valid callback ports.
+  - Verify the same behavior for a separately declared IPv6 loopback callback.
+  - Verify rejection of changed hosts, paths, queries, schemes, fragments, user information, and invalid ports.
+  - Verify that an undeclared IP family and a loopback port change for a web client remain rejected.
+  - Verify unchanged exact matching for non-loopback callbacks and configured limits for explicitly registered clients.
+  - Verify that a user without a session reaches a rendered login page.
+  - Verify login to an existing account through an enabled identity provider.
+  - Verify that the OAuth subject is the same existing account subject after authentication.
+  - Verify that a valid existing session proceeds to consent without another credential request when policy permits.
+  - Verify approval and denial through the browser consent page.
+  - Verify that approval returns to the selected local port with the correct state and issuer.
+  - Verify code exchange with the original verifier and rejection of incorrect PKCE or replayed codes.
+  - Verify that concurrent requests with different ports retain their own callback destinations.
+  - Verify refresh and revocation under the existing OAuth contract.
+  - Use repository Make targets for focused checks and the applicable final `make ci` checkpoint.
+  - After operator deployment, repeat `codex mcp login llm-proxy` with a fresh native callback port.
+  - Verify the visible login, existing account, consent, successful Codex connection, and `llm_proxy.list_tenants` result.
+  - Verify the user's owned tenants through that authenticated connection before generation acceptance.
+
+  Evidence limits and separate observations:
+  An early diagnostic configuration added an explicit `oauth_resource` value to Codex.
+  Codex then sent two identical resource parameters, which TAuth rejected.
+  The configuration override was removed, and the single-resource request still returned `invalid_request`.
+  One later request returned `unauthorized_client` before the portless comparison succeeded.
+  Its cause remains unverified and must be investigated separately if it recurs.
+  The browser automation also reported `net::ERR_BLOCKED_BY_CLIENT` on its first navigation.
+  Direct HTTP requests independently reproduced the TAuth callback rejection.
+  The check issued no access token and completed no authenticated MCP call.
+  Production activation remains an operator action after the TAuth correction is validated and released.
 
 - [x] [B072] (P1) Require new consent when identity disclosure changes.
   Evidence:

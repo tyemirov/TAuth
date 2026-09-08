@@ -64,6 +64,20 @@ This policy controls all agent work in this repository.
 - The values `0600` and `7777` have no governance meaning.
 - This rule does not change service authorization or operation authority.
 
+## Selected Manifest Contract
+
+Apply this section when the task changes or validates a selected application manifest.
+
+- Keep the selected application manifest versionless.
+- Keep `owner`, `release`, and `resources` as the current baseline fields.
+- Each later gateway must accept every manifest that an earlier versionless gateway accepted.
+- Keep each accepted field name, type, requirement, and function.
+- A field added to an existing shape must be optional.
+- A field added to an existing shape must have one canonical default.
+- Normalize that default before manifest identity calculation.
+- Add a resource kind only with one closed shape.
+- Reject unknown fields and `schema_version`.
+
 ## Static Website Hosting
 
 Apply this section to deployment or publication work for a browser frontend.
@@ -88,23 +102,24 @@ Apply this gate when the selected task requires credentials.
 - Include ignored `.env`, `.env.*`, and `*.env` files in the authorized repository roots.
 - Treat tracked example and sample environment files as documentation only.
 - Search only for exact variable names. Do not print, copy, or record secret values.
-- Do not source or execute an environment file.
-- Parse only the required assignment from a discovered private environment file.
-- Pass the value through the command's documented private input channel.
+- When a command declares one repository environment file as its input, clear
+  its owned process variables and source only that file.
+- Use the command's standard environment lookup. Do not add a credential parser
+  or another input channel.
 - When available, use a non-mutating authentication command to verify the discovered value.
 - Request new credentials only after each authorized existing input fails verification.
 - Report a credential blocker only after you complete this gate.
 
 ## Validation
 
+- Use repository-native `make` targets.
+- Do not run a pre-edit or per-issue `make ci` baseline.
 - Preserve the expected failing integration-test result as implementation evidence.
-- Use repository-native `make` targets when available.
-- Use a satisfactory CI result only when the source code, tests, config, dependencies, and build files stay the same.
-- If there is no applicable satisfactory result, run `make ci` once before you change files.
-- During the change, run the smallest repository target that validates the changed contract.
-- After the last source, test, config, dependency, or build change, run `make ci` once.
+- During the change, run the smallest public-entrypoint target that validates the changed contract.
+- After the last stack change, run `make ci` once at the documented stack completion checkpoint.
 - If this run reports an error, run the target that reports the error during the correction.
 - After the last correction, run `make ci` once.
+- Run `make verify` only when the operator explicitly selects the complete qualification lane.
 - When `make ci` includes `make fmt`, `make lint`, and `make test`, use its result for those targets.
 - During the change or error diagnosis, run the necessary component target.
 - Run a component target when `make ci` does not include the necessary check.
@@ -142,9 +157,7 @@ Apply this gate when the selected task requires credentials.
 - Use `@dataclass(frozen=True)` or Pydantic when already in use.
 - Validate in constructors or edge adapters.
 - Use type hints throughout.
-- Prefer pytest scenarios through public entry points.
-- Use focused unit tests for complex algorithms, calculations, and isolated logic when useful.
-- Require integration coverage of public behavior for product acceptance.
+- Use pytest for integration, end-to-end, and focused unit tests under the shared test-driven development rules.
 
 ### JavaScript And Frontend
 
