@@ -139,6 +139,8 @@ const loginURL = getGitHubLoginUrl();
 A link requires an active account session and fresh GitHub authentication.
 Matching emails never merge accounts. Existing account rules control unlinking and disablement.
 The browser helper restores the profile through `/auth/session` after completion.
+A popup `returnTo` must use the initiating page origin. The helper rejects another origin before authentication starts.
+OAuth login returns a TAuth completion document before navigation to consent. This step keeps Strict session cookies.
 Popup messages contain only status and correlation data. The helper checks the message origin and source window.
 
 A resource scope can request the verified GitHub identity:
@@ -154,6 +156,7 @@ scopes:
 Consent describes this disclosure. Signed `provider_identities` records contain only `provider` and `provider_id`.
 The provider ID is the decimal GitHub user ID. Access without a disclosure scope contains no identity claim.
 TAuth checks the current identity at code exchange and refresh. Unlinking a required identity prevents refresh.
+Consent also records the disclosure policy. A change to that policy requires new consent.
 An issued access token can disclose the previous identity until its configured expiry.
 A Go resource reads `claims.ProviderIdentities` after `pkg/oauthvalidator` validates the token.
 
