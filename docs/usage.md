@@ -584,6 +584,20 @@ rejects redirects, oversized documents, unsafe network addresses, redirects
 during fetch, and invalid cache directives. Dynamic Client Registration is not
 available.
 
+For a metadata client with `application_type: native`, an HTTP loopback IP
+callback can use any selected port from 1 through 65535.
+For example, `http://127.0.0.1/callback` accepts `http://127.0.0.1:51196/callback`.
+A declared port can also change.
+The host, path, query, and all other URI text must stay the same.
+IPv4 and IPv6 callbacks each need their own declaration.
+
+The port rule does not apply to `localhost`, HTTPS callbacks, or web clients.
+Explicitly registered clients keep their configured port limits.
+TAuth rejects malformed ports, user information, and fragments.
+The pending request and authorization code keep the selected callback port.
+See [RFC 8252, section 7.3](https://www.rfc-editor.org/rfc/rfc8252.html#section-7.3)
+for the native loopback port requirement.
+
 Use `GET /.well-known/oauth-authorization-server` for issuer discovery and the
 published `jwks_uri` for verification keys. See [openapi.yaml](openapi.yaml) for
 the complete HTTP schema and [the OAuth validator package](../pkg/oauthvalidator/README.md)

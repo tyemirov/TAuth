@@ -311,6 +311,14 @@ components:
       name: redirect_uri
       in: query
       required: true
+      description: >-
+        Use a declared callback URI. Native clients from Client ID Metadata
+        Documents can select any port from 1 through 65535 for HTTP loopback IP
+        callbacks. All URI text except the port must stay the same.
+        IPv4 and IPv6 callbacks each need their own declaration. The port rule does not apply
+        to localhost, HTTPS callbacks, or web clients. Explicitly registered
+        clients keep their configured port limits. The pending request and
+        authorization code keep the selected callback port.
       schema:
         type: string
         format: uri
