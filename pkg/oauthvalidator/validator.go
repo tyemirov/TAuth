@@ -47,10 +47,11 @@ type JWKSet struct {
 
 // Claims contains the validated TAuth resource-token claims.
 type Claims struct {
-	ClientID string `json:"client_id"`
-	Scope    string `json:"scope"`
-	TenantID string `json:"tenant_id"`
-	GrantID  string `json:"grant_id"`
+	ProviderIdentities ProviderIdentities `json:"provider_identities,omitempty"`
+	ClientID           string             `json:"client_id"`
+	Scope              string             `json:"scope"`
+	TenantID           string             `json:"tenant_id"`
+	GrantID            string             `json:"grant_id"`
 	jwt.RegisteredClaims
 }
 
