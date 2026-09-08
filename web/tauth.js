@@ -15,6 +15,7 @@
    * @property {string} sessionEndpoint
    * @property {string} nonceEndpoint
    * @property {string} googleEndpoint
+   * @property {string} githubStartEndpoint
    * @property {string} appleStartEndpoint
    * @property {string} passwordEndpoint
    * @property {string} passwordSignupEndpoint
@@ -43,6 +44,7 @@
    * @property {string=} sessionEndpoint
    * @property {string=} nonceEndpoint
    * @property {string=} googleEndpoint
+   * @property {string=} githubStartEndpoint
    * @property {string=} appleStartEndpoint
    * @property {string=} passwordEndpoint
    * @property {string=} passwordSignupEndpoint
@@ -71,6 +73,7 @@
    * @property {string} sessionUrl
    * @property {string} nonceUrl
    * @property {string} googleUrl
+   * @property {string} githubStartUrl
    * @property {string} appleStartUrl
    * @property {string} passwordUrl
    * @property {string} passwordSignupUrl
@@ -153,6 +156,7 @@
     sessionEndpoint: "/auth/session",
     nonceEndpoint: "/auth/nonce",
     googleEndpoint: "/auth/google",
+    githubStartEndpoint: "/auth/github/start",
     appleStartEndpoint: "/auth/apple/start",
     passwordEndpoint: "/auth/password/login",
     passwordSignupEndpoint: "/auth/password/signup",
@@ -269,6 +273,97 @@
       "tauth.missing_nonce_token",
     );
     return { credential: credential, nonceToken: nonceToken };
+  }
+
+  /**
+   * @typedef {Object} GitHubLoginOptions
+   * @property {"redirect" | "popup"=} mode
+   * @property {"session" | "link"=} operation
+   * @property {string=} returnTo
+   */
+
+  var githubMessageType = "tauth:github";
+  var githubPopupTimeoutMilliseconds = 5 * 60 * 1000;
+  var githubPopupPollMilliseconds = 250;
+
+  /**
+   * @param {GitHubLoginOptions=} input
+   * @returns {string}
+   */
+  function getGitHubLoginUrl(input = {}) {
+    var loginUrl = new URL(getAuthEndpoints().githubStartUrl);
+    if (input.operation !== undefined && input.operation !== "session" && input.operation !== "link") {
+      throw new Error("tauth.github_invalid_operation");
+    }
+    if (input.mode !== undefined && input.mode !== "redirect" && input.mode !== "popup") {
+      throw new Error("tauth.github_invalid_mode");
+    }
+    var tenantId = currentTenantId();
+    if (tenantId) loginUrl.searchParams.set("tenant_id", tenantId);
+    loginUrl.searchParams.set("return_to", input.returnTo === undefined ? currentReturnToUrl() : input.returnTo);
+    loginUrl.searchParams.set("operation", input.operation || "session");
+    return loginUrl.toString();
+  }
+
+  /**
+   * @param {GitHubLoginOptions=} input
+   * @returns {Promise<UserProfile | string>}
+   */
+  async function startGitHubLogin(input = {}) {
+    var loginUrl = new URL(getGitHubLoginUrl(input));
+    if (input.mode !== "popup") {
+      rememberRestoreHint();
+      window.location.assign(loginUrl.toString());
+      return loginUrl.toString();
+    }
+    var random = window.crypto.getRandomValues(new Uint8Array(32));
+    var correlation = btoa(String.fromCharCode(...random)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    loginUrl.searchParams.set("popup", "true");
+    loginUrl.searchParams.set("correlation", correlation);
+    var expectedOrigin = loginUrl.origin;
+    var popup = window.open(loginUrl.toString(), "_blank", "popup,width=520,height=720");
+    if (!popup) {
+      var blocked = createAuthClientError("tauth.github_popup_blocked");
+      applyAuthError(blocked);
+      throw blocked;
+    }
+    try {
+      await new Promise(function (resolve, reject) {
+        var complete = false;
+        function cleanup() {
+          window.removeEventListener("message", receive);
+          clearInterval(poll);
+          clearTimeout(timeout);
+        }
+        function fail(code) {
+          if (complete) return;
+          complete = true;
+          cleanup();
+          reject(createAuthClientError(code));
+        }
+        function receive(event) {
+          var message = event.data;
+          if (event.origin !== expectedOrigin || event.source !== popup || !message || typeof message !== "object" ||
+              Object.keys(message).length !== 3 || message.type !== githubMessageType || message.correlation !== correlation || typeof message.status !== "string") return;
+          if (message.status !== "complete") { fail("tauth." + message.status); return; }
+          complete = true;
+          cleanup();
+          resolve(undefined);
+        }
+        window.addEventListener("message", receive);
+        var poll = setInterval(function () { if (popup.closed) fail("tauth.github_popup_closed"); }, githubPopupPollMilliseconds);
+        var timeout = setTimeout(function () { fail("tauth.github_popup_expired"); }, githubPopupTimeoutMilliseconds);
+      });
+      var profile = await syncProfileFromServer();
+      if (!profile) throw createAuthClientError("tauth.github_session_missing");
+      rememberRestoreHint();
+      return profile;
+    } catch (error) {
+      applyAuthError(error);
+      throw error;
+    } finally {
+      if (!popup.closed) popup.close();
+    }
   }
 
   /**
@@ -566,6 +661,7 @@
       sessionUrl: joinUrl(options.baseUrl, options.sessionEndpoint),
       nonceUrl: joinUrl(options.baseUrl, options.nonceEndpoint),
       googleUrl: joinUrl(options.baseUrl, options.googleEndpoint),
+      githubStartUrl: joinUrl(options.baseUrl, options.githubStartEndpoint),
       appleStartUrl: joinUrl(options.baseUrl, options.appleStartEndpoint),
       passwordUrl: joinUrl(options.baseUrl, options.passwordEndpoint),
       passwordSignupUrl: joinUrl(options.baseUrl, options.passwordSignupEndpoint),
@@ -1425,6 +1521,8 @@
     window["getAuthEndpoints"] = getAuthEndpoints;
     window["requestNonce"] = requestNonce;
     window["exchangeGoogleCredential"] = exchangeGoogleCredential;
+    window["getGitHubLoginUrl"] = getGitHubLoginUrl;
+    window["startGitHubLogin"] = startGitHubLogin;
     window["getAppleLoginUrl"] = getAppleLoginUrl;
     window["startAppleLogin"] = startAppleLogin;
     window["exchangePasswordCredential"] = exchangePasswordCredential;
