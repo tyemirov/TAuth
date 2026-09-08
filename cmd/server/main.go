@@ -271,6 +271,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(authkit.RedactGitHubCallbackQuery())
 	router.Use(zapLoggerMiddleware(logger))
 
 	if enableCORS {
@@ -282,6 +283,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 		if appConfig.OAuthServer().Enabled() {
 			oauthBrowserPaths = oauthBrowserEndpointPaths(appConfig.OAuthServer())
 		}
+		oauthBrowserPaths[tenants.GitHubStartPath] = struct{}{}
+		oauthBrowserPaths[tenants.GitHubCallbackPath] = struct{}{}
 		router.Use(corsMiddlewareExceptPaths(corsMiddleware, oauthBrowserPaths))
 	}
 
@@ -299,6 +302,8 @@ func runServer(command *cobra.Command, arguments []string) error {
 		logger.Info("using in-memory OAuth store")
 	}
 
+	sessions := authkit.NewOAuthBrowserSessions(registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
+	var githubContinuation authkit.GitHubAuthorizationContinuation
 	if appConfig.OAuthServer().Enabled() {
 		oauthRegistry, oauthRegistryErr := oauthserver.NewRegistry(tenantConfig)
 		if oauthRegistryErr != nil {
@@ -314,15 +319,30 @@ func runServer(command *cobra.Command, arguments []string) error {
 			oauthStore,
 			oauthSigner,
 			oauthserver.NewClientMetadataResolver(appConfig.OAuthServer().ClientMetadata()),
-			authkit.NewOAuthBrowserSessions(registry, userStore, refreshStore, nonceStore, passwordCredentialStore),
+			sessions,
 		)
 		if oauthHandlerErr != nil {
 			return oauthHandlerErr
 		}
+		githubContinuation = oauthHandler
 		if mountErr := oauthHandler.Mount(router); mountErr != nil {
 			return mountErr
 		}
 	}
+
+	githubTransactions := authkit.NewMemoryGitHubTransactionStore()
+	if databaseURL != "" {
+		var storeErr error
+		githubTransactions, storeErr = authkit.NewDatabaseGitHubTransactionStore(shutdownContext, databaseURL)
+		if storeErr != nil {
+			return storeErr
+		}
+	}
+	githubLogin, githubErr := authkit.NewGitHubLogin(sessions, githubTransactions, authkit.NewGitHubProvider(http.DefaultTransport), githubContinuation)
+	if githubErr != nil {
+		return githubErr
+	}
+	githubLogin.Mount(router)
 
 	if err := authkit.ResumeAccountDisablements(shutdownContext, passwordCredentialStore.(authkit.AccountManagementStore), refreshStore, oauthStore, time.Now().UTC().Unix()); err != nil {
 		return err
