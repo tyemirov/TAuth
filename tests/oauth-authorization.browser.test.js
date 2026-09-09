@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
+const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
@@ -42,7 +43,12 @@ if (!puppeteer) {
     }
   });
 
-  test("OAuth authorization uses TAuth login and consent pages", { timeout: 60000 }, async (testingHandle) => {
+  for (const callbackLocation of ["same-origin", "cross-origin"]) {
+    test(`OAuth authorization uses TAuth login and consent pages (${callbackLocation} callback)`, { timeout: 60000 },
+      (testingHandle) => runAuthorizationScenario(testingHandle, callbackLocation));
+  }
+
+  async function runAuthorizationScenario(testingHandle, callbackLocation) {
     /** @type {import("node:child_process").ChildProcess | null} */
     let server = null;
     /** @type {import("puppeteer").Browser | null} */
@@ -50,7 +56,20 @@ if (!puppeteer) {
     const port = await reservePort();
     const issuer = `http://127.0.0.1:${port}`;
     const resource = `${issuer}/protected-resource`;
-    const redirectUri = `${issuer}/client/callback`;
+    let callbackOrigin = issuer;
+    if (callbackLocation === "cross-origin") {
+      const callbackServer = http.createServer((_request, response) => {
+        response.writeHead(200, { "Content-Type": "text/html" });
+        response.end("<!doctype html><title>OAuth client</title><p>Callback received</p>");
+      });
+      await new Promise((resolve) => callbackServer.listen(0, "127.0.0.1", resolve));
+      testingHandle.after(() => new Promise((resolve, reject) => callbackServer.close((error) => error ? reject(error) : resolve())));
+      const address = callbackServer.address();
+      assert.ok(address && typeof address === "object");
+      callbackOrigin = `http://127.0.0.1:${address.port}`;
+      assert.notEqual(callbackOrigin, issuer);
+    }
+    const redirectUri = `${callbackOrigin}/client/callback`;
     const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "tauth-oauth-browser-"));
     testingHandle.after(async () => {
       /** @type {Promise<void>[]} */
@@ -97,6 +116,12 @@ if (!puppeteer) {
     const launchedBrowser = await puppeteer.launch(launchOptions);
     browser = launchedBrowser;
     const page = await launchedBrowser.newPage();
+    const policyErrors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && /form-action/.test(message.text())) {
+        policyErrors.push(message.text());
+      }
+    });
     await page.setRequestInterception(true);
     let googleLoginCount = 0;
     let rejectGoogleLogin = false;
@@ -282,19 +307,49 @@ if (!puppeteer) {
     assert.equal(serverLogs.includes(tokens.refresh_token), false);
 
     // A fresh browser session must retain the server-side grant for this account.
-    await page.deleteCookie(...await page.cookies());
-    await page.goto(authorize.href, { waitUntil: "load" });
+    await page.deleteCookie(...await page.cookies(issuer));
+    const freshLoginResponse = await page.goto(authorize.href, { waitUntil: "load" });
     assert.equal(await page.$eval("h1", (node) => node.textContent), "Log in");
     await page.type('input[name="email"]', "browser@example.com");
-    await page.type('input[name="password"]', "browser-test-password");
-    await Promise.all([
+    await page.type('input[name="password"]', "wrong-password");
+    const [rejectedLoginResponse] = await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
       page.click('button[type="submit"]'),
     ]);
+    assert.equal(rejectedLoginResponse.status(), 401);
+    assert.match(await page.$eval('[role="alert"]', (node) => node.textContent), /Authentication was not accepted/);
+    await page.type('input[name="email"]', "browser@example.com");
+    await page.type('input[name="password"]', "browser-test-password");
+    try {
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.click('button[type="submit"]'),
+      ]);
+    } finally {
+      assert.deepEqual(policyErrors, [], "Password login callback must not be blocked by CSP");
+    }
     const freshCallback = new URL(page.url());
     assert.equal(freshCallback.origin + freshCallback.pathname, redirectUri, "Fresh login must reuse the existing exact consent grant");
     assert.ok(freshCallback.searchParams.get("code"));
     assert.notEqual(freshCallback.searchParams.get("code"), code);
+    assert.equal(freshCallback.searchParams.get("state"), "browser-state");
+    assert.equal(freshCallback.searchParams.get("iss"), issuer);
+    for (const response of [freshLoginResponse, rejectedLoginResponse]) {
+      const formAction = response.headers()["content-security-policy"].split(";").find((directive) => directive.trim().startsWith("form-action ")).trim();
+      assert.equal(formAction, `form-action 'self' ${callbackOrigin}`);
+    }
+    const freshTokenResponse = await fetch(`${issuer}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: freshCallback.searchParams.get("code"),
+        client_id: "browser-test-client",
+        resource,
+        code_verifier: verifier,
+      }),
+    });
+    assert.equal(freshTokenResponse.status, 200, "Fresh login code must support PKCE exchange");
 
     const revokeResponse = await fetch(`${issuer}/oauth/revoke`, {
       method: "POST",
@@ -310,7 +365,7 @@ if (!puppeteer) {
     assert.equal(deniedCallback.searchParams.get("error"), "access_denied");
     assert.equal(deniedCallback.searchParams.has("code"), false);
     assert.equal(deniedCallback.searchParams.get("state"), "browser-state");
-  });
+  }
 }
 
 function oauthConfig({ issuer, resource, redirectUri, keyBase64 }) {
