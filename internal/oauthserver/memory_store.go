@@ -99,6 +99,41 @@ func (store *MemoryStore) ConsumeAuthorizationRequest(ctx context.Context, reque
 	return record.request, nil
 }
 
+// CompleteAuthorizationRequest commits the request, consent, and code together.
+func (store *MemoryStore) CompleteAuthorizationRequest(ctx context.Context, requestToken string, completion AuthorizationCompletion) (string, error) {
+	consent := completion.Consent
+	createConsent := consent.ID == ""
+	if createConsent {
+		identifier, _, err := newOpaqueToken("consent")
+		if err != nil {
+			return "", err
+		}
+		consent.ID = identifier
+	}
+	code, codeDigest, err := newOpaqueToken("authorization_code")
+	if err != nil {
+		return "", err
+	}
+	requestDigest := digestToken(requestToken)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("oauth_store.request.complete.memory: %w", err)
+	}
+	record, exists := store.requests[requestDigest]
+	if !exists || record.request.ExpiresAtUnix <= completion.NowUnix || record.request != completion.Request {
+		return "", ErrAuthorizationRequestInvalid
+	}
+	grant := completion.Grant
+	grant.ConsentID = consent.ID
+	if createConsent {
+		store.consents[consent.ID] = consent
+	}
+	store.codes[codeDigest] = memoryAuthorizationCode{grant: grant}
+	delete(store.requests, requestDigest)
+	return code, nil
+}
+
 // FindConsent returns one active exact consent grant.
 func (store *MemoryStore) FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error) {
 	store.mu.Lock()

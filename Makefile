@@ -32,6 +32,10 @@ test-oauth-login: test-oauth-login-go test-oauth-login-browser
 test-oauth-login-go:
 	$(GO) test ./internal/oauthserver -run '^TestAuthorizationServerBrowserPKCERefreshAndRevocation$$' -count=1
 
+.PHONY: test-oauth-consent
+test-oauth-consent:
+	$(GO) test -race ./internal/oauthserver -run '^TestOAuthConsent' -count=1
+
 test-oauth-login-browser:
 	node --test tests/oauth-authorization.browser.test.js
 

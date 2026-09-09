@@ -711,6 +711,49 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [ ] [B078] (P1) Preserve the OAuth request when consent completion fails.
+  Goal:
+  A failed consent operation must not permanently prevent completion of an unexpired login transaction.
+  Observed behavior (2026-09-09, UTC):
+  - The user started `codex mcp login llm-proxy` in normal Chrome after local MCP logout.
+  - Google login completed. `POST /oauth/login` returned 200 at 19:36:32.619.
+  - `GET /oauth/consent` returned 200 at 19:36:32.637.
+  - The first consent POST returned 500 at 19:36:39.080 after 2.070 seconds.
+  - Two further consent POSTs returned 400 at 19:36:39.147 and 19:36:39.160.
+  - Chrome displayed `{"error":"invalid_request"}`. Codex received no callback and eventually reported a timeout.
+  - The request was less than one minute old. The configured request lifetime was five minutes.
+  - A later authorization reused the existing session and consent, and the MCP token exchange succeeded.
+  - That later result did not verify a fresh login or selection of another account.
+  Cause and evidence limits:
+  `handleConsent` removes the request before it saves consent and issues an authorization code.
+  These database operations have separate transactions. A later failure cannot restore the request.
+  The same ordering affects authorization with existing consent.
+  The live access logs contain HTTP status and duration, but no underlying error for the first 500.
+  The reason for the repeated submissions is not established.
+  Requirements:
+  - Complete request removal, new consent storage, and code storage in one atomic operation.
+  - If completion fails, preserve the unexpired request and remove partial writes.
+  - Validate required provider identities before the storage operation.
+  - Preserve request binding, expiry, PKCE, and successful-request replay rejection.
+  - Apply the same storage contract to authorization with existing consent.
+  Validation:
+  - Inject a code storage failure through the real HTTP consent endpoint and SQLite adapter.
+  - Verify the initial 500, the unchanged consent page, and successful completion after the failure ends.
+  - Verify that the failed attempt leaves no consent or code.
+  - Verify that a completed request cannot issue a second code.
+  - Run the focused OAuth tests and `make ci`.
+  - After deployment, verify fresh login in normal Chrome and receipt of the Codex callback.
+  Scope:
+  Account selection remains a separate acceptance requirement. Existing-session success does not establish that behavior.
+  Implementation (2026-09-09):
+  `CompleteAuthorizationRequest` groups request removal, new consent, and code storage in one operation.
+  SQLite uses one database transaction. The memory adapter uses one lock.
+  The new HTTP tests first reproduced a 400 response after an injected storage failure.
+  The corrected implementation passed the focused consent, login, and GitHub OAuth targets.
+  Local `make ci` passed formatting, lint, Go tests, JavaScript tests, browser tests, and renderer tests.
+  The container check stopped at `test-empty-tenant-bootstrap-runtime` because Docker reported `meta.db: read-only file system`.
+  Full CI and deployed browser acceptance remain unverified.
+
 - [x] [B077] (P1) Return the Google login continuation for an existing session.
   Goal:
   A user with a valid TAuth session can complete Google login from an open OAuth login page.

@@ -543,6 +543,14 @@ OAuth persistence uses four additional tables:
 - `oauth_consents` stores one time-bounded exact user approval and its revocation time.
 - `oauth_refresh_tokens` stores only a token digest, family ID, minimum grant metadata, absolute expiry, and active, rotated, or revoked state.
 
+OAuth completion removes the pending request, stores new consent, and stores the authorization code in one atomic operation.
+The database adapter uses one transaction. The memory adapter holds one lock until all changes are completed.
+If storage fails, the pending request remains available until it expires, and partial consent or code writes do not remain.
+The server checks required provider identities before this operation.
+
+The same completion contract applies when the user has existing consent.
+A successful completion consumes the request once. A repeated submission cannot issue another authorization code.
+
 `DatabaseRefreshTokenStore` and `DatabaseUserStore` parse the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silence default logging, auto-migrate their schemas, and tag errors with context (`refresh_store.*` / `user_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
 
 ## 7. Security Considerations
