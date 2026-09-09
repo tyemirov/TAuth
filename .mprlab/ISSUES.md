@@ -757,6 +757,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B081] (P1) {B079} Allow the approved callback origin after password login.
+  Goal:
+  Complete fresh password login with an existing consent grant when the callback uses another origin.
+  Evidence:
+  Chromium blocks the callback because the login page uses `form-action 'self'`.
+  The existing browser fixture uses the issuer origin for its callback.
+  Requirements:
+  - Allow only the validated callback origin and the issuer origin in the login form policy.
+  - Use the same policy after rejected password login.
+  - Preserve consent, request binding, and PKCE behavior.
+  Validation:
+  - Reproduce the failure through Chromium before the production change.
+  - Verify both callback origins, fresh password login, and authorization code exchange.
+  - Run `make test-oauth-login`, `make test-oauth-consent`, and `make ci`.
+  Resolution (2026-09-09):
+  The login page now adds the validated callback origin to its form policy.
+  The same policy applies after rejected password login.
+  Chromium first reproduced the blocked callback with another origin.
+  Both callback variants now pass with consent reuse, password retry, and PKCE code exchange.
+  The focused targets, `make verify-js`, and `make ci` passed. All 52 JavaScript and browser tests passed without skips.
+
 - [x] [B080] (P1) Remove the stale login controls after Google account selection.
   Goal:
   Show login progress after Google returns the selected account.
