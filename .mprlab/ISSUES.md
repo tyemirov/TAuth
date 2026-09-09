@@ -567,6 +567,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements (420–640)
 
+- [x] [I210] (P1) Show progress during the OAuth consent submission.
+  Goal:
+  Show a clear response when the user selects Approve or Deny.
+  Evidence:
+  The user reported that both buttons seemed unresponsive. The form has no visible submission state.
+  Requirements:
+  - Show progress immediately after either decision.
+  - Prevent another submission while the first request is active.
+  - Preserve the selected decision in the form request.
+  - Keep explicit approval for each new consent grant.
+  Validation:
+  - Inspect the real form state before browser navigation.
+  - Verify visible progress, disabled controls, one submission, and the correct callback for both decisions.
+  Resolution: 2026-09-09 — Both buttons now show progress and prevent another submission.
+  The form preserves the selected decision before it disables the buttons.
+  The initial browser assertion returned an empty status instead of `Connecting…`.
+  Delayed navigation initially caused a `30000 ms` test timeout. The test now observes form state before navigation.
+  Browser tests verify both decisions, exact form values, and one submission.
+  The consent page permits only its nonce-bound script. `make ci` passed, including both container runtime checks.
+  Production deployment and live browser acceptance remain operator steps.
+
 - [x] [I209] (P2) Update four managed governance documents.
   Goal:
   The TAuth guidance matches the current Governor templates and retains repository-owned rules.
@@ -735,6 +756,49 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes (361–399)
+
+- [x] [B080] (P1) Remove the stale login controls after Google account selection.
+  Goal:
+  Show login progress after Google returns the selected account.
+  Evidence:
+  The user reported that the login dialog appeared again after account selection.
+  The current Google callback leaves the login heading and controls visible until navigation completes.
+  The user confirmed that the dialog appeared briefly and then continued without another login.
+  Requirements:
+  - Replace the login controls with progress while TAuth processes the Google credential.
+  - Prevent duplicate credential submissions while the request is active.
+  - Replace the login history entry when the accepted login continues.
+  - Restore the login controls with a visible error when TAuth rejects the credential.
+  Validation:
+  - Hold the Google login response in the browser integration test.
+  - Verify progress, one submission, error recovery, and navigation without the stale login entry.
+  Resolution: 2026-09-09 — The Google callback now shows progress and hides the login controls until completion.
+  An accepted login replaces the history entry. A rejected login restores the controls and shows the error.
+  The initial browser assertion returned `Log in` instead of `Signing in…`.
+  The corrected browser test verifies progress, duplicate callback rejection, error recovery, and history replacement.
+  `make ci` passed. Production deployment and live browser acceptance remain operator steps.
+
+- [x] [B079] (P1) Use an existing consent grant after a fresh login.
+  Goal:
+  Require one approval for each valid consent grant.
+  Evidence:
+  The user completed fresh LLM Proxy login and reported a redundant consent prompt.
+  Authorization checks stored consent before login. The consent page does not check stored consent after login.
+  Requirements:
+  - Examine the exact consent grant for the authenticated account before the consent page appears.
+  - If the grant is valid, complete the request with the existing atomic operation.
+  - Require new approval for another account, an expired grant, or different permissions.
+  - Preserve denial, request expiry, PKCE, and code replay rejection.
+  Validation:
+  - Reproduce the extra prompt through the public HTTP and browser interfaces.
+  - Verify fresh login, grant isolation, and code exchange.
+  - Run the focused OAuth tests and `make ci`.
+  Resolution: 2026-09-09 — Authorization and the consent page now use the same exact-grant lookup.
+  Fresh login uses the existing atomic completion operation when the selected account has a valid grant.
+  The initial HTTP test returned `200` instead of `303`. The browser stopped at consent instead of the client callback.
+  HTTP tests pass with memory and SQLite stores. Other accounts, expired grants, and revoked grants still require approval.
+  Browser tests verify a fresh session and a new authorization code without another consent prompt.
+  `make ci` passed. Production deployment and live browser acceptance remain operator steps.
 
 - [ ] [B078] (P1) Preserve the OAuth request when consent completion fails.
   Goal:

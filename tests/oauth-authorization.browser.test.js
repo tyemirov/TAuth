@@ -98,8 +98,26 @@ if (!puppeteer) {
     browser = launchedBrowser;
     const page = await launchedBrowser.newPage();
     await page.setRequestInterception(true);
+    let googleLoginCount = 0;
+    let rejectGoogleLogin = false;
+    let observeGoogleRequest = () => {};
+    /** @type {Promise<void> | null} */
+    let googleLoginGate = null;
+    let consentSubmissionCount = 0;
     /** @param {import("puppeteer").HTTPRequest} request */
     const interceptGoogleScript = async (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/oauth/consent" ) {
+        consentSubmissionCount += 1;
+      }
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/oauth/login" && googleLoginGate) {
+        googleLoginCount += 1;
+        observeGoogleRequest();
+        await googleLoginGate;
+        if (rejectGoogleLogin) {
+          await request.respond({ status: 500, contentType: "application/json", body: '{"error":"server_error"}' });
+          return;
+        }
+      }
       if (request.url() === "https://accounts.google.com/gsi/client") {
         await request.respond({
           status: 200,
@@ -111,6 +129,40 @@ if (!puppeteer) {
       await request.continue();
     };
     page.on("request", interceptGoogleScript);
+
+    let reportConsentState = (_state) => {};
+    await page.exposeFunction("reportConsentState", (state) => reportConsentState(state));
+    const submitConsent = async (decision) => {
+      const consentResponse = await page.reload({ waitUntil: "domcontentloaded" });
+      assert.doesNotMatch(consentResponse.headers()["content-security-policy"], /accounts\.google\.com/, "Consent must not enable provider scripts or frames");
+      const observed = new Promise((resolve) => { reportConsentState = resolve; });
+      await page.evaluate(() => {
+        document.addEventListener("submit", (event) => {
+          const form = event.target;
+          const state = {
+            status: document.querySelector('[role="status"]')?.textContent || "",
+            disabled: Array.from(form.querySelectorAll("button")).every((button) => button.disabled),
+            decisions: new FormData(form, event.submitter).getAll("decision"),
+            duplicatePrevented: false,
+          };
+          const duplicate = new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: event.submitter });
+          form.dispatchEvent(duplicate);
+          state.duplicatePrevented = duplicate.defaultPrevented;
+          void window.reportConsentState(state);
+        }, { once: true });
+      });
+      const countBefore = consentSubmissionCount;
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.click(`button[value="${decision}"]`),
+      ]);
+      const state = await observed;
+      assert.equal(state.status, decision === "approve" ? "Connecting…" : "Cancelling…");
+      assert.equal(state.disabled, true);
+      assert.deepEqual(state.decisions, [decision]);
+      assert.equal(state.duplicatePrevented, true);
+      assert.equal(consentSubmissionCount, countBefore + 1);
+    };
 
     const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
     const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
@@ -155,6 +207,24 @@ if (!puppeteer) {
     assert.doesNotMatch(await page.content(), /access_token|refresh_token|PRIVATE KEY|password/);
 
     await googlePage.bringToFront();
+    /** @type {() => void} */
+    let releaseGoogleLogin = () => {};
+    googleLoginGate = new Promise((resolve) => { releaseGoogleLogin = resolve; });
+    rejectGoogleLogin = true;
+    const rejectedRequest = new Promise((resolve) => { observeGoogleRequest = resolve; });
+    await googlePage.evaluate(() => { void window.__tauthGoogleCallback({ credential: "unused-token-with-existing-session" }); });
+    await rejectedRequest;
+    assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Signing in…", "Account selection must replace the stale login dialog with progress");
+    assert.equal(await googlePage.$eval("#login-controls", (node) => node.hidden), true);
+    assert.equal(await googlePage.$eval('[role="status"]', (node) => node.textContent), "Please wait while we sign you in.");
+    await googlePage.evaluate(() => { void window.__tauthGoogleCallback({ credential: "duplicate-callback" }); });
+    releaseGoogleLogin();
+    await googlePage.waitForFunction(() => !document.querySelector("#google-error")?.hidden);
+    assert.equal(googleLoginCount, 1, "Only one credential request may be active");
+    assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Log in");
+    assert.equal(await googlePage.$eval("#login-controls", (node) => node.hidden), false);
+    rejectGoogleLogin = false;
+    googleLoginGate = null;
     const googleResponsePromise = googlePage.waitForResponse((response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/oauth/login");
     await googlePage.evaluate(async () => {
@@ -168,12 +238,11 @@ if (!puppeteer) {
     assert.equal(new URL(googlePage.url()).searchParams.get("request"), pendingGoogleURL.searchParams.get("request"));
     assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Authorize access");
     assert.doesNotMatch(await googlePage.content(), /Google authentication was not accepted/);
+    await googlePage.goBack({ waitUntil: "domcontentloaded" });
+    assert.equal(googlePage.url(), "about:blank", "Accepted login must replace the login history entry");
 
     await page.bringToFront();
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.click('button[value="approve"]'),
-    ]);
+    await submitConsent("approve");
     const callback = new URL(page.url());
     assert.equal(callback.origin + callback.pathname, redirectUri);
     assert.equal(callback.searchParams.get("state"), "browser-state");
@@ -211,6 +280,36 @@ if (!puppeteer) {
     assert.equal(serverLogs.includes(code), false);
     assert.equal(serverLogs.includes(tokens.access_token), false);
     assert.equal(serverLogs.includes(tokens.refresh_token), false);
+
+    // A fresh browser session must retain the server-side grant for this account.
+    await page.deleteCookie(...await page.cookies());
+    await page.goto(authorize.href, { waitUntil: "load" });
+    assert.equal(await page.$eval("h1", (node) => node.textContent), "Log in");
+    await page.type('input[name="email"]', "browser@example.com");
+    await page.type('input[name="password"]', "browser-test-password");
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.click('button[type="submit"]'),
+    ]);
+    const freshCallback = new URL(page.url());
+    assert.equal(freshCallback.origin + freshCallback.pathname, redirectUri, "Fresh login must reuse the existing exact consent grant");
+    assert.ok(freshCallback.searchParams.get("code"));
+    assert.notEqual(freshCallback.searchParams.get("code"), code);
+
+    const revokeResponse = await fetch(`${issuer}/oauth/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: tokens.refresh_token, client_id: "browser-test-client" }),
+    });
+    assert.equal(revokeResponse.status, 200);
+    await page.goto(authorize.href, { waitUntil: "domcontentloaded" });
+    assert.equal(await page.$eval("h1", (node) => node.textContent), "Authorize access");
+    await submitConsent("deny");
+    const deniedCallback = new URL(page.url());
+    assert.equal(deniedCallback.origin + deniedCallback.pathname, redirectUri);
+    assert.equal(deniedCallback.searchParams.get("error"), "access_denied");
+    assert.equal(deniedCallback.searchParams.has("code"), false);
+    assert.equal(deniedCallback.searchParams.get("state"), "browser-state");
   });
 }
 

@@ -219,7 +219,7 @@ paths:
               schema:
                 type: string
         "303":
-          description: Continue to login when the user has no valid tenant session.
+          description: Continue to login without a valid tenant session, or return a code when the exact consent grant is valid.
         "400":
           $ref: "#/components/responses/OAuthError"
     post:

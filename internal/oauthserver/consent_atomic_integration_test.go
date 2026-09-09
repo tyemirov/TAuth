@@ -3,11 +3,90 @@ package oauthserver
 import (
 	"context"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestOAuthConsentExistingGrantAfterFreshLogin(t *testing.T) {
+	for _, storage := range []string{"memory", "sqlite"} {
+		t.Run(storage, func(t *testing.T) {
+			fixture := newGitHubOAuthFixture(t, storage, false)
+			verifier := strings.Repeat("d", 43)
+			callback, _ := fixture.begin(t, "initial-grant", verifier, testOAuthClient, testOAuthRedirect)
+			fixture.approve(t, fixture.callbackDestination(t, callback))
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.client.Jar = jar
+			callback, _ = fixture.begin(t, "fresh-login", verifier, testOAuthClient, testOAuthRedirect)
+			consentURL := fixture.callbackDestination(t, callback)
+			response := doRequest(t, fixture.client, http.MethodGet, consentURL, nil)
+			assertStatus(t, response, http.StatusSeeOther)
+			destination := response.Header.Get("Location")
+			response.Body.Close()
+			if queryValue(t, destination, "state") != "fresh-login" {
+				t.Fatal("fresh login changed OAuth state")
+			}
+			code := queryValue(t, destination, "code")
+			response = doRequest(t, fixture.client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(codeTokenForm(code, verifier).Encode()))
+			assertStatus(t, response, http.StatusOK)
+			response.Body.Close()
+			assertOAuthError(t, doRequest(t, fixture.client, http.MethodGet, consentURL, nil), "invalid_request")
+		})
+	}
+}
+
+func TestOAuthConsentFreshLoginRequiresNewGrant(t *testing.T) {
+	for _, condition := range []string{"different-account", "expired-grant", "revoked-grant"} {
+		t.Run(condition, func(t *testing.T) {
+			fixture := newGitHubOAuthFixture(t, "sqlite", false)
+			verifier := strings.Repeat("e", 43)
+			callback, _ := fixture.begin(t, "initial-grant", verifier, testOAuthClient, testOAuthRedirect)
+			consentURL := fixture.callbackDestination(t, callback)
+			pending, err := fixture.server.store.GetAuthorizationRequest(context.Background(), queryValue(t, consentURL, "request"), time.Now().Unix())
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := fixture.approve(t, consentURL)
+			response := doRequest(t, fixture.client, http.MethodPost, fixture.issuer+"/oauth/token", strings.NewReader(codeTokenForm(queryValue(t, destination, "code"), verifier).Encode()))
+			assertStatus(t, response, http.StatusOK)
+			tokens := decodeTokenResponse(t, response)
+			switch condition {
+			case "different-account":
+				fixture.provider.UserJSON = `{"id":42,"login":"second-user","name":"Second User"}`
+				fixture.provider.EmailsJSON = `[{"email":"second@example.com","primary":true,"verified":true}]`
+			case "expired-grant":
+				policy, _, err := fixture.server.registry.ResolveResource(pending.Resource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				future := time.Now().Add(policy.ConsentTTL + time.Minute)
+				fixture.server.now = func() time.Time { return future }
+			case "revoked-grant":
+				form := url.Values{"token": {tokens.RefreshToken}, "client_id": {testOAuthClient}}
+				response = doRequest(t, fixture.client, http.MethodPost, fixture.issuer+"/oauth/revoke", strings.NewReader(form.Encode()))
+				assertStatus(t, response, http.StatusOK)
+				response.Body.Close()
+			}
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.client.Jar = jar
+			callback, _ = fixture.begin(t, "fresh-grant", verifier, testOAuthClient, testOAuthRedirect)
+			consentURL = fixture.callbackDestination(t, callback)
+			response = doRequest(t, fixture.client, http.MethodGet, consentURL, nil)
+			assertStatus(t, response, http.StatusOK)
+			if !strings.Contains(readBody(t, response), "Authorize access") {
+				t.Fatal("fresh login omitted required consent")
+			}
+		})
+	}
+}
 
 func TestOAuthConsentStorageFailurePreservesRequest(t *testing.T) {
 	for _, table := range []string{oauthConsentsTable, oauthAuthorizationCodesTable} {
