@@ -130,6 +130,7 @@ type Store interface {
 	CreateAuthorizationRequest(ctx context.Context, request AuthorizationRequest) (string, error)
 	GetAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error)
 	ConsumeAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error)
+	CompleteAuthorizationRequest(ctx context.Context, requestToken string, completion AuthorizationCompletion) (string, error)
 	FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error)
 	SaveConsent(ctx context.Context, consent Consent) (Consent, error)
 	IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error)
@@ -139,6 +140,15 @@ type Store interface {
 	RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error
 	RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error
 	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
+}
+
+// AuthorizationCompletion binds one pending request to its consent and code.
+// An empty consent ID creates consent; a populated ID uses the approved grant.
+type AuthorizationCompletion struct {
+	Request AuthorizationRequest
+	Consent Consent
+	Grant   AuthorizationGrant
+	NowUnix int64
 }
 
 func (client Client) permits(resource string, scopes []string) bool {

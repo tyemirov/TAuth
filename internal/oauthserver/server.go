@@ -309,24 +309,11 @@ func (server *Server) handleConsent(response http.ResponseWriter, request *http.
 		return
 	}
 	now := server.now().UTC()
-	consumed, consumeErr := server.store.ConsumeAuthorizationRequest(request.Context(), requestToken, now.Unix())
-	if consumeErr != nil || consumed != pending {
-		if consumeErr != nil {
-			writeAuthorizationRequestStoreError(response, consumeErr)
-		} else {
-			writeOAuthError(response, http.StatusBadRequest, "invalid_request")
-		}
-		return
-	}
-	consent, saveErr := server.store.SaveConsent(request.Context(), Consent{
+	consent := Consent{
 		ConsentKey: pending.consentKey(userID), CreatedAtUnix: now.Unix(),
 		ExpiresAtUnix: now.Add(policy.ConsentTTL).Unix(),
-	})
-	if saveErr != nil {
-		writeOAuthError(response, http.StatusInternalServerError, "server_error")
-		return
 	}
-	server.issueCodeAndRedirect(response, request, pending, userID, consent.ID, now)
+	server.completeAndRedirect(response, request, requestToken, pending, userID, consent, now)
 }
 
 func (server *Server) handleToken(response http.ResponseWriter, request *http.Request) {
@@ -577,19 +564,10 @@ func (server *Server) pendingBrowserRequest(response http.ResponseWriter, reques
 
 func (server *Server) consumeAndIssueCodeAndRedirect(response http.ResponseWriter, request *http.Request, requestToken string, pending AuthorizationRequest, userID string, consentID string) {
 	now := server.now().UTC()
-	consumed, consumeErr := server.store.ConsumeAuthorizationRequest(request.Context(), requestToken, now.Unix())
-	if consumeErr != nil || consumed != pending {
-		if consumeErr != nil {
-			writeAuthorizationRequestStoreError(response, consumeErr)
-		} else {
-			writeOAuthError(response, http.StatusBadRequest, "invalid_request")
-		}
-		return
-	}
-	server.issueCodeAndRedirect(response, request, pending, userID, consentID, now)
+	server.completeAndRedirect(response, request, requestToken, pending, userID, Consent{ID: consentID}, now)
 }
 
-func (server *Server) issueCodeAndRedirect(response http.ResponseWriter, request *http.Request, pending AuthorizationRequest, userID string, consentID string, now time.Time) {
+func (server *Server) completeAndRedirect(response http.ResponseWriter, request *http.Request, requestToken string, pending AuthorizationRequest, userID string, consent Consent, now time.Time) {
 	_, resource, err := server.registry.ResolveResource(pending.Resource)
 	if err != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_target")
@@ -603,14 +581,17 @@ func (server *Server) issueCodeAndRedirect(response http.ResponseWriter, request
 		}
 		return
 	}
-	code, issueErr := server.store.IssueAuthorizationCode(request.Context(), AuthorizationGrant{
-		ConsentID: consentID, TenantID: pending.TenantID, UserID: userID,
+	grant := AuthorizationGrant{
+		TenantID: pending.TenantID, UserID: userID,
 		ClientID: pending.ClientID, RedirectURI: pending.RedirectURI, Resource: pending.Resource,
 		Scope: pending.Scope, DisclosurePolicy: pending.DisclosurePolicy, CodeChallenge: pending.CodeChallenge,
 		ExpiresAtUnix: now.Add(server.config.AuthorizationCodeTTL()).Unix(),
+	}
+	code, issueErr := server.store.CompleteAuthorizationRequest(request.Context(), requestToken, AuthorizationCompletion{
+		Request: pending, Consent: consent, Grant: grant, NowUnix: now.Unix(),
 	})
 	if issueErr != nil {
-		writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		writeAuthorizationRequestStoreError(response, issueErr)
 		return
 	}
 	redirectWithParameters(response, pending.RedirectURI, map[string]string{"code": code, "iss": server.config.Issuer(), "state": pending.State})

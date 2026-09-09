@@ -196,7 +196,7 @@ The render request has this envelope schema:
 | `contributions` | array | Required. The array contains complete contributions. |
 | `contributions[].owner` | string | Required application owner. |
 | `contributions[].id` | string | Required resource ID. |
-| `contributions[].kind` | string | Required `tauth_authorization_server` or `tauth_tenant`. |
+| `contributions[].kind` | string | Required `tauth_authorization_server`, `tauth_tenant`, or `tauth_github_tenant`. |
 | `contributions[].desired` | object | Required normalized resource from the gateway schema. |
 | `contributions[].outputs` | object | Required map with output names as keys. |
 | `contributions[].outputs.*.value` | string | Required resolved output value. |
@@ -207,6 +207,11 @@ The decoder rejects unknown fields in the envelope and nested resource data.
 The gateway owns the `resources.yml` resource schema and canonical defaults.
 This document does not define a second resource schema. TAuth owns the mapping
 from each accepted normalized resource to its native config.
+
+The `tauth_github_tenant` kind requires enabled GitHub login and does not require Google configuration.
+Its envelope kind must match the desired resource kind.
+It uses the same native tenant validation, private outputs, and OAuth disclosure policy as `tauth_tenant`.
+The existing `tauth_tenant` contribution contract remains current.
 
 The gateway treats the request and response as private values. It does not
 interpret TAuth fields or write secret values to normal logs.

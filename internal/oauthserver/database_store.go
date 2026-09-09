@@ -191,6 +191,36 @@ func (store *DatabaseStore) FindConsent(ctx context.Context, key ConsentKey, now
 	return consentFromDatabase(record), true, nil
 }
 
+// CompleteAuthorizationRequest commits the request, consent, and code together.
+func (store *DatabaseStore) CompleteAuthorizationRequest(ctx context.Context, requestToken string, completion AuthorizationCompletion) (string, error) {
+	var code string
+	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		transactionStore := &DatabaseStore{db: transaction, driverLabel: store.driverLabel}
+		pending, err := transactionStore.ConsumeAuthorizationRequest(ctx, requestToken, completion.NowUnix)
+		if err != nil {
+			return err
+		}
+		if pending != completion.Request {
+			return ErrAuthorizationRequestInvalid
+		}
+		consent := completion.Consent
+		if consent.ID == "" {
+			consent, err = transactionStore.SaveConsent(ctx, consent)
+			if err != nil {
+				return err
+			}
+		}
+		grant := completion.Grant
+		grant.ConsentID = consent.ID
+		code, err = transactionStore.IssueAuthorizationCode(ctx, grant)
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("oauth_store.request.complete.%s: %w", store.driverLabel, err)
+	}
+	return code, nil
+}
+
 func (store *DatabaseStore) SaveConsent(ctx context.Context, consent Consent) (Consent, error) {
 	if strings.TrimSpace(consent.ID) == "" {
 		consentID, _, consentIDErr := newOpaqueToken("consent")
