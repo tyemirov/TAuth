@@ -26,6 +26,7 @@ const (
 
 	resourceKindAuthorizationServer = "tauth_authorization_server"
 	resourceKindTenant              = "tauth_tenant"
+	resourceKindGitHubTenant        = "tauth_github_tenant"
 
 	googleWebClientOutput = "google-web-client-id"
 	jwtSigningKeyOutput   = "jwt-signing-key"
@@ -404,7 +405,7 @@ func buildDocument(renderRequest request) (nativeDocument, error) {
 				return nativeDocument{}, buildErr
 			}
 			document.OAuth = &oauthServer
-		case resourceKindTenant:
+		case resourceKindTenant, resourceKindGitHubTenant:
 			tenant, buildErr := buildTenant(item)
 			if buildErr != nil {
 				return nativeDocument{}, buildErr
@@ -467,8 +468,11 @@ func buildTenant(item contribution) (nativeTenant, error) {
 	if decodeErr := strictJSON(item.Desired, &resource); decodeErr != nil {
 		return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s: %v", errInvalidRequest, item.Owner, item.ID, decodeErr)
 	}
-	if resource.Kind != resourceKindTenant || resource.ID != item.ID || resource.Version != 1 {
+	if resource.Kind != item.Kind || resource.ID != item.ID || resource.Version != 1 {
 		return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s identity is inconsistent", errInvalidRequest, item.Owner, item.ID)
+	}
+	if item.Kind == resourceKindGitHubTenant && (resource.Tenant.GitHubOAuth == nil || !resource.Tenant.GitHubOAuth.Enabled) {
+		return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s requires enabled GitHub login", errInvalidRequest, item.Owner, item.ID)
 	}
 	googleWebClientID := ""
 	if resource.Tenant.GoogleWebClientID != nil {
