@@ -1,0 +1,620 @@
+openapi: 3.1.0
+info:
+  title: TAuth OAuth Authorization Server
+  version: 1.0.0
+  description: OAuth 2.1 authorization-code service for public first-party resource clients.
+servers:
+  - url: https://auth.example.com
+paths:
+  /auth/github/start:
+    get:
+      operationId: startGitHubLogin
+      summary: Start GitHub identity authentication.
+      description: Create a five-minute browser-bound transaction and redirect to GitHub with PKCE S256.
+      parameters:
+        - name: tenant_id
+          in: query
+          schema: {type: string}
+          description: Select the specified tenant, or resolve one tenant from the return destination.
+        - name: return_to
+          in: query
+          schema: {type: string, format: uri}
+          description: Use one configured tenant origin. Required for session login and linking.
+        - name: operation
+          in: query
+          schema: {type: string, enum: [session, link, oauth], default: session}
+        - name: oauth_request
+          in: query
+          schema: {type: string}
+          description: Identify the pending OAuth request. Required only for OAuth continuation.
+        - name: popup
+          in: query
+          schema: {type: boolean, const: true}
+          description: Select popup completion for session login or linking.
+        - name: correlation
+          in: query
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+          description: Supply a random 32-byte base64url value for popup completion.
+      responses:
+        "302":
+          description: The browser receives a secure transaction cookie and the GitHub authorization destination.
+          headers:
+            Location:
+              schema: {type: string, format: uri}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        "400":
+          $ref: "#/components/responses/GitHubFailure"
+        "401":
+          $ref: "#/components/responses/GitHubFailure"
+        "404":
+          $ref: "#/components/responses/GitHubFailure"
+        "500":
+          $ref: "#/components/responses/GitHubFailure"
+        "503":
+          $ref: "#/components/responses/GitHubFailure"
+  /auth/github/callback:
+    get:
+      operationId: completeGitHubLogin
+      summary: Complete a GitHub login transaction.
+      description: Claim the browser-bound transaction before exchange. Resolve the tenant without an Origin header.
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+        - name: code
+          in: query
+          schema: {type: string}
+        - name: error
+          in: query
+          schema: {type: string}
+        - name: error_description
+          in: query
+          schema: {type: string}
+        - name: error_uri
+          in: query
+          schema: {type: string}
+        - name: tenant_id
+          in: query
+          schema: {type: string}
+          description: If present, this value must match the transaction tenant.
+      responses:
+        "200":
+          description: >-
+            A popup page sends completion status and correlation to the initiating origin.
+            OAuth continuation returns a TAuth document that starts navigation to consent after the document loads.
+          content:
+            text/html:
+              schema: {type: string}
+        "303":
+          description: Session login or account linking sets TAuth cookies and returns to the approved destination.
+          headers:
+            Location:
+              schema: {type: string, format: uri}
+        "400":
+          $ref: "#/components/responses/GitHubFailure"
+        "401":
+          $ref: "#/components/responses/GitHubFailure"
+        "403":
+          $ref: "#/components/responses/GitHubFailure"
+        "409":
+          $ref: "#/components/responses/GitHubFailure"
+        "500":
+          $ref: "#/components/responses/GitHubFailure"
+        "502":
+          $ref: "#/components/responses/GitHubFailure"
+  /.well-known/oauth-authorization-server:
+    get:
+      operationId: getAuthorizationServerMetadata
+      summary: Get authorization-server metadata.
+      responses:
+        "200":
+          description: The RFC 8414 metadata for the configured issuer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizationServerMetadata"
+  /oauth/jwks:
+    get:
+      operationId: getOAuthJWKS
+      summary: Get public OAuth verification keys.
+      responses:
+        "200":
+          description: The public ES256 verification keys for current and retained key IDs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWKSet"
+  /oauth/authorize:
+    get:
+      operationId: authorizeOAuthClient
+      summary: Start a browser authorization-code transaction.
+      parameters:
+        - $ref: "#/components/parameters/ResponseType"
+        - $ref: "#/components/parameters/ClientID"
+        - $ref: "#/components/parameters/RedirectURI"
+        - $ref: "#/components/parameters/Resource"
+        - $ref: "#/components/parameters/Scope"
+        - $ref: "#/components/parameters/State"
+        - $ref: "#/components/parameters/CodeChallenge"
+        - $ref: "#/components/parameters/CodeChallengeMethod"
+      responses:
+        "303":
+          description: Continue at a TAuth login or consent page, or return a code or OAuth error to the exact client redirect URI.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/OAuthError"
+  /oauth/login:
+    get:
+      operationId: getOAuthLogin
+      summary: Show the issuer-owned login page for a pending request.
+      parameters:
+        - $ref: "#/components/parameters/RequestHandle"
+      responses:
+        "200":
+          description: The no-store TAuth login page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "303":
+          description: Continue to consent when the user has a valid session.
+        "400":
+          $ref: "#/components/responses/OAuthError"
+    post:
+      operationId: submitOAuthLogin
+      summary: Authenticate a user for a pending request.
+      parameters:
+        - $ref: "#/components/parameters/BrowserOrigin"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/OAuthPasswordLogin"
+                - $ref: "#/components/schemas/OAuthGoogleLogin"
+      responses:
+        "200":
+          description: >-
+            A Google login POST with Accept application/json returns the next consent URL.
+            This response also applies when the request has a valid TAuth session.
+            The response uses Cache-Control no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [next]
+                properties:
+                  next:
+                    type: string
+                    format: uri
+        "303":
+          description: Continue to the issuer-owned consent page after password login.
+        "401":
+          description: The login was not accepted. The response contains no account data.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/OAuthError"
+  /oauth/consent:
+    get:
+      operationId: getOAuthConsent
+      summary: Show the client, resource, scopes, and return host.
+      parameters:
+        - $ref: "#/components/parameters/RequestHandle"
+      responses:
+        "200":
+          description: The no-store TAuth consent page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "303":
+          description: Continue to login when the user has no valid tenant session.
+        "400":
+          $ref: "#/components/responses/OAuthError"
+    post:
+      operationId: decideOAuthConsent
+      summary: Approve or deny a pending client grant.
+      parameters:
+        - $ref: "#/components/parameters/BrowserOrigin"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [request, decision]
+              properties:
+                request:
+                  type: string
+                decision:
+                  type: string
+                  enum: [approve, deny]
+      responses:
+        "303":
+          description: Return a one-time code or access_denied to the exact registered redirect URI.
+        "400":
+          $ref: "#/components/responses/OAuthError"
+  /oauth/token:
+    post:
+      operationId: exchangeOAuthGrant
+      summary: Exchange a code or rotate a refresh token.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/AuthorizationCodeExchange"
+                - $ref: "#/components/schemas/RefreshTokenExchange"
+      responses:
+        "200":
+          description: A short-lived resource access token and one opaque rotating refresh token.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/OAuthError"
+  /oauth/revoke:
+    post:
+      operationId: revokeOAuthGrant
+      summary: Revoke a refresh-token family and its consent grant.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token, client_id]
+              properties:
+                token:
+                  type: string
+                token_type_hint:
+                  type: string
+                  description: Optional lookup hint. TAuth ignores unrecognized values as required by RFC 7009.
+                client_id:
+                  type: string
+      responses:
+        "200":
+          description: Revocation is complete. Unknown tokens have the same response.
+        "400":
+          $ref: "#/components/responses/OAuthError"
+components:
+  parameters:
+    ResponseType:
+      name: response_type
+      in: query
+      required: true
+      schema:
+        type: string
+        const: code
+    ClientID:
+      name: client_id
+      in: query
+      required: true
+      schema:
+        type: string
+    RedirectURI:
+      name: redirect_uri
+      in: query
+      required: true
+      description: >-
+        Use a declared callback URI. Native clients from Client ID Metadata
+        Documents can select any port from 1 through 65535 for HTTP loopback IP
+        callbacks. All URI text except the port must stay the same.
+        IPv4 and IPv6 callbacks each need their own declaration. The port rule does not apply
+        to localhost, HTTPS callbacks, or web clients. Explicitly registered
+        clients keep their configured port limits. The pending request and
+        authorization code keep the selected callback port.
+      schema:
+        type: string
+        format: uri
+    Resource:
+      name: resource
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uri
+    Scope:
+      name: scope
+      in: query
+      required: true
+      schema:
+        type: string
+    State:
+      name: state
+      in: query
+      required: true
+      schema:
+        type: string
+    CodeChallenge:
+      name: code_challenge
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 43
+        maxLength: 43
+    CodeChallengeMethod:
+      name: code_challenge_method
+      in: query
+      required: true
+      schema:
+        type: string
+        const: S256
+    RequestHandle:
+      name: request
+      in: query
+      required: true
+      schema:
+        type: string
+    BrowserOrigin:
+      name: Origin
+      in: header
+      required: true
+      description: The exact issuer origin. Browsers set this header for the issuer-owned form POST.
+      schema:
+        type: string
+        format: uri
+  responses:
+    GitHubFailure:
+      description: A stable GitHub login error without provider credentials or response bodies.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GitHubError"
+    OAuthError:
+      description: A standard OAuth error without account, token, code, or key data.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OAuthError"
+  schemas:
+    GitHubError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_request
+            - missing_tenant
+            - github_login_not_configured
+            - https_required
+            - invalid_origin
+            - invalid_return_to
+            - invalid_state
+            - invalid_oauth_request
+            - authentication_required
+            - github_consent_denied
+            - github_provider_rejected
+            - github_verified_email_required
+            - user_not_allowed
+            - account_exists
+            - account_disabled
+            - store_failure
+    ProviderIdentity:
+      type: object
+      additionalProperties: false
+      required: [provider, provider_id]
+      properties:
+        provider:
+          type: string
+          const: github
+        provider_id:
+          type: string
+          pattern: '^[1-9][0-9]{0,19}$'
+          description: The positive decimal GitHub user ID, within the unsigned 64-bit range.
+    ProviderIdentities:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        $ref: "#/components/schemas/ProviderIdentity"
+      description: This signed claim is present only when a granted resource scope requires provider identity disclosure.
+    AuthorizationServerMetadata:
+      type: object
+      required:
+        - issuer
+        - authorization_endpoint
+        - token_endpoint
+        - revocation_endpoint
+        - jwks_uri
+        - response_types_supported
+        - grant_types_supported
+        - code_challenge_methods_supported
+        - resource_parameter_supported
+        - authorization_response_iss_parameter_supported
+      properties:
+        issuer:
+          type: string
+          format: uri
+        authorization_endpoint:
+          type: string
+          format: uri
+        token_endpoint:
+          type: string
+          format: uri
+        revocation_endpoint:
+          type: string
+          format: uri
+        jwks_uri:
+          type: string
+          format: uri
+        scopes_supported:
+          type: array
+          items:
+            type: string
+        response_types_supported:
+          type: array
+          items:
+            type: string
+        grant_types_supported:
+          type: array
+          items:
+            type: string
+        token_endpoint_auth_methods_supported:
+          type: array
+          items:
+            type: string
+        revocation_endpoint_auth_methods_supported:
+          type: array
+          items:
+            type: string
+        code_challenge_methods_supported:
+          type: array
+          items:
+            type: string
+        client_id_metadata_document_supported:
+          type: boolean
+        resource_parameter_supported:
+          type: boolean
+          const: true
+        authorization_response_iss_parameter_supported:
+          type: boolean
+          const: true
+    JWKSet:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/JWK"
+    JWK:
+      type: object
+      required: [kty, use, kid, alg, crv, x, y]
+      properties:
+        kty:
+          type: string
+          const: EC
+        use:
+          type: string
+          const: sig
+        kid:
+          type: string
+        alg:
+          type: string
+          const: ES256
+        crv:
+          type: string
+          const: P-256
+        x:
+          type: string
+        y:
+          type: string
+    AuthorizationCodeExchange:
+      type: object
+      required: [grant_type, code, client_id, resource, code_verifier]
+      properties:
+        grant_type:
+          type: string
+          const: authorization_code
+        code:
+          type: string
+        client_id:
+          type: string
+        resource:
+          type: string
+          format: uri
+        code_verifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+    OAuthPasswordLogin:
+      type: object
+      required: [request, provider, email, password]
+      properties:
+        request:
+          type: string
+        provider:
+          type: string
+          const: password
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    OAuthGoogleLogin:
+      type: object
+      required: [request, provider, google_id_token, nonce_token]
+      properties:
+        request:
+          type: string
+        provider:
+          type: string
+          const: google
+        google_id_token:
+          type: string
+        nonce_token:
+          type: string
+    RefreshTokenExchange:
+      type: object
+      required: [grant_type, refresh_token, client_id, resource]
+      properties:
+        grant_type:
+          type: string
+          const: refresh_token
+        refresh_token:
+          type: string
+        client_id:
+          type: string
+        resource:
+          type: string
+          format: uri
+        scope:
+          type: string
+          description: Optional exact scope set from the approved refresh-token family.
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, scope, refresh_token]
+      properties:
+        access_token:
+          type: string
+          description: A signed TAuth JWT. Its optional provider_identities claim follows the ProviderIdentities schema.
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          minimum: 1
+        scope:
+          type: string
+        refresh_token:
+          type: string
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - access_denied
+            - invalid_client
+            - invalid_grant
+            - invalid_request
+            - invalid_scope
+            - invalid_target
+            - server_error
+            - unsupported_grant_type
+            - unsupported_response_type
+            - unauthorized_client
