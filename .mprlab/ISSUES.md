@@ -6,6 +6,31 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F006] (P1) {F005} Accept GitHub tenant contributions in the deployment renderer.
+  Goal:
+  The consuming ISSUES.md F008 deployment can declare a GitHub tenant without Google configuration.
+  The gateway preserves the required Google field in its existing `tauth_tenant` manifest shape.
+  Requirements:
+  - Accept `tauth_github_tenant` as a distinct contribution kind in the current schema-v1 render request.
+  - Require matching envelope and desired-resource kinds.
+  - Require enabled GitHub configuration for the new kind.
+  - Use the current tenant renderer, private outputs, native validation, and OAuth identity disclosure policy.
+  - Preserve the existing `tauth_tenant` contribution contract.
+  - Keep resource schema ownership in the gateway and authentication mechanics in TAuth.
+  Validation:
+  - Run the real CLI with a GitHub tenant and no Google configuration.
+  - Verify GitHub login settings and per-scope identity disclosure in the rendered native config.
+  - Reject absent or disabled GitHub configuration, mismatched kinds, and missing private outputs.
+  - Verify empty output and private-value exclusion after rejection.
+  - Run `make test-deployment-config-renderer` and `make ci`.
+  Resolution (2026-09-08):
+  The renderer accepts `tauth_github_tenant` through the existing native tenant implementation.
+  It requires enabled GitHub configuration and matching envelope and desired-resource kinds.
+  The real CLI test verifies GitHub settings and identity disclosure without Google configuration.
+  It rejects invalid kinds, absent or disabled GitHub login, and missing private outputs without config or credential disclosure.
+  The focused renderer target and full `make ci` passed, including both runtime bootstrap checks.
+  No provider artifact was published or deployed.
+
 - [x] [F005] (P0) {F001,B055} Add GitHub login for browser sessions and OAuth resource clients.
   Goal:
   A user can authenticate with GitHub without a Google account, a password account, or manual token entry.
