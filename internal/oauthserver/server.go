@@ -192,16 +192,23 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 		redirectIssuerPage(response, server.config.LoginEndpoint(), requestToken)
 		return
 	}
-	consent, consentExists, consentErr := server.store.FindConsent(request.Context(), pending.consentKey(userID), now.Unix())
-	if consentErr != nil {
-		writeOAuthError(response, http.StatusInternalServerError, "server_error")
-		return
-	}
-	if consentExists {
-		server.consumeAndIssueCodeAndRedirect(response, request, requestToken, pending, userID, consent.ID)
+	if server.continueWithConsent(response, request, requestToken, pending, userID) {
 		return
 	}
 	redirectIssuerPage(response, server.config.ConsentEndpoint(), requestToken)
+}
+
+func (server *Server) continueWithConsent(response http.ResponseWriter, request *http.Request, requestToken string, pending AuthorizationRequest, userID string) bool {
+	consent, consentExists, consentErr := server.store.FindConsent(request.Context(), pending.consentKey(userID), server.now().UTC().Unix())
+	if consentErr != nil {
+		writeOAuthError(response, http.StatusInternalServerError, "server_error")
+		return true
+	}
+	if consentExists {
+		server.consumeAndIssueCodeAndRedirect(response, request, requestToken, pending, userID, consent.ID)
+		return true
+	}
+	return false
 }
 
 func (server *Server) handleLogin(response http.ResponseWriter, request *http.Request) {
@@ -291,8 +298,17 @@ func (server *Server) handleConsent(response http.ResponseWriter, request *http.
 		return
 	}
 	if request.Method == http.MethodGet {
+		if server.continueWithConsent(response, request, requestToken, pending, userID) {
+			return
+		}
 		data := consentPageDataFor(pending, resource, requestToken)
-		writeBrowserPage(response, http.StatusOK, consentPage, data, browserPagePolicy{formRedirectOrigin: data.RedirectOrigin})
+		scriptNonce, _, nonceErr := newOpaqueToken("browser_script_nonce")
+		if nonceErr != nil {
+			writeOAuthError(response, http.StatusInternalServerError, "server_error")
+			return
+		}
+		data.ScriptNonce = scriptNonce
+		writeBrowserPage(response, http.StatusOK, consentPage, data, browserPagePolicy{scriptNonce: scriptNonce, formRedirectOrigin: data.RedirectOrigin})
 		return
 	}
 	decision := request.PostForm.Get("decision")
@@ -807,6 +823,7 @@ type consentScopeData struct {
 }
 
 type consentPageData struct {
+	ScriptNonce        string
 	RedirectOrigin     string
 	RequestToken       string
 	ClientName         string
@@ -836,6 +853,7 @@ func consentPageDataFor(pending AuthorizationRequest, resource Resource, request
 
 type browserPagePolicy struct {
 	scriptNonce        string
+	googleLogin        bool
 	formRedirectOrigin string
 }
 
@@ -848,7 +866,10 @@ func writeBrowserPage(response http.ResponseWriter, status int, page *template.T
 	}
 	contentSecurityPolicy := "default-src 'none'; style-src 'unsafe-inline'; form-action " + formActions + "; base-uri 'none'; frame-ancestors 'none'"
 	if policy.scriptNonce != "" {
-		contentSecurityPolicy += "; script-src 'nonce-" + policy.scriptNonce + "' https://accounts.google.com; frame-src https://accounts.google.com; connect-src 'self' https://accounts.google.com"
+		contentSecurityPolicy += "; script-src 'nonce-" + policy.scriptNonce + "'"
+		if policy.googleLogin {
+			contentSecurityPolicy += " https://accounts.google.com; frame-src https://accounts.google.com; connect-src 'self' https://accounts.google.com"
+		}
 	}
 	response.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	response.Header().Set("Referrer-Policy", "origin")
@@ -880,9 +901,13 @@ func (server *Server) writeLoginPage(response http.ResponseWriter, request *http
 	if methods.GitHub {
 		data.GitHubURL = tenants.GitHubStartPath + "?" + url.Values{"tenant_id": {pending.TenantID}, "operation": {"oauth"}, "oauth_request": {requestToken}}.Encode()
 	}
-	writeBrowserPage(response, status, loginPage, data, browserPagePolicy{scriptNonce: data.ScriptNonce})
+	parsedRedirect, _ := url.Parse(pending.RedirectURI)
+	writeBrowserPage(response, status, loginPage, data, browserPagePolicy{
+		scriptNonce: data.ScriptNonce, googleLogin: methods.GoogleClientID != "",
+		formRedirectOrigin: parsedRedirect.Scheme + "://" + parsedRedirect.Host,
+	})
 }
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Log in to TAuth</title><style>{{template "style"}}</style>{{if .GoogleClientID}}<script src="https://accounts.google.com/gsi/client" async defer></script>{{end}}</head><body data-request-token="{{.RequestToken}}" data-google-client-id="{{.GoogleClientID}}" data-google-nonce="{{.GoogleNonce}}"><main><h1>Log in</h1><p><strong>{{.ClientName}}</strong> is requesting access to {{.ResourceName}}.</p>{{if .ErrorMessage}}<p role="alert" class="error">{{.ErrorMessage}}</p>{{end}}{{if .GitHubURL}}<p><a href="{{.GitHubURL}}">Continue with GitHub</a></p>{{end}}{{if .GoogleClientID}}<div id="google-login"></div><p id="google-error" role="alert" class="error" hidden>Google authentication was not accepted.</p><script nonce="{{.ScriptNonce}}">window.addEventListener("load",function(){var root=document.body;var error=document.getElementById("google-error");if(!window.google||!google.accounts||!google.accounts.id){error.hidden=false;return;}google.accounts.id.initialize({client_id:root.dataset.googleClientId,nonce:root.dataset.googleNonce,callback:async function(result){try{var response=await fetch(window.location.href,{method:"POST",credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({request:root.dataset.requestToken,provider:"google",google_id_token:result.credential,nonce_token:root.dataset.googleNonce})});if(!response.ok){throw new Error("login rejected");}var payload=await response.json();if(!payload.next){throw new Error("login continuation missing");}window.location.assign(payload.next);}catch(_failure){error.hidden=false;}}});google.accounts.id.renderButton(document.getElementById("google-login"),{theme:"outline",size:"large",width:320});});</script>{{end}}{{if and .GoogleClientID .PasswordLogin}}<p class="separator">or</p>{{end}}{{if .PasswordLogin}}<form method="post"><input type="hidden" name="request" value="{{.RequestToken}}"><input type="hidden" name="provider" value="password"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button type="submit">Continue</button></form>{{end}}</main></body></html>{{define "style"}}:root{color-scheme:dark}body{margin:0;background:#111;color:#eee;font:16px system-ui}main{max-width:30rem;margin:10vh auto;padding:2rem;background:#1b1b1b;border:1px solid #444;border-radius:12px}label{display:block;margin:1rem 0}input,button{box-sizing:border-box;width:100%;padding:.75rem;margin-top:.35rem;background:#242424;color:#fff;border:1px solid #666;border-radius:6px}button{background:#2765d7;border:0;font-weight:700}.error{color:#ff9b9b}.separator{text-align:center;color:#aaa}#google-login{display:flex;justify-content:center;margin:1.25rem 0}{{end}}`))
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Log in to TAuth</title><style>{{template "style"}}</style>{{if .GoogleClientID}}<script src="https://accounts.google.com/gsi/client" async defer></script>{{end}}</head><body data-request-token="{{.RequestToken}}" data-google-client-id="{{.GoogleClientID}}" data-google-nonce="{{.GoogleNonce}}"><main><h1>Log in</h1><p><strong>{{.ClientName}}</strong> is requesting access to {{.ResourceName}}.</p>{{if .ErrorMessage}}<p role="alert" class="error">{{.ErrorMessage}}</p>{{end}}<p id="login-status" role="status" hidden></p><div id="login-controls">{{if .GitHubURL}}<p><a href="{{.GitHubURL}}">Continue with GitHub</a></p>{{end}}{{if .GoogleClientID}}<div id="google-login"></div><p id="google-error" role="alert" class="error" hidden>Google authentication was not accepted.</p><script nonce="{{.ScriptNonce}}">window.addEventListener("load",function(){var root=document.body;var error=document.getElementById("google-error");var controls=document.getElementById("login-controls");var heading=document.querySelector("h1");var status=document.getElementById("login-status");var busy=false;function setPending(pending){busy=pending;controls.hidden=pending;heading.textContent=pending?"Signing in…":"Log in";status.textContent=pending?"Please wait while we sign you in.":"";status.hidden=!pending;document.querySelector("main").setAttribute("aria-busy",String(pending));}if(!window.google||!google.accounts||!google.accounts.id){error.hidden=false;return;}google.accounts.id.initialize({client_id:root.dataset.googleClientId,nonce:root.dataset.googleNonce,callback:async function(result){if(busy){return;}error.hidden=true;setPending(true);try{var response=await fetch(window.location.href,{method:"POST",credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({request:root.dataset.requestToken,provider:"google",google_id_token:result.credential,nonce_token:root.dataset.googleNonce})});if(!response.ok){throw new Error("login rejected");}var payload=await response.json();if(!payload.next){throw new Error("login continuation missing");}window.location.replace(payload.next);}catch(_failure){setPending(false);error.hidden=false;}}});google.accounts.id.renderButton(document.getElementById("google-login"),{theme:"outline",size:"large",width:320});});</script>{{end}}{{if and .GoogleClientID .PasswordLogin}}<p class="separator">or</p>{{end}}{{if .PasswordLogin}}<form method="post"><input type="hidden" name="request" value="{{.RequestToken}}"><input type="hidden" name="provider" value="password"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button type="submit">Continue</button></form>{{end}}</div></main></body></html>{{define "style"}}:root{color-scheme:dark}body{margin:0;background:#111;color:#eee;font:16px system-ui}main{max-width:30rem;margin:10vh auto;padding:2rem;background:#1b1b1b;border:1px solid #444;border-radius:12px}label{display:block;margin:1rem 0}input,button{box-sizing:border-box;width:100%;padding:.75rem;margin-top:.35rem;background:#242424;color:#fff;border:1px solid #666;border-radius:6px}button{background:#2765d7;border:0;font-weight:700}.error{color:#ff9b9b}.separator{text-align:center;color:#aaa}#google-login{display:flex;justify-content:center;margin:1.25rem 0}{{end}}`))
 
-var consentPage = template.Must(template.New("consent").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorize access</title><style>{{template "style"}}</style></head><body><main><h1>Authorize access</h1><p><strong>{{.ClientName}}</strong> wants to access <strong>{{.ResourceName}}</strong>.</p><p class="meta">Client: {{.ClientID}}<br>Return host: {{.RedirectHost}}</p>{{if .Loopback}}<p role="note" class="warning">This client returns to an application on this device.</p>{{end}}<h2>Permissions</h2>{{if .IdentityDisclosure}}<p>This resource receives your verified GitHub user ID. This permission does not grant GitHub repository access.</p>{{end}}<ul>{{range .Scopes}}<li><strong>{{.Name}}</strong><br><span>{{.Description}}</span></li>{{end}}</ul><form method="post"><input type="hidden" name="request" value="{{.RequestToken}}"><div class="actions"><button name="decision" value="deny" class="secondary">Deny</button><button name="decision" value="approve">Approve</button></div></form></main></body></html>{{define "style"}}:root{color-scheme:dark}body{margin:0;background:#111;color:#eee;font:16px system-ui}main{max-width:36rem;margin:8vh auto;padding:2rem;background:#1b1b1b;border:1px solid #444;border-radius:12px}.meta{color:#aaa;overflow-wrap:anywhere}.warning{padding:.75rem;background:#392f12;border:1px solid #7b6321}li{margin:.8rem 0}li span{color:#bbb}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{flex:1;padding:.75rem;background:#2765d7;color:#fff;border:0;border-radius:6px;font-weight:700}.secondary{background:#333;border:1px solid #666}{{end}}`))
+var consentPage = template.Must(template.New("consent").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorize access</title><style>{{template "style"}}</style></head><body><main><h1>Authorize access</h1><p><strong>{{.ClientName}}</strong> wants to access <strong>{{.ResourceName}}</strong>.</p><p class="meta">Client: {{.ClientID}}<br>Return host: {{.RedirectHost}}</p>{{if .Loopback}}<p role="note" class="warning">This client returns to an application on this device.</p>{{end}}<h2>Permissions</h2>{{if .IdentityDisclosure}}<p>This resource receives your verified GitHub user ID. This permission does not grant GitHub repository access.</p>{{end}}<ul>{{range .Scopes}}<li><strong>{{.Name}}</strong><br><span>{{.Description}}</span></li>{{end}}</ul><form method="post"><input type="hidden" name="request" value="{{.RequestToken}}"><div class="actions"><button name="decision" value="deny" class="secondary">Deny</button><button name="decision" value="approve">Approve</button></div></form><p id="consent-status" role="status" hidden></p><script nonce="{{.ScriptNonce}}">(function(){var form=document.querySelector("form");var pending=false;form.addEventListener("submit",function(event){if(pending||!event.submitter){event.preventDefault();return;}pending=true;var decision=document.createElement("input");decision.type="hidden";decision.name=event.submitter.name;decision.value=event.submitter.value;form.appendChild(decision);form.querySelectorAll("button").forEach(function(button){button.disabled=true;});form.setAttribute("aria-busy","true");var status=document.getElementById("consent-status");status.textContent=decision.value==="approve"?"Connecting…":"Cancelling…";status.hidden=false;});})();</script></main></body></html>{{define "style"}}:root{color-scheme:dark}body{margin:0;background:#111;color:#eee;font:16px system-ui}main{max-width:36rem;margin:8vh auto;padding:2rem;background:#1b1b1b;border:1px solid #444;border-radius:12px}.meta{color:#aaa;overflow-wrap:anywhere}.warning{padding:.75rem;background:#392f12;border:1px solid #7b6321}li{margin:.8rem 0}li span{color:#bbb}.actions{display:flex;gap:.75rem;margin-top:1.5rem}button{flex:1;padding:.75rem;background:#2765d7;color:#fff;border:0;border-radius:6px;font-weight:700}button:disabled{opacity:.65;cursor:wait}.secondary{background:#333;border:1px solid #666}{{end}}`))

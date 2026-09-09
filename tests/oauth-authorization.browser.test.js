@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
+const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
@@ -42,7 +43,12 @@ if (!puppeteer) {
     }
   });
 
-  test("OAuth authorization uses TAuth login and consent pages", { timeout: 60000 }, async (testingHandle) => {
+  for (const callbackLocation of ["same-origin", "cross-origin"]) {
+    test(`OAuth authorization uses TAuth login and consent pages (${callbackLocation} callback)`, { timeout: 60000 },
+      (testingHandle) => runAuthorizationScenario(testingHandle, callbackLocation));
+  }
+
+  async function runAuthorizationScenario(testingHandle, callbackLocation) {
     /** @type {import("node:child_process").ChildProcess | null} */
     let server = null;
     /** @type {import("puppeteer").Browser | null} */
@@ -50,7 +56,20 @@ if (!puppeteer) {
     const port = await reservePort();
     const issuer = `http://127.0.0.1:${port}`;
     const resource = `${issuer}/protected-resource`;
-    const redirectUri = `${issuer}/client/callback`;
+    let callbackOrigin = issuer;
+    if (callbackLocation === "cross-origin") {
+      const callbackServer = http.createServer((_request, response) => {
+        response.writeHead(200, { "Content-Type": "text/html" });
+        response.end("<!doctype html><title>OAuth client</title><p>Callback received</p>");
+      });
+      await new Promise((resolve) => callbackServer.listen(0, "127.0.0.1", resolve));
+      testingHandle.after(() => new Promise((resolve, reject) => callbackServer.close((error) => error ? reject(error) : resolve())));
+      const address = callbackServer.address();
+      assert.ok(address && typeof address === "object");
+      callbackOrigin = `http://127.0.0.1:${address.port}`;
+      assert.notEqual(callbackOrigin, issuer);
+    }
+    const redirectUri = `${callbackOrigin}/client/callback`;
     const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "tauth-oauth-browser-"));
     testingHandle.after(async () => {
       /** @type {Promise<void>[]} */
@@ -97,9 +116,33 @@ if (!puppeteer) {
     const launchedBrowser = await puppeteer.launch(launchOptions);
     browser = launchedBrowser;
     const page = await launchedBrowser.newPage();
+    const policyErrors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && /form-action/.test(message.text())) {
+        policyErrors.push(message.text());
+      }
+    });
     await page.setRequestInterception(true);
+    let googleLoginCount = 0;
+    let rejectGoogleLogin = false;
+    let observeGoogleRequest = () => {};
+    /** @type {Promise<void> | null} */
+    let googleLoginGate = null;
+    let consentSubmissionCount = 0;
     /** @param {import("puppeteer").HTTPRequest} request */
     const interceptGoogleScript = async (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/oauth/consent" ) {
+        consentSubmissionCount += 1;
+      }
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/oauth/login" && googleLoginGate) {
+        googleLoginCount += 1;
+        observeGoogleRequest();
+        await googleLoginGate;
+        if (rejectGoogleLogin) {
+          await request.respond({ status: 500, contentType: "application/json", body: '{"error":"server_error"}' });
+          return;
+        }
+      }
       if (request.url() === "https://accounts.google.com/gsi/client") {
         await request.respond({
           status: 200,
@@ -111,6 +154,40 @@ if (!puppeteer) {
       await request.continue();
     };
     page.on("request", interceptGoogleScript);
+
+    let reportConsentState = (_state) => {};
+    await page.exposeFunction("reportConsentState", (state) => reportConsentState(state));
+    const submitConsent = async (decision) => {
+      const consentResponse = await page.reload({ waitUntil: "domcontentloaded" });
+      assert.doesNotMatch(consentResponse.headers()["content-security-policy"], /accounts\.google\.com/, "Consent must not enable provider scripts or frames");
+      const observed = new Promise((resolve) => { reportConsentState = resolve; });
+      await page.evaluate(() => {
+        document.addEventListener("submit", (event) => {
+          const form = event.target;
+          const state = {
+            status: document.querySelector('[role="status"]')?.textContent || "",
+            disabled: Array.from(form.querySelectorAll("button")).every((button) => button.disabled),
+            decisions: new FormData(form, event.submitter).getAll("decision"),
+            duplicatePrevented: false,
+          };
+          const duplicate = new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: event.submitter });
+          form.dispatchEvent(duplicate);
+          state.duplicatePrevented = duplicate.defaultPrevented;
+          void window.reportConsentState(state);
+        }, { once: true });
+      });
+      const countBefore = consentSubmissionCount;
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.click(`button[value="${decision}"]`),
+      ]);
+      const state = await observed;
+      assert.equal(state.status, decision === "approve" ? "Connecting…" : "Cancelling…");
+      assert.equal(state.disabled, true);
+      assert.deepEqual(state.decisions, [decision]);
+      assert.equal(state.duplicatePrevented, true);
+      assert.equal(consentSubmissionCount, countBefore + 1);
+    };
 
     const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
     const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
@@ -155,6 +232,24 @@ if (!puppeteer) {
     assert.doesNotMatch(await page.content(), /access_token|refresh_token|PRIVATE KEY|password/);
 
     await googlePage.bringToFront();
+    /** @type {() => void} */
+    let releaseGoogleLogin = () => {};
+    googleLoginGate = new Promise((resolve) => { releaseGoogleLogin = resolve; });
+    rejectGoogleLogin = true;
+    const rejectedRequest = new Promise((resolve) => { observeGoogleRequest = resolve; });
+    await googlePage.evaluate(() => { void window.__tauthGoogleCallback({ credential: "unused-token-with-existing-session" }); });
+    await rejectedRequest;
+    assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Signing in…", "Account selection must replace the stale login dialog with progress");
+    assert.equal(await googlePage.$eval("#login-controls", (node) => node.hidden), true);
+    assert.equal(await googlePage.$eval('[role="status"]', (node) => node.textContent), "Please wait while we sign you in.");
+    await googlePage.evaluate(() => { void window.__tauthGoogleCallback({ credential: "duplicate-callback" }); });
+    releaseGoogleLogin();
+    await googlePage.waitForFunction(() => !document.querySelector("#google-error")?.hidden);
+    assert.equal(googleLoginCount, 1, "Only one credential request may be active");
+    assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Log in");
+    assert.equal(await googlePage.$eval("#login-controls", (node) => node.hidden), false);
+    rejectGoogleLogin = false;
+    googleLoginGate = null;
     const googleResponsePromise = googlePage.waitForResponse((response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/oauth/login");
     await googlePage.evaluate(async () => {
@@ -168,12 +263,11 @@ if (!puppeteer) {
     assert.equal(new URL(googlePage.url()).searchParams.get("request"), pendingGoogleURL.searchParams.get("request"));
     assert.equal(await googlePage.$eval("h1", (node) => node.textContent), "Authorize access");
     assert.doesNotMatch(await googlePage.content(), /Google authentication was not accepted/);
+    await googlePage.goBack({ waitUntil: "domcontentloaded" });
+    assert.equal(googlePage.url(), "about:blank", "Accepted login must replace the login history entry");
 
     await page.bringToFront();
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.click('button[value="approve"]'),
-    ]);
+    await submitConsent("approve");
     const callback = new URL(page.url());
     assert.equal(callback.origin + callback.pathname, redirectUri);
     assert.equal(callback.searchParams.get("state"), "browser-state");
@@ -211,7 +305,67 @@ if (!puppeteer) {
     assert.equal(serverLogs.includes(code), false);
     assert.equal(serverLogs.includes(tokens.access_token), false);
     assert.equal(serverLogs.includes(tokens.refresh_token), false);
-  });
+
+    // A fresh browser session must retain the server-side grant for this account.
+    await page.deleteCookie(...await page.cookies(issuer));
+    const freshLoginResponse = await page.goto(authorize.href, { waitUntil: "load" });
+    assert.equal(await page.$eval("h1", (node) => node.textContent), "Log in");
+    await page.type('input[name="email"]', "browser@example.com");
+    await page.type('input[name="password"]', "wrong-password");
+    const [rejectedLoginResponse] = await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      page.click('button[type="submit"]'),
+    ]);
+    assert.equal(rejectedLoginResponse.status(), 401);
+    assert.match(await page.$eval('[role="alert"]', (node) => node.textContent), /Authentication was not accepted/);
+    await page.type('input[name="email"]', "browser@example.com");
+    await page.type('input[name="password"]', "browser-test-password");
+    try {
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.click('button[type="submit"]'),
+      ]);
+    } finally {
+      assert.deepEqual(policyErrors, [], "Password login callback must not be blocked by CSP");
+    }
+    const freshCallback = new URL(page.url());
+    assert.equal(freshCallback.origin + freshCallback.pathname, redirectUri, "Fresh login must reuse the existing exact consent grant");
+    assert.ok(freshCallback.searchParams.get("code"));
+    assert.notEqual(freshCallback.searchParams.get("code"), code);
+    assert.equal(freshCallback.searchParams.get("state"), "browser-state");
+    assert.equal(freshCallback.searchParams.get("iss"), issuer);
+    for (const response of [freshLoginResponse, rejectedLoginResponse]) {
+      const formAction = response.headers()["content-security-policy"].split(";").find((directive) => directive.trim().startsWith("form-action ")).trim();
+      assert.equal(formAction, `form-action 'self' ${callbackOrigin}`);
+    }
+    const freshTokenResponse = await fetch(`${issuer}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: freshCallback.searchParams.get("code"),
+        client_id: "browser-test-client",
+        resource,
+        code_verifier: verifier,
+      }),
+    });
+    assert.equal(freshTokenResponse.status, 200, "Fresh login code must support PKCE exchange");
+
+    const revokeResponse = await fetch(`${issuer}/oauth/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: tokens.refresh_token, client_id: "browser-test-client" }),
+    });
+    assert.equal(revokeResponse.status, 200);
+    await page.goto(authorize.href, { waitUntil: "domcontentloaded" });
+    assert.equal(await page.$eval("h1", (node) => node.textContent), "Authorize access");
+    await submitConsent("deny");
+    const deniedCallback = new URL(page.url());
+    assert.equal(deniedCallback.origin + deniedCallback.pathname, redirectUri);
+    assert.equal(deniedCallback.searchParams.get("error"), "access_denied");
+    assert.equal(deniedCallback.searchParams.has("code"), false);
+    assert.equal(deniedCallback.searchParams.get("state"), "browser-state");
+  }
 }
 
 function oauthConfig({ issuer, resource, redirectUri, keyBase64 }) {

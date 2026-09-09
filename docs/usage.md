@@ -556,6 +556,15 @@ A Google login POST with `Accept: application/json` returns HTTP `200` with a
 JSON `next` URL and `Cache-Control: no-store`. This response also applies when
 the request has a valid TAuth session, such as when another tab completed login.
 The page uses `next` to open consent for the same pending request.
+After Google account selection, the page shows progress until TAuth completes login.
+The page replaces its login history entry when login succeeds.
+If login fails, the page shows an error and restores the login controls.
+
+TAuth checks the exact consent grant again after login.
+If the selected account has a valid grant, TAuth returns an authorization code without another consent prompt.
+A different account, expired grant, revoked grant, or different disclosure policy requires new approval.
+For a new grant, the consent buttons show progress and prevent another submission while the request is active.
+Google account selection confirms identity. TAuth consent gives the client access to the specified resource and permissions.
 
 The client exchanges the one-time code with the same client ID, resource, and
 PKCE verifier. The redirect URI remains bound inside the code and is absent
