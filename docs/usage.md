@@ -158,13 +158,16 @@ The preflight builder is generalized under `github.com/tyemirov/utils/preflight`
 
 ### 2.6 MPR Lab lifecycle
 
-The MPR Lab production lifecycle requires the exact sibling
-`../mprlab-gateway`. Run `make release`, `make publish`, and, as the operator,
-`make deploy`. Each command delegates this exact Git root to the sibling
-gateway, whose Ansible engine reads `.mprlab/deploy/resources.yml`, assembles
-the shared TAuth tenant configuration from application contributions, and owns
-all operator values and remote convergence. TAuth carries no local deployment
-binding or production lifecycle implementation.
+The MPR Lab lifecycle uses the installed `mprlab-gateway` command.
+Make sure that the command is on `PATH`.
+Use `MPRLAB_GATEWAY_EXECUTABLE` to select an explicit installed command path.
+Run `make release && make publish && make deploy` from the TAuth repository root as the operator.
+Each command passes this Git root through `--app-root`.
+Gateway reads `.mprlab/deploy/resources.yml` and assembles the shared TAuth tenant configuration from application contributions.
+Gateway owns release receipts, publication, and remote convergence.
+The operator keeps inventory and private config under `MPRLAB_GATEWAY_OPERATOR_ROOT`.
+The default operator root is `$HOME/.config/mprlab-gateway`.
+TAuth carries no production lifecycle implementation.
 
 ---
 

@@ -174,8 +174,9 @@ company owns that file, every tenant value, all secrets, routing, and deployment
 orchestration. This repository ships the generic service, configuration schema,
 neutral examples, and validation commands. For the MPR Lab deployment, the
 tracked `.mprlab/deploy/resources.yml` declares only desired resources and
-secret identities. The exact sibling `../mprlab-gateway` owns generic Ansible
-orchestration, operator values, release sealing, publication, and convergence.
+secret identities. The installed `mprlab-gateway` runtime owns Ansible orchestration, release receipts, publication, and convergence.
+The operator keeps inventory and private config under `MPRLAB_GATEWAY_OPERATOR_ROOT`.
+The default operator root is `$HOME/.config/mprlab-gateway`.
 The TAuth artifact converts the declared TAuth resources to its native config.
 
 The `render-deployment-config` command reads one strict schema-v1 JSON request
@@ -367,7 +368,7 @@ When multiple product origins need access, list them under the `cors_allowed_ori
 
 Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://auth.example.com` will also be sent with requests made by `https://app.example.com` because both live under `.example.com`.
 
-### 3. Use the sibling gateway lifecycle
+### 3. Use the installed Gateway runtime
 
 The three production lifecycle commands are fixed:
 
@@ -377,11 +378,13 @@ make publish
 make deploy
 ```
 
-Each command passes this exact Git root to `../mprlab-gateway`. TAuth declares
-its image, retained data, shared tenant-config mount, runtime capabilities,
-backend route, GitHub Pages site, and health check in `.mprlab/deploy/resources.yml`; it contains
-no production controller, Ansible, Compose, Caddy, release, publication, or
-deployment implementation. Only the operator runs `make deploy`.
+Each command passes this Git root to the installed `mprlab-gateway` command through `--app-root`.
+Make sure that `mprlab-gateway` is on `PATH`.
+Use `MPRLAB_GATEWAY_EXECUTABLE` to select an explicit installed command path.
+
+TAuth declares its image, retained data, shared tenant-config mount, runtime capabilities, backend route, GitHub Pages site, and health check in `.mprlab/deploy/resources.yml`.
+TAuth contains no production controller, Ansible, Compose, Caddy, release, publication, or deployment implementation.
+Only the operator runs `make deploy`.
 
 ### Run the demo with Docker Compose (local quick-start)
 

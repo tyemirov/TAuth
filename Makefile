@@ -7,7 +7,7 @@ GO_TAGS ?= nodynamic,webp_encoder
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
+ci: format lint test-go test-js test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
@@ -70,21 +70,25 @@ verify-js:
 test-deployment-config-renderer:
 	bash tests/deployment-config-renderer.sh
 
+.PHONY: test-installed-gateway
+test-installed-gateway:
+	bash tests/installed-gateway.sh
+
 test-empty-tenant-bootstrap-runtime:
 	bash tests/empty-tenant-bootstrap-runtime.sh
 
 test-oauth-provider-bootstrap-runtime:
 	bash tests/oauth-provider-bootstrap-runtime.sh
 
+MPRLAB_GATEWAY_EXECUTABLE ?= mprlab-gateway
+
 .PHONY: release publish deploy
 
 release publish deploy:
 	@application_root="$$(git rev-parse --show-toplevel)"; \
-	gateway_root="$$(dirname "$${application_root}")/mprlab-gateway"; \
-	if [ ! -d "$${gateway_root}" ]; then \
-		printf "required sibling gateway is missing: %s; clone mprlab-gateway at exactly %s\n" \
-			"$${gateway_root}" "$${gateway_root}" >&2; \
+	if ! command -v "$(MPRLAB_GATEWAY_EXECUTABLE)" >/dev/null 2>&1; then \
+		printf 'Gateway runtime is unavailable: %s. Install a released runtime and add its command directory to PATH.\n' \
+			"$(MPRLAB_GATEWAY_EXECUTABLE)" >&2; \
 		exit 2; \
 	fi; \
-	$(MAKE) --no-print-directory -C "$${gateway_root}" "app-$@" \
-		MPRLAB_APP_ROOT="$${application_root}"
+	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" "app-$@" --app-root "$${application_root}"

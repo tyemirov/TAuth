@@ -755,6 +755,21 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Resolved 2026-07-10: TAuth now owns the complete shared tenant registry and environment contract, the `ps` tenant resolves `https://poodlescanner.com` and scopes its cookies to `api.poodlescanner.com`, and the production CORS allowlist includes its declared Google exception. The app-owned deploy manifest moved to the current `.mprlab/deploy/resources.yml` discovery path, and the deploy no-op no longer requires a gateway checkout. Validation passed with the production config black-box test, deployment no-op test, the real TAuth doctor/preflight commands, and `make ci`.
 
 
+- [x] [I211] Use the installed Gateway runtime.
+  Goal: Run the application lifecycle through the installed `mprlab-gateway` command.
+  Requirements:
+  - Keep `make release`, `make publish`, and `make deploy` as the public commands.
+  - Pass the application Git root through `--app-root`.
+  - Use `MPRLAB_GATEWAY_EXECUTABLE` for an explicit installed command path.
+  - Keep inventory and private config under `MPRLAB_GATEWAY_OPERATOR_ROOT`.
+  Validation:
+  - The public Make integration test reproduced the required sibling-checkout failure.
+  - The installed Gateway v4.0.2 accepted the committed application release plan.
+  - `make test-installed-gateway` and `make ci` passed.
+  - Governor reported existing managed-content drift in `.mprlab/POLICY.md` and `.mprlab/AGENTS.DOCKER.md`.
+  - Release, publication, and deployment were not run.
+
+
 ## BugFixes (361–399)
 
 - [x] [B081] (P1) {B079} Allow the approved callback origin after password login.
