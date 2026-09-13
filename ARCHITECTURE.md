@@ -343,8 +343,11 @@ is declarative: `.mprlab/deploy/resources.yml` names the TAuth image, retained
 data, gateway-managed tenant configuration, exported capabilities, public
 routes, and health contract without containing secret bytes or host paths.
 
-The root `make release`, `make publish`, and `make deploy` entrypoints delegate
-the exact selected Git root to the required sibling `../mprlab-gateway`.
+The root `make release`, `make publish`, and `make deploy` commands use the installed `mprlab-gateway` runtime.
+Each command passes the selected Git root through `--app-root`.
+`MPRLAB_GATEWAY_EXECUTABLE` selects an explicit installed command path.
+`MPRLAB_GATEWAY_OPERATOR_ROOT` selects the operator inventory and private config root.
+Its default is `$HOME/.config/mprlab-gateway`.
 Gateway-owned Ansible validates the `resources.yml` schema, resolves declared
 outputs, manages immutable lifecycle receipts, and performs convergence. The
 gateway sends complete TAuth contributions and output envelopes to
