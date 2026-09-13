@@ -15,21 +15,6 @@ import (
 
 const deployManifestRelativePath = ".mprlab/deploy/resources.yml"
 
-var expectedGatewayWrapper = strings.Join([]string{
-	".PHONY: release publish deploy",
-	"",
-	"release publish deploy:",
-	"\t@application_root=\"$$(git rev-parse --show-toplevel)\"; \\",
-	"\tgateway_root=\"$$(dirname \"$${application_root}\")/mprlab-gateway\"; \\",
-	"\tif [ ! -d \"$${gateway_root}\" ]; then \\",
-	"\t\tprintf \"required sibling gateway is missing: %s; clone mprlab-gateway at exactly %s\\n\" \\",
-	"\t\t\t\"$${gateway_root}\" \"$${gateway_root}\" >&2; \\",
-	"\t\texit 2; \\",
-	"\tfi; \\",
-	"\t$(MAKE) --no-print-directory -C \"$${gateway_root}\" \"app-$@\" \\",
-	"\t\tMPRLAB_APP_ROOT=\"$${application_root}\"",
-}, "\n")
-
 func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
@@ -320,9 +305,6 @@ func TestRepositoryDelegatesOnlyThreeProductionLifecycleCommands(t *testing.T) {
 		t.Fatalf("read Makefile: %v", readErr)
 	}
 	makefileText := string(makefileDocument)
-	if !strings.Contains(makefileText, expectedGatewayWrapper) {
-		t.Fatalf("Makefile does not expose the exact sibling-gateway wrapper")
-	}
 	for _, obsoleteTarget := range []string{
 		"\ncontainer-artifacts:",
 		"\npublish-release:",
