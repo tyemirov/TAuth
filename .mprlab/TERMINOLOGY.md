@@ -92,6 +92,10 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `customer value`: The measurable benefit that a product change gives its users.
+- `platform account`: One account that a person can use across participating MPR Lab applications.
+- `shared identity`: A stable person identifier and approved profile data available to participating applications.
+- `single sign-on`: Authentication in another participating application through an existing central login session.
 - `GitHub identity`: The provider identity whose subject is the immutable numeric GitHub user ID.
 - `provider identity`: A verified provider name and subject associated with one tenant account.
 - `identity claim`: A signed OAuth claim that discloses a verified provider identity to an authorized resource.

@@ -4,6 +4,54 @@ Entries record newly discovered requests or changes, with their outcomes. No ins
 
 Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to documentation. Read @issues.md/POLICY.md, @issues.md/PLANNING.md, @issues.md/NOTES.md, and @issues.md/ISSUES.md. Start working on open issues. Prioritize bugfixes and maintenance. Work autonomously and stack up PRs.
 
+## Planning
+
+- [ ] [P001] Assess customer value and options for a platform account across applications.
+  Goal:
+  Determine whether shared identity or single sign-on solves a demonstrated customer problem across MPR Lab applications.
+  This issue authorizes analysis and a decision only. Implementation requires a separate approved feature issue.
+  Current contract:
+  TAuth scopes persisted accounts, provider identities, password credentials, and sessions to a tenant.
+  Applications can accept the same Google account while retaining separate TAuth accounts and sessions.
+  Registration with email and password in one tenant does not create an account in another tenant.
+  TAuth has account management and an OAuth authorization server. Their existence does not establish single sign-on across tenants.
+  Source references: `ARCHITECTURE.md`, `internal/authkit/database_user_store.go`, and `internal/oauthserver/server.go`.
+  Customer hypotheses:
+  A platform account could reduce repeated registration, password recovery, and profile entry for users of multiple applications.
+  Single sign-on could reduce the time needed to enter another application.
+  These hypotheses require customer research. Current cross-application demand and measurable customer value remain unknown.
+  Requirements:
+  - Identify customers who use, or need to use, at least two applications for a concrete task.
+  - Identify where repeated registration, login, identity confusion, or account recovery prevents completion of that task.
+  - Compare Google users, email/password users, and users who prefer separate identities across applications.
+  - Measure current login completion, time to first useful action, repeat use, and related support requests where data permits.
+  - State each measurement period, population, denominator, and data limitation.
+  - Keep customer outcomes separate from internal convenience and increased visits to other products.
+  - Compare the current system, improvements to individual application login, shared identity, and shared identity with single sign-on.
+  - Assess whether customers understand and trust an MPR Lab account across the selected applications.
+  - Record customer expectations for profile sharing, separate identities, account recovery, and account deletion.
+  - Assess separate application domains, browser restrictions, and native clients for the selected customer tasks.
+  - Estimate engineering effort, operating cost, support cost, and dependencies for each option.
+  - Assess existing account migration, verified identity linking, application permissions, subscriptions, and product data ownership.
+  - Assess central service failure, account compromise, application logout, and platform logout.
+  - Require ownership verification when connecting existing accounts. Treat matching email addresses as insufficient proof.
+  - Select one canonical account contract if implementation is recommended. Define any required bounded data migration.
+  Open Decisions:
+  The participating applications, shared profile fields, account membership rules, and logout semantics remain undecided.
+  A central login page, protocol choice, and database design remain options for analysis.
+  Deliverables:
+  - Produce a customer problem statement with research results, source references, and explicit assumptions.
+  - Produce an option comparison with expected customer outcomes, costs, risks, and uncertainty.
+  - Define a small evaluation with two applications selected from demonstrated customer demand.
+  - Set measurable success thresholds and stop conditions before an evaluation starts.
+  - Recommend proceed, defer, or decline. Record the decision owner and the reasons for the recommendation.
+  - If implementation is recommended, propose the smallest feature scope and its acceptance criteria for user approval.
+  Validation:
+  - Trace each customer benefit to an observed problem or an explicitly untested hypothesis.
+  - Show why the recommended option is sufficient compared with improvements to individual application login.
+  - State whether the available research supports a decision or requires further investigation.
+  - Close P001 after the user accepts the analysis and decision, including a decision to defer or decline.
+
 ## Features
 
 - [x] [F006] (P1) {F005} Accept GitHub tenant contributions in the deployment renderer.
