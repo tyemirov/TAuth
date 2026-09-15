@@ -669,8 +669,8 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		writeAppleCallbackSuccess(contextGin, statePayload, responsePayload)
 		recordMetric(metricAuthLoginSuccess)
 	}
-	router.GET("/auth/apple/callback", handleAppleCallback)
-	router.POST("/auth/apple/callback", handleAppleCallback)
+	router.GET(AppleCallbackPath, handleAppleCallback)
+	router.POST(AppleCallbackPath, handleAppleCallback)
 
 	router.POST("/auth/apple/native", func(contextGin *gin.Context) {
 		tenantID, resolved := resolveTenantIDRequired(contextGin, registry)

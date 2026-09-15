@@ -92,3 +92,7 @@ release publish deploy:
 		exit 2; \
 	fi; \
 	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" "app-$@" --app-root "$${application_root}"
+
+.PHONY: test-apple-callback-cors
+test-apple-callback-cors:
+	$(GO) test ./cmd/server -run '^TestRunServerAppleCallbackCORS$$' -count=1

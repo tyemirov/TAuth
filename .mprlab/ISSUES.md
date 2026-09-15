@@ -820,6 +820,14 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B082] (P0) Accept the Apple form callback before tenant CORS checks.
+  The public Apple callback returns HTTP 403 when the request contains `Origin: https://appleid.apple.com`.
+  The same request without that origin reaches the callback handler.
+  Exclude the callback route from CORS. Preserve signed state, nonce, provider token, and tenant checks.
+  Verify the real server through HTTP with Apple, unknown, and tenant origins.
+  Verify that ordinary API routes still reject unknown origins.
+  Resolved: The callback route uses one shared constant and excludes CORS. The real server integration test and `make ci` passed.
+
 - [x] [B081] (P1) {B079} Allow the approved callback origin after password login.
   Goal:
   Complete fresh password login with an existing consent grant when the callback uses another origin.
