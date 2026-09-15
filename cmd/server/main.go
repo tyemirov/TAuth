@@ -285,6 +285,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 		}
 		oauthBrowserPaths[tenants.GitHubStartPath] = struct{}{}
 		oauthBrowserPaths[tenants.GitHubCallbackPath] = struct{}{}
+		oauthBrowserPaths[authkit.AppleCallbackPath] = struct{}{}
 		router.Use(corsMiddlewareExceptPaths(corsMiddleware, oauthBrowserPaths))
 	}
 
@@ -491,7 +492,7 @@ func appleOAuthBypassPath(request *http.Request) bool {
 	if request == nil || request.URL == nil {
 		return false
 	}
-	if request.URL.Path == "/auth/apple/callback" {
+	if request.URL.Path == authkit.AppleCallbackPath {
 		return true
 	}
 	return request.URL.Path == "/auth/apple/start" && strings.TrimSpace(request.Header.Get("Origin")) == ""

@@ -476,6 +476,8 @@ For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential
 4. Add the matching `apple_oauth` block to the tenant config. Put native App IDs in `native_client_ids`. Keep `private_key` or `private_key_base64` in an environment variable or secret manager.
 5. Point your web UI button at `startAppleLogin()` from `tauth.js` or the URL returned by `getAppleLoginUrl()`.
 
+The Apple callback accepts cross-origin form navigation without CORS response headers. Ordinary API routes retain the tenant CORS allowlist.
+
 Apple redirects back to TAuth with an authorization code. TAuth posts that code to Apple’s token endpoint with an ES256 client secret, validates the returned ID token through Apple JWKS, checks the original nonce, enforces `allowed_users`, issues the standard first-party cookies, and redirects to the signed `return_to` URL when it was provided. Apple access tokens are not returned to the browser or stored.
 
 ### Native desktop and mobile login (system browser + PKCE)

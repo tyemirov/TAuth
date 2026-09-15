@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -87,6 +88,61 @@ func TestCORSMiddlewareExcludesOAuthBrowserRoutes(t *testing.T) {
 	router.ServeHTTP(sessionRecorder, sessionRequest)
 	if sessionRecorder.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
 		t.Fatal("normal TAuth route lost configured CORS")
+	}
+}
+
+func TestRunServerAppleCallbackCORS(t *testing.T) {
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		testServer := httptest.NewServer(server.Handler)
+		defer testServer.Close()
+		for _, scenario := range []struct {
+			name, path, origin, body string
+			status                   int
+			errorCode                string
+		}{
+			{"apple-form", "/auth/apple/callback", "https://appleid.apple.com", "code=test-code&state=invalid", http.StatusUnauthorized, "invalid_state"},
+			{"unknown-origin-state", "/auth/apple/callback", "https://unknown.example", "code=test-code&state=invalid", http.StatusUnauthorized, "invalid_state"},
+			{"missing-state", "/auth/apple/callback", "https://appleid.apple.com", "code=test-code", http.StatusBadRequest, "invalid_apple_callback"},
+			{"tenant-origin", "/auth/apple/callback", "https://alpha.localhost", "code=test-code&state=invalid", http.StatusUnauthorized, "invalid_state"},
+			{"api-apple-origin", "/auth/password/login", "https://appleid.apple.com", "{}", http.StatusForbidden, ""},
+			{"api-unknown-origin", "/auth/password/login", "https://unknown.example", "{}", http.StatusForbidden, ""},
+		} {
+			t.Run(scenario.name, func(t *testing.T) {
+				request, err := http.NewRequest(http.MethodPost, testServer.URL+scenario.path, strings.NewReader(scenario.body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Origin", scenario.origin)
+				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				response, err := testServer.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != scenario.status || !strings.Contains(string(body), scenario.errorCode) {
+					t.Fatalf("expected HTTP %d with %q, got %d: %s", scenario.status, scenario.errorCode, response.StatusCode, body)
+				}
+				if response.Header.Get("Access-Control-Allow-Origin") != "" {
+					t.Fatal("callback or rejected API response exposed CORS")
+				}
+			})
+		}
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+	restoreValidator := withGoogleValidatorBuilderStub(func(context.Context) (authkit.GoogleTokenValidator, error) { return noopGoogleValidator{}, nil })
+	defer restoreValidator()
+	config := sampleApplicationConfig()
+	config.Server.EnableCORS = true
+	config.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &config))
+	if err := runServer(command, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

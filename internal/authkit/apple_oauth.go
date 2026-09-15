@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	// AppleCallbackPath receives the Apple authorization response.
+	AppleCallbackPath           = "/auth/apple/callback"
 	appleIssuer                 = "https://appleid.apple.com"
 	appleOAuthGrantTypeCode     = "authorization_code"
 	appleOAuthResponseTypeCode  = "code"
