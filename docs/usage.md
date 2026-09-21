@@ -1175,6 +1175,8 @@ Use `operation: "link"` only with an active account session.
 A popup failure rejects the returned promise and calls `onAuthError`.
 
 The callback accepts GitHub's `code` and `state`, or a provider denial.
+Both responses require one `iss` value equal to `https://github.com/login/oauth`.
+A missing, empty, duplicate, or different issuer value returns HTTP 400 with `invalid_state` before the token exchange.
 It checks the transaction and browser cookie before exchange.
 Transactions expire after five minutes. Each callback can claim its transaction once.
 A new login is necessary after an expired transaction, provider rejection, or ambiguous token exchange.

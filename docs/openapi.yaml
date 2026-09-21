@@ -59,6 +59,11 @@ paths:
       summary: Complete a GitHub login transaction.
       description: Claim the browser-bound transaction before exchange. Resolve the tenant without an Origin header.
       parameters:
+        - name: iss
+          in: query
+          required: true
+          schema: {type: string, const: "https://github.com/login/oauth"}
+          description: The exact GitHub issuer. Validate this value before the token exchange.
         - name: state
           in: query
           required: true

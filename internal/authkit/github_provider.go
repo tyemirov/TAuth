@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	githubIssuer                = "https://github.com/login/oauth"
 	githubAuthorizationEndpoint = "https://github.com/login/oauth/authorize"
 	githubTokenEndpoint         = "https://github.com/login/oauth/access_token"
 	githubUserEndpoint          = "https://api.github.com/user"

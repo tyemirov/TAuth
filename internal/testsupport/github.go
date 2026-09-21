@@ -67,7 +67,7 @@ func (provider *GitHub) serve(response http.ResponseWriter, request *http.Reques
 			response.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		callback.RawQuery = url.Values{"state": {query.Get("state")}, "code": {code}}.Encode()
+		callback.RawQuery = url.Values{"state": {query.Get("state")}, "code": {code}, "iss": {"https://github.com/login/oauth"}}.Encode()
 		http.Redirect(response, request, callback.String(), http.StatusFound)
 	case "/login/oauth/access_token":
 		provider.Calls.Add(1)

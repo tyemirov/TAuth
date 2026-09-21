@@ -186,7 +186,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 	githubPrivateHeaders(response)
 	query := request.URL.Query()
 	state := query.Get("state")
-	if !githubQueryValid(query, "state", "code", "error", "error_description", "error_uri", "tenant_id") || !githubOpaqueValid(state) {
+	if !githubQueryValid(query, "state", "code", "error", "error_description", "error_uri", "tenant_id", "iss") || query.Get("iss") != githubIssuer || !githubOpaqueValid(state) {
 		githubError(response, http.StatusBadRequest, "invalid_state")
 		return
 	}

@@ -648,6 +648,8 @@ Separate cookies permit simultaneous transactions without replacement of another
 
 The transaction lifetime is five minutes. The memory store permits at most 4096 outstanding transactions.
 The database store uses `github_login_transactions` in the configured SQLite or PostgreSQL database.
+The callback requires one `iss` value equal to `https://github.com/login/oauth`.
+It rejects missing, empty, duplicate, or different issuer values before it claims the transaction.
 The callback atomically removes the transaction before the token exchange.
 A foreign browser cannot claim it. A claimed transaction cannot be replayed after failure or process restart.
 An unclaimed database transaction remains available after restart until its expiry.

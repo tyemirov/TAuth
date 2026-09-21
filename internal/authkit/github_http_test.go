@@ -626,3 +626,40 @@ func TestGitHubCallbackLogsOmitCredentials(t *testing.T) {
 		t.Fatal("callback credential in recovery log")
 	}
 }
+
+func TestGitHubHTTPCallbackIssuer(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		values []string
+	}{
+		{"missing", nil},
+		{"empty", []string{""}},
+		{"foreign", []string{"https://other.example/login/oauth"}},
+		{"trailing slash", []string{"https://github.com/login/oauth/"}},
+		{"duplicate", []string{"https://github.com/login/oauth", "https://github.com/login/oauth"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fixture := newGitHubHTTPFixture(t, true, true)
+			callback := fixture.callbackURL(t, "")
+			parsed, err := url.Parse(callback)
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := parsed.Query()
+			query.Del("iss")
+			for _, value := range scenario.values {
+				query.Add("iss", value)
+			}
+			parsed.RawQuery = query.Encode()
+			status, _ := githubHTTPResponse(t, fixture.client, parsed.String())
+			if status != http.StatusBadRequest || fixture.provider.Calls.Load() != 0 {
+				t.Fatalf("issuer rejected before exchange: status=%d calls=%d", status, fixture.provider.Calls.Load())
+			}
+			status, body := githubHTTPResponse(t, fixture.client, callback)
+			if status != http.StatusSeeOther || fixture.provider.Calls.Load() != 1 {
+				t.Fatalf("valid issuer preserves transaction: status=%d calls=%d body=%s", status, fixture.provider.Calls.Load(), body)
+			}
+			fixture.profile(t)
+		})
+	}
+}

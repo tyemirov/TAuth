@@ -820,6 +820,24 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes (361–399)
 
+- [x] [B083] (P0) Validate the GitHub issuer in login responses.
+  Goal:
+  Restore GitHub login for the ISSUES.md MCP client.
+  Evidence:
+  GitHub returned `iss=https://github.com/login/oauth` in the production callback.
+  TAuth rejected that field and returned HTTP 400 before the token exchange.
+  Requirements:
+  - Require the exact GitHub issuer before the transaction claim and token exchange.
+  - Reject missing, empty, duplicate, and different issuer values.
+  - Include the issuer in the local GitHub provider responses.
+  - Preserve browser binding, single-use transactions, and PKCE validation.
+  Validation:
+  - Run `make test-github-http test-github-oauth test-github-browser` and `make ci`.
+  - Deploy TAuth and repeat live MCP authentication.
+  Resolution: Required the exact GitHub issuer before the transaction claim.
+  HTTP, OAuth, browser, and full `make ci` validation passed. Live deployment validation is pending.
+
+
 - [x] [B082] (P0) Accept the Apple form callback before tenant CORS checks.
   The public Apple callback returns HTTP 403 when the request contains `Origin: https://appleid.apple.com`.
   The same request without that origin reaches the callback handler.
