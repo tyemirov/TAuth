@@ -53,6 +53,7 @@ type passwordHashComparer func(hashedPassword []byte, password []byte) error
 
 // MemoryPasswordCredentialStore stores password credentials in memory.
 type MemoryPasswordCredentialStore struct {
+	githubCredentials    map[githubCredentialIdentity][]byte
 	mu                   sync.RWMutex
 	tenants              map[string]map[string]passwordCredential
 	accounts             map[string]map[string]*accountRecord
@@ -64,6 +65,7 @@ type MemoryPasswordCredentialStore struct {
 // NewMemoryPasswordCredentialStore constructs an empty in-memory credential store.
 func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 	return &MemoryPasswordCredentialStore{
+		githubCredentials:    make(map[githubCredentialIdentity][]byte),
 		tenants:              make(map[string]map[string]passwordCredential),
 		accounts:             make(map[string]map[string]*accountRecord),
 		identities:           make(map[string]map[string]accountIdentityRecord),

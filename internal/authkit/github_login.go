@@ -36,6 +36,11 @@ func NewGitHubLogin(sessions *OAuthBrowserSessions, transactions GitHubTransacti
 	if sessions == nil || sessions.users == nil || sessions.refreshTokens == nil || transactions == nil || provider == nil {
 		return nil, errors.New("github_login.invalid_dependencies")
 	}
+	for _, config := range sessions.registry.configs {
+		if config.GitHubOAuth.CredentialKey() != "" && sessions.accountStore == nil {
+			return nil, errors.New("github_login.credential_store_missing")
+		}
+	}
 	return &GitHubLogin{sessions: sessions, transactions: transactions, provider: provider, continuation: continuation}, nil
 }
 
@@ -178,7 +183,7 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 	}
 	http.SetCookie(response, &http.Cookie{Name: githubBrowserCookie(state), Value: browser, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: int(githubTransactionTTL.Seconds())})
 	challenge := sha256.Sum256([]byte(verifier))
-	parameters := url.Values{"client_id": {transaction.ClientID}, "redirect_uri": {transaction.RedirectURI}, "scope": {tenants.GitHubIdentityScope}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(challenge[:])}, "code_challenge_method": {"S256"}}
+	parameters := url.Values{"client_id": {transaction.ClientID}, "redirect_uri": {transaction.RedirectURI}, "scope": {config.GitHubOAuth.Scopes()}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(challenge[:])}, "code_challenge_method": {"S256"}}
 	http.Redirect(response, request, login.provider.authorizationEndpoint+"?"+parameters.Encode(), http.StatusFound)
 }
 
@@ -237,7 +242,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		login.failure(response, request, transaction, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	identity, err := login.provider.identity(request.Context(), config.GitHubOAuth, transaction, query.Get("code"))
+	authentication, err := login.provider.identity(request.Context(), config.GitHubOAuth, transaction, query.Get("code"))
 	if err != nil {
 		code := "github_provider_rejected"
 		if errors.Is(err, ErrGitHubEmailMissing) {
@@ -246,6 +251,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		login.failure(response, request, transaction, http.StatusBadGateway, code)
 		return
 	}
+	identity := authentication.identity
 	if !isAllowedUser(identity.UserEmail, config.AllowedUsers) {
 		login.failure(response, request, transaction, http.StatusForbidden, errorUserNotAllowed)
 		return
@@ -274,6 +280,12 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 	if !active {
 		login.failure(response, request, transaction, http.StatusForbidden, errorAccountDisabled)
 		return
+	}
+	if config.GitHubOAuth.CredentialKey() != "" {
+		if err := login.sessions.saveGitHubCredential(request.Context(), transaction.TenantID, profile.applicationUserID, authentication.credential); err != nil {
+			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
+			return
+		}
 	}
 	if err := login.sessions.writeBrowserSession(request.Context(), response, config, transaction.TenantID, profile); err != nil {
 		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")

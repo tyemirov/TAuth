@@ -47,9 +47,10 @@ func NewRegistry(config tenants.Config) (Registry, error) {
 		}
 		for _, configuredResource := range authorization.Resources() {
 			resource := Resource{
-				Identifier:  configuredResource.Identifier(),
-				DisplayName: configuredResource.DisplayName(),
-				Scopes:      make(map[string]Scope),
+				GitHubCredentialsKey: configuredResource.GitHubCredentialsKey(),
+				Identifier:           configuredResource.Identifier(),
+				DisplayName:          configuredResource.DisplayName(),
+				Scopes:               make(map[string]Scope),
 			}
 			for _, configuredScope := range configuredResource.Scopes() {
 				resource.Scopes[configuredScope.Identifier()] = Scope{

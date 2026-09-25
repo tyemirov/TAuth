@@ -693,6 +693,11 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 	if oauthAuthorizationErr != nil {
 		return Tenant{}, nil, oauthAuthorizationErr
 	}
+	for _, resource := range oauthAuthorization.Resources() {
+		if resource.GitHubCredentialsKey() != "" && githubOAuth.Scopes() != GitHubRepositoryScope {
+			return Tenant{}, nil, fmt.Errorf("%w: tenant.github_credentials_require_repository_scope tenant=%s", ErrInvalidTenantConfig, tenantID)
+		}
+	}
 	if oauthAuthorization.Enabled() && !passwordAuthEnabled && googleWebClientID == "" && !githubOAuth.Enabled() {
 		return Tenant{}, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeOAuthMissingBrowserAuth, tenantID)
 	}
@@ -1551,6 +1556,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	}
 	tenant.GitHubOAuth.ClientID = os.ExpandEnv(tenant.GitHubOAuth.ClientID)
 	tenant.GitHubOAuth.ClientSecret = os.ExpandEnv(tenant.GitHubOAuth.ClientSecret)
+	tenant.GitHubOAuth.CredentialKey = os.ExpandEnv(tenant.GitHubOAuth.CredentialKey)
 	tenant.GitHubOAuth.RedirectURI = os.ExpandEnv(tenant.GitHubOAuth.RedirectURI)
 	tenant.GitHubOAuth.Scopes = expandEnvSlice(tenant.GitHubOAuth.Scopes)
 	tenant.AppleOAuth.ClientID = os.ExpandEnv(tenant.AppleOAuth.ClientID)

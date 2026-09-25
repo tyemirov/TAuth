@@ -54,9 +54,10 @@ type OAuthAuthorization struct {
 
 // OAuthResource is one protected-resource identifier and its permitted scopes.
 type OAuthResource struct {
-	identifier  string
-	displayName string
-	scopes      []OAuthScope
+	githubCredentialsKey string
+	identifier           string
+	displayName          string
+	scopes               []OAuthScope
 }
 
 // OAuthScope is one resource permission displayed during consent.
@@ -97,9 +98,10 @@ type FileOAuthAuthorization struct {
 
 // FileOAuthResource represents one raw protected resource.
 type FileOAuthResource struct {
-	Identifier  string           `json:"identifier" yaml:"identifier"`
-	DisplayName string           `json:"display_name" yaml:"display_name"`
-	Scopes      []FileOAuthScope `json:"scopes" yaml:"scopes"`
+	GitHubCredentialsKey string           `json:"github_credentials_key" yaml:"github_credentials_key"`
+	Identifier           string           `json:"identifier" yaml:"identifier"`
+	DisplayName          string           `json:"display_name" yaml:"display_name"`
+	Scopes               []FileOAuthScope `json:"scopes" yaml:"scopes"`
 }
 
 // FileOAuthScope represents one raw resource scope.
@@ -173,6 +175,9 @@ func (authorization OAuthAuthorization) Clients() []OAuthClient {
 
 // Identifier returns the exact RFC 8707 resource identifier.
 func (resource OAuthResource) Identifier() string { return resource.identifier }
+
+// GitHubCredentialsKey authenticates the backend permitted to retrieve provider credentials.
+func (resource OAuthResource) GitHubCredentialsKey() string { return resource.githubCredentialsKey }
 
 // DisplayName returns the resource name shown during consent.
 func (resource OAuthResource) DisplayName() string { return resource.displayName }
@@ -322,7 +327,10 @@ func parseOAuthResources(rawResources []FileOAuthResource, tenantID TenantID, al
 			return nil, nil, scopeErr
 		}
 		resourceIndex[identifier] = scopeIndex
-		resources = append(resources, OAuthResource{identifier: identifier, displayName: displayName, scopes: scopes})
+		if rawResource.GitHubCredentialsKey != "" && (len(rawResource.GitHubCredentialsKey) < 32 || strings.ContainsAny(rawResource.GitHubCredentialsKey, "\r\n\t ")) {
+			return nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeOAuthInvalidResource, tenantID)
+		}
+		resources = append(resources, OAuthResource{identifier: identifier, displayName: displayName, scopes: scopes, githubCredentialsKey: rawResource.GitHubCredentialsKey})
 	}
 	sort.Slice(resources, func(left, right int) bool { return resources[left].identifier < resources[right].identifier })
 	return resources, resourceIndex, nil
@@ -535,6 +543,7 @@ func expandFileOAuthAuthorizationEnv(raw FileOAuthAuthorization) FileOAuthAuthor
 		resource := &raw.Resources[resourceIndex]
 		resource.Identifier = os.ExpandEnv(resource.Identifier)
 		resource.DisplayName = os.ExpandEnv(resource.DisplayName)
+		resource.GitHubCredentialsKey = os.ExpandEnv(resource.GitHubCredentialsKey)
 		for scopeIndex := range resource.Scopes {
 			resource.Scopes[scopeIndex].Identifier = os.ExpandEnv(resource.Scopes[scopeIndex].Identifier)
 			resource.Scopes[scopeIndex].DisplayName = os.ExpandEnv(resource.Scopes[scopeIndex].DisplayName)

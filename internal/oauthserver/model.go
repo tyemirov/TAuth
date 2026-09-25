@@ -25,9 +25,10 @@ type Client struct {
 
 // Resource is one tenant-owned protected resource.
 type Resource struct {
-	Identifier  string
-	DisplayName string
-	Scopes      map[string]Scope
+	GitHubCredentialsKey string
+	Identifier           string
+	DisplayName          string
+	Scopes               map[string]Scope
 }
 
 // Scope is one resource permission presented during consent.

@@ -16,15 +16,16 @@ import (
 
 // GitHub is a local OAuth App protocol server. Configure responses before a request.
 type GitHub struct {
-	Server      *httptest.Server
-	UserJSON    string
-	EmailsJSON  string
-	TokenJSON   string
-	TokenStatus int
-	Calls       atomic.Int64
-	mu          sync.Mutex
-	codes       map[string]url.Values
-	nextCode    int
+	Server              *httptest.Server
+	UserJSON            string
+	EmailsJSON          string
+	TokenJSON           string
+	AuthorizationScopes string
+	TokenStatus         int
+	Calls               atomic.Int64
+	mu                  sync.Mutex
+	codes               map[string]url.Values
+	nextCode            int
 }
 
 // NewGitHub starts the deterministic provider.
@@ -53,7 +54,11 @@ func (provider *GitHub) serve(response http.ResponseWriter, request *http.Reques
 	switch request.URL.Path {
 	case "/login/oauth/authorize":
 		query := request.URL.Query()
-		if query.Get("scope") != "read:user user:email" || query.Get("code_challenge_method") != "S256" {
+		expectedScopes := "read:user user:email"
+		if provider.AuthorizationScopes != "" {
+			expectedScopes = provider.AuthorizationScopes
+		}
+		if query.Get("scope") != expectedScopes || query.Get("code_challenge_method") != "S256" {
 			response.WriteHeader(http.StatusBadRequest)
 			return
 		}

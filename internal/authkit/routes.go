@@ -1635,7 +1635,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		profile, unlinkErr := store.UnlinkIdentity(contextGin, tenantID, accountID, inbound.Provider, inbound.ProviderID)
+		profile, unlinkErr := store.UnlinkIdentity(contextGin.Request.Context(), tenantID, accountID, inbound.Provider, inbound.ProviderID)
 		if unlinkErr != nil {
 			writeAccountError(contextGin, unlinkErr)
 			return

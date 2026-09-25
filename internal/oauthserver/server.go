@@ -31,6 +31,7 @@ const (
 
 // BrowserSessions connects issuer-owned browser pages to normal TAuth sessions.
 type BrowserSessions interface {
+	GitHubCredential(context.Context, string, string) (authkit.GitHubCredential, error)
 	ProviderIdentities(context.Context, string, string, []string) (oauthvalidator.ProviderIdentities, error)
 	ActiveUser(ctx context.Context, tenantID string, userID string) (bool, error)
 	Resolve(request *http.Request, tenantID string) (userID string, authenticated bool, err error)
@@ -82,6 +83,7 @@ func (server *Server) Mount(router gin.IRouter) error {
 		{http.MethodGet, endpointPath(server.config.AuthorizationEndpoint()), server.handleAuthorize},
 		{http.MethodPost, endpointPath(server.config.TokenEndpoint()), server.handleToken},
 		{http.MethodPost, endpointPath(server.config.RevocationEndpoint()), server.handleRevocation},
+		{http.MethodPost, githubCredentialsPath, server.handleGitHubCredentials},
 		{http.MethodGet, endpointPath(server.config.LoginEndpoint()), server.handleLogin},
 		{http.MethodPost, endpointPath(server.config.LoginEndpoint()), server.handleLogin},
 		{http.MethodGet, endpointPath(server.config.ConsentEndpoint()), server.handleConsent},
@@ -199,6 +201,9 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 }
 
 func (server *Server) continueWithConsent(response http.ResponseWriter, request *http.Request, requestToken string, pending AuthorizationRequest, userID string) bool {
+	if !server.requireGitHubCredential(response, request, pending, requestToken, userID) {
+		return true
+	}
 	consent, consentExists, consentErr := server.store.FindConsent(request.Context(), pending.consentKey(userID), server.now().UTC().Unix())
 	if consentErr != nil {
 		writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -584,6 +589,9 @@ func (server *Server) consumeAndIssueCodeAndRedirect(response http.ResponseWrite
 }
 
 func (server *Server) completeAndRedirect(response http.ResponseWriter, request *http.Request, requestToken string, pending AuthorizationRequest, userID string, consent Consent, now time.Time) {
+	if !server.requireGitHubCredential(response, request, pending, requestToken, userID) {
+		return
+	}
 	_, resource, err := server.registry.ResolveResource(pending.Resource)
 	if err != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_target")
