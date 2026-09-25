@@ -839,7 +839,19 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Release, publication, and deployment were not run.
 
 
-## BugFixes (361–399)
+## BugFixes
+
+- [x] [B084] (P2) {F007} Validate GitHub disclosure for resource credentials.
+  Goal: Credential delivery includes the approved GitHub identity.
+  Requirements: Validate resource configuration and requested scopes before authorization.
+  Resolution: Configuration validation enforces GitHub disclosure. Authorization requests without disclosure fail with `invalid_scope`.
+  Validation: Regression tests reproduced both failures. `make test-github-oauth` and final `make ci` passed.
+
+- [x] [B085] (P2) {F007} Validate credential ownership across linked GitHub identities.
+  Goal: Permit credential delivery when an account has multiple GitHub identities.
+  Requirements: Verify credential ownership against account identities and token identities.
+  Resolution: Account and token identity checks accept the linked credential owner at any position.
+  Validation: Memory and SQLite tests reproduced the redirect failure. Focused tests and final `make ci` passed.
 
 - [x] [B083] (P0) Validate the GitHub issuer in login responses.
   Goal:
