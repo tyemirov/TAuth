@@ -540,6 +540,8 @@ const resetProfile = await completePasswordReset({
 
 ### 5.6 OAuth resource authorization
 
+See [GitHub resource credentials](github-resource-credentials.md) when a resource service needs the signed-in user's GitHub repository access.
+
 An OAuth client starts at the configured `authorization_endpoint`. It must send
 `response_type=code`, one `client_id`, one exact `redirect_uri`, one RFC 8707
 `resource`, a space-separated `scope`, `state`, a PKCE challenge, and
