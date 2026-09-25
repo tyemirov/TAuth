@@ -16,6 +16,10 @@ Set `oauth.resources[].github_credentials_key` for each resource that needs prov
 Use a private service key of at least 32 characters with no whitespace.
 Give the same key to that resource service. Do not give it to an MCP client.
 Each resource has its own key.
+Configure at least one resource scope with `identity_providers: [github]`.
+Include that scope in each authorization request for this resource.
+TAuth rejects a credential-enabled resource without a GitHub disclosure scope at startup.
+For an authorization request without a GitHub disclosure scope, TAuth responds with `invalid_scope` before login or consent.
 
 An identity-only GitHub tenant uses `[read:user, user:email]` and has no credential key.
 A resource credential key requires repository scopes and the encryption key.
@@ -32,7 +36,7 @@ Use `Authorization: Bearer <resource-service-key>` and this body:
 ```
 
 TAuth checks the token signature, expiry, audience, tenant, client, scopes, current consent, and active account.
-The GitHub identity must match the current credential owner.
+The credential owner must be one of the account's linked GitHub identities and one of the token's disclosed GitHub identities.
 A successful response contains `github_id`, `access_token`, `token_type`, and `scope`.
 The response prohibits caching. Do not log or return the provider token to the MCP client.
 
