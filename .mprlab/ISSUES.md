@@ -54,6 +54,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F007] (P0) Supply GitHub credentials to authenticated resource services.
+  Request:
+  ISSUES.md I052 replaces separate repository approvals with the user's current GitHub permissions after MCP sign-in.
+  Current GitHub login verifies identity but does not retain the repository credential needed by the resource service.
+  Requirements:
+  - Permit configured repository scopes for selected GitHub tenants.
+  - Retain their provider credentials in encrypted server storage after successful account authentication.
+  - Bind each credential to its tenant, user, and immutable GitHub identity.
+  - Require a resource service secret independently of the public client's OAuth token.
+  - Verify the resource audience, current consent, account state, and provider identity before credential delivery.
+  - Keep provider credentials outside public OAuth responses, access-token claims, browser storage, URLs, and logs.
+  - Require GitHub sign-in when a selected resource needs a missing provider credential.
+  - Reject cross-resource, cross-tenant, expired, revoked, or substituted credentials.
+  - Extend the resource config renderer and public integration tests.
+  - Preserve identity-only login for resources that do not request repository credentials.
+  Resolution:
+  Repository scopes, encrypted credential storage, private resource delivery, and deployment rendering are implemented.
+  The service endpoint checks the user token and current OAuth consent before it returns a credential.
+  Focused GitHub HTTP, configuration, OAuth, and renderer tests passed. Automatic `make ci` passed.
+  Contract: `POST /oauth/github-credentials`. See `docs/github-resource-credentials.md`.
+
 - [x] [F006] (P1) {F005} Accept GitHub tenant contributions in the deployment renderer.
   Goal:
   The consuming ISSUES.md F008 deployment can declare a GitHub tenant without Google configuration.
@@ -818,7 +839,19 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Release, publication, and deployment were not run.
 
 
-## BugFixes (361–399)
+## BugFixes
+
+- [x] [B084] (P2) {F007} Validate GitHub disclosure for resource credentials.
+  Goal: Credential delivery includes the approved GitHub identity.
+  Requirements: Validate resource configuration and requested scopes before authorization.
+  Resolution: Configuration validation enforces GitHub disclosure. Authorization requests without disclosure fail with `invalid_scope`.
+  Validation: Regression tests reproduced both failures. `make test-github-oauth` and final `make ci` passed.
+
+- [x] [B085] (P2) {F007} Validate credential ownership across linked GitHub identities.
+  Goal: Permit credential delivery when an account has multiple GitHub identities.
+  Requirements: Verify credential ownership against account identities and token identities.
+  Resolution: Account and token identity checks accept the linked credential owner at any position.
+  Validation: Memory and SQLite tests reproduced the redirect failure. Focused tests and final `make ci` passed.
 
 - [x] [B083] (P0) Validate the GitHub issuer in login responses.
   Goal:

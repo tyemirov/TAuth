@@ -169,7 +169,7 @@ func (databaseAccountChallengeRecord) TableName() string {
 
 // NewDatabaseUserStore constructs a DatabaseUserStore backed by the provided database URL.
 func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUserStore, error) {
-	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseGitHubCredential{})
 	if openErr != nil {
 		return nil, openErr
 	}

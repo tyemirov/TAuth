@@ -120,6 +120,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthorizationServerMetadata"
+  /oauth/github-credentials:
+    post:
+      operationId: getGitHubResourceCredential
+      summary: Get the user's GitHub credential for an authenticated resource service.
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: Bearer resource service key. Public clients must not receive this key.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subject_token]
+              properties:
+                subject_token:
+                  type: string
+                  description: The user's current resource access token.
+      responses:
+        "200":
+          description: The current GitHub credential. The response prohibits caching.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [github_id, access_token, token_type, scope]
+                properties:
+                  github_id:
+                    type: string
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  scope:
+                    type: string
+        "400":
+          $ref: "#/components/responses/OAuthError"
+        "401":
+          $ref: "#/components/responses/OAuthError"
+        "403":
+          $ref: "#/components/responses/OAuthError"
+        "500":
+          $ref: "#/components/responses/OAuthError"
   /oauth/jwks:
     get:
       operationId: getOAuthJWKS

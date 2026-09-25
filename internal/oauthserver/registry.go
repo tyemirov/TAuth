@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,9 +48,10 @@ func NewRegistry(config tenants.Config) (Registry, error) {
 		}
 		for _, configuredResource := range authorization.Resources() {
 			resource := Resource{
-				Identifier:  configuredResource.Identifier(),
-				DisplayName: configuredResource.DisplayName(),
-				Scopes:      make(map[string]Scope),
+				GitHubCredentialsKey: configuredResource.GitHubCredentialsKey(),
+				Identifier:           configuredResource.Identifier(),
+				DisplayName:          configuredResource.DisplayName(),
+				Scopes:               make(map[string]Scope),
 			}
 			for _, configuredScope := range configuredResource.Scopes() {
 				resource.Scopes[configuredScope.Identifier()] = Scope{
@@ -138,6 +140,9 @@ func validateRequestedScopes(resource Resource, client Client, rawScope string) 
 	}
 	sort.Strings(fields)
 	if !client.permits(resource.Identifier, fields) {
+		return nil, "", ErrInvalidScope
+	}
+	if resource.GitHubCredentialsKey != "" && !slices.Contains(requiredIdentityProviders(resource, rawScope), tenants.GitHubProvider) {
 		return nil, "", ErrInvalidScope
 	}
 	return fields, strings.Join(fields, " "), nil

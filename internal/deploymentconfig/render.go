@@ -150,19 +150,21 @@ type nativeClientResource struct {
 }
 
 type githubOAuthResource struct {
-	Enabled      bool              `json:"enabled"`
-	ClientID     resourceReference `json:"client_id"`
-	ClientSecret resourceReference `json:"client_secret"`
-	RedirectURI  string            `json:"redirect_uri"`
-	Scopes       []string          `json:"scopes"`
+	CredentialKey *resourceReference `json:"credential_key,omitempty"`
+	Enabled       bool               `json:"enabled"`
+	ClientID      resourceReference  `json:"client_id"`
+	ClientSecret  resourceReference  `json:"client_secret"`
+	RedirectURI   string             `json:"redirect_uri"`
+	Scopes        []string           `json:"scopes"`
 }
 
 type nativeGitHubOAuth struct {
-	Enabled      bool     `yaml:"enabled"`
-	ClientID     string   `yaml:"client_id"`
-	ClientSecret string   `yaml:"client_secret"`
-	RedirectURI  string   `yaml:"redirect_uri"`
-	Scopes       []string `yaml:"scopes"`
+	CredentialKey string   `yaml:"credential_key,omitempty"`
+	Enabled       bool     `yaml:"enabled"`
+	ClientID      string   `yaml:"client_id"`
+	ClientSecret  string   `yaml:"client_secret"`
+	RedirectURI   string   `yaml:"redirect_uri"`
+	Scopes        []string `yaml:"scopes"`
 }
 
 type appleOAuthResource struct {
@@ -218,9 +220,27 @@ type tenantOAuth struct {
 }
 
 type tenantOAuthResource struct {
-	Identifier  string             `json:"identifier" yaml:"identifier"`
-	DisplayName string             `json:"display_name" yaml:"display_name"`
-	Scopes      []tenantOAuthScope `json:"scopes" yaml:"scopes"`
+	GitHubCredentialsKey *resourceReference `json:"github_credentials_key,omitempty" yaml:"-"`
+	Identifier           string             `json:"identifier" yaml:"identifier"`
+	DisplayName          string             `json:"display_name" yaml:"display_name"`
+	Scopes               []tenantOAuthScope `json:"scopes" yaml:"scopes"`
+}
+
+type nativeTenantOAuth struct {
+	Enabled                      bool                        `yaml:"enabled"`
+	AccessTokenTTL               string                      `yaml:"access_token_ttl"`
+	RefreshTokenTTL              string                      `yaml:"refresh_token_ttl"`
+	ConsentTTL                   string                      `yaml:"consent_ttl"`
+	AllowClientMetadataDocuments bool                        `yaml:"allow_client_metadata_documents"`
+	Resources                    []nativeTenantOAuthResource `yaml:"resources"`
+	Clients                      []tenantOAuthClient         `yaml:"clients"`
+}
+
+type nativeTenantOAuthResource struct {
+	Identifier           string             `yaml:"identifier"`
+	DisplayName          string             `yaml:"display_name"`
+	Scopes               []tenantOAuthScope `yaml:"scopes"`
+	GitHubCredentialsKey string             `yaml:"github_credentials_key,omitempty"`
 }
 
 type tenantOAuthScope struct {
@@ -287,7 +307,7 @@ type nativeTenant struct {
 	AppleOAuth          *nativeAppleOAuth        `yaml:"apple_oauth,omitempty"`
 	PasswordAuth        *nativePasswordAuth      `yaml:"password_auth,omitempty"`
 	AccountManagement   *nativeAccountManagement `yaml:"account_management,omitempty"`
-	OAuth               *tenantOAuth             `yaml:"oauth,omitempty"`
+	OAuth               *nativeTenantOAuth       `yaml:"oauth,omitempty"`
 	JWTSigningKey       string                   `yaml:"jwt_signing_key"`
 	CookieDomain        string                   `yaml:"cookie_domain"`
 	SessionCookieName   string                   `yaml:"session_cookie_name"`
@@ -514,7 +534,7 @@ func buildTenant(item contribution) (nativeTenant, error) {
 	if resource.Tenant.GitHubOAuth != nil {
 		settings := resource.Tenant.GitHubOAuth
 		if !settings.Enabled {
-			if settings.ClientID != (resourceReference{}) || settings.ClientSecret != (resourceReference{}) || settings.RedirectURI != "" || len(settings.Scopes) != 0 {
+			if settings.CredentialKey != nil || settings.ClientID != (resourceReference{}) || settings.ClientSecret != (resourceReference{}) || settings.RedirectURI != "" || len(settings.Scopes) != 0 {
 				return nativeTenant{}, fmt.Errorf("%w: contribution %s/%s has settings for disabled GitHub login", errInvalidRequest, item.Owner, item.ID)
 			}
 			tenant.GitHubOAuth = &nativeGitHubOAuth{}
@@ -527,7 +547,14 @@ func buildTenant(item contribution) (nativeTenant, error) {
 			if err != nil {
 				return nativeTenant{}, err
 			}
-			tenant.GitHubOAuth = &nativeGitHubOAuth{Enabled: settings.Enabled, ClientID: clientID, ClientSecret: secret, RedirectURI: settings.RedirectURI, Scopes: settings.Scopes}
+			credentialKey := ""
+			if settings.CredentialKey != nil {
+				credentialKey, err = requireOutput(item, "github-credential-key")
+				if err != nil {
+					return nativeTenant{}, err
+				}
+			}
+			tenant.GitHubOAuth = &nativeGitHubOAuth{CredentialKey: credentialKey, Enabled: settings.Enabled, ClientID: clientID, ClientSecret: secret, RedirectURI: settings.RedirectURI, Scopes: settings.Scopes}
 		}
 	}
 	if resource.Tenant.AppleOAuth != nil {
@@ -581,9 +608,20 @@ func buildTenant(item contribution) (nativeTenant, error) {
 		tenant.AccountManagement = nativeAccount
 	}
 	if resource.Tenant.OAuth != nil {
-		oauth := *resource.Tenant.OAuth
-		oauth.Enabled = true
-		tenant.OAuth = &oauth
+		oauth := resource.Tenant.OAuth
+		native := &nativeTenantOAuth{Enabled: true, AccessTokenTTL: oauth.AccessTokenTTL, RefreshTokenTTL: oauth.RefreshTokenTTL, ConsentTTL: oauth.ConsentTTL, AllowClientMetadataDocuments: oauth.AllowClientMetadataDocuments, Clients: oauth.Clients}
+		for index, protected := range oauth.Resources {
+			key := ""
+			if protected.GitHubCredentialsKey != nil {
+				var err error
+				key, err = requireOutput(item, fmt.Sprintf("oauth-resource-%d-github-credentials-key", index))
+				if err != nil {
+					return nativeTenant{}, err
+				}
+			}
+			native.Resources = append(native.Resources, nativeTenantOAuthResource{Identifier: protected.Identifier, DisplayName: protected.DisplayName, Scopes: protected.Scopes, GitHubCredentialsKey: key})
+		}
+		tenant.OAuth = native
 	}
 	return tenant, nil
 }

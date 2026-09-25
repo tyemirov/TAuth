@@ -16,23 +16,28 @@ const (
 	GitHubCallbackPath = "/auth/github/callback"
 	// GitHubIdentityScope is the closed GitHub OAuth App permission set.
 	GitHubIdentityScope = "read:user user:email"
+	// GitHubRepositoryScope is the repository-capable GitHub permission set.
+	GitHubRepositoryScope = "read:user repo user:email"
 )
 
 // GitHubOAuth contains validated GitHub.com identity settings.
 type GitHubOAuth struct {
-	enabled      bool
-	clientID     string
-	clientSecret string
-	redirectURI  string
+	enabled       bool
+	clientID      string
+	clientSecret  string
+	redirectURI   string
+	scopes        string
+	credentialKey string
 }
 
 // FileGitHubOAuth is the native GitHub provider configuration.
 type FileGitHubOAuth struct {
-	Enabled      yamlBool `json:"enabled" yaml:"enabled"`
-	ClientID     string   `json:"client_id" yaml:"client_id"`
-	ClientSecret string   `json:"client_secret" yaml:"client_secret"`
-	RedirectURI  string   `json:"redirect_uri" yaml:"redirect_uri"`
-	Scopes       []string `json:"scopes" yaml:"scopes"`
+	Enabled       yamlBool `json:"enabled" yaml:"enabled"`
+	ClientID      string   `json:"client_id" yaml:"client_id"`
+	ClientSecret  string   `json:"client_secret" yaml:"client_secret"`
+	RedirectURI   string   `json:"redirect_uri" yaml:"redirect_uri"`
+	Scopes        []string `json:"scopes" yaml:"scopes"`
+	CredentialKey string   `json:"credential_key" yaml:"credential_key"`
 }
 
 // GitHubOAuth returns the tenant's GitHub provider.
@@ -50,12 +55,18 @@ func (config GitHubOAuth) ClientSecret() string { return config.clientSecret }
 // RedirectURI returns the exact configured callback.
 func (config GitHubOAuth) RedirectURI() string { return config.redirectURI }
 
+// Scopes returns the selected provider permission set.
+func (config GitHubOAuth) Scopes() string { return config.scopes }
+
+// CredentialKey returns the encryption key for retained repository credentials.
+func (config GitHubOAuth) CredentialKey() string { return config.credentialKey }
+
 func parseGitHubOAuth(raw FileGitHubOAuth, tenantID TenantID) (GitHubOAuth, error) {
 	invalid := func() (GitHubOAuth, error) {
 		return GitHubOAuth{}, fmt.Errorf("%w: tenant.invalid_github_oauth tenant=%s", ErrInvalidTenantConfig, tenantID)
 	}
 	if !bool(raw.Enabled) {
-		if raw.ClientID != "" || raw.ClientSecret != "" || raw.RedirectURI != "" || len(raw.Scopes) != 0 {
+		if raw.ClientID != "" || raw.ClientSecret != "" || raw.RedirectURI != "" || len(raw.Scopes) != 0 || raw.CredentialKey != "" {
 			return invalid()
 		}
 		return GitHubOAuth{}, nil
@@ -65,12 +76,17 @@ func parseGitHubOAuth(raw FileGitHubOAuth, tenantID TenantID) (GitHubOAuth, erro
 		err != nil || callback.Scheme != "https" || callback.Hostname() == "" || callback.User != nil || callback.RawQuery != "" || callback.ForceQuery || callback.Fragment != "" || callback.Path != GitHubCallbackPath || callback.RawPath != "" {
 		return invalid()
 	}
+	selectedScopes := GitHubIdentityScope
 	if len(raw.Scopes) != 0 {
 		scopes := slices.Clone(raw.Scopes)
 		slices.Sort(scopes)
-		if !slices.Equal(scopes, strings.Fields(GitHubIdentityScope)) {
+		selectedScopes = strings.Join(scopes, " ")
+		if selectedScopes != GitHubIdentityScope && selectedScopes != GitHubRepositoryScope {
 			return invalid()
 		}
 	}
-	return GitHubOAuth{enabled: true, clientID: raw.ClientID, clientSecret: raw.ClientSecret, redirectURI: raw.RedirectURI}, nil
+	if (selectedScopes == GitHubRepositoryScope && len(raw.CredentialKey) != 32) || (selectedScopes == GitHubIdentityScope && raw.CredentialKey != "") {
+		return invalid()
+	}
+	return GitHubOAuth{enabled: true, clientID: raw.ClientID, clientSecret: raw.ClientSecret, redirectURI: raw.RedirectURI, scopes: selectedScopes, credentialKey: raw.CredentialKey}, nil
 }
