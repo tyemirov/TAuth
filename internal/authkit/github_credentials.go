@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/pkg/oauthvalidator"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -110,7 +111,7 @@ func (sessions *OAuthBrowserSessions) saveGitHubCredential(ctx context.Context, 
 	return sessions.accountStore.SaveGitHubCredential(ctx, tenantID, userID, box.Seal(nil, nil, encoded, githubCredentialBinding(tenantID, userID)))
 }
 
-// GitHubCredential retrieves a credential only for the account's current GitHub identity.
+// GitHubCredential retrieves a credential owned by a linked GitHub identity.
 func (sessions *OAuthBrowserSessions) GitHubCredential(ctx context.Context, tenantID, userID string) (GitHubCredential, error) {
 	identities, err := sessions.ProviderIdentities(ctx, tenantID, userID, []string{tenants.GitHubProvider})
 	if err != nil {
@@ -132,7 +133,9 @@ func (sessions *OAuthBrowserSessions) GitHubCredential(ctx context.Context, tena
 	if err := json.Unmarshal(encoded, &credential); err != nil {
 		return GitHubCredential{}, fmt.Errorf("github.credential_decode: %w", err)
 	}
-	if len(identities) != 1 || identities[0].ProviderID != credential.GitHubID {
+	if !slices.ContainsFunc(identities, func(identity oauthvalidator.ProviderIdentity) bool {
+		return identity.Provider == tenants.GitHubProvider && identity.ProviderID == credential.GitHubID
+	}) {
 		return GitHubCredential{}, ErrGitHubCredentialMissing
 	}
 	return credential, nil

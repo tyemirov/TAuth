@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -139,6 +140,9 @@ func validateRequestedScopes(resource Resource, client Client, rawScope string) 
 	}
 	sort.Strings(fields)
 	if !client.permits(resource.Identifier, fields) {
+		return nil, "", ErrInvalidScope
+	}
+	if resource.GitHubCredentialsKey != "" && !slices.Contains(requiredIdentityProviders(resource, rawScope), tenants.GitHubProvider) {
 		return nil, "", ErrInvalidScope
 	}
 	return fields, strings.Join(fields, " "), nil

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -329,6 +330,11 @@ func parseOAuthResources(rawResources []FileOAuthResource, tenantID TenantID, al
 		resourceIndex[identifier] = scopeIndex
 		if rawResource.GitHubCredentialsKey != "" && (len(rawResource.GitHubCredentialsKey) < 32 || strings.ContainsAny(rawResource.GitHubCredentialsKey, "\r\n\t ")) {
 			return nil, nil, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeOAuthInvalidResource, tenantID)
+		}
+		if rawResource.GitHubCredentialsKey != "" && !slices.ContainsFunc(scopes, func(scope OAuthScope) bool {
+			return slices.Contains(scope.IdentityProviders(), GitHubProvider)
+		}) {
+			return nil, nil, fmt.Errorf("%w: %s tenant=%s resource=%s requires a GitHub identity disclosure scope", ErrInvalidTenantConfig, errorCodeOAuthInvalidResource, tenantID, identifier)
 		}
 		resources = append(resources, OAuthResource{identifier: identifier, displayName: displayName, scopes: scopes, githubCredentialsKey: rawResource.GitHubCredentialsKey})
 	}

@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/pkg/oauthvalidator"
 )
 
 const githubCredentialsPath = "/oauth/github-credentials"
@@ -96,7 +98,9 @@ func (server *Server) handleGitHubCredentials(response http.ResponseWriter, requ
 		writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		return
 	}
-	if len(claims.ProviderIdentities) != 1 || claims.ProviderIdentities[0].Provider != "github" || claims.ProviderIdentities[0].ProviderID != credential.GitHubID {
+	if !slices.ContainsFunc(claims.ProviderIdentities, func(identity oauthvalidator.ProviderIdentity) bool {
+		return identity.Provider == tenants.GitHubProvider && identity.ProviderID == credential.GitHubID
+	}) {
 		writeOAuthError(response, http.StatusForbidden, "invalid_grant")
 		return
 	}
