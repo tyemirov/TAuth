@@ -6,6 +6,37 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Planning
 
+- [x] [P002] (P1) Plan a tenant console from the Ledger and LLM Proxy workflows.
+  Goal:
+  Define a functional UI for owner login, tenant creation, later configuration, and browser and backend integration.
+  This issue records the completed analysis. F008 owns implementation of the resulting scope.
+  Deliverables:
+  - Compare the current Ledger, LLM Proxy, and TAuth source contracts.
+  - Define the screens, owner boundary, management API, persistent configuration, and runtime activation.
+  - Plan the initial UI integration with `tauth.js` and `sessionvalidator`.
+  - Keep OAuth console configuration as optional future scope.
+  - Record migration requirements, Gateway dependencies, acceptance criteria, and open product decisions.
+  Result:
+  The September 26, 2026 source review and proposed delivery sequence are in `.mprlab/TENANT-CONSOLE.md`.
+  The proposal uses the Ledger workspace structure and selected LLM Proxy configuration patterns.
+  Tenant persistence and runtime activation are required backend work.
+  External-domain cookie integration requires a customer-domain auth endpoint.
+  Accepted direction:
+  Accounts own tenants. Each tenant has one owner, and an account can own multiple tenants.
+  Migrate current environment-backed tenant configuration into the database before the tenant management UI.
+  Assign all existing application tenants to the account enrolled through verified Google login as `vtyemirov@gmail.com`.
+  Bind subsequent ownership checks to the stable account ID and console subject.
+  Use the same schema for imported tenants and tenants created later.
+  The plan defines the ownership tables, bounded import, database cutover, and migration acceptance criteria.
+  Resolution:
+  Prepared F008 with six sequential implementation issues: F009, I212, F010, F011, F012, and F013.
+  Recorded implementation defaults and acceptance criteria in `.mprlab/TENANT-CONSOLE.md`.
+  Google login, customer API proxy routes, and protected session key export define the first delivery.
+  P001 remains the separate assessment of shared identity across applications.
+  Validation:
+  Verified the issue identifiers, dependency sequence, changed prose, and whitespace.
+  The Governor check retains six existing managed-file differences. Production implementation and migration remain pending under F008.
+
 - [ ] [P001] Assess customer value and options for a platform account across applications.
   Goal:
   Determine whether shared identity or single sign-on solves a demonstrated customer problem across MPR Lab applications.
@@ -53,6 +84,242 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Close P001 after the user accepts the analysis and decision, including a decision to defer or decline.
 
 ## Features
+
+- [x] [F008] (P1) {F009,I212,F010,F011,F012,F013} Deliver the account-owned TAuth tenant console.
+  Goal:
+  Let a person sign in, manage owned tenants, and integrate an application through `tauth.js` and `sessionvalidator`.
+  Requirements:
+  - Use `.mprlab/TENANT-CONSOLE.md` as the implementation contract derived from P002.
+  - Assign all imported application tenants to the account for verified Google login `vtyemirov@gmail.com`.
+  - Use one database ownership model for imported tenants and newly created tenants.
+  - Complete the child issues sequentially in this order: F009, I212, F010, F011, F012, and F013.
+  - Preserve current provider behavior and application-user identities through the migration.
+  Deliverables:
+  - F009: Owner accounts, verified login bindings, database schema, and console bootstrap.
+  - I212: Bounded tenant import and database-only runtime configuration.
+  - F010: Owner-authorized management API and runtime activation.
+  - F011: Owner-scoped Gateway provisioning through the management contract.
+  - F012: Browser tenant workspace and configuration forms.
+  - F013: Integration setup, secret export, and end-to-end application acceptance.
+  Validation:
+  - Require all six child issues to pass their implementation acceptance criteria.
+  - Verify that the initial owner can see the complete imported tenant collection after login.
+  - Verify that another account can create and use an isolated tenant through the same UI.
+  - Complete a real browser login and protected application request through the published validator package.
+  - Record production import, publication, deployment, and live-provider qualification separately in the delivery runbook.
+  OAuth console configuration, team membership, and additional provider forms remain future scope.
+  Resolution:
+  Completed F009, I212, F010, F011, F012, and F013 in sequence.
+  Imported and new application tenants use one owner-authorized database contract and the same console workflow.
+  Gateway uses scoped management credentials. The runtime rejects tenant YAML.
+  The browser acceptance completed owner login, application login, and protected requests through the public session validator.
+  TAuth and Gateway CI passed. Console race checks and the Pages artifact check passed.
+  The production runbook records migration, release inputs, publication, deployment, and live-provider qualification separately.
+  These production operations were not executed during local implementation.
+  Changed files: ownership and runtime modules, management APIs, Gateway client, browser workspace, customer example, acceptance tests, and operational documentation.
+  Existing Governor differences remain in six TAuth files and five Gateway files.
+
+- [x] [F009] (P1) Build tenant ownership storage and verified console login.
+  Goal:
+  Establish the persistent owner account that contains each application tenant.
+  Requirements:
+  - Implement the database structure in P002's durable plan with domain constructors and explicit database constraints.
+  - Keep `owner_accounts` and `owner_login_bindings` separate from the existing tenant-scoped application `accounts`.
+  - Require exactly one `owner_account_id` for each application tenant.
+  - Create the reserved console tenant through an explicit operator bootstrap command.
+  - Authenticate the initial owner through Google and verify `vtyemirov@gmail.com` during controlled enrollment.
+  - Persist the verified issuer, console tenant, and subject as the owner login binding.
+  - Use that stable binding for later authorization, independently of profile email changes.
+  - Support later owner account creation through the same verified console login contract.
+  - Store tenant secrets with authenticated encryption and keep the encryption key in service secret configuration.
+  - Reject owner deletion while that account owns tenants.
+  Deliverables:
+  - Add owner persistence, tenant relationships, secret storage, and database initialization.
+  - Add console bootstrap, Google login, and idempotent owner provision through public entry points.
+  - Specify the reserved console tenant bootstrap order and its restricted administration in the runbook.
+  - Add owner resource schemas to the canonical OpenAPI document.
+  Validation:
+  - Start with failing HTTP and CLI integration tests for owner enrollment and provision.
+  - Verify repeat login returns the same owner account after restart.
+  - Reject wrong-audience, unverified-email, substituted-subject, and customer-tenant credentials during initial enrollment.
+  - Verify distinct console identities produce distinct owner accounts.
+  - Verify database constraints reject missing owners and cross-tenant secret references.
+  - Run the applicable Make targets and final `make ci`.
+  Resolution:
+  Added encrypted console bootstrap, stable owner bindings, and the owner HTTP resource.
+  Added database constraints for ownership, revisions, and tenant secret references.
+  Verified Google enrollment restrictions, separate owners, email changes, restart, CSRF, and customer-session rejection.
+  `make test-console` and `make ci` passed on September 26, 2026.
+  The new runbook and execution plan passed the mechanical language check.
+  The Governor check retains the six differences recorded by P002.
+  Production enrollment and live Google qualification remain separate operations.
+
+
+- [x] [F010] (P1) {I212} Add owner-authorized tenant management and runtime activation.
+  Goal:
+  Let an authenticated owner create, configure, activate, and suspend application tenants without a service restart.
+  Requirements:
+  - Implement the proposed management resources in `.mprlab/TENANT-CONSOLE.md`.
+  - Authorize every tenant resource through the current owner's stable account ID.
+  - Support paginated collections and explicit draft, active, and suspended tenant states.
+  - Require exact console Origin and CSRF protection for cookie-authenticated mutations.
+  - Use idempotency keys for creation and ETags with preconditions for configuration changes.
+  - Verify production hostname ownership through bounded DNS TXT challenges before new origin activation.
+  - Retain imported active origins and record their operator-approved import provenance.
+  - Reserve console origins and enforce tenant-bound localhost requests with distinct cookie names.
+  - Build one immutable runtime snapshot for each active revision across all authentication consumers.
+  - Validate a complete revision before committing its activation.
+  - Restore the committed active revision after restart and expose activation failures as typed resource states.
+  - Revoke refresh sessions and OAuth refresh grants when suspension completes.
+  - State the expiry limit for access tokens already accepted by offline validators.
+  Deliverables:
+  - Implement owner-scoped tenant creation, reads, updates, configuration, origin proofs, activations, and audit records.
+  - Update origin resolution, CORS, providers, cookies, account policy, email delivery, and OAuth registries together.
+  - Define the database commit and runtime publication sequence, including crash recovery and failed activation behavior.
+  - Update OpenAPI, repository clients, and public error contracts atomically.
+  Validation:
+  - Start with failing HTTP integration tests against the real server and database.
+  - Verify two owners cannot read, mutate, export, or activate each other's resources.
+  - Verify retry identity, conflicting payloads, stale ETags, pagination, origin conflicts, and suspension.
+  - Verify a failed activation preserves the previous active revision.
+  - Verify a request uses one revision while a concurrent activation completes.
+  - Verify immediate use of a new tenant and persistence after restart.
+  - Run the applicable Make targets and final `make ci`.
+
+  Resolved 2026-09-26: Added owner-scoped tenant resources, cursor pages, retry receipts, revision preconditions, DNS proofs, and audit records.
+  Activation commits and publishes one complete runtime snapshot. Existing requests retain their selected revision.
+  Suspension drains retired requests and revokes refresh sessions and OAuth grants. Restart completes pending suspension.
+  Added typed failed activation resources and updated OpenAPI and the operations document.
+  Validation: real HTTP and database tests cover isolation, retries, conflicts, DNS, restart, suspension, and concurrent activation.
+  Response schema checks, the focused race check, and final `make ci` passed. B086 records the corrected context race.
+  The Governor check retains the six existing differences recorded by P002.
+  Changed files: `internal/controlplane`, `cmd/server/main.go`, `cmd/server/runtime.go`, `cmd/server/console_test.go`, `cmd/server/management_test.go`, `cmd/server/management_contract_test.go`, `internal/tenants/config.go`, `internal/authkit/database_nonce_store.go`, `internal/authkit/database_refresh_store.go`, `internal/oauthserver/database_store.go`, `internal/web/cors.go`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, and `ARCHITECTURE.md`.
+
+- [x] [F011] (P1) {F010} Provision account-owned tenants through Gateway.
+  Goal:
+  Let Gateway manage its authorized tenant resources through the database management contract.
+  Requirements:
+  - Replace Gateway's runtime tenant YAML output with authenticated provisioning through F010's resources.
+  - Keep ownership with the account for `vtyemirov@gmail.com` for all imported application tenants.
+  - Issue revocable opaque provisioning credentials bound to an owner, permitted operations, and explicit tenant grants.
+  - Store provisioning credential digests and show each generated credential once.
+  - Permit tenant creation only through an explicit owner-scoped creation grant.
+  - Use the same configuration validation and activation service for Gateway and console writes.
+  - Require revision preconditions so Gateway cannot overwrite concurrent console changes.
+  - Persist contribution-to-tenant references and stable retry receipts for repeated deployment requests.
+  - Preserve the validator key and cookie outputs required by existing consuming applications.
+  - Keep service settings and encryption keys in deployment configuration.
+  Deliverables:
+  - Add provisioning credential administration and restricted authentication to the management API.
+  - Update TAuth's deployment renderer, resource integration, and provisioning contract tests.
+  - Implement the corresponding client change in the primary Gateway repository after reading its agent contracts.
+  - Record the required released Gateway version and ordered production cutover in the runbook.
+  Validation:
+  - Verify the actual Gateway client provisions a tenant through a real TAuth HTTP server and test database.
+  - Verify repeat provisioning preserves tenant IDs, ownership, credentials, and configuration revisions.
+  - Reject revoked credentials, unauthorized tenants, unauthorized creation, and stale configuration revisions.
+  - Verify downstream validator outputs retain their existing values for imported tenants.
+  - Run repository-native checks in each changed repository, including the installed Gateway integration lane.
+  Production cutover requires the matching Gateway release. Release and deployment remain separate operational steps.
+  Resolution:
+  Added opaque scoped credentials, persistent contribution bindings, and revision-safe provisioning through shared activation.
+  The renderer emits service settings only. Gateway F017 implements the actual Ansible management client and handler task.
+  Imported validator keys and cookie outputs retain their values. Revocation and concurrent console edits reject machine writes.
+  Validation:
+  TAuth and Gateway `make ci` passed. The actual Gateway client passed against the real TAuth service and database.
+  Gateway handler and installed-runtime targets passed. TAuth console race checks passed.
+  Gateway's lifecycle package took 801.788 seconds in aggregate CI. The separate installed lane took 117.283 seconds.
+  Existing Governor differences remain: six in TAuth and five in Gateway.
+  The runbooks require the exact released Gateway version before cutover. This source change allocates no release version.
+  Changed files: credential and provisioning modules, deployment renderer, server commands and tests, Makefile, fixtures, OpenAPI, service manifest, README, architecture, and operations guide.
+  Gateway files: Ansible client, provider handler tasks and descriptor, client acceptance playbook, Makefile, and provisioning guide.
+
+- [x] [F012] (P1) {F011} Build the authenticated tenant workspace.
+  Goal:
+  Let owners return to their tenant collection and configure tenants through a functional browser UI.
+  Requirements:
+  - Use the Ledger tenant rail and responsive selector with the shared MPR-UI account controls.
+  - Serve the static console at `/app/` through the existing GitHub Pages artifact.
+  - Use the reserved console tenant for Google authentication and the separate API hostname for management requests.
+  - Show imported tenants to their owner after login.
+  - Let another owner start with an empty collection and create named draft tenants.
+  - Implement Overview, Domains, Sign-in methods, Integration, and Settings sections from the durable plan.
+  - Support Google setup, domain proofs, activation, rename, and confirmed suspension through F010.
+  - Show current provider summaries for imported tenants and preserve configuration fields outside the editable forms.
+  - Validate backend payloads in client modules and keep components focused on visible state and user intent.
+  - Cancel old requests and reject late responses after account or tenant changes.
+  - Implement keyboard access, focus return, narrow layouts, field errors, and explicit request states.
+  Deliverables:
+  - Add semantic HTML, checked ES modules, styles, runtime public configuration, and the management backend client.
+  - Preserve documentation routes and the canonical `/tauth.js` artifact.
+  - Add a tenant URL state that survives page reloads on GitHub Pages.
+  Validation:
+  - Start with failing automated-browser tests against the real management service.
+  - Verify imported tenant selection, new-owner signup, draft creation, configuration, activation, and return login.
+  - Verify logout clears protected state and tenant switching rejects stale results.
+  - Verify keyboard and narrow-width flows, failed requests, and revision conflicts.
+  - Build the Pages artifact and verify its console, documentation, and helper files.
+  - Run the applicable Make targets and final `make ci`.
+  Resolution:
+  Added the Pages workspace with pinned MPR-UI controls, a typed management client, and tenant URL selection.
+  Owners can create drafts, configure Google and domains, publish proofs, activate, rename, and suspend tenants.
+  The UI preserves form values on errors and rejects late results after tenant or account changes.
+  Validation:
+  Chromium acceptance passed against the real TLS service and database, with controlled Google and DNS boundaries.
+  Coverage includes imported tenants, new owners, activation, return login, conflicts, field errors, keyboard focus, and narrow layouts.
+  The Pages artifact and checked JavaScript passed. Final `make ci` passed after the Pages contract test update.
+  The Governor check retains the six existing managed-file differences.
+  Changed files: `web/app/`, console bootstrap handler, browser fixture and test, Pages Dockerfile and test, Makefile, TypeScript configuration, OpenAPI, README, architecture, and operations guide.
+
+- [x] [F013] (P1) {F012} Complete tenant integration setup and application acceptance.
+  Goal:
+  Let an owner use a tenant in a real browser application and a protected backend.
+  Requirements:
+  - Generate public `tauth.js` settings and complete Google sign-in examples from the selected active tenant revision.
+  - Generate backend configuration for `sessionvalidator` with explicit expected-tenant authorization.
+  - Provide exact customer API proxy routes for auth endpoints and `/me` with host-only session cookies.
+  - Bind proxy requests to the correct tenant and preserve browser Origin validation.
+  - Require recent Google authentication within five minutes for a session key export.
+  - Bind the fresh authentication transaction to the current owner, tenant, and export operation.
+  - Return exported keys through no-store responses and record secret-free audit events.
+  - Clear displayed secrets after dismissal, tenant change, or logout.
+  - Record setup checks against the active configuration revision and show their evidence and time.
+  - Restrict server-side setup checks to verified destinations and fixed protocols.
+  - Document session key replacement, validator installation, session expiry, and provider configuration.
+  Deliverables:
+  - Complete the Integration screen, protected export resource, and setup-check resources.
+  - Add a runnable browser application and Go backend example with the published validator interface.
+  - Add an automated browser acceptance target with distinct frontend, customer API, and TAuth origins.
+  - Complete the production migration and publication runbook with required inputs and ordered verification steps.
+  Validation:
+  - Start with failing browser and HTTP tests for the complete integration flow.
+  - Import existing tenants and verify their owner can use the generated settings after login.
+  - Create a new tenant through the UI, authenticate an application user, and call a protected backend route.
+  - Verify refresh, logout, restart, wrong-tenant requests, denied origins, and expired sessions.
+  - Verify stale or substituted reauthentication cannot export a key.
+  - Verify public snippets, browser storage, logs, and URLs contain no secrets.
+  - Run the complete automated-browser acceptance target and final `make ci`.
+  Live-provider qualification, production import, publication, and deployment are separate runbook records.
+  Resolution:
+  Added active-revision snippets, Google-bound key exports, fixed HTTPS setup checks, and the complete Integration screen.
+  Added the runnable customer API with exact proxy routes, host-only cookies, and explicit validator tenant authorization.
+  Added an offline key replacement command with suspension and revision preconditions.
+  The operations guide defines provider inputs, key installation, expiry limits, and the ordered production delivery record.
+  Manual key replacement preserves a Gateway revision conflict. Automatic adoption of that operator change is outside this delivery.
+  Validation:
+  Final `make ci` passed, including the Pages artifact and complete Chromium application acceptance.
+  Console HTTP, database, and browser race checks passed.
+  Two owners created and used isolated applications. The initial owner used imported settings and exported the preserved key.
+  Acceptance covered refresh, restart, expiry, denied origins, wrong-tenant tokens, and protected backend requests.
+  Export tests rejected stale, expired, replayed, substituted, cross-owner, cross-tenant, and obsolete-revision authentication.
+  Browser tests verified dismissal, tenant-change, logout, and late-callback secret clearing.
+  Setup tests rejected private destinations, mixed DNS answers, redirects, oversized responses, and invalid tenant nonce binding.
+  The key replacement test rejected the old key after the suspended installation and restart sequence.
+  Changed files: `internal/controlplane/integration.go`, `setup.go`, `key_replace.go`, schema, management routes, and resource representations.
+  Server files: runtime wiring, integration and setup tests, browser fixture, and key replacement command and test.
+  Application files: `internal/customerapp/`, `examples/tenant-app/`, `web/app/`, browser acceptance, Pages asset check, Makefile, and module metadata.
+  Documents: README, architecture, OpenAPI, tenant operations guide, terminology, and this resolution.
+  The Governor check retains six pre-existing managed-file differences. Changed prose passed its scoped language review.
 
 - [x] [F007] (P0) Supply GitHub credentials to authenticated resource services.
   Request:
@@ -634,7 +901,48 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
 
 
-## Improvements (420–640)
+## Improvements
+
+- [x] [I212] (P1) {F009} Migrate tenant configuration into the owner database.
+  Goal:
+  Replace environment-backed tenant YAML with one persistent runtime source while preserving current authentication behavior.
+  Requirements:
+  - Read the effective tenant configuration through the canonical loader, including literal values and environment substitutions.
+  - Inventory the source without printing secrets or copying them into repository artifacts.
+  - Require the verified initial owner binding from F009 before importing any application tenant.
+  - Assign every imported application tenant to that owner's account in one database transaction.
+  - Preserve tenant IDs, provider configuration, keys, origins, cookie settings, account policies, and session lifetimes.
+  - Preserve application users, provider identities, password hashes, refresh sessions, encrypted provider credentials, and OAuth grants.
+  - Record a secret-safe source digest and import receipt for an identical retry.
+  - Reject incomplete input, duplicate identifiers, conflicting ownership, and changed-source retries before writes.
+  - Keep the bounded importer separate from normal service startup.
+  - Load all runtime tenant configuration from the database after the cutover.
+  - Reject obsolete tenant YAML and tenant environment configuration in the normal runtime.
+  - Keep service database and encryption-key settings in service configuration.
+  Deliverables:
+  - Add the bounded import command, redacted inspection output, transaction, receipts, and database loader.
+  - Update server startup, tenant resolution, account seeding, doctor, and preflight for the database contract.
+  - Update all repository-owned runtime fixtures and examples to the new tenant configuration contract.
+  - Add a runbook for backup, configuration freeze, import, verification, and coordinated Gateway cutover through F011.
+  - Record removal of the temporary importer after verified production migration as an operational cleanup step.
+  Validation:
+  - Start with a failing CLI integration test against representative current configuration and populated account storage.
+  - Verify every source tenant occurs once under the intended owner, with identical effective authentication settings.
+  - Verify identical retries, conflicts, interrupted imports, and transaction rollback without partial data.
+  - Verify existing login, refresh, provider credentials, and OAuth behavior through real public endpoints.
+  - Verify restart uses database configuration with tenant environment inputs removed.
+  - Verify missing database configuration fails explicitly instead of loading YAML.
+  - Run the applicable Make targets and final `make ci`.
+  Production migration waits for F011's matching Gateway client. This issue closes on implementation and software acceptance.
+
+  Resolved 2026-09-26: Added the bounded import command, redacted inventory, encrypted configuration revisions, and atomic retry receipts.
+  Runtime, doctor, and preflight now read tenant configuration from the database.
+  The import preserves existing tenant keys, users, and sessions. Runtime configuration rejects tenant YAML.
+  Updated service fixtures, examples, renderer checks, and the migration runbook.
+  Validation: CLI and HTTP integration tests, browser flows, container checks, and `make ci` passed.
+  The Governor check retains the six existing differences recorded by P002.
+  Production import and Gateway cutover remain separate operations after F011.
+  Changed files: `internal/controlplane`, `internal/runtimeconfig`, `internal/testconfig`, `internal/appconfig`, `internal/tenants`, `internal/doctor`, `internal/preflight`, `internal/deploymentconfig`, `cmd/server`, `pkg/sessionvalidator`, `tests`, `examples`, `Makefile`, `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, and `docs/tenant-console-operations.md`.
 
 - [x] [I210] (P1) Show progress during the OAuth consent submission.
   Goal:
@@ -840,6 +1148,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes
+
+- [x] [B087] (P1) Limit Gateway suspension grants to suspension changes.
+  Observed:
+  A provisioning credential with the suspension operation can rename a tenant through metadata PATCH.
+  Expected:
+  Reject name and environment changes from provisioning credentials.
+  Validation:
+  The HTTP acceptance test returned 200 for an expected 403 before the correction.
+  Resolution:
+  Provisioning metadata PATCH rejects name and environment changes with 403.
+  Focused HTTP acceptance and final `make ci` pass.
+  Changed files: `internal/controlplane/resources.go` and `cmd/server/provisioning_test.go`.
+
+
+- [x] [B086] (P0) Keep management database contexts outside the Gin request pool.
+  F010 acceptance with `GOFLAGS=-race make test-console` found a data race during owner provision.
+  The SQL cleanup goroutine reads a pooled Gin context after the HTTP handler returns.
+  Pass the HTTP request context to database operations and runtime construction.
+  Validate the console HTTP tests with the race detector and final CI.
+
+  Resolved 2026-09-26: Management handlers now pass the HTTP request context to database and runtime operations.
+  The focused race check and final `make ci` passed.
+  Changed files: `internal/controlplane/http.go`, `internal/controlplane/management_http.go`, `internal/controlplane/resources.go`, and `internal/controlplane/activation.go`.
 
 - [x] [B084] (P2) {F007} Validate GitHub disclosure for resource credentials.
   Goal: Credential delivery includes the approved GitHub identity.
