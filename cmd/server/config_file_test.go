@@ -55,7 +55,7 @@ tenants:
     allow_insecure_http: "true"
 `)
 
-	config, loadErr := appconfig.LoadConfig(configPath)
+	config, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
@@ -100,7 +100,7 @@ tenants:
     nonce_ttl: "5m"
 `)
 
-	config, loadErr := appconfig.LoadConfig(configPath)
+	config, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
@@ -139,7 +139,7 @@ tenants:
     refresh_ttl: "720h"
 `, passwordHash))
 
-	config, loadErr := appconfig.LoadConfig(configPath)
+	config, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
@@ -161,7 +161,7 @@ tenants:
 }
 
 func TestLoadApplicationConfigRejectsEmptyPath(testingHandle *testing.T) {
-	if _, err := appconfig.LoadConfig("  "); err == nil {
+	if _, err := appconfig.LoadImportSource("  "); err == nil {
 		testingHandle.Fatalf("expected error for empty path")
 	}
 }
@@ -185,23 +185,27 @@ func TestLoadApplicationConfigMultiTenantFixture(testingHandle *testing.T) {
 		testingHandle.Fatalf("runtime caller unavailable")
 	}
 	baseDir := filepath.Dir(filename)
-	configPath := filepath.Join(baseDir, "..", "..", "tests", "fixtures", "multi-tenant", "config.yaml")
+	configPath := filepath.Join(baseDir, "..", "..", "tests", "fixtures", "multi-tenant", "tenants.import.yaml")
 	if _, err := os.Stat(configPath); err != nil {
 		testingHandle.Fatalf("fixture config missing: %v", err)
 	}
 
-	config, loadErr := appconfig.LoadConfig(configPath)
+	config, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		testingHandle.Fatalf("expected config to load, got %v", loadErr)
 	}
-	if config.Server.ListenAddr != ":8082" {
-		testingHandle.Fatalf("unexpected listen addr: %s", config.Server.ListenAddr)
+	service, err := appconfig.LoadConfig(filepath.Join(filepath.Dir(configPath), "config.yaml"))
+	if err != nil {
+		testingHandle.Fatal(err)
 	}
-	if !config.Server.EnableCORS {
+	if service.Server.ListenAddr != ":8082" {
+		testingHandle.Fatalf("unexpected listen addr: %s", service.Server.ListenAddr)
+	}
+	if !service.Server.EnableCORS {
 		testingHandle.Fatalf("expected CORS to be enabled")
 	}
-	if len(config.Server.CORSAllowedOrigins) != 3 {
-		testingHandle.Fatalf("expected three CORS origins, got %d", len(config.Server.CORSAllowedOrigins))
+	if len(service.Server.CORSAllowedOrigins) != 3 {
+		testingHandle.Fatalf("expected three CORS origins, got %d", len(service.Server.CORSAllowedOrigins))
 	}
 	if len(config.Tenants) != 2 {
 		testingHandle.Fatalf("expected two tenants in example config")

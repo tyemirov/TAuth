@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"io"
 	"net"
 	"net/http"
@@ -140,7 +141,7 @@ func TestRunServerAppleCallbackCORS(t *testing.T) {
 	config.Server.EnableCORS = true
 	config.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, config)))
 	if err := runServer(command, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestRunServerValidatorInitFailure(t *testing.T) {
 
 	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	if err := runServer(command, nil); err == nil || err.Error() != "config.google_validator_init: validator_fail" {
 		t.Fatalf("expected google validator init error, got %v", err)
@@ -245,12 +246,12 @@ func TestRunServerSuccess(t *testing.T) {
 	defer restoreValidator()
 
 	cfg := sampleApplicationConfig()
-	cfg.Server.DatabaseURL = "sqlite://file::memory:?cache=shared"
+	cfg.Server.DatabaseURL = "sqlite://" + filepath.Join(t.TempDir(), "service.db")
 	cfg.Server.EnableCORS = true
 	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed, got %v", err)
@@ -315,7 +316,7 @@ func TestRunServerQueuesPasswordSignupVerificationEmail(testingHandle *testing.T
 		},
 	}
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &config))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(testingHandle, config)))
 	if runErr := runServer(command, nil); runErr != nil {
 		testingHandle.Fatalf("expected runServer to queue verification email, got %v", runErr)
 	}
@@ -339,7 +340,7 @@ func TestRunServerRejectsCORSOriginsOutsideTenants(testingHandle *testing.T) {
 	cfg.Server.CORSAllowedOrigins = []string{"https://external.example.com"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(testingHandle, cfg)))
 
 	runErr := runServer(command, nil)
 	if runErr == nil {
@@ -369,7 +370,7 @@ func TestRunServerAllowsCORSExceptionOrigins(testingHandle *testing.T) {
 	cfg.Server.CORSAllowedOriginExceptions = []string{"https://accounts.google.com"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(testingHandle, cfg)))
 
 	if err := runServer(command, nil); err != nil {
 		testingHandle.Fatalf("expected CORS exception to be allowed, got %v", err)
@@ -400,7 +401,7 @@ func TestRunServerWithSQLiteFilePath(t *testing.T) {
 	cfg.Server.DatabaseURL = dsn
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	if err := runServer(command, nil); err != nil {
 		t.Fatalf("expected runServer to succeed with file-backed sqlite, got %v", err)
@@ -411,7 +412,7 @@ func TestRunServerWithSQLiteFilePath(t *testing.T) {
 	}
 }
 
-func TestRunServerInMemoryStore(t *testing.T) {
+func TestRunServerWithPersistentStore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
@@ -428,10 +429,10 @@ func TestRunServerInMemoryStore(t *testing.T) {
 	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.localhost"}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	if err := runServer(command, nil); err != nil {
-		t.Fatalf("expected runServer to succeed with in-memory store, got %v", err)
+		t.Fatalf("expected runServer to succeed with persistent store, got %v", err)
 	}
 }
 
@@ -460,7 +461,7 @@ func TestRunServerHonorsContextCancellation(t *testing.T) {
 
 	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(commandContext, appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(commandContext, appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	done := make(chan error, 1)
 	go func() {
@@ -1027,7 +1028,7 @@ func sampleApplicationConfig() appconfig.ApplicationConfig {
 
 func writeConfigFileFromStruct(t *testing.T, cfg appconfig.ApplicationConfig) string {
 	t.Helper()
-	payload, err := yaml.Marshal(cfg)
+	payload, err := yaml.Marshal(testconfig.Prepare(t, cfg))
 	if err != nil {
 		t.Fatalf("failed to marshal config: %v", err)
 	}

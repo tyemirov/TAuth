@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,7 @@ func TestDoctorCommandJSONOutput(testingHandle *testing.T) {
 func TestDoctorCommandFailsOnInvalidConfig(testingHandle *testing.T) {
 	tempDir := testingHandle.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
-	writeDoctorTestConfig(testingHandle, configPath, invalidDoctorConfigYAML)
+	writeRawConfig(testingHandle, configPath, invalidDoctorConfigYAML)
 
 	rootCommand := newRootCommand()
 	var stdout bytes.Buffer
@@ -112,6 +113,10 @@ func TestDoctorCommandMultipleConfigs(testingHandle *testing.T) {
 }
 
 func writeDoctorTestConfig(testingHandle *testing.T, path string, content string) {
+	writeRawConfig(testingHandle, path, testconfig.ServiceYAML(testingHandle, content))
+}
+
+func writeRawConfig(testingHandle *testing.T, path string, content string) {
 	testingHandle.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		testingHandle.Fatalf("write config: %v", err)
