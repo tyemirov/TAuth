@@ -7,7 +7,7 @@ GO_TAGS ?= nodynamic,webp_encoder
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
+ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
 format:
 	$(GO) fmt ./...
@@ -21,6 +21,15 @@ lint:
 
 test-go:
 	$(GO) test ./...
+
+.PHONY: test-console
+test-console:
+	$(GO) test ./cmd/server -run '^TestConsole' -count=1
+	$(GO) test ./internal/controlplane -count=1
+
+.PHONY: test-database-fixture
+test-database-fixture:
+	$(GO) test ./cmd/server -run '^TestDatabaseFixture$$' -count=1
 
 .PHONY: test-oauth-metadata
 test-oauth-metadata:
@@ -96,3 +105,27 @@ release publish deploy:
 .PHONY: test-apple-callback-cors
 test-apple-callback-cors:
 	$(GO) test ./cmd/server -run '^TestRunServerAppleCallbackCORS$$' -count=1
+
+.PHONY: test-gateway-provisioning
+test-gateway-provisioning:
+	@test -n "$${TAUTH_GATEWAY_ROOT}" || { echo "TAUTH_GATEWAY_ROOT must select the Gateway checkout"; exit 2; }
+	$(GO) test ./cmd/server -run '^TestConsoleActualGatewayClient$$' -count=1 -v
+
+.PHONY: test-console-browser
+test-console-browser:
+	TAUTH_CONSOLE_BROWSER=1 $(GO) test ./cmd/server -run '^TestConsoleBrowserWorkspace$$' -count=1 -v
+
+.PHONY: format-console test-console-pages
+format-console:
+	npx --yes prettier@3.6.2 --write web/app/*.js web/app/index.html web/app/workspace.css tests/console-workspace.browser.cjs
+
+test-console-pages:
+	bash tests/console-pages.sh
+
+.PHONY: run-tenant-app
+run-tenant-app:
+	$(GO) run ./examples/tenant-app
+
+.PHONY: test-customer-app
+test-customer-app:
+	$(GO) test ./internal/customerapp -count=1
