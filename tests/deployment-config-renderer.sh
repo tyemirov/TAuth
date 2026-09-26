@@ -24,25 +24,15 @@ trap cleanup EXIT
 
 go build -o "${binary_path}" ./cmd/server
 "${binary_path}" render-deployment-config <"${valid_fixture}" >"${config_path}"
-"${binary_path}" doctor "${config_path}" --json >"${doctor_path}"
-
-grep -Eq '"valid": ?true' "${doctor_path}"
-grep -Fq 'http://127.0.0.1:4443' "${config_path}"
-grep -Fq 'http://localhost:4443' "${config_path}"
-grep -Fq 'password_auth:' "${config_path}"
-grep -Fq 'account_management:' "${config_path}"
-grep -Fq 'email_verification_ttl: 30m' "${config_path}"
-grep -Fq 'server_address: pinguin:50051' "${config_path}"
-grep -Fq 'api_key: fixture-email-delivery-api-key' "${config_path}"
-grep -Fq 'email_verification_url: https://ui.example.invalid/verify-email' "${config_path}"
-grep -Fq 'password_reset_url: https://ui.example.invalid/reset-password' "${config_path}"
-grep -Fq 'password_link_url: https://ui.example.invalid/link-password' "${config_path}"
-grep -Fq 'password_reset_ttl: 15m' "${config_path}"
-grep -Fq 'enable_tenant_header_override: true' "${config_path}"
-grep -Fq 'google_native_clients:' "${config_path}"
-grep -Fq 'apple_oauth:' "${config_path}"
-grep -Fq 'issuer: https://auth.example.invalid' "${config_path}"
-grep -Fq 'identifier: https://api.example.invalid' "${config_path}"
+"${binary_path}" validate-service-config "${config_path}" >"${doctor_path}"
+rg -q '"valid":true' "${doctor_path}"
+if rg -q '^tenants:' "${config_path}"; then
+  echo 'renderer emitted obsolete runtime tenant configuration' >&2
+  exit 1
+fi
+rg -Fq 'tenant_encryption_key: ${TAUTH_TENANT_ENCRYPTION_KEY}' "${config_path}"
+rg -Fq 'enable_tenant_header_override: true' "${config_path}"
+rg -Fq 'issuer: https://auth.example.invalid' "${config_path}"
 
 if "${binary_path}" render-deployment-config <"${unknown_fixture}" >/dev/null 2>"${stderr_path}"; then
   printf '%s\n' 'renderer accepted an unknown request field' >&2

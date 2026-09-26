@@ -17,7 +17,7 @@ const DEMO_ENV_TEMPLATE_PATH = pathModule.join(
 );
 const DEMO_TENANT_CONFIG_PATH = pathModule.join(
   DEMO_FIXTURE_ROOT,
-  "config.yaml",
+  "tenants.import.yaml",
 );
 const DEMO_LOCAL_CONFIG_PATH = pathModule.join(
   DEMO_FIXTURE_ROOT,

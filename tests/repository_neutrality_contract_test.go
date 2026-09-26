@@ -223,6 +223,7 @@ func TestPagesArtifactAssemblesDocsAndCanonicalHelper(t *testing.T) {
 		"",
 		"COPY docs/ /",
 		"COPY web/tauth.js /tauth.js",
+		"COPY web/app/ /app/",
 		"",
 		"FROM scratch AS pages",
 		"",
