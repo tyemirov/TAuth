@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -51,6 +52,7 @@ type Tenant struct {
 	refreshTTL           time.Duration
 	nonceTTL             time.Duration
 	allowInsecureHTTP    bool
+	requireTenantHeader  bool
 }
 
 // TenantID identifies each tenant block.
@@ -221,6 +223,64 @@ func LoadConfig(path string) (Config, error) {
 // LoadConfigFromDocument constructs a Config from the parsed YAML document.
 func LoadConfigFromDocument(document FileDocument) (Config, error) {
 	document = expandFileDocumentEnv(document)
+	return LoadResolvedConfig(document)
+}
+
+// ResolveDocument expands migration inputs exactly once before persistence.
+func ResolveDocument(document FileDocument) (FileDocument, error) {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return FileDocument{}, fmt.Errorf("tenant.import.encode: %w", err)
+	}
+	var source any
+	if err := json.Unmarshal(encoded, &source); err != nil {
+		return FileDocument{}, fmt.Errorf("tenant.import.decode: %w", err)
+	}
+	if err := requireEnvironmentInputs(source); err != nil {
+		return FileDocument{}, err
+	}
+	document = expandFileDocumentEnv(document)
+	if _, err := LoadResolvedConfig(document); err != nil {
+		return FileDocument{}, err
+	}
+	return document, nil
+}
+
+func requireEnvironmentInputs(value any) error {
+	switch entry := value.(type) {
+	case string:
+		if strings.HasPrefix(entry, "$2a$") || strings.HasPrefix(entry, "$2b$") || strings.HasPrefix(entry, "$2y$") {
+			return nil
+		}
+		var missing string
+		os.Expand(entry, func(name string) string {
+			value, exists := os.LookupEnv(name)
+			if !exists || value == "" {
+				missing = name
+			}
+			return value
+		})
+		if missing != "" {
+			return fmt.Errorf("tenant.import.missing_environment: %s", missing)
+		}
+	case []any:
+		for _, item := range entry {
+			if err := requireEnvironmentInputs(item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for _, item := range entry {
+			if err := requireEnvironmentInputs(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// LoadResolvedConfig validates effective database values without environment expansion.
+func LoadResolvedConfig(document FileDocument) (Config, error) {
 	tenantIndex := make(map[TenantID]Tenant)
 	originToTenantIDs := make(map[string][]TenantID)
 	nativeGoogleClientIDs := make(map[string]TenantID)
@@ -760,6 +820,7 @@ func buildTenant(raw FileTenant) (Tenant, []string, error) {
 		refreshTTL:           refreshTTL,
 		nonceTTL:             nonceTTL,
 		allowInsecureHTTP:    allowInsecureHTTP,
+		requireTenantHeader:  raw.RequireTenantHeader,
 	}, origins, nil
 }
 
@@ -1634,6 +1695,7 @@ type FileTenant struct {
 	SessionTTL           string                   `json:"session_ttl" yaml:"session_ttl"`
 	RefreshTTL           string                   `json:"refresh_ttl" yaml:"refresh_ttl"`
 	NonceTTL             string                   `json:"nonce_ttl" yaml:"nonce_ttl"`
+	RequireTenantHeader  bool                     `json:"require_tenant_header" yaml:"require_tenant_header"`
 	AllowInsecureHTTP    yamlBool                 `json:"allow_insecure_http" yaml:"allow_insecure_http"`
 }
 
@@ -1734,3 +1796,6 @@ func (value *yamlBool) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 }
+
+// RequireTenantHeader binds managed development requests to their explicit tenant.
+func (tenant Tenant) RequireTenantHeader() bool { return tenant.requireTenantHeader }

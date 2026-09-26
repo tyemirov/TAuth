@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,10 @@ const (
 )
 
 func writeConfigFile(testingHandle *testing.T, contents string) string {
+	return writeRawConfigFile(testingHandle, testconfig.ServiceYAML(testingHandle, contents))
+}
+
+func writeRawConfigFile(testingHandle *testing.T, contents string) string {
 	testingHandle.Helper()
 	configPath := filepath.Join(testingHandle.TempDir(), "config.yaml")
 	if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
@@ -163,8 +168,8 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	if payload.SchemaVersion == "" || payload.Service.Name == "" {
 		testingHandle.Fatalf("expected schema + service metadata")
 	}
-	if len(payload.EffectiveConfig.Tenants) != 1 {
-		testingHandle.Fatalf("expected one tenant, got %d", len(payload.EffectiveConfig.Tenants))
+	if len(payload.EffectiveConfig.Tenants) != 2 {
+		testingHandle.Fatalf("expected application and console tenants, got %d", len(payload.EffectiveConfig.Tenants))
 	}
 	tenant := payload.EffectiveConfig.Tenants[0]
 	if !tenant.TenantOriginsRedacted {
@@ -187,11 +192,11 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 		testingHandle.Fatalf("expected one dependency, got %d", len(payload.Dependencies))
 	}
 	dependency := payload.Dependencies[0]
-	if dependency.Name != refreshStoreName || dependency.Type != refreshStoreTypeMemory || !dependency.Ready {
-		testingHandle.Fatalf("expected memory refresh store to be ready")
+	if dependency.Name != refreshStoreName || dependency.Type != refreshStoreTypeDatabase || !dependency.Ready {
+		testingHandle.Fatalf("expected database refresh store to be ready")
 	}
-	if dependency.Details[refreshStoreDriverKey] != refreshStoreTypeMemory {
-		testingHandle.Fatalf("expected memory refresh store driver")
+	if dependency.Details[refreshStoreDriverKey] != "sqlite" {
+		testingHandle.Fatalf("expected SQLite refresh store driver")
 	}
 	if tenant.SameSiteMode == "" || tenant.JWTIssuer == "" {
 		testingHandle.Fatalf("expected same_site_mode and jwt_issuer")
@@ -376,7 +381,7 @@ func testOAuthPrivateKeyBase64(t *testing.T) string {
 }
 
 func TestBuildReportRejectsInvalidDatabaseURL(testingHandle *testing.T) {
-	configPath := writeConfigFile(testingHandle, buildConfigPayload("bad://invalid"))
+	configPath := writeRawConfigFile(testingHandle, "server:\n  database_url: bad://invalid\n  tenant_encryption_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n")
 	_, err := BuildRedactedReport(configPath)
 	if err == nil {
 		testingHandle.Fatalf("expected error for invalid database url")

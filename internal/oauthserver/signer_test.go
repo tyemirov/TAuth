@@ -52,7 +52,7 @@ tenants: []
 	if writeErr := os.WriteFile(configPath, []byte(configDocument), 0o600); writeErr != nil {
 		t.Fatalf("write config: %v", writeErr)
 	}
-	applicationConfig, loadErr := appconfig.LoadConfig(configPath)
+	applicationConfig, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		t.Fatalf("load config: %v", loadErr)
 	}

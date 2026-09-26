@@ -4,20 +4,16 @@ import (
 	"strings"
 	"testing"
 
+	"encoding/json"
 	"github.com/tyemirov/tauth/internal/tenants"
-	"gopkg.in/yaml.v3"
 )
 
 func TestGitHubOnlyDeploymentRendering(t *testing.T) {
-	payload, err := Render(strings.NewReader(githubDeploymentInput))
+	projection, err := resolveGitHubFixture(githubDeploymentInput)
 	if err != nil {
 		t.Fatalf("GitHub-only rendering: %v", err)
 	}
-	var document tenants.FileDocument
-	if err := yaml.Unmarshal(payload, &document); err != nil {
-		t.Fatal(err)
-	}
-	config, err := tenants.LoadConfigFromDocument(document)
+	config, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: []tenants.FileTenant{projection.Tenant}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,19 +35,25 @@ func TestGitHubDisabledDeploymentRendering(t *testing.T) {
 func TestGitHubRepositoryCredentialDeploymentRendering(t *testing.T) {
 	input := strings.Replace(githubDeploymentInput, `"scopes":["read:user","user:email"]`, `"scopes":["read:user","repo","user:email"],"credential_key":{"resource":"identity","output":"vault"}`, 1)
 	input = strings.Replace(input, `"jwt-signing-key":{"value":"test-signing-key"}`, `"github-credential-key":{"value":"01234567890123456789012345678901"},"jwt-signing-key":{"value":"test-signing-key"}`, 1)
-	payload, err := Render(strings.NewReader(input))
+	projection, err := resolveGitHubFixture(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var document tenants.FileDocument
-	if err := yaml.Unmarshal(payload, &document); err != nil {
-		t.Fatal(err)
-	}
-	config, err := tenants.LoadConfigFromDocument(document)
+	config, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: []tenants.FileTenant{projection.Tenant}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if config.Tenants()[0].GitHubOAuth().CredentialKey() != "01234567890123456789012345678901" {
 		t.Fatal("credential encryption key was not resolved")
 	}
+}
+
+func resolveGitHubFixture(input string) (ProvisioningConfiguration, error) {
+	var request struct {
+		Contributions []json.RawMessage `json:"contributions"`
+	}
+	if err := json.Unmarshal([]byte(input), &request); err != nil {
+		return ProvisioningConfiguration{}, err
+	}
+	return ResolveContribution(request.Contributions[0])
 }

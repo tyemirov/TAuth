@@ -14,6 +14,7 @@ import (
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
 	"github.com/tyemirov/tauth/internal/oauthserver"
+	"github.com/tyemirov/tauth/internal/runtimeconfig"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/utils/preflight"
 )
@@ -31,7 +32,6 @@ const (
 	errorCodeBuildReport       = "preflight.build_report"
 	refreshStoreName           = "refresh_store"
 	refreshStoreDriverKey      = "driver"
-	refreshStoreTypeMemory     = "memory"
 	refreshStoreTypeDatabase   = "database"
 )
 
@@ -170,7 +170,7 @@ func buildReport(configPath string, mode preflight.RedactionMode) ([]byte, error
 	if loadErr != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeLoadConfig, loadErr)
 	}
-	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
+	tenantConfig, tenantErr := runtimeconfig.Load(context.Background(), config)
 	if tenantErr != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeLoadTenants, tenantErr)
 	}
@@ -410,19 +410,9 @@ type refreshStoreDependency struct {
 
 func (dependency refreshStoreDependency) Check(ctx context.Context) (preflight.DependencyStatus, error) {
 	trimmedURL := strings.TrimSpace(dependency.databaseURL)
-	if trimmedURL == "" {
-		return preflight.DependencyStatus{
-			Name:  refreshStoreName,
-			Type:  refreshStoreTypeMemory,
-			Ready: true,
-			Details: map[string]string{
-				refreshStoreDriverKey: refreshStoreTypeMemory,
-			},
-		}, nil
-	}
 	contextDeadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	store, storeErr := authkit.NewDatabaseRefreshTokenStore(contextDeadline, trimmedURL)
+	driver, storeErr := authkit.CheckDatabaseConnectivity(contextDeadline, trimmedURL)
 	if storeErr != nil {
 		return preflight.DependencyStatus{}, fmt.Errorf("%w: %s: %w", errPreflight, errorCodeRefreshStoreCheck, storeErr)
 	}
@@ -431,7 +421,7 @@ func (dependency refreshStoreDependency) Check(ctx context.Context) (preflight.D
 		Type:  refreshStoreTypeDatabase,
 		Ready: true,
 		Details: map[string]string{
-			refreshStoreDriverKey: store.Driver(),
+			refreshStoreDriverKey: driver,
 		},
 	}, nil
 }

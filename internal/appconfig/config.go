@@ -23,7 +23,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v9"
+const ConfigSchemaVersion = "tauth.config.v10"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
@@ -35,7 +35,7 @@ const DefaultJWTIssuer = "tauth"
 type ApplicationConfig struct {
 	Server  ServerSettings       `yaml:"server"`
 	OAuth   FileOAuthSettings    `yaml:"oauth"`
-	Tenants []tenants.FileTenant `yaml:"tenants"`
+	Tenants []tenants.FileTenant `yaml:"tenants,omitempty"`
 	oauth   OAuthServerConfig
 }
 
@@ -43,6 +43,7 @@ type ApplicationConfig struct {
 type ServerSettings struct {
 	ListenAddr                  string   `yaml:"listen_addr"`
 	DatabaseURL                 string   `yaml:"database_url"`
+	TenantEncryptionKey         string   `yaml:"tenant_encryption_key"`
 	EnableCORS                  YamlBool `yaml:"enable_cors"`
 	CORSAllowedOrigins          []string `yaml:"cors_allowed_origins"`
 	CORSAllowedOriginExceptions []string `yaml:"cors_allowed_origin_exceptions"`
@@ -81,6 +82,23 @@ func (value *YamlBool) UnmarshalYAML(node *yaml.Node) error {
 
 // LoadConfig reads and validates a config.yaml file.
 func LoadConfig(path string) (*ApplicationConfig, error) {
+	payload, err := readConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfig(payload)
+}
+
+// LoadImportSource reads the bounded migration input, including tenant YAML.
+func LoadImportSource(path string) (*ApplicationConfig, error) {
+	payload, err := readConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseImportSource(payload)
+}
+
+func readConfig(path string) ([]byte, error) {
 	cleanedPath := strings.TrimSpace(path)
 	cleanedPath = strings.Trim(cleanedPath, `"'`)
 	if cleanedPath == "" {
@@ -90,17 +108,35 @@ func LoadConfig(path string) (*ApplicationConfig, error) {
 	if readErr != nil {
 		return nil, fmt.Errorf("%s: read %s: %w", ErrorCodeMissingConfigFile, cleanedPath, readErr)
 	}
-	return ParseConfig(payload)
+	return payload, nil
 }
 
 // ParseConfig decodes and validates one config.yaml payload.
 func ParseConfig(payload []byte) (*ApplicationConfig, error) {
+	var service struct {
+		Server ServerSettings    `yaml:"server"`
+		OAuth  FileOAuthSettings `yaml:"oauth"`
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&service); err != nil {
+		return nil, fmt.Errorf("%s: service configuration accepts no tenant YAML: %w", ErrorCodeInvalidConfigFile, err)
+	}
+	return finishConfig(ApplicationConfig{Server: service.Server, OAuth: service.OAuth})
+}
+
+// ParseImportSource decodes configuration for the one-off migration command.
+func ParseImportSource(payload []byte) (*ApplicationConfig, error) {
 	var document ApplicationConfig
 	decoder := yaml.NewDecoder(strings.NewReader(string(payload)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
 		return nil, fmt.Errorf("%s: %s", ErrorCodeInvalidConfigFile, err.Error())
 	}
+	return finishConfig(document)
+}
+
+func finishConfig(document ApplicationConfig) (*ApplicationConfig, error) {
 	document = expandApplicationConfigEnv(document)
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
@@ -126,6 +162,7 @@ func (config ApplicationConfig) OAuthServer() OAuthServerConfig {
 func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
 	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
 	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)
+	config.Server.TenantEncryptionKey = os.ExpandEnv(config.Server.TenantEncryptionKey)
 	config.Server.CORSAllowedOrigins = expandEnvSlice(config.Server.CORSAllowedOrigins)
 	config.Server.CORSAllowedOriginExceptions = expandEnvSlice(config.Server.CORSAllowedOriginExceptions)
 	config.OAuth = expandOAuthSettingsEnv(config.OAuth)

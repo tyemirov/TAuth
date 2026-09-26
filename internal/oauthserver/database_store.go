@@ -485,3 +485,17 @@ func refreshRecordFromGrant(tokenHash string, grant RefreshGrant, issuedAtUnix i
 func refreshGrantFromDatabase(record databaseOAuthRefreshToken) RefreshGrant {
 	return RefreshGrant{ConsentID: record.ConsentID, FamilyID: record.FamilyID, TenantID: record.TenantID, UserID: record.UserID, ClientID: record.ClientID, Resource: record.Resource, Scope: record.Scope, DisclosurePolicy: record.DisclosurePolicy, ExpiresAtUnix: record.ExpiresAtUnix}
 }
+
+// RevokeTenantGrants participates in the tenant suspension transaction.
+func RevokeTenantGrants(ctx context.Context, db *gorm.DB, tenantID string, nowUnix int64) error {
+	if err := db.WithContext(ctx).Model(&databaseOAuthRefreshToken{}).Where("tenant_id = ?", tenantID).Updates(map[string]any{"status": refreshTokenStatusRevoked, "revoked_at_unix": nowUnix}).Error; err != nil {
+		return fmt.Errorf("oauth_store.suspend_tokens tenant=%s: %w", tenantID, err)
+	}
+	if err := db.WithContext(ctx).Model(&databaseConsent{}).Where("tenant_id = ?", tenantID).Update("revoked_at_unix", nowUnix).Error; err != nil {
+		return fmt.Errorf("oauth_store.suspend_consents tenant=%s: %w", tenantID, err)
+	}
+	if err := db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&databaseAuthorizationCode{}).Error; err != nil {
+		return fmt.Errorf("oauth_store.suspend_codes tenant=%s: %w", tenantID, err)
+	}
+	return nil
+}
