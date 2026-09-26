@@ -11,6 +11,8 @@ services:
     volumes:
       - tauth_data:/data
       - ./config.yaml:/config/config.yaml:ro
+      - ./tenants.import.yaml:/config/tenants.import.yaml:ro
+      - ../console-bootstrap.yaml.example:/config/console-bootstrap.yaml:ro
     restart: unless-stopped
 
   notes-frontend:
