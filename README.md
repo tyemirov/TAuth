@@ -18,8 +18,7 @@ TAuth validates provider identities and issues first-party session cookies. Its 
 
 ## Authorize first-party resource clients
 
-Enable the issuer-level `oauth` block and at least one tenant `oauth` block in
-the same config. The OAuth login page shows controls for enabled Google, GitHub, and password providers. TAuth requires
+Enable the issuer-level `oauth` block in service YAML and the tenant `oauth` block in its database configuration. The OAuth login page shows controls for enabled Google, GitHub, and password providers. TAuth requires
 authorization code plus PKCE `S256`, one
 RFC 8707 `resource` value, an exact scope set, and an exact registered redirect
 URI. Registered native clients can declare a bounded loopback-port range.
@@ -52,6 +51,11 @@ oauth:
     minimum_cache_ttl: "1m"
     maximum_cache_ttl: "1h"
 
+```
+
+The tenant OAuth block belongs in the bounded migration source.
+
+```yaml
 tenants:
   - id: "product"
     # The normal tenant fields and one issuer-page browser provider are also required.
@@ -108,7 +112,7 @@ accepts traffic. This process also revokes application refresh tokens.
 
 ## GitHub login
 
-GitHub-only tenants need no Google or password provider. See [the GitHub example](examples/github/config.yaml.example).
+GitHub-only tenants need no Google or password provider. See [the GitHub example](examples/github/tenants.import.yaml.example).
 
 1. Register a dedicated GitHub.com OAuth App for identity authentication.
 2. Set its callback URL to the configured TAuth URL, for example `https://auth.example.com/auth/github/callback`.
@@ -169,9 +173,8 @@ See [GitHub operations and errors](docs/usage.md#github-login-operations) for tr
 
 ## Deploy TAuth for a hosted product
 
-TAuth accepts one complete YAML configuration from its operator. The consuming
-company owns that file, every tenant value, all secrets, routing, and deployment
-orchestration. This repository ships the generic service, configuration schema,
+TAuth reads service settings from YAML and tenant configuration from its persistent owner database.
+The operator owns service secrets, routing, and deployment orchestration. This repository ships the generic service, configuration schema,
 neutral examples, and validation commands. For the MPR Lab deployment, the
 tracked `.mprlab/deploy/resources.yml` declares only desired resources and
 secret identities. The installed `mprlab-gateway` runtime owns Ansible orchestration, release receipts, publication, and convergence.
@@ -181,12 +184,13 @@ The TAuth artifact converts the declared TAuth resources to its native config.
 
 The `render-deployment-config` command reads one strict schema-v1 JSON request
 from standard input. The request contains complete TAuth resource contributions
-and their resolved output envelopes. The command writes one validated native
-YAML config to standard output. Unknown request fields, unsupported resource
+and their resolved output envelopes. The command validates contributions and writes service YAML to standard output.
+Tenant configuration goes through the authenticated management API. Unknown request fields, unsupported resource
 kinds, missing outputs, and invalid native config cause a nonzero exit.
 
 ```bash
-tauth render-deployment-config < deployment-request.json > config.yaml
+tauth render-deployment-config < deployment-request.json > service.yaml
+tauth validate-service-config service.yaml
 ```
 
 The render request has this envelope schema:
@@ -217,200 +221,71 @@ The existing `tauth_tenant` contribution contract remains current.
 The gateway treats the request and response as private values. It does not
 interpret TAuth fields or write secret values to normal logs.
 
-### 1. Describe your tenants
+### 1. Initialize persistent ownership
 
-Every active deployment loads one YAML configuration. Define each active tenant
-(origins, Google clients, cookie domain, and TTLs) once and pass that file to
-every TAuth process:
+TAuth stores tenant configuration, encrypted secrets, and owner relationships in its database.
+The service YAML contains server settings and optional OAuth issuer settings.
+It does not accept a `tenants` field.
 
-```bash
-cat > tenants.yaml <<'YAML'
-tenants:
-  - id: "prod"
-    display_name: "Production tenant"
-    tenant_origins:
-      - "https://app.example.com"
-      - "https://admin.example.com"
-    google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
-    google_native_client_id: "your_desktop_native_client_id.apps.googleusercontent.com"
-    google_native_clients:
-      - platform: "ios"
-        client_id: "your_ios_client_id.apps.googleusercontent.com"
-        redirect_uris:
-          - "com.example.app://oauth2redirect/google"
-          - "https://app.example.com/oauth/google/callback"
-      - platform: "android"
-        client_id: "your_android_client_id.apps.googleusercontent.com"
-        redirect_uris:
-          - "com.example.app:/oauth2redirect/google"
-    apple_oauth:
-      enabled: true
-      client_id: "com.example.web"
-      native_client_ids:
-        - "com.example.app"
-      team_id: "APPLETEAMID"
-      key_id: "APPLEKEYID"
-      private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
-      redirect_uri: "https://auth.example.com/auth/apple/callback"
-    password_auth:
-      enabled: true
-      users:
-        - email: "operator@example.com"
-          display_name: "Operator"
-          password_hash: "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
-    account_management:
-      enabled: true
-      password_signup:
-        enabled: true
-      return_challenge_tokens: false
-      email_verification_ttl: "30m"
-      email_delivery:
-        server_address: "pinguin-grpc:50051"
-        api_key: "${PINGUIN_TENANT_API_KEY}"
-        email_verification_url: "https://app.example.com/verify-email"
-        password_reset_url: "https://app.example.com/reset-password"
-        password_link_url: "https://app.example.com/link-password"
-        connection_timeout_seconds: 3
-        operation_timeout_seconds: 5
-      password_reset_ttl: "15m"
-    jwt_signing_key: "replace-with-your-tenant-signing-key"
-    cookie_domain: ".example.com"
-    session_cookie_name: "app_session_prod"
-    refresh_cookie_name: "app_refresh_prod"
-    session_ttl: "15m"
-    refresh_ttl: "1440h"
-    nonce_ttl: "5m"
-    allow_insecure_http: false
-YAML
+Use [the console operations runbook](docs/tenant-console-operations.md) to initialize the database and reserved console tenant.
+Authenticate the initial owner through Google before importing application tenants.
+The initial enrollment email is `vtyemirov@gmail.com`.
+Later authorization uses the stable console subject and owner account ID.
+
+### 2. Import application configuration
+
+Use the bounded import command for existing effective tenant configuration.
+The `tenants.import.yaml` examples describe migration input.
+The importer preserves existing tenant IDs, keys, cookies, providers, policies, users, and sessions.
+
+```sh
+tauth --config service.yaml tenant-import --source tenants.import.yaml --inspect
+tauth --config service.yaml tenant-import --source tenants.import.yaml --import-id initial-tenants
 ```
 
-Tenant files accept shell-style environment placeholders (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) in any string field. TAuth expands those variables before validation so you can keep secrets or per-host values in `.env` files; missing variables collapse to empty strings, so keep sensible defaults in the YAML when a field is required.
+An identical retry returns the same receipt. A changed source fails without partial writes.
+Remove tenant environment inputs after the verified import.
+The service reads active tenant revisions from the database after restart.
 
-Each entry defines:
-
-- `id` – stable identifier used inside JWTs and storage (lowercase letters/numbers/underscores/hyphens).
-- `display_name` – friendly label surfaced in logs and the demo UI.
-- `tenant_origins` – browser origins that should resolve to this tenant. Entries must be full origins (`https://app.example.com`, `http://localhost:8000`); the resolver uses the request `Origin` header to select a tenant, and can optionally accept an `X-TAuth-Tenant` override when you enable it for shared-origin or non-browser clients.
-- `allowed_users` – optional list of email addresses allowed to log in for the tenant; when present, only these users may sign in. An empty list blocks all sign-ins for the tenant.
-- `google_web_client_id` – optional OAuth Web client configured in Google Cloud Console for this tenant’s origins. Omit it when the tenant uses GitHub, Apple, password, or native Google authentication without browser Google authentication.
-- `google_native_client_id` – optional legacy OAuth Desktop/installed-app client used by native apps that sign in through the system browser and exchange ID tokens with `POST /auth/google/native`.
-- `google_native_clients` – optional platform-specific native clients. Use `platform: "ios"` / `"android"` for Expo mobile apps, set the matching Google OAuth client ID, and list every custom-scheme or app-link redirect URI the app may use. Every native client ID must be unique across tenants.
-- `apple_oauth` – optional Sign in with Apple provider. Set `enabled: true`. Configure the Services ID, Team ID, and Key ID. Provide a PKCS8 ECDSA private key and an HTTPS callback URI. Add each native iOS App ID under `native_client_ids`. Each native ID must be unique across tenants.
-- `password_auth` – optional email/password provider. Set `enabled: true` to allow password login and optionally seed users with normalized emails, display names, optional avatar URLs, and bcrypt `password_hash` values.
-- `account_management` – optional first-party account lifecycle. Enable it for persisted account IDs and account routes.
-- `email_delivery` – required Pinguin settings and public challenge pages when account management does not return test tokens.
-- `oauth` – optional resource-authorization policy. An enabled tenant declares exact resource identifiers, scopes, and consent and token lifetimes. It also declares public clients and whether it accepts valid Client ID Metadata Documents. The OAuth login page shows controls for enabled Google, GitHub, and password providers.
-- `jwt_signing_key` – HS256 secret unique to this tenant. Every tenant must declare its own signing key so sessions remain isolated.
-- `cookie_domain` – registrable domain for cookies (e.g. `.example.com` to share cookies across subdomains). Leave it blank to emit host-only cookies when developing on `localhost`.
-- `session_ttl` / `refresh_ttl` / `nonce_ttl` – durations using Go’s `time.ParseDuration` syntax.
-- `allow_insecure_http` – `true` only for local development; production tenants must stay `false`. When enabled, cookies drop the `Secure` flag and default to `SameSite=Lax` so browsers keep them over HTTP (even if CORS is on). That setup only works when your dev UI also runs on `http://localhost`, so avoid mixing hosts like `127.0.0.1`.
-
-### 2. Launch the service (e.g. on `https://auth.example.com`)
-
-```bash
-cat > config.yaml <<'YAML'
-server:
-  listen_addr: ":8443"
-  database_url: "sqlite:///data/tauth.db"
-  enable_cors: true
-  cors_allowed_origins:
-    - "https://app.example.com"
-    - "https://accounts.google.com"
-  cors_allowed_origin_exceptions:
-    - "https://accounts.google.com"
-  enable_tenant_header_override: true
-
-tenants:
-  - id: "product"
-    display_name: "Product"
-    tenant_origins: ["https://app.example.com"]
-    google_web_client_id: "product-client.apps.googleusercontent.com"
-    google_native_client_id: "product-native.apps.googleusercontent.com"
-    apple_oauth:
-      enabled: true
-      client_id: "com.example.product.web"
-      native_client_ids:
-        - "com.example.product"
-      team_id: "APPLETEAMID"
-      key_id: "APPLEKEYID"
-      private_key_base64: "${APPLE_PRIVATE_KEY_BASE64}"
-      redirect_uri: "https://auth.example.com/auth/apple/callback"
-    jwt_signing_key: "replace-with-product-signing-key"
-    cookie_domain: ".example.com"
-    session_cookie_name: "app_session_product"
-    refresh_cookie_name: "app_refresh_product"
-    session_ttl: "30m"
-    refresh_ttl: "720h"
-    nonce_ttl: "10m"
-    allow_insecure_http: false
-YAML
-
-tauth --config=config.yaml
-# or set TAUTH_CONFIG_FILE=/etc/tauth/config.yaml and run `tauth`
-```
-
-For a forward-only aggregate deployment before any application declares a
-tenant, use an explicit empty set instead of inventing a placeholder tenant:
+### 3. Start and verify the service
 
 ```yaml
-tenants: []
+server:
+  listen_addr: ":8080"
+  database_url: "${TAUTH_DATABASE_URL}"
+  tenant_encryption_key: "${TAUTH_TENANT_ENCRYPTION_KEY}"
+  enable_cors: true
+  cors_allowed_origins: ["https://tauth.mprlab.com"]
+  enable_tenant_header_override: true
 ```
 
-This bootstrap state is valid for `tauth doctor` and keeps `GET /health`
-available. TAuth does not authenticate requests until a subsequent aggregate
-configuration supplies a tenant.
-
-Before deploying, run `tauth preflight --config=config.yaml` to validate the config and emit a redacted effective-config report (signing keys and tenant origins are reported as fingerprints only so validators can compare without seeing secrets).
-
-> SQLite DSN tip: use three slashes for absolute paths (e.g. `sqlite:///data/tauth.db`). Host-based forms such as `sqlite://file:/data/tauth.db` are invalid and rejected at startup.
-
-When multiple product origins need access, list them under the `cors_allowed_origins` array inside `config.yaml`. If you include non-tenant origins (for example `https://accounts.google.com`), mirror them in `cors_allowed_origin_exceptions` so config validation permits them.
-
-Host the binary behind TLS (or terminate TLS at your load balancer) so responses set `Secure` cookies. Working from the tenants file above, cookies issued by `https://auth.example.com` will also be sent with requests made by `https://app.example.com` because both live under `.example.com`.
-
-### 3. Use the installed Gateway runtime
-
-The three production lifecycle commands are fixed:
-
-```bash
-make release
-make publish
-make deploy
+```sh
+tauth doctor service.yaml --json
+tauth --config service.yaml preflight
+tauth --config service.yaml
 ```
 
-Each command passes this Git root to the installed `mprlab-gateway` command through `--app-root`.
-Make sure that `mprlab-gateway` is on `PATH`.
-Use `MPRLAB_GATEWAY_EXECUTABLE` to select an explicit installed command path.
+The database URL and base64 encryption key are required. The decoded key must contain 32 bytes.
+The service rejects missing console bootstrap data and incorrect encryption keys.
+The database can contain the console tenant with no application tenants.
 
-TAuth declares its image, retained data, shared tenant-config mount, runtime capabilities, backend route, GitHub Pages site, and health check in `.mprlab/deploy/resources.yml`.
-TAuth contains no production controller, Ansible, Compose, Caddy, release, publication, or deployment implementation.
-Only the operator runs `make deploy`.
+The local Compose examples mount service configuration and a separate tenant import source.
+Complete console bootstrap with `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
+Start the service, enroll the initial owner, and then run the tenant import command through the same Compose service.
+Use `docker compose up --build` for tests of current source.
 
-### Run the demo with Docker Compose (local quick-start)
+The production cutover requires the matching Gateway provisioning release from F011.
+Release, publication, deployment, and live-provider qualification remain separate operations.
 
-We ship a compose example under `examples/tauth-demo` that builds TAuth from the local Dockerfile and pairs it with a simple static web server (`ghcr.io/tyemirov/ghttp:latest`) serving the demo assets on port `8000`. The TAuth service itself serves only API and health endpoints.
+The tenant workspace is at `/app/` on the product site.
+Integration supplies public settings from the active revision, a complete browser example, protected key export, and persisted setup evidence.
+Use the [customer application example](examples/tenant-app/README.md) for the Google cookie integration and explicit backend tenant authorization.
+See the [operations guide](docs/tenant-console-operations.md) for key replacement and the ordered production delivery record.
 
-1. `cd examples/tauth-demo`
-2. Update the environment file with your Google OAuth client ID and signing key:
-
-   ```bash
-   $EDITOR .env.tauth
-   ```
-
-3. Review `config.yaml` to ensure the tenant origins and ports match your local setup.
-4. Build and start the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` to load the demo UI (it communicates with TAuth at `http://localhost:8082` via CORS).
-
-The sample config now defines **two tenants** so you can exercise origin-based routing without touching `/etc/hosts`. Thanks to RFC 6761, any `*.localhost` name automatically resolves to `127.0.0.1`, so both tenants work out of the box:
-
-- `notes` – resolve via `http://localhost:8082` or the example UI at `http://localhost:8000`.
-- `portal` – a second example frontend runs at `http://localhost:4173`. Its browser origin lives under `tenant_origins`, so TAuth can derive the tenant from the request `Origin` header without extra UI wiring.
-
-This setup lets you verify header overrides, cookie isolation, and resolver behavior locally before promoting changes to production.
-
-When multiple tenants run on the same machine, list each distinct frontend origin (for example `http://localhost:8000` and `http://localhost:4173`) under `tenant_origins`. TAuth resolves tenants by the request `Origin` header, so you only need explicit tenant overrides when two tenants intentionally share the exact same origin.
-
-Stop the stack with `docker compose down`. The compose file persists refresh tokens inside a named `tauth_data` volume mounted at `/data`, so you can inspect or reset the SQLite database between runs. Update `.env.tauth` (or the referenced `config.yaml`) to change ports, database DSNs, origins, cookie domains, or Google credentials before re-running. Re-run `docker compose up --build` whenever you change Go code so the local image picks up your edits.
+Use Google sign-in to select imported tenants or create a draft.
+The Domains, Sign-in methods, and Settings forms save configuration revisions.
+Verify domain ownership and activate the saved revision from Overview.
+See the [console operations guide](docs/tenant-console-operations.md) for bootstrap and publication inputs.
 
 ### 4. Integrate the browser helper from the product site
 
@@ -529,7 +404,8 @@ Use the new `avatar_url` field to render signed-in UI chrome in your frontend.
 
 ## Multi-tenant configuration
 
-TAuth now reads **all** configuration from a single YAML file (`config.yaml` by default). The snippet above shows the server-level keys; the example below highlights the `tenants` section. A “single-tenant deployment” is simply a file with one entry; adding more entries lets you serve multiple products from the same binary without touching CLI flags.
+The database owns runtime tenant configuration. The following YAML describes the bounded import source.
+Use this source with `tenant-import`, not normal service startup.
 
 ```yaml
 tenants:
@@ -586,7 +462,7 @@ tenants:
     allow_insecure_http: true
 ```
 
-Rules enforced by the loader:
+Rules enforced at the tenant configuration boundary:
 
 - IDs must use lowercase letters, digits, underscores, or hyphens (`demo`, `customer_b`).
 - `display_name` is required so operators can distinguish tenants in logs.
@@ -606,14 +482,14 @@ Rules enforced by the loader:
 - Keep `return_challenge_tokens` false outside tests. TAuth then requires all Pinguin settings and challenge URLs. It does not return challenge tokens in HTTP response bodies.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_notes`).
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
-- Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) before parsing. Missing variables resolve to empty strings, so leave meaningful defaults in the file to avoid loader validation errors. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
+- Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) during the bounded import. Normal runtime reads do not expand tenant environment inputs. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
 
 The `internal/tenants` package validates the entire file before returning domain objects, so downstream routing relies on trusted tenant definitions. Request routing works as follows:
 
 - The resolver matches tenants by the request’s `Origin` header. Requests without an `Origin` header (or with an unknown origin) are rejected unless you enable the header override.
 - Enable `enable_tenant_header_override` for non-browser clients or shared origins. TAuth then accepts a tenant ID or a frontend origin. Disable it only when every request uses one unique browser `Origin`.
 - `internal/tenants.TenantMiddleware` attaches the resolved tenant to `gin.Context`; downstream handlers call `tenants.TenantFromContext` to retrieve the resolved configuration and proceed with tenant-scoped logic.
-- Launch the server with `tauth --config=/path/to/config.yaml` (or export `TAUTH_CONFIG_FILE`); no other CLI flags or environment variables are required.
+- Launch the server with `tauth --config=/path/to/service.yaml` after console bootstrap and tenant import.
 - Front-ends that share a single origin can opt into an explicit tenant selection by adding `data-tenant-id="tenant-a"` to the `<script src=".../tauth.js">` tag or by calling `setAuthTenantId("tenant-a")` before `initAuthClient(...)` when you need to override the origin mapping (for example, preview builds served from the same origin). `tauth.js` only adds the `X-TAuth-Tenant` header to its own `/auth/session`, `/me`, `/auth/*`, and logout calls when a tenant id is explicitly configured, leaving your product’s API traffic untouched. Restore hints are scoped by `baseUrl` and tenant id so shared-origin tenants do not reuse each other’s bootstrap state.
 - Refresh tokens, nonce pools, and the built-in demo user store are keyed by tenant ID. Session JWTs now embed a `tenant_id` claim, and the middleware rejects cookies presented under the wrong tenant so credentials cannot hop between tenants.
 
