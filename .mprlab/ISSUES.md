@@ -1149,6 +1149,53 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B088] (P1) Include the console runtime configuration in clean Pages artifacts.
+  Review finding:
+  The ignored runtime JSON file is absent from a clean checkout. The console cannot initialize.
+  Validation:
+  Build the Pages artifact from tracked and publishable source files without ignored local inputs.
+  Resolution:
+  Included the public runtime JSON in version control and excluded ignored files from the artifact test context.
+  The clean source build failed before the fix and passed after the fix.
+  Changed files: `.gitignore`, `web/app/runtime.json`, and `tests/console-pages.sh`.
+
+- [x] [B089] (P1) Reject machine activation after owner suspension.
+  Review finding:
+  A provisioning credential can activate a suspended tenant after revocation completes.
+  Validation:
+  Verify machine rejection and owner recovery through real HTTP requests.
+  Resolution:
+  Rejected provisioning activation while the tenant is suspended. Owner recovery remains available.
+  The HTTP test reproduced unauthorized recovery before the fix and passed with `make test-console` after the fix.
+  Changed files: `internal/controlplane/activation.go`, `cmd/server/provisioning_test.go`, and `docs/openapi.yaml`.
+
+- [x] [B090] (P1) Keep tenant CORS changes consistent across restart.
+  Review finding:
+  A successful tenant mutation can leave an explicit service origin without an active tenant. Startup then fails.
+  Validation:
+  Verify origin replacement and suspension against startup and runtime CORS checks.
+  Resolution:
+  Applied startup CORS validation to every candidate runtime before commit and publication.
+  Rejected incompatible mutations with `422` and retained the active configuration.
+  HTTP tests covered origin replacement, suspension, restart, and successful retry after correction of the explicit service allowlist.
+  `make test-console` passed. The operator guide gives the required correction sequence.
+  Changed files: `cmd/server/runtime.go`, `cmd/server/cors_management_test.go`, and `docs/tenant-console-operations.md`.
+
+- [x] [B091] (P2) Require the provisioning shape for machine configuration writes.
+  Review finding:
+  A machine can submit the console shape and bypass contribution and revision ownership checks.
+  Validation:
+  Reject ordinary and null provisioning shapes before changes to tenant configuration.
+  Resolution:
+  Required the provisioning object for every machine configuration write.
+  HTTP tests rejected the console shape for draft, active, edited, and suspended tenants.
+  Null provisioning values also failed. Owner edits and valid provisioning requests retained their documented behavior.
+  The initial regression returned `200` before the fix. It returned `422` after the fix.
+  Final `make ci`, console race checks, clean Pages artifact checks, and actual Gateway client acceptance passed for B088 through B091.
+  The Governor check retains six existing managed-file differences. The changed prose passed its scoped language review.
+  Changed files: `internal/controlplane/resources.go`, `cmd/server/provisioning_test.go`, OpenAPI, and the console operations guide.
+
+
 - [x] [B087] (P1) Limit Gateway suspension grants to suspension changes.
   Observed:
   A provisioning credential with the suspension operation can rename a tenant through metadata PATCH.
