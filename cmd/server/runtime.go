@@ -144,6 +144,9 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 	if err := appconfig.ValidateOAuthActivation(appConfig.OAuthServer(), tenantConfig); err != nil {
 		return nil, err
 	}
+	if err := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); err != nil {
+		return nil, err
+	}
 	cleanup := func() {}
 	defer func() {
 		if buildErr != nil {
