@@ -610,6 +610,41 @@ paths:
               schema: {$ref: "#/components/schemas/AuditEventPage"}
         default:
           $ref: "#/components/responses/ManagementFailure"
+  /api/management/accounts:
+    get:
+      operationId: listOwnerAccounts
+      summary: List owner accounts for a configured administrator.
+      description: The administrator role does not grant access to another owner workspace.
+      security: [{ConsoleSession: []}]
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: {type: string, format: uri}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      responses:
+        "200":
+          description: Account directory page. Responses have Cache-Control no-store.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OwnerAccount"}
+                  next_cursor: {type: string}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
   /api/management/owner-account:
     parameters:
       - name: Origin
@@ -635,7 +670,7 @@ paths:
     put:
       operationId: provisionOwnerAccount
       summary: Create the owner account for the authenticated console subject.
-      description: An existing subject binding returns the same owner account. The first account requires the designated verified Google email.
+      description: An existing subject binding returns the same owner account. Every verified console identity can enroll independently of other accounts.
       security: [{ConsoleSession: []}]
       parameters:
         - name: X-TAuth-CSRF
@@ -1419,8 +1454,9 @@ components:
     OwnerAccount:
       type: object
       additionalProperties: false
-      required: [id, display_name, contact_email, state, created_at]
+      required: [id, display_name, contact_email, state, created_at, administrator]
       properties:
+        administrator: {type: boolean}
         id: {type: string, pattern: '^[A-Za-z0-9_-]{22}$'}
         display_name: {type: string}
         contact_email: {type: string, format: email}
