@@ -48,8 +48,18 @@ func (consoleGoogleValidator) Validate(_ context.Context, token, audience string
 }
 
 func TestConsoleEnrollmentAndRestart(t *testing.T) {
+	for _, insecure := range []bool{false, true} {
+		for _, header := range []bool{false, true} {
+			t.Run(fmt.Sprintf("insecure=%t/header=%t", insecure, header), func(t *testing.T) {
+				testConsoleEnrollmentAndRestart(t, insecure, header)
+			})
+		}
+	}
+}
+
+func testConsoleEnrollmentAndRestart(t *testing.T, insecure, header bool) {
 	databaseURL := "sqlite://" + filepath.Join(t.TempDir(), "console.db")
-	config := writeTempConfig(t, "server:\n  database_url: "+databaseURL+"\n  tenant_encryption_key: "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))+"\n  enable_cors: true\n  cors_allowed_origins: ["+consoleTestOrigin+"]\n")
+	config := writeTempConfig(t, "server:\n  database_url: "+databaseURL+"\n  tenant_encryption_key: "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))+"\n  enable_cors: true\n  cors_allowed_origins: ["+consoleTestOrigin+"]\n  enable_tenant_header_override: true\n")
 	users, err := authkit.NewDatabaseUserStore(context.Background(), databaseURL)
 	if err != nil {
 		t.Fatal(err)
@@ -93,10 +103,10 @@ account_management:
 `, consoleTestOrigin, client, consoleTestOrigin, consoleTestOrigin, consoleTestOrigin))
 	}
 	bootstrapFile := consoleFile("console-client")
-	sourceFile := writeTempConfig(t, `tenants:
+	sourceFile := writeTempConfig(t, fmt.Sprintf(`tenants:
   - id: imported
     display_name: Imported application
-    tenant_origins: [https://customer.example.com]
+    tenant_origins: [https://customer.example.com, http://127.0.0.1:4443]
     google_web_client_id: ${IMPORT_GOOGLE_CLIENT}
     jwt_signing_key: ${IMPORT_SESSION_KEY}
     session_cookie_name: imported_session
@@ -104,7 +114,9 @@ account_management:
     session_ttl: 15m
     refresh_ttl: 720h
     nonce_ttl: ${IMPORT_NONCE_TTL}
-`)
+    allow_insecure_http: %t
+    require_tenant_header: %t
+`, insecure, header))
 	t.Setenv("IMPORT_GOOGLE_CLIENT", "imported-client")
 	t.Setenv("IMPORT_SESSION_KEY", "imported-session-key$literal")
 	t.Setenv("IMPORT_NONCE_TTL", "5m")
@@ -169,6 +181,9 @@ account_management:
 					t.Fatal(err)
 				}
 				req.Header.Set("Origin", requestOrigin)
+				if header && requestOrigin != consoleTestOrigin {
+					req.Header.Set("X-TAuth-Tenant", "imported")
+				}
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("X-TAuth-CSRF", "1")
 				response, err := client.Do(req)
@@ -279,7 +294,9 @@ account_management:
 				if len(items) != 1 || items[0].(map[string]any)["id"] != "imported" {
 					t.Fatal("owner cannot recover imported tenant collection")
 				}
-				verifyImportedProvisioning(consoleHTTP{t: t, client: client, base: listener.URL, origin: consoleTestOrigin})
+				gatewayListener := httptest.NewServer(server.Handler)
+				defer gatewayListener.Close()
+				verifyImportedProvisioning(consoleHTTP{t: t, client: client, base: listener.URL, origin: consoleTestOrigin, gatewayURL: gatewayListener.URL}, insecure, header)
 			}
 			if attempt == 0 {
 				for retry := 0; retry < 2; retry++ {

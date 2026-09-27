@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -44,6 +48,10 @@ func TestConsoleProvisioningCredentialScope(t *testing.T) {
 			t.Fatal("identical provisioning created another revision")
 		}
 		machine.request("POST", path+"/activations", map[string]any{"revision": saved["revision"]}, 201, append(auth, "If-Match", updated.Get("ETag"), "Idempotency-Key", "gateway-activation")...)
+		application := machine
+		application.origin = "http://localhost:9291"
+		application.tenant = "gateway-app"
+		verifyProvisionedPolicies(application, true, true, "gateway-client")
 		// Ordinary console edits invalidate the last revision controlled by Gateway.
 		machine.request("PUT", path+"/configuration", browserConfig, 422, append(auth, "If-Match", updated.Get("ETag"))...)
 		ownerSaved, ownerHeaders := owner.request("PUT", path+"/configuration", browserConfig, 200, "If-Match", updated.Get("ETag"))
@@ -106,7 +114,7 @@ func TestConsoleActualGatewayClient(t *testing.T) {
 	})
 }
 
-func verifyImportedProvisioning(owner consoleHTTP) {
+func verifyImportedProvisioning(owner consoleHTTP, insecure, requireHeader bool) {
 	owner.t.Helper()
 	issued, _ := owner.request("POST", "/api/management/provisioning-credentials", map[string]any{"name": "Imported Gateway", "operations": []string{"read", "configure", "activate"}, "tenant_ids": []string{"imported"}, "allow_create": false}, 201, "Idempotency-Key", "imported-gateway")
 	machine := owner
@@ -118,15 +126,62 @@ func verifyImportedProvisioning(owner consoleHTTP) {
 	path := "/api/management/tenants/imported"
 	_, headers := machine.request("GET", path+"/configuration", nil, 200, auth...)
 	outputs := map[string]any{"google-web-client-id": map[string]any{"value": "imported-client"}, "jwt-signing-key": map[string]any{"value": "imported-session-key$literal"}}
-	contribution := map[string]any{"owner": "imported-application", "id": "authentication", "kind": "tauth_tenant", "desired": map[string]any{"kind": "tauth_tenant", "id": "authentication", "capability": "tauth.tenants", "version": 1, "tenant": map[string]any{"id": "imported", "display_name": "Imported application", "origins": []string{"https://customer.example.com"}, "google_web_client_id": map[string]any{"resource": "private", "output": "google"}, "jwt_signing_key": map[string]any{"resource": "private", "output": "key"}, "cookie": map[string]any{"domain": "", "session_name": "imported_session", "refresh_name": "imported_refresh"}}}, "outputs": outputs}
+	contribution := map[string]any{"owner": "imported-application", "id": "authentication", "kind": "tauth_tenant", "desired": map[string]any{"kind": "tauth_tenant", "id": "authentication", "capability": "tauth.tenants", "version": 1, "tenant": map[string]any{"id": "imported", "display_name": "Imported application", "origins": []string{"https://customer.example.com", "http://127.0.0.1:4443"}, "google_web_client_id": map[string]any{"resource": "private", "output": "google"}, "jwt_signing_key": map[string]any{"resource": "private", "output": "key"}, "cookie": map[string]any{"domain": "", "session_name": "imported_session", "refresh_name": "imported_refresh"}}}, "outputs": outputs}
 	payload := map[string]any{"provisioning": map[string]any{"generation": 1, "contribution": contribution}}
-	saved, headers := machine.request("PUT", path+"/configuration", payload, 200, append(auth, "If-Match", headers.Get("ETag"))...)
-	if saved["session_cookie_name"] != "imported_session" || saved["refresh_cookie_name"] != "imported_refresh" {
-		owner.t.Fatal("imported cookie outputs changed")
+	assertPolicies := func() {
+		application := machine
+		application.origin = "http://127.0.0.1:4443"
+		application.tenant = "imported"
+		verifyProvisionedPolicies(application, insecure, requireHeader, "imported-client")
 	}
-	machine.request("POST", path+"/activations", map[string]any{"revision": saved["revision"]}, 201, append(auth, "If-Match", headers.Get("ETag"), "Idempotency-Key", "imported-activation")...)
+	assertPolicies()
+	for attempt, generation := range []int{1, 1, 2, 2} {
+		payload["provisioning"].(map[string]any)["generation"] = generation
+		if gateway := os.Getenv("TAUTH_GATEWAY_ROOT"); gateway != "" {
+			input, err := json.Marshal(map[string]any{"contributions": []any{contribution}, "owners": []any{map[string]any{"owner": "imported-application", "generation": generation}}, "removed": []any{}})
+			if err != nil {
+				owner.t.Fatal(err)
+			}
+			command := exec.Command(filepath.Join(gateway, ".venv", "bin", "python"), "-c", `
+import json
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(os.environ["TAUTH_GATEWAY_ROOT"]) / "deploy/ansible/library"))
+from mprlab_tauth_provision import Client
+
+client = Client(os.environ["TAUTH_MANAGEMENT_TEST_URL"], os.environ["TAUTH_MANAGEMENT_TEST_TOKEN"])
+print(json.dumps(client.provision(**json.load(sys.stdin))))
+`)
+			command.Env = append(os.Environ(), "TAUTH_MANAGEMENT_TEST_URL="+owner.gatewayURL, "TAUTH_MANAGEMENT_TEST_TOKEN="+issued["token"].(string))
+			command.Stdin = bytes.NewReader(input)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				owner.t.Fatalf("Gateway imported policies: %v\n%s", err, output)
+			}
+			var result struct {
+				Changed bool `json:"changed"`
+			}
+			if err := json.Unmarshal(output, &result); err != nil {
+				owner.t.Fatal(err)
+			}
+			if result.Changed != (attempt%2 == 0) {
+				owner.t.Fatalf("Gateway changed=%t on attempt %d", result.Changed, attempt)
+			}
+		} else {
+			saved, updated := machine.request("PUT", path+"/configuration", payload, 200, append(auth, "If-Match", headers.Get("ETag"))...)
+			machine.request("POST", path+"/activations", map[string]any{"revision": saved["revision"]}, 201, append(auth, "If-Match", updated.Get("ETag"), "Idempotency-Key", fmt.Sprintf("imported-activation-%d", generation))...)
+		}
+		saved, updated := machine.request("GET", path+"/configuration", nil, 200, auth...)
+		headers = updated
+		if saved["revision"] != float64(generation+1) || saved["session_cookie_name"] != "imported_session" || saved["refresh_cookie_name"] != "imported_refresh" {
+			owner.t.Fatalf("imported configuration changed: %v", saved)
+		}
+		assertPolicies()
+	}
 	outputs["jwt-signing-key"] = map[string]any{"value": "replacement-not-authorized"}
-	payload["provisioning"].(map[string]any)["generation"] = 2
+	payload["provisioning"].(map[string]any)["generation"] = 3
 	machine.request("PUT", path+"/configuration", payload, 409, append(auth, "If-Match", headers.Get("ETag"))...)
 }
 
@@ -163,4 +218,33 @@ func TestConsoleProvisioningCannotReactivateSuspendedTenant(t *testing.T) {
 		owner.request("POST", path+"/activations", activation, 201, "If-Match", etag, "Idempotency-Key", "owner-recovery")
 		application.login("application-user", "app-client")
 	})
+}
+
+func verifyProvisionedPolicies(application consoleHTTP, insecure, requireHeader bool, audience string) {
+	application.t.Helper()
+	tenantID := application.tenant
+	application.tenant = ""
+	status := http.StatusUnauthorized
+	if requireHeader {
+		status = http.StatusForbidden
+	}
+	application.request("GET", "/me", nil, status)
+	application.tenant = tenantID
+	application.request("GET", "/me", nil, http.StatusUnauthorized)
+	nonce, _ := application.request("POST", "/auth/nonce", nil, http.StatusOK)
+	claims, err := json.Marshal(map[string]any{"aud": audience, "iss": "https://accounts.google.com", "sub": "policy-probe", "email": "probe@example.com", "email_verified": true, "nonce": nonce["nonce"]})
+	if err != nil {
+		application.t.Fatal(err)
+	}
+	_, cookieHeaders := application.request("POST", "/auth/google", map[string]any{"google_id_token": string(claims), "nonce_token": nonce["nonce"]}, http.StatusOK)
+	response := http.Response{Header: cookieHeaders}
+	cookies := response.Cookies()
+	if len(cookies) != 2 {
+		application.t.Fatalf("expected session and refresh cookies, got %d", len(cookies))
+	}
+	for _, cookie := range cookies {
+		if cookie.Secure == insecure {
+			application.t.Fatalf("cookie %s: Secure=%t, allow_insecure_http=%t", cookie.Name, cookie.Secure, insecure)
+		}
+	}
 }
