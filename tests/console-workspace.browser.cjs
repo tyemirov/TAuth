@@ -62,6 +62,13 @@ test(
         document.getElementById("tenant-name").textContent ===
         "Imported application",
     );
+    await page.waitForSelector("#admin-accounts:not([hidden])");
+    await page.click("#refresh-accounts");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#account-list")
+        ?.textContent.includes("vtyemirov@gmail.com"),
+    );
     // The imported tenant uses the same settings and protected export UI.
     await page.click("[data-section=domains]");
     await page.$eval("#frontend-origins", (node) => {
@@ -560,6 +567,10 @@ test(
     const otherID = await page.$eval("#tenant-id", (node) => node.textContent);
     assert.notEqual(otherID, tenantID);
     await page.click("[data-section=signin]");
+    assert.equal(
+      await page.$eval("#admin-accounts", (node) => node.hidden),
+      true,
+    );
     await page.type("#google-client", "second-app-google");
     await page.click("[data-section=domains]");
     await page.type("#frontend-origins", process.env.TAUTH_CUSTOMER_FRONTEND);
