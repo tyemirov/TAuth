@@ -107,8 +107,11 @@ export class Client {
   /** @param {string} origin */
   constructor(origin) {
     const u = new URL(origin);
-    if (u.origin !== origin || u.protocol !== "https:")
-      throw new Error("The console requires an HTTPS API origin");
+    const loopbackHTTP =
+      u.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+    if (u.origin !== origin || (u.protocol !== "https:" && !loopbackHTTP))
+      throw new Error("The console requires HTTPS or a loopback HTTP API origin");
     this.origin = origin;
   }
   /** @param {string} method @param {string} path @param {AbortSignal} signal @param {unknown} [body] @param {string} [etag] @param {string} [key] */
