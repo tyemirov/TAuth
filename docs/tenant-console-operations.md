@@ -259,6 +259,10 @@ An identical generation and contribution retain the configuration revision.
 A changed contribution at the same generation fails. A console edit causes a revision conflict.
 Gateway cannot overwrite that edit or reactivate a suspended tenant.
 Existing validator keys and cookie settings must match the active tenant contract.
+Gateway configuration writes keep `allow_insecure_http` and `require_tenant_header` from the active tenant configuration.
+This rule applies to the first write after import and to later generations.
+For a tenant without an active revision, loopback origins set both policies to `true`.
+Loopback origins still control origin validation for each configuration write.
 Advanced Gateway integrations can retain their existing API topology without the console API-base field.
 Public console integration setup requires that field before it can produce complete settings.
 
