@@ -109,7 +109,7 @@ test-apple-callback-cors:
 .PHONY: test-gateway-provisioning
 test-gateway-provisioning:
 	@test -n "$${TAUTH_GATEWAY_ROOT}" || { echo "TAUTH_GATEWAY_ROOT must select the Gateway checkout"; exit 2; }
-	$(GO) test ./cmd/server -run '^TestConsoleActualGatewayClient$$' -count=1 -v
+	$(GO) test ./cmd/server -run '^TestConsole(ActualGatewayClient|EnrollmentAndRestart)$$' -count=1 -v
 
 .PHONY: test-console-browser
 test-console-browser:
