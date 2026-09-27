@@ -204,6 +204,9 @@ func (management *Management) checkOrigins(ctx context.Context, store *Store, te
 	return nil
 }
 func (management *Management) activate(ctx *gin.Context, store *Store, tenant tenantRecord, data []byte) (resourceResult, PreparedRuntime, error) {
+	if provisioningPrincipal(ctx) != nil && tenant.State == "suspended" {
+		return resourceResult{}, nil, failure(409, "tenant_suspended")
+	}
 	if tenant.SuspensionPending {
 		return resourceResult{}, nil, failure(409, "suspension_incomplete")
 	}

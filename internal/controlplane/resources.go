@@ -274,6 +274,9 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 		if err := decodeBody(data, &input); err != nil {
 			return result, nil, "", err
 		}
+		if provisioningPrincipal(ctx) != nil && input.Provisioning == nil {
+			return result, nil, "", failure(422, "provisioning_configuration_required")
+		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(data, &fields); err != nil {
 			return result, nil, "", failure(400, "body_invalid")
