@@ -269,6 +269,29 @@ The database URL and base64 encryption key are required. The decoded key must co
 The service rejects missing console bootstrap data and incorrect encryption keys.
 The database can contain the console tenant with no application tenants.
 
+### Local orchestration
+
+Run `make up` from the repository root. Docker Compose builds the current source and starts the service and browser frontend.
+Open `http://localhost:8081/app/` for the tenant console. The API address is `http://localhost:8082`.
+Both ports bind to `127.0.0.1`.
+Run `make down` to stop the containers. This command keeps the database volume and local keys for the next start.
+
+The first start creates random keys in `.cache/tauth-local/runtime.env` and initializes the reserved console tenant.
+Later starts use the same keys and database. Keep the key file with the database.
+
+The local stack uses the same public Google client ID as the Ledger demo.
+For another Google client, set `TAUTH_LOCAL_GOOGLE_CLIENT_ID` before the first `make up`.
+Authorize `http://localhost:8081` in that client's Google configuration before login.
+The initial owner enrollment uses `vtyemirov@gmail.com` under the current console contract.
+The console uses Google login only. Its required email configuration is inactive.
+The local stack does not start Pinguin.
+
+Run `make test-local-lifecycle` to verify startup, browser initialization, restart, data retention, and shutdown.
+This test uses a separate Compose project, temporary keys, and ports 18082 and 18083.
+It removes its containers and volume after the test.
+The browser test injects the Google script. It does not verify live Google login.
+The console accepts HTTP API origins only for `localhost`, `127.0.0.1`, and `[::1]`. Other API origins require HTTPS.
+
 The local Compose examples mount service configuration and a separate tenant import source.
 Complete console bootstrap with `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
 Start the service, enroll the initial owner, and then run the tenant import command through the same Compose service.
