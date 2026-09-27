@@ -1,0 +1,38 @@
+name: ${TAUTH_LOCAL_PROJECT:-tauth-local}
+
+services:
+  tauth:
+    build:
+      context: ..
+    env_file:
+      - path: ${TAUTH_LOCAL_RUNTIME:-../.cache/tauth-local}/runtime.env
+        required: false
+    command: ["--config", "/config/service.yaml"]
+    ports:
+      - "127.0.0.1:${TAUTH_LOCAL_API_PORT:-8082}:8080"
+    volumes:
+      - tauth_data:/data
+      - ./service.yaml:/config/service.yaml:ro
+      - ./console.yaml:/config/console.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/.well-known/tauth-console"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  frontend:
+    image: ghcr.io/tyemirov/ghttp:latest
+    depends_on:
+      tauth:
+        condition: service_healthy
+    environment:
+      GHTTP_SERVE_PORT: "8081"
+      GHTTP_SERVE_DIRECTORY: /site
+      GHTTP_SERVE_RESPONSE_HEADERS: "/=Cache-Control:no-store"
+    ports:
+      - "127.0.0.1:${TAUTH_LOCAL_WEB_PORT:-8081}:8081"
+    volumes:
+      - ${TAUTH_LOCAL_RUNTIME:-../.cache/tauth-local}/site:/site:ro
+
+volumes:
+  tauth_data:

@@ -1,0 +1,20 @@
+id: tauth-console
+display_name: TAuth local console
+tenant_origins: ["${TAUTH_CONSOLE_ORIGIN}"]
+google_web_client_id: "${TAUTH_CONSOLE_GOOGLE_CLIENT_ID}"
+jwt_signing_key: "${TAUTH_CONSOLE_SESSION_KEY}"
+session_cookie_name: tauth_console_session
+refresh_cookie_name: tauth_console_refresh
+session_ttl: 15m
+refresh_ttl: 720h
+allow_insecure_http: true
+account_management:
+  enabled: true
+  email_delivery:
+    server_address: "127.0.0.1:8090"
+    api_key: "local-console-unused-email"
+    connection_timeout_seconds: 3
+    operation_timeout_seconds: 5
+    email_verification_url: "${TAUTH_CONSOLE_ORIGIN}/app/verify"
+    password_reset_url: "${TAUTH_CONSOLE_ORIGIN}/app/reset"
+    password_link_url: "${TAUTH_CONSOLE_ORIGIN}/app/link"

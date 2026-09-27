@@ -1,0 +1,7 @@
+server:
+  listen_addr: ":8080"
+  database_url: "sqlite:///data/tauth.db"
+  tenant_encryption_key: "${TAUTH_TENANT_ENCRYPTION_KEY}"
+  enable_cors: true
+  cors_allowed_origins: ["${TAUTH_CONSOLE_ORIGIN}"]
+  enable_tenant_header_override: true
