@@ -201,6 +201,20 @@ A crash before commit leaves the previous revision active.
 A crash after commit restores the committed revision on restart.
 Multiple service instances require a separate revision-distribution design.
 
+Startup and runtime publication apply the same CORS allowlist validation.
+Each explicit service origin must belong to an active tenant or an explicit service exception.
+An origin replacement or suspension that breaks this rule returns `422` before publication.
+The previous tenant state and active revision remain in use and remain valid after restart.
+The runtime adds active tenant origins automatically, so application origins do not need duplicate entries in service configuration.
+
+Before a change that removes an explicitly listed application origin:
+
+1. Remove that application origin from `server.cors_allowed_origins`. Keep the console origin in the list.
+2. Restart the service with the corrected service configuration.
+3. Read the current resource ETag.
+4. For activation, use a new `Idempotency-Key` for the corrected attempt.
+5. Retry the tenant change.
+
 Set tenant state to `suspended` with PATCH to stop new authentication and refresh requests.
 The service publishes a snapshot without that tenant and waits for requests from retired snapshots.
 It then revokes tenant refresh sessions, OAuth refresh grants, consents, and authorization codes.
@@ -238,6 +252,7 @@ Set `MPRLAB_TAUTH_MANAGEMENT_URL` to the TAuth service origin.
 Never place the token in a manifest, public output, URL, or browser configuration.
 
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
+A machine request with the console shape or a null `provisioning` value returns `422`.
 The API validates the contribution through the same TAuth native configuration parser used by the renderer.
 Activation uses the shared management activation service and origin proofs.
 An identical generation and contribution retain the configuration revision.

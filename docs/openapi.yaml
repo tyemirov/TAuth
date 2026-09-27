@@ -393,6 +393,7 @@ paths:
           $ref: "#/components/responses/ManagementFailure"
     put:
       operationId: replaceTenantConfiguration
+      description: Provisioning credentials require the exclusive provisioning shape. The console shape or a null provisioning value returns 422.
       security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
       parameters:
         - {$ref: "#/components/parameters/ConsoleCSRF"}
@@ -531,6 +532,7 @@ paths:
           $ref: "#/components/responses/ManagementFailure"
     post:
       operationId: createActivation
+      description: A suspended tenant requires owner recovery. Provisioning activation returns 409 while the tenant is suspended.
       security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
       parameters:
         - {$ref: "#/components/parameters/ConsoleCSRF"}
