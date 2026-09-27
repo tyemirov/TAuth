@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/tyemirov/tauth/internal/appconfig"
 
 	"github.com/spf13/cobra"
 	"github.com/tyemirov/tauth/internal/deploymentconfig"
@@ -25,4 +26,14 @@ func runRenderDeploymentConfig(command *cobra.Command, arguments []string) error
 		return fmt.Errorf("deployment_config.write_output: %w", writeErr)
 	}
 	return nil
+}
+
+func newValidateServiceConfigCommand() *cobra.Command {
+	return &cobra.Command{Use: "validate-service-config FILE", Short: "Validate service settings without opening the control database", Args: cobra.ExactArgs(1), RunE: func(command *cobra.Command, arguments []string) error {
+		if _, err := appconfig.LoadConfig(arguments[0]); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintln(command.OutOrStdout(), `{"valid":true,"contract":"service-configuration"}`)
+		return err
+	}}
 }

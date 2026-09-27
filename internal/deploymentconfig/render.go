@@ -53,6 +53,11 @@ func Render(reader io.Reader) ([]byte, error) {
 	if finalizeErr := finalizeDocument(&document); finalizeErr != nil {
 		return nil, finalizeErr
 	}
+	// Tenant contributions use management resources. Only service settings belong in this artifact.
+	document.Tenants = nil
+	document.Server.TenantEncryptionKey = "${TAUTH_TENANT_ENCRYPTION_KEY}"
+	document.Server.CORSAllowedOrigins = []string{"https://accounts.google.com"}
+	document.Server.EnableTenantHeaderOverride = true
 	payload, marshalErr := yaml.Marshal(document)
 	if marshalErr != nil {
 		return nil, fmt.Errorf("%w: encode native config: %v", errInvalidConfig, marshalErr)
@@ -272,10 +277,11 @@ type tenantOAuthGrant struct {
 type nativeDocument struct {
 	Server  nativeServer       `yaml:"server"`
 	OAuth   *nativeOAuthServer `yaml:"oauth,omitempty"`
-	Tenants []nativeTenant     `yaml:"tenants"`
+	Tenants []nativeTenant     `yaml:"tenants,omitempty"`
 }
 
 type nativeServer struct {
+	TenantEncryptionKey         string   `yaml:"tenant_encryption_key,omitempty"`
 	ListenAddr                  string   `yaml:"listen_addr"`
 	DatabaseURL                 string   `yaml:"database_url"`
 	EnableCORS                  bool     `yaml:"enable_cors"`
@@ -639,7 +645,7 @@ func finalizeDocument(document *nativeDocument) error {
 	if marshalErr != nil {
 		return fmt.Errorf("%w: encode native config: %v", errInvalidConfig, marshalErr)
 	}
-	config, configErr := appconfig.ParseConfig(payload)
+	config, configErr := appconfig.ParseImportSource(payload)
 	if configErr != nil {
 		return fmt.Errorf("%w: %v", errInvalidConfig, configErr)
 	}
@@ -672,4 +678,38 @@ func finalizeDocument(document *nativeDocument) error {
 		}
 	}
 	return nil
+}
+
+// ProvisioningConfiguration is the validated tenant projection of one deployment contribution.
+type ProvisioningConfiguration struct {
+	Owner          string
+	ContributionID string
+	Tenant         tenants.FileTenant
+}
+
+// ResolveContribution projects literal resolved outputs without environment expansion.
+func ResolveContribution(payload json.RawMessage) (ProvisioningConfiguration, error) {
+	var item contribution
+	if err := strictJSON(payload, &item); err != nil {
+		return ProvisioningConfiguration{}, fmt.Errorf("deployment_config.contribution: %w", err)
+	}
+	if strings.TrimSpace(item.Owner) == "" || strings.TrimSpace(item.ID) == "" || len(item.Owner) > 128 || len(item.ID) > 128 || item.Kind != resourceKindTenant && item.Kind != resourceKindGitHubTenant {
+		return ProvisioningConfiguration{}, errInvalidRequest
+	}
+	native, err := buildTenant(item)
+	if err != nil {
+		return ProvisioningConfiguration{}, err
+	}
+	encoded, err := yaml.Marshal(native)
+	if err != nil {
+		return ProvisioningConfiguration{}, err
+	}
+	var file tenants.FileTenant
+	if err := yaml.Unmarshal(encoded, &file); err != nil {
+		return ProvisioningConfiguration{}, err
+	}
+	if _, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: []tenants.FileTenant{file}}); err != nil {
+		return ProvisioningConfiguration{}, err
+	}
+	return ProvisioningConfiguration{Owner: item.Owner, ContributionID: item.ID, Tenant: file}, nil
 }

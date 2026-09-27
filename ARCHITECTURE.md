@@ -218,10 +218,10 @@ outside this authorization-server contract.
 
 ### 4.1 `cmd/server`
 
-- Cobra CLI with a YAML-backed configuration loader.
+- Cobra CLI with service YAML and database-backed tenant configuration.
 - Wires logging (zap), Gin middleware, CORS, routes, and graceful shutdown.
 - Selects refresh token store:
-  - In-memory (`authkit.NewMemoryRefreshTokenStore`) when `database_url` is empty.
+  - A persistent database is required. Missing database configuration prevents startup.
   - Persistent (`authkit.NewDatabaseRefreshTokenStore`) when pointing at Postgres (`postgres://`) or SQLite (`sqlite://`), using GORM.
 - Attaches `authkit.RequireSession` to protected route groups (see `/api` group in `cmd/server/main.go`).
 
@@ -312,7 +312,7 @@ type AccountManagementStore interface {
 - Smart constructor enforces signing key and issuer configuration, with optional cookie name overrides.
 - Provides `ValidateToken`, `ValidateRequest`, and a Gin middleware adapter to populate typed `Claims`.
 - Shares the same claim shape (`user_id`, `user_email`, `display`, `avatar_url`, `roles`, `expires`) used by the server.
-- Includes `LoadTenantAuthConfig` to derive tenant signing keys, issuer, and cookie names from the same `config.yaml` used by TAuth.
+- Reads the session key and cookie name from the consuming backend's secret configuration.
 
 ### 4.7 OAuth authorization components
 
@@ -332,16 +332,14 @@ type AccountManagementStore interface {
 | `cors_allowed_origins` | List of allowed origins when CORS is enabled (include GIS) | `["https://app.example.com","https://accounts.google.com"]` |
 | `cors_allowed_origin_exceptions` | Non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow explicit tenant selection for shared origins and non-browser clients | `true` |
-| `tenants`              | Array of tenant entries (id, tenant_origins, web/native/Apple clients, TTLs) | See README §5 |
+| `tenant_encryption_key` | Base64 encoding of a 32-byte encryption key | Service secret input |
 
-Configuration is loaded from a single YAML file (`config.yaml` by default, override via `tauth --config=/path/to/file` or `TAUTH_CONFIG_FILE`).
+Service settings load from YAML. Tenant revisions and encrypted secrets load from the owner database.
+The runtime rejects tenant YAML and does not read tenant environment inputs.
 
-Each operator supplies one complete runtime configuration to the generic TAuth
-service. Tenant identities, origins, provider clients, cookie policy, secrets,
-routing, and secret values remain operator-owned. The MPR Lab deployment shape
-is declarative: `.mprlab/deploy/resources.yml` names the TAuth image, retained
-data, gateway-managed tenant configuration, exported capabilities, public
-routes, and health contract without containing secret bytes or host paths.
+Each operator supplies service settings and secret configuration.
+The database owns tenant identities, origins, provider clients, cookie policy, and encrypted tenant secrets. The MPR Lab manifest names the image, retained data, tenant resources, public routes, and health contract.
+It contains no secret values or host paths.
 
 The root `make release`, `make publish`, and `make deploy` commands use the installed `mprlab-gateway` runtime.
 Each command passes the selected Git root through `--app-root`.
@@ -353,14 +351,18 @@ outputs, manages immutable lifecycle receipts, and performs convergence. The
 gateway sends complete TAuth contributions and output envelopes to
 `tauth render-deployment-config` through standard input. TAuth owns the strict
 render request, TAuth defaults, output-name resolution, native config assembly,
-and native validation. The command returns the complete native YAML through
-standard output. TAuth carries no production lifecycle script or alternative
+and native validation. The command returns service configuration through standard output.
+Gateway sends tenant contributions through the scoped management API.
+Persisted contribution bindings protect console edits and preserve retry revisions.
+The production cutover requires the Gateway provisioning client from F011. TAuth carries no production lifecycle script or alternative
 controller. The README defines the render request envelope. It does not define
 a second `resources.yml` schema.
 
-### 5.1 Multi-tenant configuration file
+### 5.1 Tenant import source
 
-Every deployment relies on the declarative config file parsed by `internal/tenants`. The YAML document describes each tenant’s identity, origins, identity-provider clients, and cookie/scheduling knobs:
+The bounded importer accepts the following tenant source format.
+Normal startup reads only committed active revisions from the database.
+The importer resolves environment inputs before the transaction and preserves existing application records.
 
 ```yaml
 tenants:
@@ -441,15 +443,15 @@ Validation rules baked into the loader:
 - Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
 - Cookie names are mandatory. Use a different name for each tenant that shares a cookie domain.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
-- String fields expand environment variables (`$VAR` / `${VAR}`) during typed config loading so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
+- String fields expand environment variables (`$VAR` / `${VAR}`) during bounded tenant import so operator templates can stay DRY. Unset variables resolve to empty strings, triggering the same validation rules as blank values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved rather than treated as shell variables.
 
 Tenant resolution & runtime:
 
-- The explicit `tenants: []` aggregate is the valid bootstrap state before an application contributes a tenant. The server exposes `GET /health`; tenant-authenticated routes remain inactive because no origin or override can resolve to a tenant.
+- The reserved console tenant is required at startup. The application tenant collection can be empty.
 - `internal/tenants.NewResolver` consumes the validated config and maps HTTP requests to tenants. Origins are matched case-insensitively, and unknown origins are rejected with a 404 response before hitting auth routes. When multiple tenants intentionally share the same origin, enable the header override and send `X-TAuth-Tenant` to disambiguate.
 - Non-browser clients and shared-origin callers use the `X-TAuth-Tenant` override. The override accepts tenant IDs or frontend origins. Disable it only when every request uses one unique browser `Origin`.
 - `internal/tenants.TenantMiddleware` injects the resolved tenant into `gin.Context` so auth routes and stores can look up per-tenant keys (`tenants.TenantFromContext`) without touching global state.
-- Multi-tenant mode uses the `tenants` array in `config.yaml`. Start TAuth with `tauth --config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`. Use `enable_tenant_header_override: true` when requests require explicit tenant selection.
+- Runtime tenant configuration comes from the database. Use `enable_tenant_header_override: true` for explicit tenant selection.
 - Native clients without a browser `Origin` header must send `X-TAuth-Tenant`. Google mobile clients use `platform` to select iOS or Android audiences. Without `platform`, `/auth/google/native` accepts any configured native Google audience for the tenant. Native Apple login accepts only the resolved tenant's `native_client_ids` audiences.
 - Apple start requests can include `tenant_id` when the initiating page configured a tenant explicitly. Apple callbacks do not rely on `Origin`; the signed state token identifies the tenant after the provider redirect.
 - Front-ends pass `tenantId` to `initAuthClient` when they need to pin a tenant explicitly; the helper automatically sets the `X-TAuth-Tenant` header on its own `/auth/session`, `/me`, `/auth/*`, and logout requests to line up with the override flow above while leaving product APIs untouched. When no tenant ID is supplied, the helper relies on the request `Origin` header instead of sending overrides.
@@ -588,7 +590,8 @@ A successful completion consumes the request once. A repeated submission cannot 
 
 ## 9. CLI and Server Lifecycle
 
-- Cobra command `tauth` reads configuration from a single YAML file (`--config=/path/to/config.yaml` or `TAUTH_CONFIG_FILE`).
+- Cobra command `tauth` reads service YAML and active database revisions.
+- `console-bootstrap` installs encrypted console configuration. `tenant-import` performs the bounded migration under the enrolled owner.
 - `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
 - `tauth doctor <config-paths...>` validates one or more TAuth configurations and reports issues:
   - `--cross-validate`: Check for conflicts across multiple configs (shared origins, signing keys, cookie names).
@@ -680,3 +683,53 @@ A new authorization request requires consent for the new mapping.
 
 The OAuth v2 schema adds an empty policy to existing rows. An empty policy does not authorize identity disclosure.
 Existing grants without a recorded disclosure policy require new consent before GitHub identity disclosure.
+
+## Owner management and runtime revisions
+
+The control database stores owner bindings, application tenants, encrypted configuration revisions, origin proofs, and audit events.
+The reserved console tenant supplies the authentication authority for management resources.
+Every tenant query includes the current owner account ID.
+Management writes require Origin, CSRF, retry identity, and revision preconditions as defined in `docs/openapi.yaml`.
+
+Activation builds a complete candidate runtime before the database transaction commits.
+The service publishes the committed snapshot before it returns success.
+Each request retains one immutable snapshot. Retired snapshots release email clients after their last request.
+A failed candidate leaves the previous active revision in use. Restart restores the committed database revision.
+Suspension removes the tenant from the runtime, drains retired requests, and revokes refresh credentials and OAuth grants.
+Offline access tokens remain valid until expiry.
+The current runtime supports one service instance. See `docs/tenant-console-operations.md` for recovery and retry steps.
+
+
+## Tenant workspace
+
+GitHub Pages serves the static owner workspace at `/app/` with the documentation and canonical browser helper.
+The runtime public file selects the separate API origin.
+The public console bootstrap endpoint supplies the reserved tenant and Google client ID.
+The workspace rejects a console origin that differs from the page origin.
+MPR-UI supplies account controls, the header, footer, and theme controls.
+
+The management client validates response payloads and owns request headers, cursor traversal, and revision preconditions.
+The workspace holds one selected tenant and cancels requests when the account or tenant changes.
+An operation epoch rejects late responses, including a response already received before request cancellation.
+The URL fragment stores tenant and section selection for Pages reloads.
+Forms preserve their values after failed requests. A conflict requires an explicit configuration reload.
+Browser acceptance uses the shipped UI, a real TLS service, and a persistent test database.
+Google token validation and DNS publication are controlled external boundaries in that lane.
+
+## Customer cookie integration
+
+The Integration resource reads the selected active revision and emits public browser settings and backend input names.
+The customer API proxies six exact authentication routes and validates its own protected routes through `pkg/sessionvalidator`.
+The proxy binds the tenant, preserves the browser Origin, and creates host-only cookies at the customer API hostname.
+The protected handler compares the validated tenant claim with its configured tenant ID.
+The frontend and customer API share a cookie site. The TAuth service has a separate origin.
+
+A key export requires a fresh Google transaction bound to the owner, tenant, revision, and operation.
+Only the first export response contains the key. Receipts and audit events contain metadata only.
+The browser export state has a separate cancellation controller and clears on tenant or account transitions.
+
+Setup checks use fixed HTTPS paths on the verified active API destination.
+DNS validation and address pinning prevent requests to private destinations and prevent DNS rebinding between resolution and connection.
+The nonce probe runs outside the management database transaction because the authentication service must write its nonce record.
+The service serializes management changes while it probes, then stores bounded evidence against the checked revision.
+The [operations guide](docs/tenant-console-operations.md) defines failure handling, key replacement, and production qualification.

@@ -144,3 +144,10 @@ func (store *DatabaseNonceStore) purgeExpired(ctx context.Context, tenantID stri
 	}
 	return nil
 }
+
+// WithTTLResolver retains the database and binds nonce policy to one runtime snapshot.
+func (store *DatabaseNonceStore) WithTTLResolver(resolve func(string) time.Duration) *DatabaseNonceStore {
+	copy := *store
+	copy.ttlResolver = resolve
+	return &copy
+}

@@ -73,9 +73,17 @@ printf '%s\n' \
   '    refresh_ttl: "720h"' \
   '    nonce_ttl: "5m"' >"${config_path}"
 
+mv "${config_path}" "${test_root}/import-source.yaml"
+TAUTH_TEST_SOURCE="${test_root}/import-source.yaml" \
+TAUTH_TEST_SERVICE="${config_path}" \
+TAUTH_TEST_DATABASE="${data_path}/tauth.db" \
+TAUTH_TEST_RUNTIME_DATABASE_URL="sqlite:///data/tauth.db" \
+make test-database-fixture
+
 docker build --pull --tag "${image_name}" .
 
 if ! docker run --rm --network none \
+  --mount "type=bind,src=${data_path},dst=/data" \
   --mount "type=bind,src=${config_path},dst=/config/config.yaml,readonly" \
   "${image_name}" doctor /config/config.yaml --json >"${doctor_output_path}"; then
   cat "${doctor_output_path}" >&2

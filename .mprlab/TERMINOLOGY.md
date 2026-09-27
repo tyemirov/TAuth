@@ -96,6 +96,29 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `tenant console`: The TAuth browser frontend through which an owner configures application tenants.
+- `owner account`: A console account that owns application tenants through a verified TAuth subject.
+- `application tenant`: An isolated TAuth configuration and its application users, credentials, and sessions.
+- `console tenant`: The reserved TAuth tenant that authenticates tenant console owners.
+- `control plane`: The API and storage that manage tenant ownership and configuration.
+- `runtime snapshot`: One immutable set of active tenant settings used for a request.
+- `activation revision`: The persisted configuration revision that the runtime currently uses.
+- `origin proof`: Evidence that an owner controls a specified production hostname.
+- `setup check`: A recorded integration test result for one tenant configuration revision.
+- `reauthentication`: A fresh identity verification for one protected owner operation.
+- `cookie site`: The scheme and registrable domain used by browser SameSite cookie rules.
+- `address pinning`: Use of one resolved network address for a bounded destination check.
+- `DNS rebinding`: A change in DNS answers that redirects a later connection to another network address.
+- `base64`: A text encoding for byte values.
+- `session key`: The tenant-specific HS256 secret used to sign and validate session cookies.
+- `secret export`: An authorized response that contains a secret for backend installation.
+- `ETag`: An HTTP representation identifier used to detect concurrent changes.
+- `idempotency key`: A request identifier that prevents duplicate resource creation during retries.
+- `DNS TXT record`: A DNS text record used to prove hostname control.
+- `reverse proxy`: A server that forwards a request to another server and returns its response.
+- `CORS`: The browser protocol that controls access to responses from another origin.
+- `HS256`: The HMAC SHA-256 algorithm used for TAuth session signatures.
+
 - `customer value`: The measurable benefit that a product change gives its users.
 - `platform account`: One account that a person can use across participating MPR Lab applications.
 - `shared identity`: A stable person identifier and approved profile data available to participating applications.

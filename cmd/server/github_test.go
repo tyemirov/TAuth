@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +42,12 @@ tenants:
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, arguments := range [][]string{{"doctor", "--json", file.Name()}, {"--config", file.Name(), "preflight"}} {
+	source, err := appconfig.LoadImportSource(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeConfigFileFromStruct(t, *source)
+	for _, arguments := range [][]string{{"doctor", "--json", configPath}, {"--config", configPath, "preflight"}} {
 		command := newRootCommand()
 		var output bytes.Buffer
 		command.SetOut(&output)
@@ -88,7 +94,7 @@ tenants:
 	})
 	defer restore()
 	command := newRootCommand()
-	command.SetArgs([]string{"--config", file.Name()})
+	command.SetArgs([]string{"--config", configPath})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}

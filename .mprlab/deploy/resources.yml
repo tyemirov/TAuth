@@ -8,6 +8,7 @@ mprlab_resources:
       id: oauth-private
       bindings:
         oauth-signing-key: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
+        tenant-encryption-key: TAUTH_TENANT_ENCRYPTION_KEY
     - kind: compose_project
       id: runtime
       retired_services:
@@ -30,6 +31,10 @@ mprlab_resources:
             cardinality: one
           command:
             - --config=/config/config.yml
+          environment:
+            TAUTH_TENANT_ENCRYPTION_KEY:
+              resource: oauth-private
+              output: tenant-encryption-key
           assets:
             - managed: tauth.config
               target: /config/config.yml

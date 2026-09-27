@@ -9,6 +9,7 @@ tools/
 !package.json
 !package-lock.json
 !tsconfig.json
+!web/app/runtime.json
 # Managed by gix gitignore workflow
 .env.*
 !examples/tauth-demo/.env.tauth.example

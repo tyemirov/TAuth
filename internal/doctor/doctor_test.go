@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,8 +33,8 @@ func TestRunValidatesValidConfig(testingHandle *testing.T) {
 	if report.Summary.InvalidConfigs != 0 {
 		testingHandle.Fatalf("expected 0 invalid configs, got %d", report.Summary.InvalidConfigs)
 	}
-	if len(report.Diagnostics[0].TenantIDs) != 1 {
-		testingHandle.Fatalf("expected 1 tenant, got %d", len(report.Diagnostics[0].TenantIDs))
+	if len(report.Diagnostics[0].TenantIDs) != 2 {
+		testingHandle.Fatalf("expected application and console tenants, got %d", len(report.Diagnostics[0].TenantIDs))
 	}
 	if report.Diagnostics[0].TenantIDs[0] != "demo" {
 		testingHandle.Fatalf("expected tenant id 'demo', got %s", report.Diagnostics[0].TenantIDs[0])
@@ -43,7 +44,7 @@ func TestRunValidatesValidConfig(testingHandle *testing.T) {
 func TestRunValidatesInvalidConfig(testingHandle *testing.T) {
 	tempDir := testingHandle.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
-	writeTestConfig(testingHandle, configPath, invalidConfigYAML)
+	writeRawConfig(testingHandle, configPath, invalidConfigYAML)
 
 	report, err := Run(context.Background(), Options{
 		ConfigPaths: []string{configPath},
@@ -281,6 +282,10 @@ func TestRunCheckDatabaseDoesNotMutateRefreshStore(testingHandle *testing.T) {
 }
 
 func writeTestConfig(testingHandle *testing.T, path string, content string) {
+	writeRawConfig(testingHandle, path, testconfig.ServiceYAML(testingHandle, content))
+}
+
+func writeRawConfig(testingHandle *testing.T, path string, content string) {
 	testingHandle.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		testingHandle.Fatalf("write config: %v", err)

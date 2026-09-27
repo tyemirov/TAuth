@@ -57,6 +57,7 @@ type storeSchemaPolicy struct {
 }
 
 var storeSchemaPolicies = map[string]storeSchemaPolicy{
+	"control_store":        {StoreName: "control_store", Version: 1, AllowDestructiveReset: false},
 	githubStoreErrorPrefix: {StoreName: githubStoreErrorPrefix, Version: 1, AllowDestructiveReset: false},
 	refreshStoreErrorPrefix: {
 		StoreName:             refreshStoreErrorPrefix,
@@ -78,6 +79,22 @@ var storeSchemaPolicies = map[string]storeSchemaPolicy{
 		Version:               oauthStoreSchemaVersion,
 		AllowDestructiveReset: false,
 	},
+}
+
+// OpenControlDatabase opens the persistent owner and tenant repository.
+func OpenControlDatabase(ctx context.Context, databaseURL string, models ...interface{}) (*gorm.DB, error) {
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("control_store.parse_url: %w", err)
+	}
+	if parsed.Scheme == "sqlite" || parsed.Scheme == "sqlite3" {
+		query := parsed.Query()
+		query.Add("_pragma", "foreign_keys(1)")
+		parsed.RawQuery = query.Encode()
+		databaseURL = parsed.String()
+	}
+	database, _, err := openDatabase(ctx, databaseURL, "control_store", models...)
+	return database, err
 }
 
 // OpenOAuthDatabase opens the shared database contract and migrates OAuth store models.

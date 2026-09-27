@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,10 +18,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/controlplane"
 	"github.com/tyemirov/tauth/internal/notification"
 	"github.com/tyemirov/tauth/internal/oauthserver"
 	"github.com/tyemirov/tauth/internal/tenants"
-	"github.com/tyemirov/tauth/internal/web"
 	"go.uber.org/zap"
 )
 
@@ -57,6 +57,10 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newPreflightCommand())
 	rootCmd.AddCommand(newDoctorCommand())
 	rootCmd.AddCommand(newRenderDeploymentConfigCommand())
+	rootCmd.AddCommand(newValidateServiceConfigCommand())
+	rootCmd.AddCommand(newConsoleBootstrapCommand())
+	rootCmd.AddCommand(newTenantImportCommand())
+	rootCmd.AddCommand(newTenantKeyReplaceCommand())
 
 	return rootCmd
 }
@@ -127,6 +131,8 @@ func configError(code, message string) error {
 	return fmt.Errorf("%s: %s", code, message)
 }
 
+var lookupManagementTXT = net.DefaultResolver.LookupTXT
+
 func runServer(command *cobra.Command, arguments []string) error {
 	logger, loggerErr := zap.NewProduction()
 	if loggerErr != nil {
@@ -147,53 +153,41 @@ func runServer(command *cobra.Command, arguments []string) error {
 		return configError(configCodeUninitializedServerConf, "server configuration not prepared; PreRunE must execute before RunE")
 	}
 
-	baseServerConfig := authkit.ServerConfig{
-		AppJWTSigningKey:  nil,
-		AppJWTIssuer:      defaultAppJWTIssuer,
-		TenantID:          defaultTenantID,
-		CookieDomain:      defaultCookieDomain,
-		SessionCookieName: sessionCookieName,
-		RefreshCookieName: refreshCookieName,
-		SessionTTL:        15 * time.Minute,
-		RefreshTTL:        60 * 24 * time.Hour,
-		NonceTTL:          5 * time.Minute,
-	}
-
 	listenAddr := appConfig.Server.ListenAddr
 	databaseURL := strings.TrimSpace(appConfig.Server.DatabaseURL)
-	enableCORS := bool(appConfig.Server.EnableCORS)
-	enableTenantHeaderOverride := bool(appConfig.Server.EnableTenantHeaderOverride)
+
+	managementStore, err := controlplane.Open(shutdownContext, databaseURL, appConfig.Server.TenantEncryptionKey)
+	if err != nil {
+		return err
+	}
+	defer managementStore.Close()
+	consoleTenant, err := managementStore.Console(shutdownContext)
+	if err != nil {
+		return err
+	}
+	tenantConfig, loadErr := managementStore.RuntimeTenants(shutdownContext)
+	if loadErr != nil {
+		return loadErr
+	}
 
 	var userStore authkit.UserStore
 	var refreshStore authkit.RefreshTokenStore
 	var passwordCredentialStore authkit.PasswordCredentialStore
 
-	if databaseURL != "" {
-		persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(shutdownContext, databaseURL)
-		if storeErr != nil {
-			return storeErr
-		}
-		refreshStore = persistentStore
-		logger.Info("using persistent refresh token store", zap.String("driver", persistentStore.Driver()))
-		persistentUserStore, userStoreErr := authkit.NewDatabaseUserStore(shutdownContext, databaseURL)
-		if userStoreErr != nil {
-			return userStoreErr
-		}
-		userStore = persistentUserStore
-		passwordCredentialStore = persistentUserStore
-		logger.Info("using persistent user store", zap.String("driver", persistentUserStore.Driver()))
-	} else {
-		refreshStore = authkit.NewMemoryRefreshTokenStore()
-		logger.Info("using in-memory refresh token store")
-		userStore = web.NewInMemoryUsers()
-		passwordCredentialStore = authkit.NewMemoryPasswordCredentialStore()
-		logger.Info("using in-memory user store")
+	persistentStore, storeErr := authkit.NewDatabaseRefreshTokenStore(shutdownContext, databaseURL)
+	if storeErr != nil {
+		return storeErr
 	}
+	refreshStore = persistentStore
+	logger.Info("using persistent refresh token store", zap.String("driver", persistentStore.Driver()))
+	persistentUserStore, userStoreErr := authkit.NewDatabaseUserStore(shutdownContext, databaseURL)
+	if userStoreErr != nil {
+		return userStoreErr
+	}
+	userStore = persistentUserStore
+	passwordCredentialStore = persistentUserStore
+	logger.Info("using persistent user store", zap.String("driver", persistentUserStore.Driver()))
 
-	tenantConfig, loadErr := tenants.LoadConfigFromDocument(appConfig.TenantDocument())
-	if loadErr != nil {
-		return loadErr
-	}
 	if oauthConfigErr := appconfig.ValidateOAuthActivation(appConfig.OAuthServer(), tenantConfig); oauthConfigErr != nil {
 		return oauthConfigErr
 	}
@@ -203,51 +197,23 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if passwordSeedErr := seedPasswordUsers(shutdownContext, tenantConfig, userStore, passwordCredentialStore); passwordSeedErr != nil {
 		return passwordSeedErr
 	}
-	corsAllowedOrigins := appconfig.ExpandCommaSeparatedEntries(appConfig.Server.CORSAllowedOrigins)
-	sameSiteResolver := authkit.NewSameSiteResolver(enableCORS)
-	registry, registryErr := authkit.BuildTenantRegistry(baseServerConfig, tenantConfig, sameSiteResolver)
-	if registryErr != nil {
-		return registryErr
+	persistentNonceStore, nonceStoreErr := authkit.NewDatabaseNonceStore(shutdownContext, databaseURL, 5*time.Minute)
+	if nonceStoreErr != nil {
+		return nonceStoreErr
 	}
-	var emailChallengeSender authkit.EmailChallengeSender
-	pinguinConfigs := buildPinguinTenantConfigs(tenantConfig)
-	if len(pinguinConfigs) > 0 {
-		pinguinLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		pinguinSender, pinguinSenderErr := notification.NewPinguinEmailChallengeSender(pinguinLogger, pinguinConfigs)
-		if pinguinSenderErr != nil {
-			return pinguinSenderErr
-		}
-		defer func() {
-			if closeErr := pinguinSender.Close(); closeErr != nil {
-				logger.Error("close Pinguin notification client", zap.Error(closeErr))
-			}
-		}()
-		emailChallengeSender = pinguinSender
+	persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
+	if oauthStoreErr != nil {
+		return oauthStoreErr
 	}
-	resolverOptions := []tenants.ResolverOption{}
-	if enableTenantHeaderOverride {
-		resolverOptions = append(resolverOptions, tenants.WithHeaderOverride(""))
+	githubTransactions, storeErr := authkit.NewDatabaseGitHubTransactionStore(shutdownContext, databaseURL)
+	if storeErr != nil {
+		return storeErr
 	}
-	tenantResolver, resolverErr := tenants.NewResolver(tenantConfig, resolverOptions...)
-	if resolverErr != nil {
-		return resolverErr
+	if err := authkit.ResumeAccountDisablements(shutdownContext, persistentUserStore, refreshStore, persistentOAuthStore, time.Now().UTC().Unix()); err != nil {
+		return err
 	}
-
-	var nonceStore authkit.NonceStore
-	if databaseURL != "" {
-		persistentNonceStore, nonceStoreErr := authkit.NewDatabaseNonceStoreWithTTLResolver(shutdownContext, databaseURL, func(tenantID string) time.Duration {
-			return registry.Config(tenantID).NonceTTL
-		})
-		if nonceStoreErr != nil {
-			return nonceStoreErr
-		}
-		nonceStore = persistentNonceStore
-		logger.Info("using persistent nonce store", zap.String("driver", persistentNonceStore.Driver()))
-	} else {
-		nonceStore = authkit.NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
-			return registry.Config(tenantID).NonceTTL
-		})
-		logger.Info("using in-memory nonce store")
+	if err := managementStore.ResumeSuspensions(shutdownContext); err != nil {
+		return err
 	}
 
 	validator, validatorErr := buildGoogleTokenValidator(shutdownContext)
@@ -268,100 +234,26 @@ func runServer(command *cobra.Command, arguments []string) error {
 	authkit.ProvideMetrics(metricsRecorder)
 	defer authkit.ProvideMetrics(nil)
 
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-	router.Use(authkit.RedactGitHubCallbackQuery())
-	router.Use(zapLoggerMiddleware(logger))
-
-	if enableCORS {
-		corsMiddleware, corsErr := web.PermissiveCORS(corsAllowedOrigins)
-		if corsErr != nil {
-			return corsErr
+	publisher := &runtimePublisher{}
+	deps := &runtimeDependencies{config: appConfig, logger: logger, users: userStore, refresh: refreshStore, passwords: passwordCredentialStore, nonce: persistentNonceStore, oauth: persistentOAuthStore, github: githubTransactions, store: managementStore, console: consoleTenant}
+	builder := func(ctx context.Context, config tenants.Config) (controlplane.PreparedRuntime, error) {
+		snapshot, err := deps.build(ctx, config)
+		if err != nil {
+			return nil, err
 		}
-		oauthBrowserPaths := map[string]struct{}{}
-		if appConfig.OAuthServer().Enabled() {
-			oauthBrowserPaths = oauthBrowserEndpointPaths(appConfig.OAuthServer())
-		}
-		oauthBrowserPaths[tenants.GitHubStartPath] = struct{}{}
-		oauthBrowserPaths[tenants.GitHubCallbackPath] = struct{}{}
-		oauthBrowserPaths[authkit.AppleCallbackPath] = struct{}{}
-		router.Use(corsMiddlewareExceptPaths(corsMiddleware, oauthBrowserPaths))
+		return &preparedSnapshot{publisher: publisher, snapshot: snapshot}, nil
 	}
-
-	router.GET(healthEndpointPath, web.HandleHealth)
-	var oauthStore oauthserver.Store
-	if databaseURL != "" {
-		persistentOAuthStore, oauthStoreErr := oauthserver.NewDatabaseStore(shutdownContext, databaseURL)
-		if oauthStoreErr != nil {
-			return oauthStoreErr
-		}
-		oauthStore = persistentOAuthStore
-		logger.Info("using persistent OAuth store", zap.String("driver", persistentOAuthStore.Driver()))
-	} else if appConfig.OAuthServer().Enabled() {
-		oauthStore = oauthserver.NewMemoryStore()
-		logger.Info("using in-memory OAuth store")
-	}
-
-	sessions := authkit.NewOAuthBrowserSessions(registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
-	var githubContinuation authkit.GitHubAuthorizationContinuation
-	if appConfig.OAuthServer().Enabled() {
-		oauthRegistry, oauthRegistryErr := oauthserver.NewRegistry(tenantConfig)
-		if oauthRegistryErr != nil {
-			return oauthRegistryErr
-		}
-		oauthSigner, oauthSignerErr := oauthserver.NewSigner(appConfig.OAuthServer())
-		if oauthSignerErr != nil {
-			return oauthSignerErr
-		}
-		oauthHandler, oauthHandlerErr := oauthserver.NewServer(
-			appConfig.OAuthServer(),
-			oauthRegistry,
-			oauthStore,
-			oauthSigner,
-			oauthserver.NewClientMetadataResolver(appConfig.OAuthServer().ClientMetadata()),
-			sessions,
-		)
-		if oauthHandlerErr != nil {
-			return oauthHandlerErr
-		}
-		githubContinuation = oauthHandler
-		if mountErr := oauthHandler.Mount(router); mountErr != nil {
-			return mountErr
-		}
-	}
-
-	githubTransactions := authkit.NewMemoryGitHubTransactionStore()
-	if databaseURL != "" {
-		var storeErr error
-		githubTransactions, storeErr = authkit.NewDatabaseGitHubTransactionStore(shutdownContext, databaseURL)
-		if storeErr != nil {
-			return storeErr
-		}
-	}
-	githubLogin, githubErr := authkit.NewGitHubLogin(sessions, githubTransactions, authkit.NewGitHubProvider(http.DefaultTransport), githubContinuation)
-	if githubErr != nil {
-		return githubErr
-	}
-	githubLogin.Mount(router)
-
-	if err := authkit.ResumeAccountDisablements(shutdownContext, passwordCredentialStore.(authkit.AccountManagementStore), refreshStore, oauthStore, time.Now().UTC().Unix()); err != nil {
+	deps.management = controlplane.NewManagement(managementStore, builder, lookupManagementTXT, controlplane.NewIntegration(validator, persistentUserStore, consoleTenant.GoogleWebClientID, appconfig.DefaultJWTIssuer, controlplane.NewSetupChecker(persistentNonceStore, managementSetupNetwork())), managementNow)
+	initial, err := builder(shutdownContext, tenantConfig)
+	if err != nil {
 		return err
 	}
-
-	tenantRouter := router.Group("/")
-	tenantRouter.Use(originGateMiddleware(tenantConfig, enableTenantHeaderOverride))
-	tenantRouter.Use(tenantMiddleware(tenantResolver, http.StatusNotFound))
-
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore)
-
-	protected := tenantRouter.Group("/api")
-	protected.Use(authkit.RequireSession(registry))
-	protected.GET("/me", web.HandleWhoAmI(logger))
+	initial.Publish()
+	defer publisher.Close()
 
 	server := &http.Server{
 		Addr:              listenAddr,
-		Handler:           router,
+		Handler:           publisher,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -545,3 +437,6 @@ func zapLoggerMiddleware(logger *zap.Logger) gin.HandlerFunc {
 		)
 	}
 }
+
+var managementSetupNetwork = controlplane.DefaultSetupNetwork
+var managementNow = time.Now

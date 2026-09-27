@@ -33,11 +33,13 @@ The `tauth` binary lives under `cmd/server` in this repository. You can:
 - Build it directly with Go (e.g. `go build ./cmd/server`), or
  - Use the provided Docker setup in `examples/tauth-demo` for a local stack.
 
-The binary reads configuration exclusively from a YAML file (default `config.yaml`). Use `tauth --config=/path/to/config.yaml` or export `TAUTH_CONFIG_FILE` to point at a different file; no other environment variables or CLI flags are required.
+The binary reads service settings from YAML and active tenant revisions from the database.
+Use `tauth --config=/path/to/service.yaml` or `TAUTH_CONFIG_FILE` to select the service file.
+Complete [console bootstrap and tenant import](tenant-console-operations.md) before normal startup.
 
 ### 2.2 Core configuration
 
-`config.yaml` must include the server-level keys below plus at least one tenant:
+The service YAML contains the server settings below. It rejects the `tenants` field.
 
 | Key | Purpose | Example |
 | --- | --- | --- |
@@ -47,7 +49,7 @@ The binary reads configuration exclusively from a YAML file (default `config.yam
 | `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
 | `cors_allowed_origin_exceptions` | Allowed non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
 | `enable_tenant_header_override` | Allow explicit tenant selection for shared origins and non-browser clients | `true` / `false` |
-| `tenants` | Array of tenant entries (see README §5.1 for schema) | `[...]` |
+| `tenant_encryption_key` | Base64 encoding of a 32-byte service encryption key | Service secret input |
 
 Key notes:
 
@@ -62,82 +64,29 @@ Key notes:
 - **Challenge delivery**: Set `email_delivery` for production account management. Keep `return_challenge_tokens` false outside tests.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 - **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google, GitHub, or password authentication for the TAuth login page.
-- **OAuth persistence**: When `database_url` is set, TAuth stores pending requests and authorization-code digests. It also stores consent grants and refresh-token digests in the same SQLite or Postgres database. Without a database URL, these records are process-local and disappear at restart.
+- **OAuth persistence**: TAuth requires a persistent database for requests, authorization codes, consent grants, and refresh sessions.
 
-### 2.3 Example: hosted deployment
+### 2.3 Hosted deployment
 
-This example mirrors the README but focuses on the minimum you need to host TAuth at `https://auth.example.com` for a product UI at `https://app.example.com`:
+Use the [console operations runbook](tenant-console-operations.md) for service configuration, bootstrap, enrollment, and tenant import.
+The runtime requires the database URL and encryption key.
+Keep the encryption key in service secret configuration.
+The database contains tenant keys, provider configuration, origins, cookie settings, and account policy.
 
-```bash
-cat > config.yaml <<'YAML'
-server:
-  listen_addr: ":8443"
-  database_url: "sqlite:///data/tauth.db"
-  enable_cors: true
-  cors_allowed_origins:
-    - "https://app.example.com"
-    - "https://accounts.google.com"
-  cors_allowed_origin_exceptions:
-    - "https://accounts.google.com"
-  enable_tenant_header_override: true
+### 2.4 Local Docker Compose
 
-tenants:
-  - id: "prod"
-    display_name: "Production Tenant"
-    tenant_origins:
-      - "https://app.example.com"
-    allowed_users:
-      - "user@example.com"
-    google_web_client_id: "your_web_client_id.apps.googleusercontent.com"
-    google_native_client_id: "your_desktop_native_client_id.apps.googleusercontent.com"
-    google_native_clients:
-      - platform: "ios"
-        client_id: "your_ios_client_id.apps.googleusercontent.com"
-        redirect_uris:
-          - "com.example.app://oauth2redirect/google"
-      - platform: "android"
-        client_id: "your_android_client_id.apps.googleusercontent.com"
-        redirect_uris:
-          - "com.example.app:/oauth2redirect/google"
-    apple_oauth:
-      enabled: true
-      client_id: "com.example.web"
-      native_client_ids:
-        - "com.example.app"
-      team_id: "APPLETEAMID"
-      key_id: "APPLEKEYID"
-      private_key: "${APPLE_PRIVATE_KEY_PEM}"
-      redirect_uri: "https://auth.example.com/auth/apple/callback"
-    jwt_signing_key: "replace-with-your-tenant-signing-key"
-    cookie_domain: ".example.com"
-    session_cookie_name: "app_session_prod"
-    refresh_cookie_name: "app_refresh_prod"
-    session_ttl: "15m"
-    refresh_ttl: "1440h"
-    nonce_ttl: "5m"
-    allow_insecure_http: false
-YAML
+The Compose examples keep service settings in `config.yaml` and migration input in `tenants.import.yaml`.
+Supply the console inputs from `examples/console-bootstrap.yaml.example` through the private local environment.
 
-tauth --config=config.yaml
-```
+1. Run `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
+2. Run `docker compose up --build`.
+3. Authenticate the initial owner through the reserved console tenant.
+4. Run `docker compose exec tauth tenant-import --source /config/tenants.import.yaml --import-id local-tenants`.
+5. Restart TAuth to load the imported active configuration.
+6. Remove the application tenant environment inputs after verification.
 
-Run this behind TLS so the service issues `Secure` cookies and the browser accepts them.
-To restrict sign-ins, set `allowed_users` on a tenant; when present, only those email addresses are permitted to log in (an empty list denies all logins).
-Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-
-Set `session_cookie_name` and `refresh_cookie_name` explicitly inside every tenant block. Choose unique names per tenant to avoid collisions when multiple tenants share a cookie domain or `localhost`.
-
-### 2.4 Example: local quick‑start (Docker Compose)
-
-For a full local stack (TAuth + demo UI) without installing Go:
-
-1. `cd examples/tauth-demo`
-2. Edit `.env.tauth` (set `TAUTH_CONFIG_FILE=/config/config.yaml` and the per-tenant `TAUTH_GOOGLE_WEB_CLIENT_ID` / `TAUTH_JWT_SIGNING_KEY` values).
-3. Review `config.yaml` and replace the placeholder Google OAuth client with one registered for `http://localhost:8000` and `http://localhost:8082` (or keep the environment variable references from step 2).
-4. Start the stack: `docker compose up --build`
-5. Visit `http://localhost:8000` for the demo UI. It talks to TAuth at `http://localhost:8082`.
-
-Stop the stack with `docker compose down`. The `tauth_data` volume holds the SQLite database, and `config.yaml` stays next to the compose file for future edits.
+The named `tauth_data` volume contains the persistent database.
+The local frontend remains separate from production GitHub Pages publication.
 
 ### 2.5 Preflight validation (pre-start)
 
@@ -992,7 +941,8 @@ Reports whether the TAuth API process is ready to accept requests.
 ## 6.8 Validating sessions from other Go services
 
 Downstream Go services that share the TAuth cookie domain can validate `app_session` cookies directly using the `pkg/sessionvalidator` package. This is the recommended way to enforce authentication and read identity information without duplicating JWT logic.
-If your service can read the same `config.yaml` as TAuth, call `LoadTenantAuthConfig` to derive the tenant’s signing key, issuer, and cookie names before constructing a validator.
+Read the tenant session key and cookie name from your backend secret configuration before you construct the validator.
+Compare the validated tenant claim with your application's expected tenant ID.
 
 ### 6.8.1 Basic validator setup
 

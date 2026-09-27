@@ -2,10 +2,667 @@ openapi: 3.1.0
 info:
   title: TAuth OAuth Authorization Server
   version: 1.0.0
-  description: OAuth 2.1 authorization-code service for public first-party resource clients.
+  description: >-
+    OAuth authorization and owner-scoped tenant management. Management collections
+    use ascending ID order, limit from 1 through 100 (default 50), and cursor from
+    the previous next_cursor. All management responses use no-store. Cookie
+    mutations require the exact console Origin and X-TAuth-CSRF value 1.
+    Missing preconditions return 428. Stale preconditions return 412. Changed
+    idempotency payloads return 409. Invalid activation returns a typed error
+    with details.activation and a Location for its persisted failed resource.
 servers:
   - url: https://auth.example.com
 paths:
+  /api/management/tenants/{tenant_id}/integration:
+    get:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: No-store resource. Export keys occur only in the first successful export response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Integration"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/reauthentications:
+    post:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/ConsoleOrigin"}
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReauthenticationInput"}
+      responses:
+        "201":
+          description: No-store resource. Export keys occur only in the first successful export response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Reauthentication"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/key-exports:
+    post:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/ConsoleOrigin"}
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/KeyExportInput"}
+      responses:
+        "201":
+          description: No-store resource. Export keys occur only in the first successful export response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KeyExport"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/reauthentications/{resourceId}:
+    get:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+        - {name: resourceId, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: No-store resource. Export keys occur only in the first successful export response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Reauthentication"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/key-exports/{resourceId}:
+    get:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+        - {name: resourceId, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: No-store resource. Export keys occur only in the first successful export response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KeyExport"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/setup-checks:
+    parameters:
+      - {name: tenant_id, in: path, required: true, schema: {type: string}}
+    get:
+      security: [{ConsoleSession: []}]
+      responses:
+        "200":
+          description: Cursor page of persisted setup evidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/SetupCheck"}}
+                  next_cursor: {type: string}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+    post:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleOrigin"}
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: {type: integer, minimum: 1}
+      responses:
+        "201":
+          description: Recorded result for fixed HTTPS probes of the verified active API destination. Responses use no-store.
+          headers:
+            Location: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SetupCheck"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /api/management/tenants/{tenant_id}/setup-checks/{resourceId}:
+    get:
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {name: tenant_id, in: path, required: true, schema: {type: string}}
+        - {name: resourceId, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Persisted setup result. Evidence contains no response bodies or secrets.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SetupCheck"}
+        default: {$ref: "#/components/responses/ManagementFailure"}
+  /.well-known/tauth-console:
+    get:
+      operationId: getConsoleBootstrap
+      security: []
+      responses:
+        '200':
+          description: Public console authentication settings. The response uses no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [tenant_id, google_web_client_id, console_origin]
+                properties:
+                  tenant_id: {type: string, enum: [tauth-console]}
+                  google_web_client_id: {type: string}
+                  console_origin: {type: string, format: uri}
+  /api/management/provisioning-credentials:
+    get:
+      operationId: listProvisioningCredentials
+      security: [{ConsoleSession: []}]
+      responses:
+        '200':
+          description: The owner's cursor page of credentials. Credential tokens are omitted.
+          content:
+            application/json:
+              schema: {type: object, required: [items, next_cursor]}
+        default: {$ref: '#/components/responses/ManagementFailure'}
+    post:
+      operationId: createProvisioningCredential
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {$ref: '#/components/parameters/ConsoleOrigin'}
+        - {$ref: '#/components/parameters/ConsoleCSRF'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProvisioningCredentialInput'}
+      responses:
+        '201':
+          description: The generated token occurs once. An identical retry returns metadata only.
+          headers:
+            Location: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProvisioningCredential'}
+        default: {$ref: '#/components/responses/ManagementFailure'}
+  /api/management/provisioning-credentials/{credential_id}:
+    parameters:
+      - name: credential_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readProvisioningCredential
+      security: [{ConsoleSession: []}]
+      responses:
+        '200':
+          description: The credential metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProvisioningCredential'}
+        default: {$ref: '#/components/responses/ManagementFailure'}
+    delete:
+      operationId: revokeProvisioningCredential
+      security: [{ConsoleSession: []}]
+      responses:
+        '204': {description: The credential is revoked.}
+        default: {$ref: '#/components/responses/ManagementFailure'}
+  /api/management/tenants/{tenant_id}/origin-proofs/{proof_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: proof_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readOriginProof
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The addressed resource.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OriginProof"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/origin-proofs/{proof_id}/verifications/{verification_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: proof_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: verification_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readOriginVerification
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The addressed resource.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OriginVerification"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+    get:
+      operationId: listTenants
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TenantPage"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    post:
+      operationId: createTenant
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TenantCreate"}
+      responses:
+        "201":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Tenant"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readTenant
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Tenant"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    patch:
+      operationId: updateTenant
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TenantPatch"}
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Tenant"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/configuration:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readTenantConfiguration
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TenantConfiguration"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    put:
+      operationId: replaceTenantConfiguration
+      description: Provisioning credentials require the exclusive provisioning shape. The console shape or a null provisioning value returns 422.
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TenantConfigurationInput"}
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TenantConfiguration"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/origin-proofs:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: listOriginProofs
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OriginProofPage"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    post:
+      operationId: createOriginProof
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/OriginProofInput"}
+      responses:
+        "201":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OriginProof"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/origin-proofs/{proof_id}/verifications:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: proof_id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      operationId: createOriginVerification
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmptyInput"}
+      responses:
+        "201":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OriginVerification"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/activations:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: listActivations
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ActivationPage"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    post:
+      operationId: createActivation
+      description: A suspended tenant requires owner recovery. Provisioning activation returns 409 while the tenant is suspended.
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ActivationInput"}
+      responses:
+        "201":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Activation"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/activations/{activation_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: activation_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readActivation
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Activation"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/tenants/{tenant_id}/audit-events:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: tenant_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: listTenantAuditEvents
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      security: [{ConsoleSession: []}, {ProvisioningBearer: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Tenant and configuration reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuditEventPage"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/owner-account:
+    parameters:
+      - name: Origin
+        in: header
+        required: true
+        schema: {type: string, format: uri}
+        description: The exact configured console origin.
+    get:
+      operationId: readOwnerAccount
+      summary: Read the authenticated owner account.
+      security: [{ConsoleSession: []}]
+      responses:
+        "200":
+          $ref: "#/components/responses/OwnerAccount"
+        "401":
+          $ref: "#/components/responses/ManagementFailure"
+        "403":
+          $ref: "#/components/responses/ManagementFailure"
+        "404":
+          $ref: "#/components/responses/ManagementFailure"
+        "500":
+          $ref: "#/components/responses/ManagementFailure"
+    put:
+      operationId: provisionOwnerAccount
+      summary: Create the owner account for the authenticated console subject.
+      description: An existing subject binding returns the same owner account. The first account requires the designated verified Google email.
+      security: [{ConsoleSession: []}]
+      parameters:
+        - name: X-TAuth-CSRF
+          in: header
+          required: true
+          schema: {type: string, const: "1"}
+      responses:
+        "200":
+          $ref: "#/components/responses/OwnerAccount"
+        "201":
+          description: The owner account was created.
+          headers:
+            Location:
+              schema: {type: string, const: /api/management/owner-account}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OwnerAccount"}
+        "401":
+          $ref: "#/components/responses/ManagementFailure"
+        "403":
+          $ref: "#/components/responses/ManagementFailure"
+        "415":
+          $ref: "#/components/responses/ManagementFailure"
+        "500":
+          $ref: "#/components/responses/ManagementFailure"
   /auth/github/start:
     get:
       operationId: startGitHubLogin
@@ -350,6 +1007,28 @@ paths:
           $ref: "#/components/responses/OAuthError"
 components:
   parameters:
+    ConsoleOrigin:
+      name: Origin
+      in: header
+      required: false
+      description: Required for console cookies. Prohibited for provisioning credentials.
+      schema: {type: string, format: uri}
+    ConsoleCSRF:
+      name: X-TAuth-CSRF
+      in: header
+      required: false
+      description: Required for console cookie mutations.
+      schema: {type: string, const: '1'}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    RevisionMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string}
     ResponseType:
       name: response_type
       in: query
@@ -426,7 +1105,32 @@ components:
       schema:
         type: string
         format: uri
+  securitySchemes:
+    ProvisioningBearer:
+      type: http
+      scheme: bearer
+      description: An opaque revocable owner credential with explicit operation and tenant grants. Browser Origin and cookies are prohibited.
+    ConsoleSession:
+      type: apiKey
+      in: cookie
+      name: tauth_console_session
   responses:
+    OwnerAccount:
+      description: The current owner account.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/OwnerAccount"}
+    ManagementFailure:
+      description: The management request failed.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ManagementError"}
     GitHubFailure:
       description: A stable GitHub login error without provider credentials or response bodies.
       content:
@@ -440,6 +1144,297 @@ components:
           schema:
             $ref: "#/components/schemas/OAuthError"
   schemas:
+    SetupCheck:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, revision, state, created_at, evidence]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        revision: {type: integer, minimum: 1}
+        state: {type: string, enum: [succeeded, failed]}
+        created_at: {type: string, format: date-time}
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [path, status, code]
+            properties:
+              path: {type: string}
+              status: {type: integer, minimum: 0, maximum: 599}
+              code: {type: string}
+
+    Integration:
+      type: object
+      required: [tenant_id, revision, api_base_url, frontend_origins, google_web_client_id, script_url, session_cookie_name, session_ttl, browser_html, backend_configuration, auth_routes]
+      properties:
+        tenant_id: {type: string}
+        revision: {type: integer, minimum: 1}
+        api_base_url: {type: string}
+        frontend_origins: {type: array, items: {type: string}}
+        google_web_client_id: {type: string}
+        script_url: {type: string}
+        session_cookie_name: {type: string}
+        session_ttl: {type: string}
+        browser_html: {type: string}
+        backend_configuration: {type: object, additionalProperties: {type: string}}
+        auth_routes: {type: array, items: {type: string}}
+    ReauthenticationInput:
+      type: object
+      additionalProperties: false
+      required: [revision, operation]
+      properties:
+        revision: {type: integer, minimum: 1}
+        operation: {type: string, enum: [session-key-export]}
+    Reauthentication:
+      type: object
+      required: [id, tenant_id, revision, operation, nonce, created_at, expires_at, consumed_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        revision: {type: integer, minimum: 1}
+        operation: {type: string, enum: [session-key-export]}
+        nonce: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        consumed_at: {type: [string, 'null']}
+    KeyExportInput:
+      type: object
+      additionalProperties: false
+      required: [reauthentication_id, google_id_token]
+      properties:
+        reauthentication_id: {type: string}
+        google_id_token: {type: string}
+    KeyExport:
+      type: object
+      required: [id, tenant_id, revision, reauthentication_id, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        revision: {type: integer, minimum: 1}
+        reauthentication_id: {type: string}
+        created_at: {type: string, format: date-time}
+        session_key_base64: {type: string, description: Present only in the initial export response.}
+    TenantConfigurationInput:
+      oneOf:
+        - {$ref: '#/components/schemas/GoogleTenantConfigurationInput'}
+        - {$ref: '#/components/schemas/ProvisioningConfigurationInput'}
+    ProvisioningConfigurationInput:
+      type: object
+      additionalProperties: false
+      required: [provisioning]
+      properties:
+        provisioning:
+          type: object
+          additionalProperties: false
+          required: [generation, contribution]
+          properties:
+            generation: {type: integer, minimum: 1}
+            contribution: {$ref: '#/components/schemas/ProvisioningContribution'}
+    ProvisioningContribution:
+      type: object
+      additionalProperties: false
+      required: [owner, id, kind, desired, outputs]
+      description: A resolved Gateway tenant contribution. The service validates desired fields through its deployment resource contract.
+      properties:
+        owner: {type: string, minLength: 1, maxLength: 128}
+        id: {type: string, minLength: 1, maxLength: 128}
+        kind: {type: string, enum: [tauth_tenant, tauth_github_tenant]}
+        desired: {type: object}
+        outputs:
+          type: object
+          additionalProperties:
+            type: object
+            required: [value]
+            properties:
+              value: {type: string}
+              digest: {type: string}
+              visibility: {type: string}
+    ProvisioningBinding:
+      type: object
+      required: [tenant_id, contribution_owner, contribution_id, generation, revision]
+      properties:
+        tenant_id: {type: string}
+        contribution_owner: {type: string}
+        contribution_id: {type: string}
+        generation: {type: integer}
+        revision: {type: integer}
+    ProvisioningCredentialInput:
+      type: object
+      additionalProperties: false
+      required: [name, operations, tenant_ids, allow_create]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        operations: {type: array, uniqueItems: true, items: {type: string, enum: [read, configure, activate, suspend, proofs]}}
+        tenant_ids: {type: array, uniqueItems: true, maxItems: 100, items: {type: string}}
+        allow_create: {type: boolean}
+    ProvisioningCredential:
+      type: object
+      required: [id, name, operations, tenant_ids, allow_create, created_at, revoked_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        operations: {type: array, items: {type: string}}
+        tenant_ids: {type: array, items: {type: string}}
+        allow_create: {type: boolean}
+        created_at: {type: string, format: date-time}
+        revoked_at: {type: [string, "null"], format: date-time}
+        token: {type: string, description: Present only in the first creation response.}
+    AuditEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AuditEvent"}}
+        next_cursor: {type: string}
+    ActivationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Activation"}}
+        next_cursor: {type: string}
+    OriginProofPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/OriginProof"}}
+        next_cursor: {type: string}
+    TenantPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Tenant"}}
+        next_cursor: {type: string}
+    Tenant:
+      type: object
+      additionalProperties: false
+      required: [id, name, environment, version, state, active_revision]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        environment: {type: string}
+        version: {type: integer, minimum: 1}
+        state: {type: string, enum: [draft, active, suspended]}
+        active_revision: {type: [integer, "null"]}
+    TenantConfiguration:
+      type: object
+      required: [revision, google_web_client_id, frontend_origins, api_base_url, local_development, session_ttl, refresh_ttl, session_cookie_name, refresh_cookie_name, providers]
+      properties:
+        provisioning: {$ref: '#/components/schemas/ProvisioningBinding'}
+        revision: {type: integer, minimum: 1}
+        google_web_client_id: {type: string}
+        frontend_origins: {type: array, items: {type: string}}
+        api_base_url: {type: string}
+        local_development: {type: boolean}
+        session_ttl: {type: string}
+        refresh_ttl: {type: string}
+        session_cookie_name: {type: string}
+        refresh_cookie_name: {type: string}
+        providers: {type: array, items: {type: string, enum: [google, apple, github, password]}}
+    OriginProof:
+      type: object
+      required: [id, tenant_id, revision, hostname, name, value, state, expires_at, verified_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        revision: {type: integer}
+        hostname: {type: string}
+        name: {type: string}
+        value: {type: string}
+        state: {type: string, enum: [pending, verified]}
+        expires_at: {type: string, format: date-time}
+        verified_at: {type: [string, "null"], format: date-time}
+    OriginVerification:
+      type: object
+      required: [id, tenant_id, proof_id, state, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        proof_id: {type: string}
+        state: {type: string, const: verified}
+        created_at: {type: string, format: date-time}
+    Activation:
+      type: object
+      required: [id, tenant_id, revision, state, error_code, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        revision: {type: integer}
+        state: {type: string, enum: [succeeded, failed]}
+        error_code: {type: string}
+        created_at: {type: string, format: date-time}
+    AuditEvent:
+      type: object
+      required: [id, tenant_id, actor_account_id, operation, revision, result, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        actor_account_id: {type: string}
+        operation: {type: string}
+        revision: {type: integer}
+        result: {type: string}
+        created_at: {type: string, format: date-time}
+    EmptyInput:
+      type: object
+      additionalProperties: false
+    TenantCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        id: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,63}$', description: A declared tenant ID requires a provisioning creation grant.}
+        name: {type: string, minLength: 1, maxLength: 120}
+        environment: {type: string, maxLength: 40}
+    TenantPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        environment: {type: string, maxLength: 40}
+        state: {type: string, enum: [suspended]}
+    GoogleTenantConfigurationInput:
+      type: object
+      additionalProperties: false
+      required: [google_web_client_id, frontend_origins, api_base_url, local_development, session_ttl, refresh_ttl]
+      properties:
+        google_web_client_id: {type: string, maxLength: 256}
+        frontend_origins: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uri}}
+        api_base_url: {type: string, format: uri}
+        local_development: {type: boolean}
+        session_ttl: {type: string}
+        refresh_ttl: {type: string}
+    ActivationInput:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1}
+    OriginProofInput:
+      type: object
+      additionalProperties: false
+      required: [revision, hostname]
+      properties:
+        revision: {type: integer, minimum: 1}
+        hostname: {type: string, maxLength: 253}
+    OwnerAccount:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, contact_email, state, created_at]
+      properties:
+        id: {type: string, pattern: '^[A-Za-z0-9_-]{22}$'}
+        display_name: {type: string}
+        contact_email: {type: string, format: email}
+        state: {type: string, const: active}
+        created_at: {type: string, format: date-time}
+    ManagementError:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+        details: {type: [object, "null"], additionalProperties: true}
     GitHubError:
       type: object
       additionalProperties: false

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -78,7 +79,7 @@ func TestServerResumesPersistedAccountDisablement(t *testing.T) {
 	config := sampleApplicationConfig()
 	config.Server.DatabaseURL = databaseURL
 	command := &cobra.Command{RunE: runServer}
-	command.SetContext(context.WithValue(ctx, appConfigContextKey, &config))
+	command.SetContext(context.WithValue(ctx, appConfigContextKey, testconfig.Prepare(t, config)))
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}

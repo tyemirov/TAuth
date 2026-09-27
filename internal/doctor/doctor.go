@@ -13,7 +13,9 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/buildinfo"
+	"github.com/tyemirov/tauth/internal/controlplane"
 	"github.com/tyemirov/tauth/internal/oauthserver"
+	"github.com/tyemirov/tauth/internal/runtimeconfig"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/utils/preflight"
 )
@@ -99,7 +101,7 @@ func Run(ctx context.Context, options Options) (*Report, error) {
 		if diagnostic.Valid {
 			config, loadErr := appconfig.LoadConfig(configPath)
 			if loadErr == nil {
-				tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
+				tenantConfig, tenantErr := runtimeconfig.Load(context.Background(), config)
 				if tenantErr == nil {
 					allTenantsByConfig[configPath] = tenantConfig
 				}
@@ -129,7 +131,7 @@ func validateConfig(ctx context.Context, configPath string, checkDatabase bool) 
 		return result
 	}
 
-	tenantConfig, tenantErr := tenants.LoadConfigFromDocument(config.TenantDocument())
+	tenantConfig, tenantErr := runtimeconfig.Load(context.Background(), config)
 	if tenantErr != nil {
 		result.Valid = false
 		result.Errors = append(result.Errors, fmt.Sprintf("load_tenants: %v", tenantErr))
@@ -220,7 +222,7 @@ func validateTenantConfig(tenant tenants.Tenant, result *DiagnosticResult) {
 	if tenant.GoogleWebClientID() == "" {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_web_client_id is not configured; browser Google login will return 404", tenantID))
 	}
-	if len(tenant.NativeGoogleClients()) == 0 {
+	if len(tenant.NativeGoogleClients()) == 0 && tenant.ID() != tenants.TenantID(controlplane.ConsoleTenantID) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("tenant[%s]: google_native_client_id/google_native_clients is not configured; native login will return 404", tenantID))
 	}
 

@@ -99,6 +99,18 @@ if (!puppeteer) {
     const configPath = path.join(temporaryDirectory, "config.yaml");
     await fs.writeFile(configPath, oauthConfig({ issuer, resource, redirectUri, keyBase64 }), { mode: 0o600 });
 
+    const databasePath = path.join(temporaryDirectory, "tauth.db");
+    execFileSync("make", ["test-database-fixture"], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        TAUTH_TEST_SOURCE: configPath,
+        TAUTH_TEST_SERVICE: configPath,
+        TAUTH_TEST_DATABASE: databasePath,
+        TAUTH_TEST_RUNTIME_DATABASE_URL: `sqlite://${databasePath}`,
+      },
+    });
+
     let serverLogs = "";
     const serverProcess = spawn(serverBinary, ["--config", configPath], {
       cwd: repositoryRoot,

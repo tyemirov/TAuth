@@ -135,3 +135,11 @@ func (store *DatabaseRefreshTokenStore) RevokeUser(ctx context.Context, tenantID
 	}
 	return nil
 }
+
+// RevokeTenantSessions participates in the tenant suspension transaction.
+func RevokeTenantSessions(ctx context.Context, db *gorm.DB, tenantID string) error {
+	if err := db.WithContext(ctx).Model(&refreshTokenRecord{}).Where("tenant_id = ? AND revoked_at_unix = 0", tenantID).Update("revoked_at_unix", time.Now().UTC().Unix()).Error; err != nil {
+		return fmt.Errorf("refresh_store.suspend tenant=%s: %w", tenantID, err)
+	}
+	return nil
+}

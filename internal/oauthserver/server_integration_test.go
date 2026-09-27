@@ -491,7 +491,7 @@ tenants:
 	if writeErr := os.WriteFile(configPath, []byte(config), 0o600); writeErr != nil {
 		t.Fatalf("write config: %v", writeErr)
 	}
-	appConfig, loadErr := appconfig.LoadConfig(configPath)
+	appConfig, loadErr := appconfig.LoadImportSource(configPath)
 	if loadErr != nil {
 		t.Fatalf("load app config: %v", loadErr)
 	}

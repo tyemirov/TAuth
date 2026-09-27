@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/tyemirov/tauth/internal/testconfig"
 	"net/http"
 	"os"
 	"strings"
@@ -137,23 +138,7 @@ func TestPrepareServerConfigReturnsErrorWhenFlagMissing(t *testing.T) {
 }
 
 func TestPrepareServerConfigHonorsEnvOverride(t *testing.T) {
-	configPath := writeTempConfig(t, `
-server:
-  listen_addr: ":8080"
-
-tenants:
-  - id: "demo"
-    tenant_origins: ["https://demo.localhost"]
-    google_web_client_id: "demo-client"
-    jwt_signing_key: "demo-key"
-    cookie_domain: ""
-    session_cookie_name: "app_session_demo"
-    refresh_cookie_name: "app_refresh_demo"
-    session_ttl: "15m"
-    refresh_ttl: "720h"
-    nonce_ttl: "5m"
-    allow_insecure_http: true
-`)
+	configPath := writeTempConfig(t, "server:\n  listen_addr: :8080\n")
 
 	command := &cobra.Command{}
 	command.Flags().String("config", "missing.yaml", "")
@@ -186,7 +171,7 @@ func TestRunServerReturnsErrorForInvalidCORSOrigins(t *testing.T) {
 	cfg.Server.CORSAllowedOrigins = []string{" "}
 
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	if err := runServer(command, nil); err == nil {
 		t.Fatalf("expected CORS origin validation to fail")
@@ -206,7 +191,7 @@ func TestRunServerReturnsErrorWhenValidatorInitFails(t *testing.T) {
 
 	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	err := runServer(command, nil)
 	if err == nil || !strings.Contains(err.Error(), configCodeGoogleValidatorInit) {
@@ -227,7 +212,7 @@ func TestRunServerReturnsListenErrorForServeHTTPFailure(t *testing.T) {
 
 	cfg := sampleApplicationConfig()
 	command := &cobra.Command{}
-	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, &cfg))
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, cfg)))
 
 	err := runServer(command, nil)
 	if err == nil || !strings.Contains(err.Error(), "listen error") {
