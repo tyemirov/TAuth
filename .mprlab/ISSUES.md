@@ -1149,6 +1149,34 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B092] (P1) Preserve imported tenant policies during initial Gateway convergence.
+  Observed:
+  The production-copy rehearsal imported all 20 tenants with unchanged settings.
+  Gateway then changed `mpr-ui-demo` settings `allow_insecure_http` and `require_tenant_header` from `false` to `true`.
+  The provisioning handler derives these settings from a loopback origin in the contribution.
+  An unauthenticated `GET /me` without the tenant header returned `401` before convergence and `403` afterward.
+  Expected:
+  Preserve the imported transport and tenant-header policies during the initial Gateway configuration write.
+  Validation:
+  Reproduce the change through the management HTTP API and actual Gateway client.
+  Require stable effective settings after the first and repeated convergence.
+  The September 26 production-copy rehearsal failed its final settings assertion.
+  The import, data preservation, backup restoration, doctor, and preflight checks passed.
+  Evidence: `docs/tenant-migration-rehearsal-2026-09-26.md`.
+  Resolution:
+  Gateway configuration writes now keep both policies from the active tenant configuration.
+  New tenants still use the loopback defaults.
+  HTTP tests reproduced the defect before correction, including requests from the actual Gateway client.
+  All four policy combinations stayed the same through initial writes, retries, and later generations after correction.
+  The second production-copy rehearsal kept all 20 effective tenant configurations unchanged.
+  The `mpr-ui-demo` request without a tenant header returned `401` after both Gateway runs.
+  `make test-console`, `make test-gateway-provisioning`, and `make ci` completed without errors.
+  The CI run selected the actual Gateway client through `TAUTH_GATEWAY_ROOT`.
+  The changed prose completed its scoped language review. Governor reported the same six pre-existing managed-file differences.
+  Release, publication, and deployment were not run.
+  Changed files: `internal/controlplane/provisioning.go`, `cmd/server/console_test.go`, `cmd/server/provisioning_test.go`, and `Makefile`.
+  Updated documents: `docs/tenant-console-operations.md`, `docs/tenant-migration-rehearsal-2026-09-26.md`, and this issue record.
+
 - [x] [B088] (P1) Include the console runtime configuration in clean Pages artifacts.
   Review finding:
   The ignored runtime JSON file is absent from a clean checkout. The console cannot initialize.
