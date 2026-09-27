@@ -85,6 +85,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F014] Add root commands for local orchestration.
+  Goal:
+  Start and stop the current TAuth service and tenant console through `make up` and `make down`.
+  Requirements:
+  - Build the current service source and initialize the reserved console tenant.
+  - Keep the database and local keys after shutdown.
+  - Bind local ports to the loopback address.
+  - Permit HTTP console API origins only for loopback hosts.
+  Validation:
+  The initial `make test-local-lifecycle` failed because the `up` target was absent.
+  `make test-local-lifecycle` passed with real Docker containers and Chromium.
+  Startup, browser initialization, repeated startup, restart, data retention, and repeated shutdown passed.
+  `make ci` passed. The normal local stack also passed startup at ports 8081 and 8082.
+  The browser test injected the Google script. Live Google login remains unverified.
+  Resolution:
+  Added root targets, Compose services, random persistent keys, console bootstrap, and loopback HTTP support.
+  Added isolated lifecycle tests and README instructions.
+  Changed files: `Makefile`, `local/compose.yml`, `local/stack.sh`, `local/service.yaml`, `local/console.yaml`,
+  `web/app/client.js`, `tests/local-lifecycle.sh`, `tests/local-console.browser.cjs`, and `README.md`.
+  Changed prose passed the scoped language review. Governor retained six existing managed-file differences.
+
 - [x] [F008] (P1) {F009,I212,F010,F011,F012,F013} Deliver the account-owned TAuth tenant console.
   Goal:
   Let a person sign in, manage owned tenants, and integrate an application through `tauth.js` and `sessionvalidator`.
