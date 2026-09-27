@@ -1,13 +1,22 @@
 SHELL := /bin/bash
+.DEFAULT_GOAL := ci
 
 GO ?= go
 STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
 
+.PHONY: test-local-lifecycle
+test-local-lifecycle:
+	bash tests/local-lifecycle.sh
+
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
+ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle
+
+.PHONY: up down
+up down:
+	bash local/stack.sh $@
 
 format:
 	$(GO) fmt ./...
