@@ -94,6 +94,7 @@ func (store *Store) saveProvisioning(ctx *gin.Context, tenant tenantRecord, inpu
 	if tenant.State == "suspended" {
 		return resourceResult{}, failure(409, "tenant_suspended")
 	}
+	next := projection.Tenant
 	if tenant.ActiveRevision != nil {
 		active, _, err := store.configuration(ctx.Request.Context(), tenant.ID, *tenant.ActiveRevision)
 		if err != nil {
@@ -111,9 +112,10 @@ func (store *Store) saveProvisioning(ctx *gin.Context, tenant tenantRecord, inpu
 		if !bytes.Equal(currentTenant.SigningKey(), nextTenant.SigningKey()) || currentTenant.SessionCookieName() != nextTenant.SessionCookieName() || currentTenant.RefreshCookieName() != nextTenant.RefreshCookieName() || currentTenant.CookieDomain() != nextTenant.CookieDomain() {
 			return resourceResult{}, failure(409, "validator_contract_conflict")
 		}
+		next.RequireTenantHeader = active.RequireTenantHeader
+		next.AllowInsecureHTTP = active.AllowInsecureHTTP
 	}
 
-	next := projection.Tenant
 	local := false
 	for _, raw := range next.TenantOrigins {
 		address, err := url.Parse(raw)
@@ -124,9 +126,11 @@ func (store *Store) saveProvisioning(ctx *gin.Context, tenant tenantRecord, inpu
 			local = true
 		}
 	}
-	next.RequireTenantHeader = local
-	if local {
-		next.AllowInsecureHTTP = true
+	if tenant.ActiveRevision == nil {
+		next.RequireTenantHeader = local
+		if local {
+			next.AllowInsecureHTTP = true
+		}
 	}
 	revision := current.Revision + 1
 	if err := store.saveConfiguration(ctx.Request.Context(), next, revision, "gateway-draft"); err != nil {
