@@ -6,6 +6,7 @@ import {
   RequestError,
   configuration,
   loadClient,
+  ownerAccount,
   tenant,
   tenantPath,
 } from "./client.js";
@@ -50,6 +51,9 @@ function clearProtected() {
   el("tenant-detail").hidden = true;
   el("tenant-list").replaceChildren();
   el("tenant-select").replaceChildren();
+  el("admin-accounts").hidden = true;
+  el("account-list").replaceChildren();
+  el("accounts-status").textContent = "";
   for (const id of [
     "tenant-name",
     "tenant-id",
@@ -367,13 +371,14 @@ async function openWorkspace() {
   notice("Loading your tenants…");
   const version = epoch;
   try {
-    await client.enroll(controller.signal);
+    const owner = await client.enroll(controller.signal);
     const items = await client.collection(
       PATHS.tenants,
       tenant,
       controller.signal,
     );
     if (version !== epoch) return;
+    el("admin-accounts").hidden = !owner.administrator;
     tenants = items;
     el("workspace").hidden = false;
     drawCollection();
@@ -391,6 +396,32 @@ async function openWorkspace() {
     }
   }
 }
+el("refresh-accounts").addEventListener("click", async () => {
+  const version = epoch;
+  el("accounts-status").textContent = "Loading accounts…";
+  try {
+    const accounts = await client.collection(
+      PATHS.accounts,
+      ownerAccount,
+      controller.signal,
+    );
+    if (version !== epoch) return;
+    el("account-list").replaceChildren(
+      ...accounts.map((account) => {
+        const item = document.createElement("li");
+        item.textContent = `${account.displayName} · ${account.email}${account.administrator ? " · Administrator" : ""}`;
+        return item;
+      }),
+    );
+    el("accounts-status").textContent = `${accounts.length} accounts`;
+  } catch (error) {
+    if (version !== epoch) return;
+    el("account-list").replaceChildren();
+    el("accounts-status").textContent =
+      error instanceof Error ? error.message : "Accounts could not load.";
+    if (error instanceof RequestError && error.status === 401) signOut();
+  }
+});
 /** @param {string} intent */
 function openTenantDialog(intent) {
   dialogIntent = intent;

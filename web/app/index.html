@@ -41,6 +41,15 @@
         <a href="/">Read the documentation</a>
       </section>
       <button id="retry-workspace" hidden>Retry workspace</button>
+      <section id="admin-accounts" hidden aria-label="Administrator accounts">
+        <h2>Accounts</h2>
+        <p>
+          View registered accounts. Each workspace remains private to its owner.
+        </p>
+        <button id="refresh-accounts" type="button">Refresh accounts</button>
+        <p id="accounts-status" role="status"></p>
+        <ul id="account-list"></ul>
+      </section>
       <section id="workspace" hidden aria-label="Tenant workspace">
         <aside class="tenant-rail" aria-label="Your tenants">
           <header>

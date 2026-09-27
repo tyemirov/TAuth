@@ -5,6 +5,7 @@
 /** @typedef {{id:string,hostname:string,name:string,value:string,state:string,revision:number,expires_at:string}} Proof */
 export const PATHS = Object.freeze({
   owner: "/api/management/owner-account",
+  accounts: "/api/management/accounts",
   tenants: "/api/management/tenants",
   bootstrap: "/.well-known/tauth-console",
 });
@@ -37,6 +38,19 @@ function integer(value) {
 function texts(value) {
   if (!Array.isArray(value)) throw new Error("Invalid service list");
   return value.map(text);
+}
+/** @param {unknown} value */
+export function ownerAccount(value) {
+  const account = object(value);
+  if (typeof account.administrator !== "boolean")
+    throw new Error("Invalid administrator setting");
+  if (account.state !== "active") throw new Error("Owner account is inactive");
+  return {
+    id: text(account.id),
+    displayName: text(account.display_name),
+    email: text(account.contact_email),
+    administrator: account.administrator,
+  };
 }
 /** @param {unknown} value @returns {Tenant} */
 export function tenant(value) {
@@ -111,7 +125,9 @@ export class Client {
       u.protocol === "http:" &&
       ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
     if (u.origin !== origin || (u.protocol !== "https:" && !loopbackHTTP))
-      throw new Error("The console requires HTTPS or a loopback HTTP API origin");
+      throw new Error(
+        "The console requires HTTPS or a loopback HTTP API origin",
+      );
     this.origin = origin;
   }
   /** @param {string} method @param {string} path @param {AbortSignal} signal @param {unknown} [body] @param {string} [etag] @param {string} [key] */
@@ -176,10 +192,7 @@ export class Client {
   /** @param {AbortSignal} signal */
   async enroll(signal) {
     const { value } = await this.request("PUT", PATHS.owner, signal);
-    text(value.id);
-    text(value.display_name);
-    text(value.contact_email);
-    if (value.state !== "active") throw new Error("Owner account is inactive");
+    return ownerAccount(value);
   }
   /** @param {string} id @param {AbortSignal} signal */
   async selected(id, signal) {
