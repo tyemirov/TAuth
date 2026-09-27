@@ -33,6 +33,7 @@ const DefaultJWTIssuer = "tauth"
 
 // ApplicationConfig represents the parsed config.yaml payload.
 type ApplicationConfig struct {
+	Admin   AdminSettings        `yaml:"admin"`
 	Server  ServerSettings       `yaml:"server"`
 	OAuth   FileOAuthSettings    `yaml:"oauth"`
 	Tenants []tenants.FileTenant `yaml:"tenants,omitempty"`
@@ -114,6 +115,7 @@ func readConfig(path string) ([]byte, error) {
 // ParseConfig decodes and validates one config.yaml payload.
 func ParseConfig(payload []byte) (*ApplicationConfig, error) {
 	var service struct {
+		Admin  AdminSettings     `yaml:"admin"`
 		Server ServerSettings    `yaml:"server"`
 		OAuth  FileOAuthSettings `yaml:"oauth"`
 	}
@@ -122,7 +124,7 @@ func ParseConfig(payload []byte) (*ApplicationConfig, error) {
 	if err := decoder.Decode(&service); err != nil {
 		return nil, fmt.Errorf("%s: service configuration accepts no tenant YAML: %w", ErrorCodeInvalidConfigFile, err)
 	}
-	return finishConfig(ApplicationConfig{Server: service.Server, OAuth: service.OAuth})
+	return finishConfig(ApplicationConfig{Admin: service.Admin, Server: service.Server, OAuth: service.OAuth})
 }
 
 // ParseImportSource decodes configuration for the one-off migration command.
@@ -138,6 +140,11 @@ func ParseImportSource(payload []byte) (*ApplicationConfig, error) {
 
 func finishConfig(document ApplicationConfig) (*ApplicationConfig, error) {
 	document = expandApplicationConfigEnv(document)
+	admin, err := normalizeAdmin(document.Admin)
+	if err != nil {
+		return nil, err
+	}
+	document.Admin = admin
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
 	}
@@ -160,6 +167,7 @@ func (config ApplicationConfig) OAuthServer() OAuthServerConfig {
 }
 
 func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
+	config.Admin.Emails = expandEnvSlice(config.Admin.Emails)
 	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
 	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)
 	config.Server.TenantEncryptionKey = os.ExpandEnv(config.Server.TenantEncryptionKey)

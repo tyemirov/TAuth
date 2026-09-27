@@ -4,6 +4,7 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tyemirov/tauth/internal/authkit"
@@ -12,10 +13,11 @@ import (
 )
 
 const OwnerPath = "/api/management/owner-account"
+const AccountsPath = "/api/management/accounts"
 const CSRFHeader = "X-TAuth-CSRF"
 
 // Mount registers owner resources with the reserved console session authority.
-func Mount(router *gin.Engine, store *Store, config authkit.ServerConfig, sessions *authkit.OAuthBrowserSessions, users authkit.UserStore, origin string) error {
+func Mount(router *gin.Engine, store *Store, config authkit.ServerConfig, sessions *authkit.OAuthBrowserSessions, users authkit.UserStore, origin string, adminEmails []string) error {
 	validator, err := sessionvalidator.New(sessionvalidator.Config{SigningKey: config.AppJWTSigningKey, Issuer: config.AppJWTIssuer, CookieName: config.SessionCookieName})
 	if err != nil {
 		return err
@@ -58,6 +60,45 @@ func Mount(router *gin.Engine, store *Store, config authkit.ServerConfig, sessio
 			fail(401, "management.console_session_required")
 			return
 		}
+		email, display, _, _, err := users.GetUserProfile(ctx.Request.Context(), ConsoleTenantID, claims.Subject)
+		if err != nil {
+			fail(500, "management.profile_read_failed")
+			return
+		}
+		isAdmin := func(email string) bool {
+			for _, allowed := range adminEmails {
+				if strings.EqualFold(email, allowed) {
+					return true
+				}
+			}
+			return false
+		}
+		if ctx.Request.URL.Path == AccountsPath {
+			if !isAdmin(email) {
+				fail(403, "management.administrator_required")
+				return
+			}
+			limit, cursor, err := pageQuery(ctx)
+			if err != nil {
+				respondError(ctx, err)
+				return
+			}
+			owners := []Owner{}
+			if err := store.db.WithContext(ctx.Request.Context()).Where("id > ?", cursor).Order("id").Limit(limit + 1).Find(&owners).Error; err != nil {
+				fail(500, "management.accounts_read_failed")
+				return
+			}
+			next := ""
+			if len(owners) > limit {
+				owners = owners[:limit]
+				next = owners[len(owners)-1].ID
+			}
+			for index := range owners {
+				owners[index].Administrator = isAdmin(owners[index].ContactEmail)
+			}
+			ctx.JSON(200, gin.H{"items": owners, "next_cursor": next})
+			return
+		}
 		if ctx.Request.Method == http.MethodGet || ctx.Request.Method == http.MethodHead {
 			owner, err := store.OwnerForSubject(ctx.Request.Context(), claims.Issuer, claims.Subject)
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -68,19 +109,11 @@ func Mount(router *gin.Engine, store *Store, config authkit.ServerConfig, sessio
 				fail(500, "management.owner_read_failed")
 				return
 			}
+			owner.Administrator = isAdmin(email)
 			ctx.JSON(200, owner)
 			return
 		}
-		email, display, _, _, err := users.GetUserProfile(ctx.Request.Context(), ConsoleTenantID, claims.Subject)
-		if err != nil {
-			fail(500, "management.profile_read_failed")
-			return
-		}
 		owner, created, err := store.Provision(ctx.Request.Context(), claims.Issuer, claims.Subject, email, display)
-		if errors.Is(err, ErrEnrollment) {
-			fail(403, "management.enrollment_denied")
-			return
-		}
 		if err != nil {
 			fail(500, "management.owner_provision_failed")
 			return
@@ -90,7 +123,17 @@ func Mount(router *gin.Engine, store *Store, config authkit.ServerConfig, sessio
 			status = 201
 			ctx.Header("Location", OwnerPath)
 		}
+		owner.Administrator = isAdmin(email)
 		ctx.JSON(status, owner)
+	}
+	router.GET(AccountsPath, handler)
+	router.HEAD(AccountsPath, handler)
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		router.Handle(method, AccountsPath, func(ctx *gin.Context) {
+			ctx.Header("Cache-Control", "no-store")
+			ctx.Header("Allow", "GET, HEAD, OPTIONS")
+			ctx.AbortWithStatus(http.StatusMethodNotAllowed)
+		})
 	}
 	router.GET(OwnerPath, handler)
 	router.HEAD(OwnerPath, handler)

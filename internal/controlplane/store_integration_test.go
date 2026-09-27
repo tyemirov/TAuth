@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/tyemirov/tauth/deployment/migrations"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/controlplane"
 	"github.com/tyemirov/tauth/internal/tenants"
@@ -44,7 +45,7 @@ func TestImportRollbackPreservesExistingData(t *testing.T) {
 		return tenants.FileTenant{ID: id, DisplayName: id, TenantOrigins: []string{"https://" + id + ".example.com"}, GoogleWebClientID: id + "-google", JWTSigningKey: id + "-secret", SessionCookieName: id + "-session", RefreshCookieName: id + "-refresh", SessionTTL: "15m", RefreshTTL: "720h"}
 	}
 	document := tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import"), tenant("zz-conflict")}}
-	if _, err := store.Import(context.Background(), "rollback", document); err == nil {
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "rollback", owner.ID, document); err == nil {
 		t.Fatal("conflicting import accepted")
 	}
 	var count int64
@@ -54,15 +55,17 @@ func TestImportRollbackPreservesExistingData(t *testing.T) {
 	if count != 0 {
 		t.Fatal("failed import left a partial tenant")
 	}
-	if err := db.Raw("SELECT COUNT(*) FROM tenant_imports WHERE id = ?", "rollback").Scan(&count).Error; err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("failed import left a receipt")
+	if db.Migrator().HasTable("tenant_imports") {
+		if err := db.Raw("SELECT COUNT(*) FROM tenant_imports WHERE id = ?", "rollback").Scan(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatal("failed import left a receipt")
+		}
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := store.Import(cancelled, "cancelled", tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import")}}); err == nil {
+	if _, err := migrations.Apply(cancelled, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "cancelled", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import")}}); err == nil {
 		t.Fatal("cancelled import succeeded")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/tyemirov/tauth/internal/authkit"
@@ -19,17 +18,15 @@ import (
 )
 
 const ConsoleTenantID = "tauth-console"
-const InitialOwnerEmail = "vtyemirov@gmail.com"
-
-var ErrEnrollment = errors.New("management.enrollment_denied")
 
 // Owner is the public owner account representation.
 type Owner struct {
-	ID           string    `json:"id" gorm:"primaryKey"`
-	DisplayName  string    `json:"display_name" gorm:"not null"`
-	ContactEmail string    `json:"contact_email" gorm:"not null"`
-	State        string    `json:"state" gorm:"not null;check:state = 'active'"`
-	CreatedAt    time.Time `json:"created_at"`
+	Administrator bool      `json:"administrator" gorm:"-"`
+	ID            string    `json:"id" gorm:"primaryKey"`
+	DisplayName   string    `json:"display_name" gorm:"not null"`
+	ContactEmail  string    `json:"contact_email" gorm:"not null"`
+	State         string    `json:"state" gorm:"not null;check:state = 'active'"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (Owner) TableName() string { return "owner_accounts" }
@@ -45,11 +42,9 @@ type ownerBinding struct {
 func (ownerBinding) TableName() string { return "owner_login_bindings" }
 
 type consoleBootstrap struct {
-	ID             string `gorm:"primaryKey"`
-	Configuration  []byte `gorm:"not null"`
-	Digest         string `gorm:"not null"`
-	InitialOwnerID *string
-	InitialOwner   *Owner `gorm:"foreignKey:InitialOwnerID;references:ID;constraint:OnDelete:RESTRICT"`
+	ID            string `gorm:"primaryKey"`
+	Configuration []byte `gorm:"not null"`
+	Digest        string `gorm:"not null"`
 }
 
 // Store holds persistent control plane data and its authenticated cipher.
@@ -192,26 +187,23 @@ func (store *Store) Provision(ctx context.Context, issuer, subject, email, displ
 	var owner Owner
 	created := false
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Serialize enrollment and retry decisions through the singleton bootstrap row.
+		// Serialize enrollment and retry decisions through the singleton console row.
 		if err := tx.Model(&consoleBootstrap{}).Where("id = ?", ConsoleTenantID).Update("id", ConsoleTenantID).Error; err != nil {
-			return err
-		}
-		var bootstrap consoleBootstrap
-		if err := tx.First(&bootstrap, "id = ?", ConsoleTenantID).Error; err != nil {
 			return err
 		}
 		local := &Store{db: tx, cipher: store.cipher}
 		existing, err := local.OwnerForSubject(ctx, issuer, subject)
 		if err == nil {
+			existing.ContactEmail = email
+			existing.DisplayName = display
+			if err := tx.Model(&existing).Updates(map[string]any{"contact_email": email, "display_name": display}).Error; err != nil {
+				return err
+			}
 			owner = existing
 			return nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
-		}
-		initialEmail := strings.EqualFold(email, InitialOwnerEmail)
-		if (bootstrap.InitialOwnerID == nil && !initialEmail) || (bootstrap.InitialOwnerID != nil && initialEmail) {
-			return ErrEnrollment
 		}
 		owner = Owner{ID: newID(), DisplayName: display, ContactEmail: email, State: "active", CreatedAt: time.Now().UTC()}
 		if err := tx.Create(&owner).Error; err != nil {
@@ -219,11 +211,6 @@ func (store *Store) Provision(ctx context.Context, issuer, subject, email, displ
 		}
 		if err := tx.Create(&ownerBinding{Issuer: issuer, ConsoleTenantID: ConsoleTenantID, Subject: subject, OwnerAccountID: owner.ID}).Error; err != nil {
 			return err
-		}
-		if bootstrap.InitialOwnerID == nil {
-			if err := tx.Model(&bootstrap).Update("initial_owner_id", owner.ID).Error; err != nil {
-				return err
-			}
 		}
 		created = true
 		return nil

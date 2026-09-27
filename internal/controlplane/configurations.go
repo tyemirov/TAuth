@@ -2,17 +2,11 @@ package controlplane
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/tyemirov/tauth/internal/tenants"
-	"gorm.io/gorm"
 )
 
 const configurationPurpose = "configuration"
@@ -30,17 +24,6 @@ type tenantRecord struct {
 
 func (tenantRecord) TableName() string { return "tenants" }
 
-// ImportReceipt records an atomic migration without secret values.
-type ImportReceipt struct {
-	ID             string    `json:"id" gorm:"primaryKey"`
-	SourceDigest   string    `json:"source_digest"`
-	OwnerAccountID string    `json:"owner_account_id"`
-	TenantIDs      string    `json:"tenant_ids"`
-	CompletedAt    time.Time `json:"completed_at"`
-}
-
-func (ImportReceipt) TableName() string { return "tenant_imports" }
-
 type configurationRecord struct {
 	TenantID            string
 	Revision            int64
@@ -54,92 +37,6 @@ func (configurationRecord) TableName() string { return "tenant_configurations" }
 
 type configurationReference struct {
 	SecretID string `json:"secret_id"`
-}
-
-// Import installs effective application configuration under the verified initial owner.
-func (store *Store) Import(ctx context.Context, id string, document tenants.FileDocument) (ImportReceipt, error) {
-	if strings.TrimSpace(id) == "" || len(id) > 128 {
-		return ImportReceipt{}, errors.New("management.import_id_invalid")
-	}
-	if len(document.Tenants) == 0 {
-		return ImportReceipt{}, errors.New("management.import_empty")
-	}
-	if _, err := tenants.LoadResolvedConfig(document); err != nil {
-		return ImportReceipt{}, err
-	}
-	for _, tenant := range document.Tenants {
-		if tenant.ID == ConsoleTenantID {
-			return ImportReceipt{}, errors.New("management.console_reserved")
-		}
-	}
-	sort.Slice(document.Tenants, func(left, right int) bool { return document.Tenants[left].ID < document.Tenants[right].ID })
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return ImportReceipt{}, fmt.Errorf("management.encode_import: %w", err)
-	}
-	digestMAC := hmac.New(sha256.New, store.digestKey)
-	_, _ = digestMAC.Write(encoded)
-	digest := fmt.Sprintf("%x", digestMAC.Sum(nil))
-	var receipt ImportReceipt
-	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&consoleBootstrap{}).Where("id = ?", ConsoleTenantID).Update("id", ConsoleTenantID).Error; err != nil {
-			return err
-		}
-		var bootstrap consoleBootstrap
-		if err := tx.First(&bootstrap, "id = ?", ConsoleTenantID).Error; err != nil {
-			return err
-		}
-		if bootstrap.InitialOwnerID == nil {
-			return errors.New("management.initial_owner_required")
-		}
-		err := tx.First(&receipt, "id = ?", id).Error
-		if err == nil {
-			if receipt.SourceDigest != digest || receipt.OwnerAccountID != *bootstrap.InitialOwnerID {
-				return errors.New("management.import_conflict")
-			}
-			return nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		local := &Store{db: tx, cipher: store.cipher, keyID: store.keyID, digestKey: store.digestKey}
-		existing, err := local.ApplicationTenants(ctx)
-		if err != nil {
-			return err
-		}
-		console, err := local.Console(ctx)
-		if err != nil {
-			return err
-		}
-		all := append(append(existing.Tenants, console), document.Tenants...)
-		if _, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: all}); err != nil {
-			return err
-		}
-		ids := make([]string, 0, len(document.Tenants))
-		for _, file := range document.Tenants {
-			record := tenantRecord{ID: file.ID, OwnerAccountID: *bootstrap.InitialOwnerID, Name: file.DisplayName, State: "draft"}
-			if err := tx.Create(&record).Error; err != nil {
-				return fmt.Errorf("management.import_tenant id=%s: %w", file.ID, err)
-			}
-			if err := local.saveConfiguration(ctx, file, 1, "operator-approved-import"); err != nil {
-				return err
-			}
-			if err := tx.Model(&record).Updates(map[string]any{"state": "active", "active_revision": 1}).Error; err != nil {
-				return err
-			}
-			ids = append(ids, file.ID)
-		}
-		idsJSON, err := json.Marshal(ids)
-		if err != nil {
-			return err
-		}
-		receipt = ImportReceipt{ID: id, SourceDigest: digest, OwnerAccountID: *bootstrap.InitialOwnerID, TenantIDs: string(idsJSON), CompletedAt: time.Now().UTC()}
-		return tx.Create(&receipt).Error
-	})
-	if err != nil {
-		return ImportReceipt{}, fmt.Errorf("management.import: %w", err)
-	}
-	return receipt, nil
 }
 
 func (store *Store) saveConfiguration(ctx context.Context, file tenants.FileTenant, revision int64, provenance string) error {
