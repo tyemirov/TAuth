@@ -7,17 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyemirov/tauth/deployment/migrations"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyemirov/tauth/internal/authkit"
+	"github.com/tyemirov/tauth/internal/controlplane"
 	"google.golang.org/api/idtoken"
 )
 
@@ -59,7 +63,7 @@ func TestConsoleEnrollmentAndRestart(t *testing.T) {
 
 func testConsoleEnrollmentAndRestart(t *testing.T, insecure, header bool) {
 	databaseURL := "sqlite://" + filepath.Join(t.TempDir(), "console.db")
-	config := writeTempConfig(t, "server:\n  database_url: "+databaseURL+"\n  tenant_encryption_key: "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))+"\n  enable_cors: true\n  cors_allowed_origins: ["+consoleTestOrigin+"]\n  enable_tenant_header_override: true\n")
+	config := writeTempConfig(t, "admin:\n  emails: [vtyemirov@gmail.com]\nserver:\n  database_url: "+databaseURL+"\n  tenant_encryption_key: "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))+"\n  enable_cors: true\n  cors_allowed_origins: ["+consoleTestOrigin+"]\n  enable_tenant_header_override: true\n")
 	users, err := authkit.NewDatabaseUserStore(context.Background(), databaseURL)
 	if err != nil {
 		t.Fatal(err)
@@ -120,11 +124,11 @@ account_management:
 	t.Setenv("IMPORT_GOOGLE_CLIENT", "imported-client")
 	t.Setenv("IMPORT_SESSION_KEY", "imported-session-key$literal")
 	t.Setenv("IMPORT_NONCE_TTL", "5m")
-	inspection := newRootCommand()
+	inspection := migrations.NewCommand()
 	var inventory bytes.Buffer
 	inspection.SetOut(&inventory)
 	inspection.SetErr(io.Discard)
-	inspection.SetArgs([]string{"--config", config, "tenant-import", "--source", sourceFile, "--inspect"})
+	inspection.SetArgs([]string{"--config", config, "--source", sourceFile, "--inspect"})
 	if err := inspection.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -132,16 +136,20 @@ account_management:
 		t.Fatal("invalid redacted inventory")
 	}
 	t.Setenv("IMPORT_NONCE_TTL", "")
-	missingInput := newRootCommand()
+	missingInput := migrations.NewCommand()
 	missingInput.SetOut(io.Discard)
 	missingInput.SetErr(io.Discard)
-	missingInput.SetArgs([]string{"--config", config, "tenant-import", "--source", sourceFile, "--inspect"})
+	missingInput.SetArgs([]string{"--config", config, "--source", sourceFile, "--inspect"})
 	if err := missingInput.Execute(); err == nil {
 		t.Fatal("missing optional environment input was accepted")
 	}
 	t.Setenv("IMPORT_NONCE_TTL", "5m")
 	execute := func(args ...string) error {
 		command := newRootCommand()
+		if len(args) > 0 && args[0] == "deployment-migration" {
+			command = migrations.NewCommand()
+			args = args[1:]
+		}
 		command.SetOut(io.Discard)
 		command.SetErr(io.Discard)
 		command.SetArgs(append([]string{"--config", config}, args...))
@@ -150,7 +158,7 @@ account_management:
 	if err := execute("console-bootstrap", "--tenant-file", bootstrapFile); err != nil {
 		t.Fatal(err)
 	}
-	if err := execute("tenant-import", "--source", sourceFile, "--import-id", "initial-import"); err == nil {
+	if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import"); err == nil {
 		t.Fatal("import before initial enrollment succeeded")
 	}
 	if err := execute("console-bootstrap", "--tenant-file", bootstrapFile); err != nil {
@@ -164,6 +172,56 @@ account_management:
 	t.Cleanup(func() { buildGoogleTokenValidator = previous })
 	var ownerID string
 	for attempt := 0; attempt < 2; attempt++ {
+		activeClient := "console-client"
+		if attempt == 1 {
+			activeClient = "replacement.apps.googleusercontent.com"
+			previousConfig, err := os.ReadFile(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config = writeTempConfig(t, strings.Replace(string(previousConfig), "admin:\n  emails: [vtyemirov@gmail.com]\n", "", 1))
+			store, err := controlplane.OpenExisting(context.Background(), databaseURL, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := store.Console(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, inputs := range [][2]string{{"", activeClient}, {"wrong-client", activeClient}, {"console-client", ""}, {"console-client", "invalid"}, {"console-client", " x.apps.googleusercontent.com"}} {
+				if err := execute("console-google-client-replace", "--expected-client-id", inputs[0], "--client-id", inputs[1]); err == nil {
+					t.Fatalf("replacement accepted invalid inputs %q", inputs)
+				}
+				after, err := store.Console(context.Background())
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatal("rejected replacement changed console", err)
+				}
+			}
+			if err := execute("console-google-client-replace", "--expected-client-id", "console-client", "--client-id", activeClient); err != nil {
+				t.Fatal(err)
+			}
+			after, err := store.Console(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			before.GoogleWebClientID = activeClient
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("replacement changed other console fields")
+			}
+			store.Close()
+			if err := execute("console-google-client-replace", "--expected-client-id", "console-client", "--client-id", "other.apps.googleusercontent.com"); err == nil {
+				t.Fatal("stale replacement succeeded")
+			}
+			if err := execute("console-google-client-replace", "--expected-client-id", activeClient, "--client-id", activeClient); err == nil {
+				t.Fatal("unchanged replacement succeeded")
+			}
+			if err := execute("console-bootstrap", "--tenant-file", consoleFile(activeClient)); err != nil {
+				t.Fatal("replacement bootstrap digest:", err)
+			}
+			if err := execute("console-bootstrap", "--tenant-file", bootstrapFile); err == nil {
+				t.Fatal("obsolete bootstrap accepted")
+			}
+		}
 		restore := withServeHTTPStub(func(server *http.Server) error {
 			listener := httptest.NewTLSServer(server.Handler)
 			defer listener.Close()
@@ -219,17 +277,25 @@ account_management:
 				request("POST", "/auth/google", map[string]any{"google_id_token": string(payload), "nonce_token": nonce}, status)
 			}
 			request("GET", "/api/management/owner-account", nil, 401)
+			request("GET", "/api/management/accounts", nil, 401)
 			if attempt == 0 {
 				login("initial", "vtyemirov@gmail.com", "customer-client", true, 401)
 				login("initial", "vtyemirov@gmail.com", "console-client", false, 401)
-				login("other", "other@example.com", "console-client", true, 200)
-				request("PUT", "/api/management/owner-account", nil, 403)
+				login("other", "other@example.com", activeClient, true, 200)
+				request("PUT", "/api/management/owner-account", nil, 201)
+				request("GET", "/api/management/accounts", nil, 403)
 			}
 			email := "vtyemirov@gmail.com"
 			if attempt == 1 {
 				email = "changed@example.com"
 			}
-			login("initial", email, "console-client", true, 200)
+			if request("GET", "/.well-known/tauth-console", nil, 200)["google_web_client_id"] != activeClient {
+				t.Fatal("bootstrap returned wrong client")
+			}
+			if attempt == 1 {
+				login("initial", email, "console-client", true, 401)
+			}
+			login("initial", email, activeClient, true, 200)
 			for _, scenario := range []struct {
 				origin, csrf, method string
 				status               int
@@ -279,6 +345,19 @@ account_management:
 				status = 200
 			}
 			owner := request("PUT", "/api/management/owner-account", nil, status)
+			if owner["administrator"] != (attempt == 0) {
+				t.Fatal("administrator role does not match current verified email")
+			}
+			if attempt == 0 {
+				accounts := request("GET", "/api/management/accounts?limit=1", nil, 200)
+				if len(accounts["items"].([]any)) != 1 || accounts["next_cursor"] == "" {
+					t.Fatal("account directory pagination failed")
+				}
+				request("POST", "/api/management/accounts", nil, 405)
+				request("GET", "/api/management/accounts?limit=0", nil, 400)
+			} else {
+				request("GET", "/api/management/accounts", nil, 403)
+			}
 			if attempt == 0 {
 				ownerID = owner["id"].(string)
 			} else if owner["id"] != ownerID {
@@ -300,25 +379,31 @@ account_management:
 			}
 			if attempt == 0 {
 				for retry := 0; retry < 2; retry++ {
-					if err := execute("tenant-import", "--source", sourceFile, "--import-id", "initial-import"); err != nil {
+					if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID); err != nil {
 						t.Fatal(err)
 					}
 				}
 				t.Setenv("IMPORT_GOOGLE_CLIENT", "changed-client")
-				if err := execute("tenant-import", "--source", sourceFile, "--import-id", "initial-import"); err == nil {
+				if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID); err == nil {
 					t.Fatal("changed import accepted")
 				}
 				t.Setenv("IMPORT_GOOGLE_CLIENT", "")
 			}
 			request("POST", "/auth/account/disable", nil, 404)
-			login("substitute", "vtyemirov@gmail.com", "console-client", true, 200)
-			request("PUT", "/api/management/owner-account", nil, 403)
-			login("other", "other@example.com", "console-client", true, 200)
-			otherStatus := 201
+			login("substitute", "vtyemirov@gmail.com", activeClient, true, 200)
+			substituteStatus := 201
 			if attempt == 1 {
-				otherStatus = 200
+				substituteStatus = 200
 			}
-			if request("PUT", "/api/management/owner-account", nil, otherStatus)["id"] == ownerID {
+			if request("PUT", "/api/management/owner-account", nil, substituteStatus)["id"] == ownerID {
+				t.Fatal("separate subjects share owner")
+			}
+			request("GET", "/api/management/tenants/imported", nil, 404)
+			if len(request("GET", "/api/management/tenants", nil, 200)["items"].([]any)) != 0 {
+				t.Fatal("administrator can see another owner workspace")
+			}
+			login("other", "other@example.com", activeClient, true, 200)
+			if request("PUT", "/api/management/owner-account", nil, 200)["id"] == ownerID {
 				t.Fatal("distinct identities share owner")
 			}
 			if attempt == 1 {
@@ -342,6 +427,14 @@ account_management:
 		restore()
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestConsoleDoesNotExposeMigrationCommand(t *testing.T) {
+	for _, command := range newRootCommand().Commands() {
+		if command.Name() == "tenant-import" {
+			t.Fatal("deployment migration is exposed by the application")
 		}
 	}
 }

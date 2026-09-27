@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tyemirov/tauth/deployment/migrations"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/controlplane"
@@ -153,7 +154,7 @@ func TestConsoleBrowserWorkspace(t *testing.T) {
 	}))
 	defer frontend.Close()
 	origin := strings.Replace(frontend.URL, "127.0.0.1", "console.tauth.test", 1)
-	config := &appconfig.ApplicationConfig{Server: appconfig.ServerSettings{DatabaseURL: "sqlite://" + filepath.Join(t.TempDir(), "browser.db"), TenantEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{19}, 32)), EnableCORS: true, EnableTenantHeaderOverride: true, CORSAllowedOrigins: []string{origin}}}
+	config := &appconfig.ApplicationConfig{Admin: appconfig.AdminSettings{Emails: []string{"vtyemirov@gmail.com"}}, Server: appconfig.ServerSettings{DatabaseURL: "sqlite://" + filepath.Join(t.TempDir(), "browser.db"), TenantEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{19}, 32)), EnableCORS: true, EnableTenantHeaderOverride: true, CORSAllowedOrigins: []string{origin}}}
 	store, err := controlplane.Open(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey)
 	if err != nil {
 		t.Fatal(err)
@@ -167,15 +168,16 @@ func TestConsoleBrowserWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := users.UpsertGoogleAccount(context.Background(), controlplane.ConsoleTenantID, authkit.GoogleAccountIdentity{Subject: "owner", UserEmail: controlplane.InitialOwnerEmail, DisplayName: "Initial owner"})
+	profile, err := users.UpsertGoogleAccount(context.Background(), controlplane.ConsoleTenantID, authkit.GoogleAccountIdentity{Subject: "owner", UserEmail: "vtyemirov@gmail.com", DisplayName: "Initial owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.Provision(context.Background(), appconfig.DefaultJWTIssuer, profile.AccountID, controlplane.InitialOwnerEmail, "Initial owner"); err != nil {
+	owner, _, err := store.Provision(context.Background(), appconfig.DefaultJWTIssuer, profile.AccountID, "vtyemirov@gmail.com", "Owner")
+	if err != nil {
 		t.Fatal(err)
 	}
 	imported := tenants.FileTenant{ID: "imported-browser", DisplayName: "Imported application", TenantOrigins: []string{"https://imported.example.com"}, GoogleWebClientID: "imported-client", JWTSigningKey: "imported-browser-signing-key", SessionCookieName: "imported_session", RefreshCookieName: "imported_refresh", SessionTTL: "15m", RefreshTTL: "720h"}
-	if _, err := store.Import(context.Background(), "browser-import", tenants.FileDocument{Tenants: []tenants.FileTenant{imported}}); err != nil {
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "browser-import", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{imported}}); err != nil {
 		t.Fatal(err)
 	}
 	restoreValidator := withGoogleValidatorBuilderStub(func(context.Context) (authkit.GoogleTokenValidator, error) { return browserGoogleValidator{}, nil })

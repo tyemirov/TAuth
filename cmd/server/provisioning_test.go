@@ -26,6 +26,9 @@ func TestConsoleProvisioningCredentialScope(t *testing.T) {
 		machine.client = &isolated
 		machine.origin = ""
 		auth := []string{"Authorization", "Bearer " + token}
+		directoryClient := machine
+		directoryClient.origin = owner.origin
+		directoryClient.request("GET", "/api/management/accounts", nil, 401, auth...)
 		body := map[string]any{"id": "gateway-app", "name": "Gateway application"}
 		tenant, headers := machine.request("POST", "/api/management/tenants", body, 201, append(auth, "Idempotency-Key", "gateway-app")...)
 		if tenant["id"] != "gateway-app" {

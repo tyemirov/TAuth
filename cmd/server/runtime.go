@@ -225,7 +225,7 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 	router.GET(healthEndpointPath, web.HandleHealth)
 
 	sessions := authkit.NewOAuthBrowserSessions(registry, userStore, refreshStore, nonceStore, passwordCredentialStore)
-	if err := controlplane.Mount(router, managementStore, registry.Config(controlplane.ConsoleTenantID), sessions, userStore, consoleTenant.TenantOrigins[0]); err != nil {
+	if err := controlplane.Mount(router, managementStore, registry.Config(controlplane.ConsoleTenantID), sessions, userStore, consoleTenant.TenantOrigins[0], appConfig.Admin.Emails); err != nil {
 		return nil, err
 	}
 
