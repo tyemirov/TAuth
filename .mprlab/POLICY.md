@@ -16,6 +16,21 @@ This policy controls all agent work in this repository.
 - Tests target public contracts and invariants, not defensive branches.
 - Prefer black-box integration and end-to-end tests through real entry points.
 
+## Automatic Data Updates And Persistence
+
+This is a binding product principle for every user interface.
+
+- Load current data automatically when a view opens and when its relevant data changes.
+- Update stale data automatically after reconnection and when the user returns to the view.
+- Never require or expose refresh or reload controls for data synchronization.
+- Persist valid user edits automatically. Never require or expose save controls for data persistence.
+- Show pending, saved, validation, conflict, and failure states without requiring a manual refresh or save.
+- Preserve unsaved edits during background updates, request failures, and concurrent changes.
+- Serialize writes and retain newer edits when an earlier write completes.
+- Keep explicit controls for user intent, such as creation, deletion, activation, and confirmation of consequential actions.
+- Do not use an explicit action as a substitute for automatic data persistence.
+- Verify automatic updates, persistence, error recovery, and account isolation through public interface tests.
+
 ## Test-Driven Development
 
 - Use test-driven development with an inverted test pyramid.

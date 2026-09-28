@@ -94,6 +94,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 - `dependency injection`: A design that supplies a component's dependencies from outside that component.
 
+- `automatic persistence`: Storage of valid user edits without a manual save action.
+- `data synchronization`: An update that brings a view into agreement with current stored data.
+- `modal`: A dialog that holds input focus until the user closes it.
+- `migration snapshot`: A fixed collection of effective configuration values for a bounded data migration.
+
 ## Repository Technical Nouns
 
 - `tenant console`: The TAuth browser frontend through which an owner configures application tenants.
@@ -175,6 +180,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `serialize`: Convert a typed value into a transport or storage representation.
 - `validate`: Confirm that an input or artifact obeys its contract.
 - `verify`: Confirm a result at its public or runtime boundary.
+
+- `persist`: Store application data durably.
+- `refresh`: Retrieve current application data for a view.
+- `save`: Write edited application data to its durable store.
+- `synchronize`: Bring displayed application data into agreement with its current source.
 
 Use the simple present, simple past, simple future, imperative, or infinitive form of these verbs.
 
