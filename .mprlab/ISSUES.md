@@ -1363,6 +1363,22 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B104] Migrate credential owners without tenants.
+  Observed: App ownership requires a tenant, so an owner with only provisioning credentials cannot migrate.
+  Requirements: Permit explicitly owned empty Apps. Validate tenant and credential ownership before database changes.
+  Resolution: Added `owner_account_id` to the migration map. Empty Apps require an existing owner. Tenant and credential assignments must match.
+  Validation: Tests preserve active and revoked credentials without creating tenants. Invalid owners and cross-owner assignments fail without schema changes.
+  Validation: Repeated migration, `make test-deployment-migration`, and `make ci` passed.
+  Files: `deployment/migrations/apps.go`, `deployment/migrations/apps_test.go`, `docs/tenant-console-operations.md`.
+
+- [x] [B105] Preserve bookmarked destinations before login.
+  Observed: Anonymous authentication bootstrap removes the requested App or tenant fragment.
+  Requirements: Preserve the initial destination through login. Clear it when an established session signs out.
+  Resolution: Fragment removal now requires an established session.
+  Validation: Browser tests verify signed-out App and tenant bookmarks, section selection, and explicit sign-out. `make ci` passed.
+  Validation: `make up` updated the local console. Its workspace code matches the source.
+  Files: `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
 - [x] [B103] (P1) Include complete deployment definitions in the local tenant import.
   Expected: Import each complete, distinct tenant definition under its App.
   Actual: The earlier scan omitted deployment manifests, including the production Download Your Data tenant.
