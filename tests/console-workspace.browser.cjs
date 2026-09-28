@@ -339,6 +339,47 @@ test(
         "Saved automatically.",
       { timeout: 10000 },
     );
+    // A late error for invalid input must not strand its corrected successor.
+    holdNextSave = true;
+    const invalidSave = page.waitForRequest(
+      (request) =>
+        request.method() === "PUT" && request.url().endsWith("/configuration"),
+    );
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "2h";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await invalidSave;
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "18m";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await heldSave.continue();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
+    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "18m");
+    holdNextSave = true;
+    const limitedSave = page.waitForRequest(
+      (request) =>
+        request.method() === "PUT" && request.url().endsWith("/configuration"),
+    );
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "19m";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await limitedSave;
+    await rateLimit(heldSave);
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
+    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "19m");
     await page.$eval("#session-ttl", (node) => (node.value = "2h"));
     await page.$eval("#configuration", (node) =>
       node.dispatchEvent(new Event("input", { bubbles: true })),
@@ -379,6 +420,20 @@ test(
       { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
     );
     assert.equal(concurrentStatus, 200);
+    // A lifetime-only edit preserves the client ID accepted from another session.
+    await page.$eval("#session-ttl", (node) => {
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+    );
+    assert.equal(
+      await page.$eval("#google-client", (node) => node.value),
+      "concurrent-client",
+    );
+
     holdNextRead = true;
     const waitingRead = page.waitForRequest(
       (request) =>
@@ -389,32 +444,60 @@ test(
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await waitingRead;
+    const competingStatus = await page.evaluate(
+      async ({ api, id }) => {
+        const path = api + "/api/management/tenants/" + id + "/configuration";
+        const response = await fetch(path, { credentials: "include" });
+        const current = await response.json();
+        const body = {
+          google_web_client_id: "another-session-client",
+          frontend_origins: current.frontend_origins,
+          api_base_url: current.api_base_url,
+          local_development: current.local_development,
+          session_ttl: current.session_ttl,
+          refresh_ttl: current.refresh_ttl,
+        };
+        return (
+          await fetch(path, {
+            method: "PUT",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "X-TAuth-CSRF": "1",
+              "If-Match": response.headers.get("ETag"),
+            },
+            body: JSON.stringify(body),
+          })
+        ).status;
+      },
+      { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
+    );
+    assert.equal(competingStatus, 200);
     await page.$eval("#google-client", (node) => {
       node.value = "my-newer-client";
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await heldRead.continue();
-    await page.waitForFunction(() =>
-      document
-        .querySelector("#field-error")
-        .textContent.includes("Changed in another session"),
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
     );
     assert.equal(
       await page.$eval("#google-client", (node) => node.value),
       "my-newer-client",
     );
+    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "15m");
+    // Return the client to the value used by the later customer integration.
     await page.$eval("#google-client", (node) => {
       node.value = "concurrent-client";
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await page.$eval("#configuration", (node) =>
-      node.dispatchEvent(new Event("input", { bubbles: true })),
-    );
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "15m");
     await page.waitForFunction(
       () =>
-        document.getElementById("google-client").value === "concurrent-client",
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
     );
     await page.setViewport({ width: 390, height: 844 });
     await page.click('[data-mpr-user="trigger"]');
@@ -498,6 +581,35 @@ test(
       "rename",
     );
     await page.click("#rename");
+    // A refresh while the dialog is open must not turn stale environment text into an edit.
+    const metadataStatus = await page.evaluate(
+      async ({ api, id }) => {
+        const path = api + "/api/management/tenants/" + id;
+        const current = await fetch(path, { credentials: "include" });
+        return (
+          await fetch(path, {
+            method: "PATCH",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "X-TAuth-CSRF": "1",
+              "If-Match": current.headers.get("ETag"),
+            },
+            body: JSON.stringify({
+              name: "Remote name",
+              environment: "remote-environment",
+            }),
+          })
+        ).status;
+      },
+      { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
+    );
+    assert.equal(metadataStatus, 200);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-name").textContent === "Remote name",
+    );
     await page.focus("#new-name");
     await page.keyboard.press("End");
     holdNextRename = true;
@@ -508,12 +620,71 @@ test(
     await waitingRename;
     await page.keyboard.type("ed");
     await page.keyboard.press("Escape");
+    assert.deepEqual(Object.keys(JSON.parse(heldRename.postData())), ["name"]);
     await heldRename.continue();
     await page.waitForFunction(
       () =>
         document.getElementById("tenant-name").textContent ===
         "Browser application renamed",
     );
+    const renamed = await page.evaluate(
+      async ({ api, id }) =>
+        (
+          await fetch(api + "/api/management/tenants/" + id, {
+            credentials: "include",
+          })
+        ).json(),
+      { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
+    );
+    assert.equal(renamed.environment, "remote-environment");
+    await page.click("#rename");
+    holdNextRename = true;
+    const invalidRename = page.waitForRequest(
+      (request) => request.method() === "PATCH",
+    );
+    await page.$eval("#new-name", (node) => {
+      node.value = "";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await invalidRename;
+    await page.$eval("#new-name", (node) => {
+      node.value = "Browser application renamed";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await heldRename.continue();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#dialog-error").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
+    holdNextRename = true;
+    const limitedRename = page.waitForRequest(
+      (request) => request.method() === "PATCH",
+    );
+    await page.$eval("#new-environment", (node) => {
+      node.value = "updated-environment";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await limitedRename;
+    await rateLimit(heldRename);
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#dialog-error").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
+    const savedMetadata = await page.evaluate(
+      async ({ api, id }) =>
+        (
+          await fetch(api + "/api/management/tenants/" + id, {
+            credentials: "include",
+          })
+        ).json(),
+      { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
+    );
+    assert.equal(savedMetadata.name, "Browser application renamed");
+    assert.equal(savedMetadata.environment, "updated-environment");
     await page.keyboard.press("Escape");
     await page.click("[data-section=domains]");
     await page.$eval(
@@ -982,5 +1153,22 @@ async function operatorStatus(url, headers) {
         response.on("end", () => resolve(response.statusCode));
       })
       .on("error", reject);
+  });
+}
+
+async function rateLimit(request) {
+  await request.respond({
+    status: 429,
+    contentType: "application/json",
+    headers: {
+      "Access-Control-Allow-Origin": new URL(process.env.TAUTH_CONSOLE_URL)
+        .origin,
+      "Access-Control-Allow-Credentials": "true",
+    },
+    body: JSON.stringify({
+      code: "management.rate_limited",
+      message: "Too many changes. Retry shortly.",
+      request_id: "rate-limit-fixture",
+    }),
   });
 }
