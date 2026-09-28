@@ -7,6 +7,8 @@ export TAUTH_LOCAL_WEB_PORT=18083
 export TAUTH_LOCAL_API_PORT=18082
 trap 'docker compose -f local/compose.yml down --volumes --remove-orphans; rm -rf "${TAUTH_LOCAL_RUNTIME}"' EXIT
 make up
+curl --fail --silent "http://localhost:${TAUTH_LOCAL_API_PORT}/.well-known/oauth-authorization-server" |
+  python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["issuer"]=="http://localhost:18082"'
 node tests/local-console.browser.cjs
 key_digest="$(shasum -a 256 "${TAUTH_LOCAL_RUNTIME}/runtime.env")"
 docker compose -f local/compose.yml exec -T tauth sh -c 'test -s /data/tauth.db; printf retained > /data/lifecycle-test'

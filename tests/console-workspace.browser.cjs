@@ -38,7 +38,43 @@ test(
       );
     });
     await page.setRequestInterception(true);
+    let holdNextRead = false,
+      heldRead = null,
+      holdNextRename = false,
+      heldRename = null,
+      holdNextSave = false,
+      failNextSave = false,
+      heldSave = null;
     page.on("request", (request) => {
+      if (
+        holdNextRead &&
+        request.method() === "GET" &&
+        request.url().endsWith("/configuration")
+      ) {
+        holdNextRead = false;
+        heldRead = request;
+        return;
+      }
+      if (holdNextRename && request.method() === "PATCH") {
+        holdNextRename = false;
+        heldRename = request;
+        return;
+      }
+      if (
+        request.method() === "PUT" &&
+        request.url().endsWith("/configuration")
+      ) {
+        if (failNextSave) {
+          failNextSave = false;
+          void request.abort("failed");
+          return;
+        }
+        if (holdNextSave) {
+          holdNextSave = false;
+          heldSave = request;
+          return;
+        }
+      }
       if (request.url().startsWith("https://accounts.google.com/")) {
         void request.respond({
           status: 200,
@@ -62,12 +98,90 @@ test(
         document.getElementById("tenant-name").textContent ===
         "Imported application",
     );
-    await page.waitForSelector("#admin-accounts:not([hidden])");
-    await page.click("#refresh-accounts");
+    assert.equal(await page.$eval("#notice", (node) => node.textContent), "");
+    assert.equal(await page.$eval("#notice", (node) => node.hidden), true);
+    assert.equal(
+      await page.$eval("#tenant-state", (node) => node.textContent),
+      "Authentication unavailable",
+    );
+    assert.equal(
+      await page.$eval(
+        "#tenant-state",
+        (node) => getComputedStyle(node).borderTopWidth,
+      ),
+      "0px",
+    );
+    assert.match(
+      await page.$eval("#next-step", (node) => node.textContent),
+      /no active configuration/,
+    );
+    assert.doesNotMatch(
+      await page.$eval("#next-step", (node) => node.textContent),
+      /Complete the application settings/,
+    );
+    await page.screenshot({ path: "/tmp/tauth-authentication-status.png" });
+    assert.equal(await page.$("#open-admin"), null);
+    await page.waitForSelector('[data-mpr-user-action="admin"]');
+    await page.click('[data-mpr-user="trigger"]');
+    await page.waitForSelector('[data-mpr-user-action="admin"]', {
+      visible: true,
+    });
+    assert.equal(await page.$eval("#admin-dialog", (node) => node.open), false);
+    await page.screenshot({ path: "/tmp/tauth-avatar-menu.png" });
+    await page.click('[data-mpr-user-action="admin"]');
+    await page.waitForSelector("#admin-dialog[open]");
     await page.waitForFunction(() =>
       document
         .querySelector("#account-list")
         ?.textContent.includes("vtyemirov@gmail.com"),
+    );
+    assert.equal(
+      await page.$eval("#accounts-status", (node) => node.textContent),
+      "1 account",
+    );
+    await page.keyboard.press("Escape");
+    assert.equal(await page.$eval("#admin-dialog", (node) => node.open), false);
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-mpr-user="trigger"]') ===
+        document.activeElement,
+    );
+    assert.equal(
+      await page.$$eval("button", (nodes) =>
+        nodes.some((node) =>
+          /^(save|refresh|reload)\b/i.test(node.textContent.trim()),
+        ),
+      ),
+      false,
+    );
+    assert.deepEqual(
+      await page.$$eval("#tenant-list button", (nodes) =>
+        nodes.map((node) => node.textContent),
+      ),
+      ["Imported application", "unnamed-browser"],
+    );
+    assert.deepEqual(
+      await page.$$eval("#tenant-select option", (nodes) =>
+        nodes.map((node) => node.textContent),
+      ),
+      ["Imported application", "unnamed-browser"],
+    );
+    await page.click('[data-tenant="unnamed-browser"]');
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-name").textContent ===
+        "unnamed-browser",
+    );
+    assert.equal(
+      await page.$eval("#tenant-id", (node) => node.textContent),
+      "unnamed-browser",
+    );
+    await page.screenshot({ path: "/tmp/tauth-tenant-labels.png" });
+    await page.click('[data-tenant="imported-browser"]');
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-name").textContent ===
+        "Imported application",
     );
     // The imported tenant uses the same settings and protected export UI.
     await page.click("[data-section=domains]");
@@ -76,12 +190,15 @@ test(
     });
     await page.type("#api-base", "http://localhost:9392");
     await page.click("#local-development");
-    await page.click("#save");
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
     await page.waitForFunction(() =>
-      document.getElementById("notice").textContent.startsWith("Draft saved"),
+      document
+        .getElementById("notice")
+        .textContent.startsWith("Configuration saved"),
     );
     await page.click("[data-section=overview]");
-    await page.click("#activate");
     await page.waitForFunction(
       () => document.getElementById("active-revision").textContent === "2",
     );
@@ -105,8 +222,29 @@ test(
     await page.click("#dismiss-export");
     await page.click("[data-section=overview]");
     await page.click("[data-create]");
+    assert.equal(
+      await page.$eval("#confirm-tenant", (node) => node.disabled),
+      true,
+    );
     await page.type("#new-name", "Browser application");
-    await page.type("#new-environment", "development");
+    assert.equal(
+      await page.$eval("#confirm-tenant", (node) => node.disabled),
+      true,
+    );
+    await page.type("#new-origin", "http://localhost:9491");
+    assert.equal(
+      await page.$eval("#confirm-tenant", (node) => node.disabled),
+      true,
+    );
+    await page.type(
+      "#new-google-client",
+      "browser-app-client.apps.googleusercontent.com",
+    );
+    await page.screenshot({ path: "/tmp/tauth-three-field-create.png" });
+    assert.equal(
+      await page.$eval("#confirm-tenant", (node) => node.disabled),
+      false,
+    );
     await page.click("#confirm-tenant");
     await page
       .waitForFunction(
@@ -121,28 +259,37 @@ test(
         );
       });
     const tenantID = await page.$eval("#tenant-id", (node) => node.textContent);
-    assert.equal(await page.$eval("#activate", (node) => node.disabled), true);
-    await page.click("[data-section=signin]");
-    await page.type("#google-client", "browser-app-client");
+    assert.equal(
+      await page.$eval("#tenant-state", (node) => node.textContent),
+      "Authentication active",
+    );
+    assert.equal(await page.$("#activate"), null);
     await page.click("[data-section=domains]");
-    await page.type("#frontend-origins", "http://localhost:9491");
+    assert.equal(
+      await page.$eval("#frontend-origins", (node) => node.value),
+      "http://localhost:9491",
+    );
     await page.type("#api-base", "http://localhost:9492");
-    await page.click("#local-development");
     await page.screenshot({
       path: "/tmp/tauth-console-workspace.png",
       fullPage: true,
     });
-    await page.click("#save");
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
 
     await page.waitForFunction(
       () =>
-        document.getElementById("notice").textContent.startsWith("Draft saved"),
+        document
+          .getElementById("notice")
+          .textContent.startsWith("Configuration saved"),
       { timeout: 5000 },
     );
     await page.click("[data-section=overview]");
-    await page.click("#activate");
     await page.waitForFunction(
-      () => document.getElementById("tenant-state").textContent === "active",
+      () =>
+        document.getElementById("tenant-state").textContent ===
+        "Authentication active",
     );
     await page.reload();
     await page.waitForFunction(
@@ -152,11 +299,50 @@ test(
     );
     assert.equal(
       await page.$eval("#tenant-state", (node) => node.textContent),
-      "active",
+      "Authentication active",
     );
     await page.click("[data-section=settings]");
+    holdNextSave = true;
+    const waitingSave = page.waitForRequest(
+      (request) =>
+        request.method() === "PUT" && request.url().endsWith("/configuration"),
+    );
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "20m";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await waitingSave;
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "25m";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await heldSave.continue();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
+    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "25m");
+    failNextSave = true;
+    await page.$eval("#session-ttl", (node) => {
+      node.value = "15m";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.waitForFunction(() =>
+      document.querySelector("#save-status").textContent.includes("not saved"),
+    );
+    assert.equal(await page.$eval("#session-ttl", (node) => node.value), "15m");
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#save-status").textContent ===
+        "Saved automatically.",
+      { timeout: 10000 },
+    );
     await page.$eval("#session-ttl", (node) => (node.value = "2h"));
-    await page.click("#save");
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
     await page.waitForFunction(() =>
       document
         .getElementById("field-error")
@@ -193,15 +379,67 @@ test(
       { api: process.env.TAUTH_CONSOLE_API, id: tenantID },
     );
     assert.equal(concurrentStatus, 200);
-    await page.click("#save");
-    await page.waitForSelector("#reload:not([hidden])");
+    holdNextRead = true;
+    const waitingRead = page.waitForRequest(
+      (request) =>
+        request.method() === "GET" && request.url().endsWith("/configuration"),
+    );
+    await page.$eval("#google-client", (node) => {
+      node.value = "my-unsaved-client";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await waitingRead;
+    await page.$eval("#google-client", (node) => {
+      node.value = "my-newer-client";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await heldRead.continue();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#field-error")
+        .textContent.includes("Changed in another session"),
+    );
+    assert.equal(
+      await page.$eval("#google-client", (node) => node.value),
+      "my-newer-client",
+    );
+    await page.$eval("#google-client", (node) => {
+      node.value = "concurrent-client";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     assert.equal(await page.$eval("#session-ttl", (node) => node.value), "15m");
-    await page.click("#reload");
     await page.waitForFunction(
       () =>
         document.getElementById("google-client").value === "concurrent-client",
     );
     await page.setViewport({ width: 390, height: 844 });
+    await page.click('[data-mpr-user="trigger"]');
+    await page.click('[data-mpr-user-action="admin"]');
+    await page.waitForSelector("#admin-dialog[open]");
+    assert.equal(
+      await page.$eval(
+        "#admin-dialog",
+        (node) => node.getBoundingClientRect().right <= innerWidth,
+      ),
+      true,
+    );
+    await page.click("#admin-dialog [data-close]");
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-mpr-user="trigger"]') ===
+        document.activeElement,
+    );
+    await page.select("#tenant-select", "unnamed-browser");
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-name").textContent ===
+        "unnamed-browser",
+    );
+
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -262,13 +500,21 @@ test(
     await page.click("#rename");
     await page.focus("#new-name");
     await page.keyboard.press("End");
-    await page.keyboard.type(" renamed");
-    await page.keyboard.press("Enter");
+    holdNextRename = true;
+    const waitingRename = page.waitForRequest(
+      (request) => request.method() === "PATCH",
+    );
+    await page.keyboard.type(" renam");
+    await waitingRename;
+    await page.keyboard.type("ed");
+    await page.keyboard.press("Escape");
+    await heldRename.continue();
     await page.waitForFunction(
       () =>
         document.getElementById("tenant-name").textContent ===
         "Browser application renamed",
     );
+    await page.keyboard.press("Escape");
     await page.click("[data-section=domains]");
     await page.$eval(
       "#frontend-origins",
@@ -281,17 +527,19 @@ test(
       process.env.TAUTH_CUSTOMER_API,
     );
     await page.click("#local-development");
-    await page.click("#save");
-    await page.waitForFunction(() =>
-      document.getElementById("notice").textContent.startsWith("Draft saved"),
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
     );
-    await verifyCustomerDomains(page);
+    await page.waitForFunction(() =>
+      document
+        .getElementById("notice")
+        .textContent.startsWith("Configuration saved"),
+    );
     await page.click("[data-section=overview]");
-    await page.click("#activate");
     await page.waitForFunction(
       () =>
-        document.getElementById("active-revision").textContent ===
-        document.getElementById("draft-revision").textContent,
+        document.getElementById("tenant-state").textContent ===
+        "Authentication active",
     );
     await page.click("[data-section=integration]");
     await page.waitForSelector("#integration-ready:not([hidden])");
@@ -535,8 +783,15 @@ test(
     await page.click("#suspend");
     await page.click("#confirm-suspend");
     await page.waitForFunction(
-      () => document.getElementById("tenant-state").textContent === "suspended",
+      () =>
+        document.getElementById("tenant-state").textContent ===
+        "Authentication suspended",
     );
+    assert.match(
+      await page.$eval("#next-step", (node) => node.textContent),
+      /not accepting sign-ins/,
+    );
+    assert.equal(await page.$eval("#resume", (node) => node.hidden), false);
     await page.click("[data-mpr-user=trigger]");
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
@@ -558,6 +813,11 @@ test(
     );
     await page.click(".mobile-selector [data-create]");
     await page.type("#new-name", "Second owner application");
+    await page.type("#new-origin", "http://localhost:9599");
+    await page.type(
+      "#new-google-client",
+      "second-app-google.apps.googleusercontent.com",
+    );
     await page.click("#confirm-tenant");
     await page.waitForFunction(
       () =>
@@ -567,23 +827,43 @@ test(
     const otherID = await page.$eval("#tenant-id", (node) => node.textContent);
     assert.notEqual(otherID, tenantID);
     await page.click("[data-section=signin]");
-    assert.equal(
-      await page.$eval("#admin-accounts", (node) => node.hidden),
-      true,
+    assert.equal(await page.$('[data-mpr-user-action="admin"]'), null);
+    await page.evaluate(() =>
+      document.querySelector("mpr-user").dispatchEvent(
+        new CustomEvent("mpr-user:menu-item", {
+          bubbles: true,
+          detail: { action: "admin" },
+        }),
+      ),
     );
-    await page.type("#google-client", "second-app-google");
+    assert.equal(await page.$eval("#admin-dialog", (node) => node.open), false);
+    await page.$eval("#google-client", (node) => {
+      node.value = "second-app-google";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     await page.click("[data-section=domains]");
-    await page.type("#frontend-origins", process.env.TAUTH_CUSTOMER_FRONTEND);
-    await page.type("#api-base", process.env.TAUTH_CUSTOMER_API);
-    await page.click("#save");
-    await page.waitForFunction(() =>
-      document.getElementById("notice").textContent.startsWith("Draft saved"),
+    await page.$eval(
+      "#frontend-origins",
+      (node, value) => {
+        node.value = value;
+      },
+      process.env.TAUTH_CUSTOMER_FRONTEND,
     );
-    await verifyCustomerDomains(page);
+    await page.click("#local-development");
+    await page.type("#api-base", process.env.TAUTH_CUSTOMER_API);
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
+    await page.waitForFunction(() =>
+      document
+        .getElementById("notice")
+        .textContent.startsWith("Configuration saved"),
+    );
     await page.click("[data-section=overview]");
-    await page.click("#activate");
     await page.waitForFunction(
-      () => document.getElementById("tenant-state").textContent === "active",
+      () =>
+        document.getElementById("tenant-state").textContent ===
+        "Authentication active",
     );
     await page.click("[data-section=integration]");
     await page.waitForSelector("#integration-ready:not([hidden])");
@@ -655,7 +935,7 @@ test(
     await page.click("#fixture-google-login");
     await page.waitForSelector("#workspace:not([hidden])");
     await page.waitForFunction(
-      () => document.querySelectorAll("[data-tenant]").length === 2,
+      () => document.querySelectorAll("[data-tenant]").length === 3,
     );
     assert.equal(
       await page.$$eval(
@@ -703,42 +983,4 @@ async function operatorStatus(url, headers) {
       })
       .on("error", reject);
   });
-}
-
-async function verifyCustomerDomains(page) {
-  for (let index = 0; index < 2; index++) {
-    const buttons = await page.$$("#proof-actions button");
-    await buttons[index].click();
-    await page.waitForFunction(
-      (count) => document.querySelectorAll("#proofs li").length === count,
-      {},
-      index + 1,
-    );
-  }
-  const records = await page.$$eval("#proofs li pre", (nodes) =>
-    nodes.map((node) => {
-      const lines = node.textContent.split("\n");
-      return { Name: lines[0].slice(4), Value: lines[1] };
-    }),
-  );
-  for (const record of records)
-    await page.evaluate(async (value) => {
-      const response = await fetch("/__dns", {
-        method: "POST",
-        body: JSON.stringify(value),
-      });
-      if (!response.ok) throw new Error("DNS publication failed");
-    }, record);
-  for (let index = 0; index < 2; index++) {
-    const buttons = await page.$$("#proofs li button");
-    await buttons[index].click();
-    await page.waitForFunction(
-      (count) =>
-        [...document.querySelectorAll("#proofs strong")].filter((node) =>
-          node.textContent.includes("verified"),
-        ).length === count,
-      {},
-      index + 1,
-    );
-  }
 }
