@@ -38,14 +38,17 @@ func TestImportRollbackPreservesExistingData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if err := db.Exec("INSERT INTO tenants(id,owner_account_id,name,state) VALUES(?,?,'Existing','draft')", "zz-conflict", owner.ID).Error; err != nil {
+	if err := db.Exec("INSERT INTO apps(id,owner_account_id,name) VALUES('existing-app',?,'Existing App')", owner.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO tenants(id,owner_account_id,app_id,name,state) VALUES(?,?,'existing-app','Existing','draft')", "zz-conflict", owner.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	tenant := func(id string) tenants.FileTenant {
 		return tenants.FileTenant{ID: id, DisplayName: id, TenantOrigins: []string{"https://" + id + ".example.com"}, GoogleWebClientID: id + "-google", JWTSigningKey: id + "-secret", SessionCookieName: id + "-session", RefreshCookieName: id + "-refresh", SessionTTL: "15m", RefreshTTL: "720h"}
 	}
 	document := tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import"), tenant("zz-conflict")}}
-	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "rollback", owner.ID, document); err == nil {
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "rollback", owner.ID, "fixture-app", "Fixture app", document); err == nil {
 		t.Fatal("conflicting import accepted")
 	}
 	var count int64
@@ -65,7 +68,7 @@ func TestImportRollbackPreservesExistingData(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := migrations.Apply(cancelled, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "cancelled", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import")}}); err == nil {
+	if _, err := migrations.Apply(cancelled, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "cancelled", owner.ID, "fixture-app", "Fixture app", tenants.FileDocument{Tenants: []tenants.FileTenant{tenant("first-import")}}); err == nil {
 		t.Fatal("cancelled import succeeded")
 	}
 }
@@ -99,8 +102,12 @@ func TestOwnershipDatabaseConstraints(t *testing.T) {
 		}
 	}
 	accept(`INSERT INTO owner_accounts(id,display_name,contact_email,state) VALUES('owner','Owner','owner@example.com','active')`)
-	accept(`INSERT INTO tenants(id,owner_account_id,name,state) VALUES('first','owner','First','draft')`)
-	accept(`INSERT INTO tenants(id,owner_account_id,name,state) VALUES('second','owner','Second','draft')`)
+	accept(`INSERT INTO apps(id,owner_account_id,name) VALUES('app','owner','App')`)
+	accept(`INSERT INTO tenants(id,owner_account_id,app_id,name,state) VALUES('first','owner','app','First','draft')`)
+	accept(`INSERT INTO tenants(id,owner_account_id,app_id,name,state) VALUES('second','owner','app','Second','draft')`)
+	reject(`INSERT INTO tenants(id,owner_account_id,app_id,name,state) VALUES('foreign-app','owner','absent','Bad','draft')`)
+	accept(`INSERT INTO owner_accounts(id,display_name,contact_email,state) VALUES('other-owner','Other','other@example.com','active')`)
+	reject(`INSERT INTO tenants(id,owner_account_id,app_id,name,state) VALUES('cross-owner','other-owner','app','Bad','draft')`)
 	ref, err := controlplane.NewSecretReference("first", "session-key", "session")
 	if err != nil {
 		t.Fatal(err)

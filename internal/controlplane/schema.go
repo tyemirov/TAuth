@@ -10,10 +10,15 @@ import (
 
 // These tables use composite references so revisions and secrets cannot cross tenants.
 var tenantSchema = []string{
+	`CREATE TABLE IF NOT EXISTS apps (
+ id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES owner_accounts(id) ON DELETE RESTRICT,
+ name TEXT NOT NULL, version BIGINT NOT NULL DEFAULT 1,
+ UNIQUE(id,owner_account_id))`,
 	`CREATE TABLE IF NOT EXISTS provisioning_credentials (
  id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES owner_accounts(id), name TEXT NOT NULL,
- operations TEXT NOT NULL, tenant_ids TEXT NOT NULL, allow_create BOOLEAN NOT NULL,
- digest TEXT NOT NULL UNIQUE, created_at TIMESTAMP NOT NULL, revoked_at TIMESTAMP)`,
+ app_id TEXT NOT NULL REFERENCES apps(id), operations TEXT NOT NULL, tenant_ids TEXT NOT NULL, allow_create BOOLEAN NOT NULL,
+ digest TEXT NOT NULL UNIQUE, created_at TIMESTAMP NOT NULL, revoked_at TIMESTAMP,
+ FOREIGN KEY(app_id,owner_account_id) REFERENCES apps(id,owner_account_id) ON DELETE RESTRICT)`,
 
 	`CREATE TABLE IF NOT EXISTS management_receipts (
  owner_account_id TEXT NOT NULL REFERENCES owner_accounts(id), path TEXT NOT NULL, key TEXT NOT NULL,
@@ -21,10 +26,12 @@ var tenantSchema = []string{
  PRIMARY KEY(owner_account_id,path,key))`,
 	`CREATE TABLE IF NOT EXISTS tenants (
 		id TEXT PRIMARY KEY, owner_account_id TEXT NOT NULL REFERENCES owner_accounts(id) ON DELETE RESTRICT,
-		name TEXT NOT NULL, environment TEXT NOT NULL DEFAULT '', version BIGINT NOT NULL DEFAULT 1, state TEXT NOT NULL CHECK(state IN ('draft','active','suspended')),
+		app_id TEXT NOT NULL,
+        name TEXT NOT NULL, environment TEXT NOT NULL DEFAULT '', version BIGINT NOT NULL DEFAULT 1, state TEXT NOT NULL CHECK(state IN ('draft','active','suspended')),
 		active_revision BIGINT, suspension_pending BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		CHECK(state != 'active' OR active_revision IS NOT NULL),
+        FOREIGN KEY(app_id,owner_account_id) REFERENCES apps(id,owner_account_id) ON DELETE RESTRICT,
 		FOREIGN KEY(id,active_revision) REFERENCES tenant_configurations(tenant_id,revision) DEFERRABLE INITIALLY DEFERRED
 	)`,
 	`CREATE TABLE IF NOT EXISTS tenant_configurations (
@@ -86,6 +93,9 @@ var tenantSchema = []string{
 }
 
 func initializeTenantSchema(ctx context.Context, db *gorm.DB) error {
+	if db.Migrator().HasTable("tenants") && !db.Migrator().HasColumn("tenants", "app_id") {
+		return fmt.Errorf("management.app_hierarchy_migration_required")
+	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, statement := range tenantSchema {
 			if tx.Dialector.Name() == "postgres" {

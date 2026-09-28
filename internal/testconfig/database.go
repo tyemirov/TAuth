@@ -45,7 +45,7 @@ func Prepare(t testing.TB, source appconfig.ApplicationConfig) *appconfig.Applic
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := migrations.Apply(context.Background(), source.Server.DatabaseURL, source.Server.TenantEncryptionKey, "fixture-import", owner.ID, document); err != nil {
+		if _, err := migrations.Apply(context.Background(), source.Server.DatabaseURL, source.Server.TenantEncryptionKey, "fixture-import", owner.ID, "fixture-app", "Fixture app", document); err != nil {
 			t.Fatal(err)
 		}
 	}
