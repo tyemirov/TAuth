@@ -176,6 +176,9 @@ App membership is required. The service rejects an unmigrated database at startu
 
 Use an empty `credentials` object when the database has no provisioning credentials.
 All tenants in one App must have the same existing owner.
+For an App without tenants, set `owner_account_id` to an existing owner and set `tenant_ids` to `[]`.
+Use this empty App for that owner's provisioning credentials when the owner has no tenants.
+For an App with tenants, `owner_account_id` is optional. When specified, it must match each tenant owner.
 Revoked credentials retain their historical grants but cannot authorize requests.
 The transaction rejects missing, duplicate, or cross-owner assignments.
 It preserves tenant IDs, states, revisions, keys, and authentication data.
@@ -476,6 +479,8 @@ A tenant with no active configuration cannot accept sign-ins, even when all requ
 A suspended tenant requires Resume tenant before authentication can continue.
 
 Tenant and section selection use the URL fragment, which works on GitHub Pages without a route rewrite.
+Anonymous bootstrap preserves bookmarked App, tenant, and section destinations through login.
+Sign-out clears the destination from an established session.
 The service authorizes each selected tenant before its details appear.
 
 Configuration combines application addresses, Google sign-in, and tenant settings.
