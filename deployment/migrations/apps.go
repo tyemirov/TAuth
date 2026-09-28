@@ -13,11 +13,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// AppGroup gives the explicit destination for existing tenant records.
+// AppGroup describes an App and its existing tenant assignments.
 type AppGroup struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	TenantIDs []string `json:"tenant_ids"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	OwnerAccountID string   `json:"owner_account_id,omitempty"`
+	TenantIDs      []string `json:"tenant_ids"`
 }
 
 // AppHierarchy is a deployment input. The service never reads this mapping.
@@ -91,13 +92,30 @@ func ApplyAppHierarchy(ctx context.Context, databaseURL string, mapping AppHiera
 			owners[row.ID] = row.OwnerAccountID
 		}
 		assignments, appOwners := map[string]string{}, map[string]string{}
+		var ownerIDs []string
+		if err := tx.Table("owner_accounts").Pluck("id", &ownerIDs).Error; err != nil {
+			return err
+		}
+		accounts := make(map[string]bool, len(ownerIDs))
+		for _, id := range ownerIDs {
+			accounts[id] = true
+		}
 		for _, app := range mapping.Apps {
-			if strings.TrimSpace(app.ID) == "" || len(app.ID) > 128 || strings.TrimSpace(app.Name) == "" || len(app.Name) > 120 || len(app.TenantIDs) == 0 || appOwners[app.ID] != "" {
+			if strings.TrimSpace(app.ID) == "" || len(app.ID) > 128 || strings.TrimSpace(app.Name) == "" || len(app.Name) > 120 || appOwners[app.ID] != "" {
 				return errors.New("migration.app_group_invalid")
 			}
-			owner := owners[app.TenantIDs[0]]
-			if owner == "" {
-				return errors.New("migration.tenant_missing")
+			owner := app.OwnerAccountID
+			if len(app.TenantIDs) > 0 {
+				tenantOwner := owners[app.TenantIDs[0]]
+				if tenantOwner == "" {
+					return errors.New("migration.tenant_missing")
+				}
+				if owner == "" {
+					owner = tenantOwner
+				}
+			}
+			if !accounts[owner] {
+				return errors.New("migration.app_owner_invalid")
 			}
 			for _, id := range app.TenantIDs {
 				if owners[id] != owner || assignments[id] != "" {
