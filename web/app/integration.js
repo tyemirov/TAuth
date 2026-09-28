@@ -110,7 +110,7 @@ document.addEventListener("tauth-console:selected", (event) => {
       element("integration-status").textContent =
         error instanceof RequestError &&
         error.code === "management.customer_api_configuration_required"
-          ? "Save a customer API origin and Google client ID, then activate that revision."
+          ? "Set a customer API origin and Google client ID to prepare integration settings."
           : error.message;
     });
 });
@@ -208,7 +208,7 @@ function button(id) {
 /** @param {import('./client.js').SetupCheck|null} check */
 function renderCheck(check) {
   element("setup-result").textContent = check
-    ? `Revision ${check.revision}: ${check.state} at ${new Date(check.created_at).toLocaleString()}\n${check.evidence.map((e) => `${e.path || "Destination"}: ${e.code} (${e.status})`).join("\n")}${selection?.config.revision !== check.revision ? "\nSaved changes require activation and a new check." : ""}`
+    ? `Revision ${check.revision}: ${check.state} at ${new Date(check.created_at).toLocaleString()}\n${check.evidence.map((e) => `${e.path || "Destination"}: ${e.code} (${e.status})`).join("\n")}${selection?.config.revision !== check.revision ? "\nConfiguration changed. Run a new check." : ""}`
     : "No setup check for this active revision.";
 }
 button("run-setup-check").onclick = async () => {

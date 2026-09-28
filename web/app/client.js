@@ -1,8 +1,7 @@
 // @ts-check
-/** @typedef {{id:string,name:string,environment:string,version:number,state:string,active_revision:number|null}} Tenant */
+/** @typedef {{id:string,name:string,environment:string,version:number,state:"draft"|"active"|"suspended",active_revision:number|null}} Tenant */
 /** @typedef {{google_web_client_id:string,frontend_origins:string[],api_base_url:string,local_development:boolean,session_ttl:string,refresh_ttl:string}} ConfigurationInput */
 /** @typedef {ConfigurationInput & {revision:number,providers:string[],session_cookie_name:string,refresh_cookie_name:string}} Configuration */
-/** @typedef {{id:string,hostname:string,name:string,value:string,state:string,revision:number,expires_at:string}} Proof */
 export const PATHS = Object.freeze({
   owner: "/api/management/owner-account",
   accounts: "/api/management/accounts",
@@ -63,7 +62,7 @@ export function tenant(value) {
     name: text(v.name),
     environment: text(v.environment),
     version: integer(v.version),
-    state,
+    state: /** @type {Tenant["state"]} */ (state),
     active_revision:
       v.active_revision === null ? null : integer(v.active_revision),
   };
@@ -84,22 +83,6 @@ export function configuration(value) {
     providers: texts(v.providers),
     session_cookie_name: text(v.session_cookie_name),
     refresh_cookie_name: text(v.refresh_cookie_name),
-  };
-}
-/** @param {unknown} value @returns {Proof} */
-export function proof(value) {
-  const v = object(value);
-  const expires = text(v.expires_at);
-  if (!Number.isFinite(Date.parse(expires)))
-    throw new Error("Invalid proof expiry");
-  return {
-    id: text(v.id),
-    hostname: text(v.hostname),
-    name: text(v.name),
-    value: text(v.value),
-    state: text(v.state),
-    revision: integer(v.revision),
-    expires_at: expires,
   };
 }
 /** @param {Configuration} value @returns {ConfigurationInput} */
@@ -196,10 +179,9 @@ export class Client {
   }
   /** @param {string} id @param {AbortSignal} signal */
   async selected(id, signal) {
-    const [resource, config, proofs] = await Promise.all([
+    const [resource, config] = await Promise.all([
       this.request("GET", tenantPath(id), signal),
       this.request("GET", tenantPath(id) + "/configuration", signal),
-      this.collection(tenantPath(id) + "/origin-proofs", proof, signal),
     ]);
     if (!resource.etag || !config.etag)
       throw new Error("Revision precondition is unavailable");
@@ -208,7 +190,6 @@ export class Client {
       config: configuration(config.value),
       tenantETag: resource.etag,
       configETag: config.etag,
-      proofs,
     };
   }
 }
