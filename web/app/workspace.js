@@ -132,7 +132,8 @@ function clearProtected() {
   document.dispatchEvent(new Event("tauth-console:clear-secrets"));
 }
 function signOut() {
-  history.replaceState(null, "", location.pathname + location.search);
+  if (hasSession)
+    history.replaceState(null, "", location.pathname + location.search);
   hasSession = false;
   authenticated = false;
   clearProtected();
