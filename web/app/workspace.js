@@ -35,9 +35,14 @@ let saveTimer = 0,
 let editBase = /** @type {import('./client.js').ConfigurationInput|null} */ (
   null
 );
+const configurationFields = /** @type {Map<string,number>} */ (new Map());
+let configurationSnapshot =
+  /** @type {import('./client.js').ConfigurationInput|null} */ (null);
+let nameSnapshot = /** @type {{name:string,environment:string}|null} */ (null);
+let nameVersion = 0;
 let saveOperation = /** @type {Promise<boolean>|null} */ (null);
 let nameDraft =
-  /** @type {{id:string,name:string,environment:string,base:Tenant}|null} */ (
+  /** @type {{id:string,name:string,environment:string,fields:Map<string,number>}|null} */ (
     null
   );
 let nameOperation = /** @type {Promise<boolean>|null} */ (null);
@@ -66,6 +71,10 @@ function clearProtected() {
   clearTimeout(saveTimer);
   clearTimeout(renameTimer);
   nameDraft = null;
+  nameSnapshot = null;
+  nameVersion++;
+  configurationFields.clear();
+  configurationSnapshot = null;
   nameOperation = null;
   nameBlocked = false;
   editBase = null;
@@ -327,6 +336,8 @@ async function selectTenant(id, focus) {
   clearTimeout(renameTimer);
   clearTimeout(saveTimer);
   editBase = null;
+  configurationFields.clear();
+  configurationSnapshot = null;
   saveBlocked = false;
   controller.abort();
   controller = new AbortController();
@@ -440,11 +451,21 @@ function openTenantDialog(intent) {
   dialogKey = crypto.randomUUID();
   returnFocus = /** @type {HTMLElement} */ (document.activeElement);
   input("new-name").value =
-    intent === "rename" ? (nameDraft?.name ?? selected.tenant.name) : "";
+    intent === "rename"
+      ? nameDraft?.fields.has("name")
+        ? nameDraft.name
+        : selected.tenant.name
+      : "";
   input("new-environment").value =
     intent === "rename"
-      ? (nameDraft?.environment ?? selected.tenant.environment)
+      ? nameDraft?.fields.has("environment")
+        ? nameDraft.environment
+        : selected.tenant.environment
       : "";
+  nameSnapshot = {
+    name: input("new-name").value.trim(),
+    environment: input("new-environment").value.trim(),
+  };
   el("dialog-title").textContent =
     intent === "rename" ? "Rename tenant" : "Create tenant";
   el("confirm-tenant").textContent = "Create tenant";
@@ -522,6 +543,7 @@ function writeConfiguration(value) {
   input("local-development").checked = value.local_development;
   input("session-ttl").value = value.session_ttl;
   input("refresh-ttl").value = value.refresh_ttl;
+  configurationSnapshot = readConfiguration();
 }
 function readConfiguration() {
   return {
@@ -547,7 +569,7 @@ async function persistConfiguration() {
     id = selected.tenant.id,
     signal = controller.signal;
   const local = readConfiguration(),
-    base = editBase,
+    fields = new Map(configurationFields),
     edits = editVersion;
   saveOperation = (async () => {
     pending(true);
@@ -557,32 +579,8 @@ async function persistConfiguration() {
       const current = await client.selected(id, signal);
       if (version !== epoch) return false;
       const merged = { ...local };
-      const conflicts = [];
-      for (const key of Object.keys(local)) {
-        if (same(local[key], base[key])) merged[key] = current.config[key];
-        else if (
-          !same(current.config[key], base[key]) &&
-          !same(current.config[key], local[key])
-        )
-          conflicts.push(key);
-      }
-      if (conflicts.length) {
-        selected = current;
-        editBase = current.config;
-        if (edits === editVersion) writeConfiguration(merged);
-        else {
-          const newer = readConfiguration();
-          for (const key of Object.keys(newer))
-            if (same(newer[key], local[key])) newer[key] = merged[key];
-          writeConfiguration(newer);
-        }
-        saveBlocked = true;
-        el("field-error").textContent =
-          `Changed in another session: ${conflicts.join(", ")}. Your edits are preserved. Edit these values to resolve the conflict.`;
-        el("save-status").textContent =
-          "Changes not saved: resolve the conflict.";
-        return false;
-      }
+      for (const key of Object.keys(local))
+        if (!fields.has(key)) merged[key] = current.config[key];
       const changed = Object.keys(merged).some(
         (key) => !same(merged[key], current.config[key]),
       );
@@ -599,15 +597,14 @@ async function persistConfiguration() {
       const latest = changed ? await client.selected(id, signal) : current;
       if (version !== epoch) return false;
       selected = latest;
-      if (edits === editVersion) {
-        editBase = null;
-      } else {
-        const next = readConfiguration();
-        for (const key of Object.keys(next))
-          if (same(next[key], local[key])) next[key] = latest.config[key];
-        writeConfiguration(next);
-        editBase = latest.config;
-      }
+      for (const [key, revision] of fields)
+        if (configurationFields.get(key) === revision)
+          configurationFields.delete(key);
+      const next = readConfiguration();
+      for (const key of Object.keys(next))
+        if (!configurationFields.has(key)) next[key] = latest.config[key];
+      writeConfiguration(next);
+      editBase = configurationFields.size ? latest.config : null;
       render();
       el("save-status").textContent = editBase
         ? "Changes pending…"
@@ -616,11 +613,15 @@ async function persistConfiguration() {
       return !editBase;
     } catch (error) {
       if (version !== epoch) return false;
-      if (error instanceof RequestError && error.status === 412) {
+      if (error instanceof RequestError && error.status === 401) {
+        showError(error);
+      } else if (edits !== editVersion) {
+        el("save-status").textContent = "Changes pending…";
+      } else if (error instanceof RequestError && error.status === 412) {
         el("save-status").textContent = "Checking concurrent changes…";
       } else {
         showError(error);
-        saveBlocked = error instanceof RequestError && error.status < 500;
+        saveBlocked = permanentFailure(error);
         el("save-status").textContent =
           "Changes not saved. Your edits are preserved.";
       }
@@ -632,7 +633,7 @@ async function persistConfiguration() {
         if (editBase && !saveBlocked)
           saveTimer = window.setTimeout(
             () => void persistConfiguration(),
-            RETRY_DELAY,
+            edits !== editVersion ? AUTO_SAVE_DELAY : RETRY_DELAY,
           );
       }
     }
@@ -642,8 +643,19 @@ async function persistConfiguration() {
 form.addEventListener("submit", (event) => event.preventDefault());
 form.addEventListener("input", () => {
   if (!selected) return;
+  const values = readConfiguration();
+  const changed = Object.keys(values).filter(
+    (key) => !same(values[key], configurationSnapshot[key]),
+  );
+  if (!changed.length) return;
   if (!editBase) editBase = selected.config;
   editVersion++;
+  for (const key of changed) configurationFields.set(key, editVersion);
+  configurationSnapshot = values;
+  el("field-error").textContent = "";
+  form
+    .querySelectorAll("[aria-invalid]")
+    .forEach((node) => node.removeAttribute("aria-invalid"));
   saveBlocked = false;
   clearTimeout(saveTimer);
   el("save-status").textContent = "Changes pending…";
@@ -654,6 +666,14 @@ form.addEventListener("input", () => {
     AUTO_SAVE_DELAY,
   );
 });
+/** @param {unknown} error */
+function permanentFailure(error) {
+  return (
+    error instanceof RequestError &&
+    error.status < 500 &&
+    ![408, 412, 429].includes(error.status)
+  );
+}
 async function persistName() {
   if (nameOperation) return nameOperation;
   if (!nameDraft || nameBlocked) return !nameDraft;
@@ -661,29 +681,20 @@ async function persistName() {
     renameTimer = window.setTimeout(() => void persistName(), AUTO_SAVE_DELAY);
     return false;
   }
+  clearTimeout(renameTimer);
   const draft = nameDraft,
     version = epoch,
-    signal = controller.signal;
-  const edited = { name: draft.name, environment: draft.environment };
+    edits = nameVersion,
+    signal = controller.signal,
+    fields = new Map(draft.fields);
+  const body = Object.fromEntries(
+    [...fields.keys()].map((key) => [key, draft[key]]),
+  );
   nameOperation = (async () => {
     pending(true);
     try {
       const current = await client.selected(draft.id, signal);
       if (version !== epoch) return false;
-      const body = { ...edited };
-      for (const key of /** @type {const} */ (["name", "environment"])) {
-        if (edited[key] === draft.base[key]) body[key] = current.tenant[key];
-        else if (
-          current.tenant[key] !== draft.base[key] &&
-          current.tenant[key] !== edited[key]
-        ) {
-          nameBlocked = true;
-          draft.base = current.tenant;
-          throw new Error(
-            "This name or environment changed in another session. Your edits are preserved. Edit the value to resolve the conflict.",
-          );
-        }
-      }
       const result = await client.request(
         "PATCH",
         tenantPath(draft.id),
@@ -698,13 +709,21 @@ async function persistName() {
         selected.tenant = item;
         selected.tenantETag = result.etag;
       }
-      if (
-        nameDraft === draft &&
-        draft.name === edited.name &&
-        draft.environment === edited.environment
-      )
-        nameDraft = null;
-      else if (nameDraft?.id === item.id) nameDraft.base = item;
+      for (const [key, revision] of fields)
+        if (nameDraft.fields.get(key) === revision)
+          nameDraft.fields.delete(key);
+      if (!nameDraft.fields.size) nameDraft = null;
+      if (dialog.open && dialogIntent === "rename") {
+        for (const [key, id] of [
+          ["name", "new-name"],
+          ["environment", "new-environment"],
+        ])
+          if (!nameDraft?.fields.has(key)) input(id).value = item[key];
+        nameSnapshot = {
+          name: input("new-name").value.trim(),
+          environment: input("new-environment").value.trim(),
+        };
+      }
       render();
       el("dialog-error").textContent = nameDraft
         ? "Changes pending…"
@@ -713,13 +732,12 @@ async function persistName() {
       return !nameDraft;
     } catch (error) {
       if (version === epoch) {
-        if (
-          error instanceof RequestError &&
-          error.status !== 412 &&
-          error.status < 500
-        )
-          nameBlocked = true;
-        showError(error);
+        if (error instanceof RequestError && error.status === 401)
+          showError(error);
+        else if (edits === nameVersion) {
+          nameBlocked = permanentFailure(error);
+          showError(error);
+        } else el("dialog-error").textContent = "Changes pending…";
       }
       return false;
     } finally {
@@ -729,7 +747,7 @@ async function persistName() {
         if (nameDraft && !nameBlocked)
           renameTimer = window.setTimeout(
             () => void persistName(),
-            RETRY_DELAY,
+            edits !== nameVersion ? AUTO_SAVE_DELAY : RETRY_DELAY,
           );
       }
     }
@@ -746,13 +764,21 @@ el("tenant-form").addEventListener("input", () => {
     return;
   }
   if (!selected) return;
-  clearTimeout(renameTimer);
-  nameDraft = {
-    id: selected.tenant.id,
+  const values = {
     name: input("new-name").value.trim(),
     environment: input("new-environment").value.trim(),
-    base: nameDraft?.base || selected.tenant,
   };
+  const changed = Object.keys(values).filter(
+    (key) => values[key] !== nameSnapshot[key],
+  );
+  if (!changed.length) return;
+  clearTimeout(renameTimer);
+  nameVersion++;
+  const fields = new Map(nameDraft?.fields);
+  for (const key of changed) fields.set(key, nameVersion);
+  nameDraft = { id: selected.tenant.id, ...values, fields };
+  nameSnapshot = values;
+  input("new-name").removeAttribute("aria-invalid");
   nameBlocked = false;
   el("dialog-error").textContent = "Changes pending…";
   renameTimer = window.setTimeout(() => void persistName(), AUTO_SAVE_DELAY);
