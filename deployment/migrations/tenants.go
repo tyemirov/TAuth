@@ -36,6 +36,7 @@ func (Receipt) TableName() string { return "tenant_imports" }
 // Apply moves a frozen tenant source into the current schema in one GORM transaction.
 // The destination is an ordinary owner created through verified console enrollment.
 func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID string, document tenants.FileDocument) (Receipt, error) {
+
 	if strings.TrimSpace(id) == "" || len(id) > 128 || strings.TrimSpace(ownerID) == "" {
 		return Receipt{}, errors.New("migration.identifier_required")
 	}
@@ -82,6 +83,7 @@ func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID string, doc
 		return Receipt{}, err
 	}
 	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte("active\x00"))
 	_, _ = mac.Write(encoded)
 	digest := fmt.Sprintf("%x", mac.Sum(nil))
 	db, err := authkit.OpenControlDatabase(ctx, databaseURL)
