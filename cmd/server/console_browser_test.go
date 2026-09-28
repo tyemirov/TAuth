@@ -177,9 +177,31 @@ func TestConsoleBrowserWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	imported := tenants.FileTenant{ID: "imported-browser", DisplayName: "Imported application", TenantOrigins: []string{"https://imported.example.com"}, GoogleWebClientID: "imported-client", JWTSigningKey: "imported-browser-signing-key", SessionCookieName: "imported_session", RefreshCookieName: "imported_refresh", SessionTTL: "15m", RefreshTTL: "720h"}
-	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "browser-import", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{imported}}); err != nil {
+	unnamed := imported
+	unnamed.ID = "unnamed-browser"
+	unnamed.DisplayName = ""
+	unnamed.TenantOrigins = []string{"https://unnamed.example.com"}
+	unnamed.SessionCookieName = "unnamed_session"
+	unnamed.RefreshCookieName = "unnamed_refresh"
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "browser-import", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{imported, unnamed}}); err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the persisted inactive state produced by the withdrawn import path.
+	fixtureDB, err := authkit.OpenControlDatabase(context.Background(), config.Server.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixtureDB.Table("tenants").Where("owner_account_id = ?", owner.ID).Updates(map[string]any{"state": "draft", "active_revision": nil}).Error; err != nil {
+		t.Fatal(err)
+	}
+	fixtureSQL, err := fixtureDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixtureSQL.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	restoreValidator := withGoogleValidatorBuilderStub(func(context.Context) (authkit.GoogleTokenValidator, error) { return browserGoogleValidator{}, nil })
 	defer restoreValidator()
 

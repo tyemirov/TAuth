@@ -72,7 +72,7 @@ func TestConsoleProvisioningCredentialScope(t *testing.T) {
 		machine.request("PUT", path+"/configuration", browserConfig, 422, append(auth, "If-Match", ownerHeaders.Get("ETag"))...)
 
 		machine.request("PUT", path+"/configuration", payload, 412, append(auth, "If-Match", updated.Get("ETag"))...)
-		private, privateHeaders := owner.request("POST", "/api/management/tenants", map[string]any{"name": "Console only"}, 201, "Idempotency-Key", "private")
+		private, privateHeaders := owner.request("POST", "/api/management/tenants", consoleTenantInput("Console only"), 201, "Idempotency-Key", "private")
 		_ = private
 		machine.request("GET", privateHeaders.Get("Location"), nil, 403, auth...)
 		deniedInput := map[string]any{"name": "Read only", "operations": []string{"read"}, "tenant_ids": []string{"gateway-app"}, "allow_create": false}
@@ -190,7 +190,7 @@ print(json.dumps(client.provision(**json.load(sys.stdin))))
 
 func TestConsoleProvisioningCannotReactivateSuspendedTenant(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", "/api/management/tenants", map[string]any{"name": "Owner controlled suspension"}, 201, "Idempotency-Key", "suspension-app")
+		tenant, headers := owner.request("POST", "/api/management/tenants", consoleTenantInput("Owner controlled suspension"), 201, "Idempotency-Key", "suspension-app")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		saved, headers := owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "app-client", "frontend_origins": []string{"http://localhost:9391"}, "api_base_url": "http://localhost:9392", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}, 200, "If-Match", headers.Get("ETag"))

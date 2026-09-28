@@ -135,7 +135,9 @@ account_management:
 	if strings.Contains(inventory.String(), "imported-session-key") || !strings.Contains(inventory.String(), `"id":"imported"`) {
 		t.Fatal("invalid redacted inventory")
 	}
-	t.Setenv("IMPORT_NONCE_TTL", "")
+	if err := os.Unsetenv("IMPORT_NONCE_TTL"); err != nil {
+		t.Fatal(err)
+	}
 	missingInput := migrations.NewCommand()
 	missingInput.SetOut(io.Discard)
 	missingInput.SetErr(io.Discard)

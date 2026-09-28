@@ -105,7 +105,8 @@ func TestConsoleTenantManagement(t *testing.T) {
 			}
 			owner.request("PUT", controlplane.OwnerPath, nil, status)
 			if attempt == 0 {
-				body := map[string]any{"name": "First app", "environment": "development"}
+				body := consoleTenantInput("First app")
+				body["environment"] = "development"
 				tenant, header := owner.request("POST", "/api/management/tenants", body, 201, "Idempotency-Key", "first")
 				tenantID = tenant["id"].(string)
 				tenantPath = header.Get("Location")
@@ -113,8 +114,8 @@ func TestConsoleTenantManagement(t *testing.T) {
 				if repeated["id"] != tenantID {
 					t.Fatal("retry changed tenant")
 				}
-				owner.request("POST", "/api/management/tenants", map[string]any{"name": "Different"}, 409, "Idempotency-Key", "first")
-				owner.request("POST", "/api/management/tenants", map[string]any{"name": "Second app"}, 201, "Idempotency-Key", "second")
+				owner.request("POST", "/api/management/tenants", consoleTenantInput("Different"), 409, "Idempotency-Key", "first")
+				owner.request("POST", "/api/management/tenants", consoleTenantInput("Second app"), 201, "Idempotency-Key", "second")
 				page, _ := owner.request("GET", "/api/management/tenants?limit=1", nil, 200)
 				if len(page["items"].([]any)) != 1 || page["next_cursor"] == "" {
 					t.Fatal("pagination missing")
@@ -225,13 +226,13 @@ func withManagementService(t *testing.T, validator authkit.GoogleTokenValidator,
 	}
 }
 
-func TestConsoleDNSProofsAndFailedActivation(t *testing.T) {
+func TestConsoleAutomaticPublicationAndDomainConflicts(t *testing.T) {
 	values := map[string]string{}
 	original := lookupManagementTXT
 	lookupManagementTXT = func(ctx context.Context, name string) ([]string, error) { return []string{values[name]}, nil }
 	defer func() { lookupManagementTXT = original }()
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", controlplane.TenantsPath, map[string]any{"name": "Production"}, 201, "Idempotency-Key", "production")
+		tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Production"), 201, "Idempotency-Key", "production")
 		path := headers.Get("Location")
 		tenantID := tenant["id"].(string)
 		owner.request("DELETE", path, nil, 405)
@@ -240,14 +241,7 @@ func TestConsoleDNSProofsAndFailedActivation(t *testing.T) {
 		owner.request("PUT", path+"/configuration", input, 428)
 		owner.request("PUT", path+"/configuration", input, 403, "If-Match", headers.Get("ETag"), "X-TAuth-CSRF", "")
 		saved, headers := owner.request("PUT", path+"/configuration", input, 200, "If-Match", headers.Get("ETag"))
-		failed, failureHeader := owner.request("POST", path+"/activations", map[string]any{"revision": saved["revision"]}, 422, "If-Match", headers.Get("ETag"), "Idempotency-Key", "unverified")
-		if failed["code"] != "management.origin_proof_required" {
-			t.Fatal("wrong proof failure")
-		}
-		resource, _ := owner.request("GET", failureHeader.Get("Location"), nil, 200)
-		if resource["state"] != "failed" {
-			t.Fatal("failed activation not stored")
-		}
+
 		for _, hostname := range []string{"customer.example", "api.customer.example"} {
 			proof, _ := owner.request("POST", path+"/origin-proofs", map[string]any{"revision": saved["revision"], "hostname": hostname}, 201, "Idempotency-Key", hostname)
 			verify := path + "/origin-proofs/" + proof["id"].(string) + "/verifications"
@@ -261,22 +255,19 @@ func TestConsoleDNSProofsAndFailedActivation(t *testing.T) {
 		app.origin = "https://customer.example"
 		app.tenant = tenantID
 		app.login("user", "production-client")
-		// A saved invalid provider revision must not remove the active runtime.
+		// Rejected edits leave both the stored configuration and active runtime unchanged.
 		input["google_web_client_id"] = ""
-		next, nextHeaders := owner.request("PUT", path+"/configuration", input, 200, "If-Match", headers.Get("ETag"))
-		owner.request("POST", path+"/activations", map[string]any{"revision": next["revision"]}, 422, "If-Match", nextHeaders.Get("ETag"), "Idempotency-Key", "invalid")
+		owner.request("PUT", path+"/configuration", input, 422, "If-Match", headers.Get("ETag"))
 		app.login("still-active", "production-client")
-		second, secondHeaders := owner.request("POST", controlplane.TenantsPath, map[string]any{"name": "Conflict"}, 201, "Idempotency-Key", "conflict")
-		_ = second
+		_, secondHeaders := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Conflict"), 201, "Idempotency-Key", "conflict")
 		secondPath := secondHeaders.Get("Location")
 		_, secondHeaders = owner.request("GET", secondPath+"/configuration", nil, 200)
 		input["google_web_client_id"] = "other-client"
-		conflict, conflictHeaders := owner.request("PUT", secondPath+"/configuration", input, 200, "If-Match", secondHeaders.Get("ETag"))
-		owner.request("POST", secondPath+"/activations", map[string]any{"revision": conflict["revision"]}, 409, "If-Match", conflictHeaders.Get("ETag"), "Idempotency-Key", "conflict")
+		owner.request("PUT", secondPath+"/configuration", input, 409, "If-Match", secondHeaders.Get("ETag"))
 		input["frontend_origins"] = []string{owner.origin}
 		input["api_base_url"] = owner.origin
-		reserved, reservedHeader := owner.request("PUT", secondPath+"/configuration", input, 200, "If-Match", conflictHeaders.Get("ETag"))
-		owner.request("POST", secondPath+"/activations", map[string]any{"revision": reserved["revision"]}, 409, "If-Match", reservedHeader.Get("ETag"), "Idempotency-Key", "reserved")
+		owner.request("PUT", secondPath+"/configuration", input, 409, "If-Match", secondHeaders.Get("ETag"))
+
 	})
 }
 
@@ -300,7 +291,7 @@ func (v blockingConsoleValidator) Validate(ctx context.Context, token, audience 
 func TestConsoleRequestRetainsRuntimeRevision(t *testing.T) {
 	validator := blockingConsoleValidator{make(chan struct{}), make(chan struct{})}
 	withManagementService(t, validator, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", controlplane.TenantsPath, map[string]any{"name": "Concurrent"}, 201, "Idempotency-Key", "new")
+		tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Concurrent"), 201, "Idempotency-Key", "new")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		input := map[string]any{"google_web_client_id": "old-client", "frontend_origins": []string{"http://localhost:8181"}, "api_base_url": "http://localhost:8182", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}

@@ -54,13 +54,13 @@ func TestConsoleSetupDestinationRestrictions(t *testing.T) {
 	lookupManagementTXT = func(_ context.Context, name string) ([]string, error) { return []string{values[name]}, nil }
 	defer func() { lookupManagementTXT = originalDNS }()
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		_, headers := owner.request("POST", controlplane.TenantsPath, map[string]any{"name": "Setup destination"}, 201, "Idempotency-Key", "setup-destination")
+		_, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Setup destination"), 201, "Idempotency-Key", "setup-destination")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		config, headers := owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "customer-google", "frontend_origins": []string{"https://customer.example"}, "api_base_url": "https://api.customer.example", "local_development": false, "session_ttl": "15m", "refresh_ttl": "720h"}, 200, "If-Match", headers.Get("ETag"))
 		revision := config["revision"]
 		etag := headers.Get("ETag")
-		owner.request("POST", path+"/setup-checks", map[string]any{"revision": revision}, 409, "If-Match", etag, "Idempotency-Key", "inactive")
+		owner.request("POST", path+"/setup-checks", map[string]any{"revision": revision}, 201, "If-Match", etag, "Idempotency-Key", "active-on-save")
 		for _, host := range []string{"customer.example", "api.customer.example"} {
 			proof, _ := owner.request("POST", path+"/origin-proofs", map[string]any{"hostname": host, "revision": revision}, 201, "Idempotency-Key", host)
 			values[proof["name"].(string)] = proof["value"].(string)
