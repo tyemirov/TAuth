@@ -101,8 +101,10 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `App`: An account-owned resource that contains related application tenants.
+
 - `tenant console`: The TAuth browser frontend through which an owner configures application tenants.
-- `owner account`: A console account that owns application tenants through a verified TAuth subject.
+- `owner account`: A console account that owns Apps through a verified TAuth subject.
 - `application tenant`: An isolated TAuth configuration and its application users, credentials, and sessions.
 - `console tenant`: The reserved TAuth tenant that authenticates tenant console owners.
 - `control plane`: The API and storage that manage tenant ownership and configuration.

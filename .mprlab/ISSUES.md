@@ -85,6 +85,19 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F017] (P1) Add Apps between owner accounts and tenants.
+  Goal: Let each account own Apps, with each App containing its tenants.
+  Requirements: Keep tenant credentials and sessions isolated. Require an owned App for tenant creation.
+  Deliverables: App API, workspace navigation, explicit deployment migration, and public interface tests.
+  Validation: HTTP, browser, migration, actual Gateway client tests, and `make ci` passed.
+  Resolution: Added App creation, selection, metadata, required tenant membership, and App-scoped provisioning credentials.
+  Local result: Assigned 22 active tenants to 19 Apps. Existing data across 33 tables stayed unchanged. All live nonce requests passed.
+  Files: `.gitignore`, `.mprlab/TERMINOLOGY.md`, `README.md`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, `docs/local-tenant-migration-2026-09-28.md`.
+  Files: `internal/controlplane/apps.go`, `schema.go`, `configurations.go`, `credentials.go`, `management_http.go`, `resources.go`, `store_integration_test.go`.
+  Files: `deployment/migrations/apps.go`, `apps_test.go`, `command.go`, `tenants.go`, `repair_test.go`, `local-apps-20260928.json`.
+  Files: `internal/testconfig/database.go`, `cmd/server/apps_test.go`, and the console, provisioning, creation, import, integration, key, CORS, and setup test fixtures.
+  Files: `web/app/client.js`, `workspace.js`, `index.html`, `workspace.css`, and `tests/console-workspace.browser.cjs`.
+
 - [x] [F016] (P1) {B093} Let configured administrators view owner accounts.
   Goal:
   Use the PoodleScanner `admin.emails` contract for a separate account directory.
@@ -971,6 +984,44 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements
 
+- [x] [I221] Edit App and tenant names inline.
+  Requirements: Replace rename dialogs with inline name inputs. Remove the environment label field.
+  Requirements: Save valid edits automatically without success announcements. Show errors beside the affected input.
+  Resolution: Pencil controls now edit names in the heading. Removed environment input, extra name labels, and automatic-save messages.
+  Validation: Browser tests cover inline edits, keyboard completion, focus departure, validation, retries, and concurrent changes. `make ci` passed.
+  Validation: `make up` updated the local console. The served HTML, JavaScript, and CSS match the source files.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I220] Put workspace actions beside their content.
+  Requirements: Move Documentation to the footer. Put pause and resume in the authentication status control.
+  Requirements: Use pencil icons to edit App and tenant names. Show one App-to-tenant heading.
+  Requirements: Keep automatic persistence and suspension confirmation.
+  Resolution: Added the footer link, status action, and name controls. Moved the tenant ID into Integration.
+  Resolution: App rename uses automatic persistence, including Apps with no tenants. Failed requests retain newer edits.
+  Validation: Desktop and mobile Chromium workflows and `make ci` passed. The local console serves the updated HTML, JavaScript, and CSS.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I219] Reduce tenant navigation to Configuration and Integration.
+  Requirements: Combine application addresses, Google sign-in, and tenant settings. Collapse session settings by default.
+  Requirements: Keep automatic persistence, validation feedback, and integration controls.
+  Resolution: Removed Overview and combined the configuration controls. Session validation errors expand and focus the affected field.
+  Validation: The initial browser test rejected five sections. Desktop and mobile browser tests and `make ci` passed.
+  Validation: `make up` updated the local console. The served page contains the two sections.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I218] Add a plus sign to the App creation button.
+  Requirements: Show `+ Create App` in the App list header.
+  Validation: `make ci` passed. The local console serves the updated label after `make up`.
+  Files: `web/app/index.html`.
+
+- [x] [I217] (P1) Present Apps and tenants in a compact workspace.
+  Goal: Show all Apps with tenant counts. Expand the selected App to show its tenants.
+  Requirements: Use the Smith MPR styling rules. Keep automatic persistence and account isolation.
+  Validation: Desktop and mobile Chromium workflows and `make ci` passed. The retained local console serves the compact App list.
+  Resolution: Replaced dropdown navigation with App rows, tenant counts, and nested tenant selection. Applied the Smith MPR styling tokens.
+  Files: `web/app/index.html`, `workspace.js`, `workspace.css`, `cmd/server/console_browser_test.go`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+  Discovery: B103 records complete deployment definitions omitted by the earlier tenant import.
+
 - [x] [I216] (P1) Require complete Google tenant input at creation.
   Requirements:
   - Require a name, application origin, and Google OAuth client ID before tenant creation.
@@ -1311,6 +1362,16 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes
+
+- [x] [B103] (P1) Include complete deployment definitions in the local tenant import.
+  Expected: Import each complete, distinct tenant definition under its App.
+  Actual: The earlier scan omitted deployment manifests, including the production Download Your Data tenant.
+  Deliverables: Use the canonical contribution resolver in the separate migration tool. Import complete missing definitions under existing Apps.
+  Validation: CLI tests and `make ci` passed. Six definitions passed canonical validation, rehearsal, actual import, and repeated invocation.
+  Resolution: Imported Download Your Data, Ledger, MPR UI, Investors, Gallery, and iRoom production definitions into existing Apps.
+  Local result: 28 active tenants in 19 Apps. Existing rows across 36 tables stayed unchanged. All 28 live nonce requests passed.
+  Excluded: MailGoblin has no complete authentication settings. ISSUES.md lacks two declared credential keys.
+  Files: `deployment/migrations/command.go`, `freeze_test.go`, `docs/tenant-console-operations.md`, and `docs/local-tenant-migration-2026-09-28.md`.
 
 - [x] [B099] (P2) Persist explicit configuration edits without overwriting untouched fields.
   Requirements:
