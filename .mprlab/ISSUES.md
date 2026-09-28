@@ -85,6 +85,53 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F016] (P1) {B093} Let configured administrators view owner accounts.
+  Goal:
+  Use the PoodleScanner `admin.emails` contract for a separate account directory.
+  Requirements:
+  - Permit administrators to view other accounts.
+  - Keep tenant reads, writes, and secrets scoped to the authenticated owner.
+  - Configure both operator email spellings without automatic alias inference.
+  - Reject ordinary users and provisioning credentials at the account directory.
+  Validation:
+  Verify administrator and ordinary-user behavior through HTTP and Chromium.
+  Resolution:
+  Added configured administrator emails, a read-only account directory, and its browser view.
+  All tenant routes retain owner-scoped authorization, including routes used by administrators.
+  The local configuration includes both approved operator email spellings.
+  HTTP acceptance covers ordinary users, administrator role removal, pagination, tenant isolation, and denied provisioning credentials.
+  Chromium verifies the visible administrator view and its absence for an ordinary user.
+  Validation: `make test-console`, `make test-console-browser`, and `make ci` passed.
+  Changed files: `internal/appconfig/admin.go`, `internal/appconfig/config.go`, `internal/controlplane/http.go`, `cmd/server/runtime.go`,
+  `cmd/server/console_test.go`, `cmd/server/provisioning_test.go`, `cmd/server/console_browser_test.go`, `local/service.yaml`,
+  `web/app/client.js`, `web/app/workspace.js`, `web/app/index.html`, `tests/console-workspace.browser.cjs`, and `docs/openapi.yaml`.
+
+
+- [x] [F015] (P1) Replace the console Google client through an operator command.
+  Goal:
+  Correct a persisted console client ID without loss of owner accounts or application tenants.
+  Requirements:
+  - Require the expected current client ID and the replacement client ID.
+  - Change only the encrypted console client ID and its configuration digest.
+  - Reject stale input and keep bootstrap create-only.
+  - Preserve keys, owner bindings, application configuration, and sessions.
+  Validation:
+  The initial CLI test failed because the replacement command was absent.
+  `make test-console` passed with replacement, rejected inputs, bootstrap consistency, and HTTP login after restart.
+  Owner accounts, application tenants, and application sessions remained available.
+  The first `make ci` timed out in the cross-origin OAuth browser test.
+  The isolated browser target and the complete `make ci` retry passed without test changes.
+  Resolution:
+  Added `console-google-client-replace` with an expected client ID check and an encrypted database update.
+  Updated the local database and private bootstrap input to the operator's corrected Google client.
+  Compared all 33 database tables against the stopped-service backup. Other database values remained unchanged.
+  The API and Chromium used `212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com` after the latest operator correction.
+  The operator subsequently confirmed successful live Google login with that client.
+  B093 resolves the separate owner enrollment denial that followed authentication.
+  Changed prose passed the scoped language review. Governor retained six existing managed-file differences.
+  Changed files: `cmd/server/console_client.go`, `cmd/server/main.go`, `cmd/server/console_test.go`,
+  `internal/controlplane/console_client.go`, `README.md`, and `docs/tenant-console-operations.md`.
+
 - [x] [F014] Add root commands for local orchestration.
   Goal:
   Start and stop the current TAuth service and tenant console through `make up` and `make down`.
@@ -924,6 +971,101 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements
 
+- [x] [I216] (P1) Require complete Google tenant input at creation.
+  Requirements:
+  - Require a name, application origin, and Google OAuth client ID before tenant creation.
+  - Validate the inputs in the browser and management API.
+  - Generate the tenant ID, signing key, cookie names, and standard session lifetimes.
+  - Create the complete tenant atomically without a separate owner activation action.
+  - Reject invalid input without a partial tenant record.
+  Validation:
+  Exercise HTTP rejection, atomic creation, browser field requirements, and the active runtime.
+  Resolution:
+  - Required all three inputs and created active tenants in one transaction without DNS ownership verification.
+  - Applied valid configuration edits automatically and kept explicit resume for suspended tenants.
+  - Removed the draft revision display, activation action, and DNS controls from the browser workspace.
+  - Verified missing and malformed inputs, origin conflicts, immediate authentication, and rollback through HTTP.
+  - Passed `make test-console`, `make test-console-browser`, and final `make ci`.
+  - Updated the local stack with `make up` and compared served assets with source files.
+  - Preserved the configured console Google client ID. Production deployment remains separate.
+  - Reviewed changed prose and found no new mechanical language findings. Preserved 156 findings in unchanged text.
+  Changed files:
+  - `internal/controlplane/resources.go`, `internal/controlplane/activation.go`.
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `web/app/client.js`, `web/app/integration.js`.
+  - `cmd/server/tenant_creation_test.go`, `cmd/server/management_test.go`, `cmd/server/cors_management_test.go`.
+  - `cmd/server/integration_test.go`, `cmd/server/key_replace_test.go`, `cmd/server/provisioning_test.go`, `cmd/server/setup_integration_test.go`.
+  - `tests/console-workspace.browser.cjs`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, `README.md`.
+
+- [x] [I215] (P1) Migrate the existing local tenants to the operator account.
+  Requirements:
+  - Discover effective tenant configuration in the local Development repositories.
+  - Preserve tenant IDs, keys, provider settings, and existing destination account data.
+  - Assign migrated tenants to the verified local owner through the separate GORM migration.
+  - Back up the destination, rehearse against a copy, and record the final comparison.
+  - Keep migration inputs and operations outside the application runtime.
+  Validation:
+  Compare the effective source and destination settings, owner ID, receipt, and persistent rows after restart.
+  Resolution:
+  - Imported 22 complete definitions as inactive drafts through the external GORM migration.
+  - Preferred application-local definitions and excluded incomplete sources.
+  - Preserved every selected configuration value and all rows in 28 unrelated tables.
+  - Verified the backup, rehearsal, repeated receipt, live import, and retained state after `make up`.
+  - Recorded tenant IDs, selected sources, and exclusions in `docs/local-tenant-migration-2026-09-28.md`.
+  - `make ci` passed. Production was not changed.
+  Changed files:
+  - `deployment/migrations/command.go`, `deployment/migrations/tenants.go`, and deployment migration tests.
+  - `README.md`, `docs/tenant-console-operations.md`, and the local migration record.
+
+
+- [x] [I214] (P1) Use an administrator modal and automatic workspace persistence.
+  Requirements:
+  - Load current data automatically without refresh or reload controls.
+  - Persist valid edits automatically without save controls.
+  - Preserve pending edits and show validation, network, and conflict status.
+  Validation:
+  Verify the generated governance contract and applicable browser behavior.
+  Resolution:
+  - Moved the account directory into a separate administrator modal, following the PoodleScanner interaction pattern.
+  - Removed manual save, refresh, reload, and workspace retry controls.
+  - Added automatic updates, serialized persistence, transient retries, and visible conflict states.
+  - Verified preservation of newer edits during saves, rename-dialog closure, and delayed conflict checks.
+  - Verified administrator visibility, owner isolation, keyboard dismissal, and restored focus in Chromium.
+  - `make ci` passed. `make up` serves the updated local interface.
+  - Changed prose passed the mechanical check and producer review against ASD-STE100 Part 1 and Part 2.
+  - Preserved six existing Governor differences and 156 findings in unchanged prose.
+  Changed files:
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `.mprlab/POLICY.md`, `.mprlab/AGENTS.FRONTEND.md`, `.mprlab/TERMINOLOGY.md`, and the operations runbook.
+
+
+- [x] [I213] (P1) {B093} Move tenant migration outside the application.
+  Goal:
+  Provide a separate one-off deployment GORM routine for the production ownership transfer.
+  Requirements:
+  - Select an explicit verified owner ID without personal account rules in the app.
+  - Remove the application import command and migration receipt schema setup.
+  - Preserve tenant settings, users, identities, and sessions.
+  - Commit tenant writes and the completion receipt in one transaction.
+  - Remove the obsolete first-owner schema with GORM.
+  - Record production execution separately from local test results.
+  Validation:
+  Test the deployment entry point, rollback, receipt retries, changed-input rejection, and schema cleanup.
+  Resolution:
+  Moved the migration into `deployment/migrations` with a separate executable at `deployment/tenantownership`.
+  Removed the import command and migration receipt setup from the application.
+  The routine requires an explicit owner ID and uses a GORM transaction for tenant records and the completion receipt.
+  GORM schema cleanup removes the obsolete first-owner foreign key and column. An identical retry succeeds.
+  Added Make targets for the separate executable, build, and focused migration acceptance.
+  Validation: deployment CLI, schema cleanup, rollback, repeat, changed-source, and existing-session tests passed. `make ci` passed.
+  Local schema cleanup completed against a backup-protected database without changes to other stored values.
+  Production transfer remains pending in the deployment runbook. The routine is not a service startup action or an automatic Gateway hook.
+  Changed files: `deployment/migrations/command.go`, `deployment/migrations/tenants.go`, `deployment/migrations/tenants_test.go`,
+  `deployment/tenantownership/main.go`, `Makefile`, `cmd/server/main.go`, `cmd/server/tenant_import.go` (removed),
+  `internal/controlplane/import.go` (removed), `internal/controlplane/configurations.go`, `internal/controlplane/schema.go`,
+  `internal/controlplane/store_integration_test.go`, `internal/testconfig/database.go`, `README.md`, `ARCHITECTURE.md`,
+  `docs/usage.md`, `docs/tenant-console-operations.md`, and `docs/tenant-migration-rehearsal-2026-09-26.md`.
+
+
 - [x] [I212] (P1) {F009} Migrate tenant configuration into the owner database.
   Goal:
   Replace environment-backed tenant YAML with one persistent runtime source while preserving current authentication behavior.
@@ -1169,6 +1311,129 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes
+
+- [x] [B098] (P1) Repair the inactive local tenant import.
+  Requirements:
+  - Repair the selected import through a separate, explicit-owner GORM migration.
+  - Resolve cookie conflicts and bind requests for shared origins to explicit tenant IDs.
+  - Preserve keys, providers, origins, owner data, and unrelated database records.
+  - Validate the combined runtime before the transaction commits active revisions.
+  - Reject inactive output from future imports.
+  - Back up the database, rehearse the repair, and verify authentication through public interfaces.
+  Validation:
+  Exercise repair rollback, repeatability, tenant isolation, and the local service after restart.
+  Resolution:
+  - Applied the bounded GORM repair to all 22 imported local tenants and activated revision 2.
+  - Assigned distinct cookies to Hecate and NameSignal and required tenant headers for 15 tenants with shared origins.
+  - Preserved keys, providers, origins, ownership, original revisions, and 29 unrelated database tables.
+  - Removed inactive output from the importer and added transactional repair receipts and preconditions.
+  - Configured the local OAuth issuer with a persistent signing key for the imported authorization-server tenant.
+  - Passed migration, HTTP isolation, and final `make ci` checks.
+  - Verified the backup, rehearsal, actual database comparison, and identical receipt on repeated execution.
+  - Restarted the local stack and verified nonce creation for all 22 tenants through HTTP.
+  - Verified rejection of unauthenticated profiles, missing tenant headers, and unregistered origins.
+  - Recorded the local result in `docs/local-tenant-migration-2026-09-28.md`.
+  Changed files:
+  - `deployment/migrations/repair.go`, `deployment/migrations/repair_test.go`, `deployment/migrations/command.go`, `deployment/migrations/tenants.go`.
+  - `cmd/server/tenant_import_repair_test.go`, `cmd/server/console_browser_test.go`.
+  - `local/service.yaml`, `local/compose.yml`, `local/stack.sh`, `tests/local-lifecycle.sh`.
+  - `README.md`, `docs/tenant-console-operations.md`, `docs/local-tenant-migration-2026-09-28.md`.
+
+- [x] [B097] (P1) Correct workspace load feedback and authentication status.
+  Requirements:
+  - Clear routine success notifications after tenant data loads.
+  - Show authentication status as text instead of a control.
+  - Explain when a tenant has no active configuration without claiming that required inputs are missing.
+  - Distinguish suspended authentication from an active configuration revision.
+  Validation:
+  Verify the rendered states and quiet successful loads through Chromium against the real service.
+  Resolution:
+  - Cleared the load notification and hid its empty region after tenant selection.
+  - Replaced the status pill with plain authentication status and an explanation for each state.
+  - Removed the incorrect claim that an inactive configuration has missing inputs.
+  - Verified inactive imports, active creation, and suspended authentication through the browser.
+  - Passed `make test-console-browser` and `make ci` after the changes.
+  - Updated the local stack with `make up` and verified the served workspace files.
+  - Reviewed changed prose with no new mechanical language findings. Preserved unrelated findings.
+  Changed files:
+  - `web/app/workspace.js`, `web/app/client.js`, `web/app/index.html`, `web/app/workspace.css`.
+  - `tests/console-workspace.browser.cjs`, `cmd/server/console_browser_test.go`, `docs/tenant-console-operations.md`.
+
+- [x] [B095] (P1) Open administration from the avatar menu.
+  Requirements:
+  - Put Admin in the authenticated administrator's avatar menu.
+  - Open the dedicated modal and return focus to the avatar after dismissal.
+  - Remove the separate workspace Admin button.
+  - Keep the menu item absent for ordinary accounts and after logout.
+  Validation:
+  Drive the real menu and modal in Chromium, then run `make ci`.
+  Resolution:
+  - Used the pinned MPR user-menu contract to open the administrator modal from the avatar.
+  - Removed the workspace button and retained the account control through header updates.
+  - Verified desktop and mobile menu access, keyboard dismissal, focus return, and ordinary-account isolation in Chromium.
+  - Focused browser checks and `make ci` passed.
+  Changed files:
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `docs/tenant-console-operations.md` and this tracker.
+
+
+- [x] [B096] (P1) Render one consistent tenant label.
+  Observed:
+  Named tenants have two labels, while unnamed imported tenants have only an ID.
+  Requirements:
+  - Show one label per tenant in the navigation list and mobile selector.
+  - Use the display name when present and the tenant ID when the display name is empty.
+  - Keep the tenant ID available in the detail view.
+  Validation:
+  Exercise named and unnamed imported tenants through the real browser and API.
+  Resolution:
+  - Applied one tenant label rule to desktop navigation, mobile selection, and detail headings.
+  - Preserved stored display names and kept tenant IDs in the detail view.
+  - Added a real unnamed imported tenant to the browser fixture.
+  - Verified both label cases and tenant selection in Chromium.
+  - Focused browser checks and `make ci` passed.
+  Changed files:
+  - `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `cmd/server/console_browser_test.go`, the operations runbook, and this tracker.
+
+
+- [x] [B094] (P1) Accept explicitly empty optional migration inputs.
+  Observed:
+  The migration rejects a configured empty cookie domain as a missing environment input.
+  An empty domain is valid and preserves host-only cookies.
+  Requirements:
+  - Reject absent environment inputs.
+  - Preserve present empty values and let the field validator enforce required content.
+  Validation:
+  Verify the source-freeze CLI with an empty cookie domain and a signing key that contains a literal dollar sign.
+  Resolution:
+  - Distinguished undefined environment inputs from defined empty optional values.
+  - Verified empty cookie domains, literal dollar signs, and rejection of incomplete migration definitions.
+  - Focused migration and console checks passed. `make ci` passed.
+  Changed files:
+  - `internal/tenants/config.go`, `cmd/server/console_test.go`, and deployment migration tests.
+
+
+- [x] [B093] (P1) Permit every verified console user to create an owner account.
+  Goal:
+  Remove the first-owner restriction that denied the operator's verified Google account.
+  Requirements:
+  - Bind owners to the stable console subject, independent of email aliases or login order.
+  - Keep every workspace scoped to its owner.
+  - Remove migration operations from the application. Use a separate deployment routine.
+  - Remove the persisted first-owner field without loss of other database values.
+  Validation:
+  Verify enrollment before any administrator, separate subjects, owner isolation, and restart through HTTP and CLI tests.
+  Resolution:
+  Removed email-based and first-owner enrollment rules. Each verified console subject owns a separate workspace.
+  Existing bindings retain their owner ID. Email matches do not merge different subjects.
+  Removed the obsolete local schema field through the separate deployment GORM routine.
+  Compared all 33 local database tables before and after the schema change. All remaining values matched.
+  The local source build is active at ports 8081 and 8082 with the existing Google client and database.
+  Validation: `make test-console`, `make test-console-browser`, and `make ci` passed.
+  Changed files: `internal/controlplane/store.go`, `internal/controlplane/http.go`, `cmd/server/console_test.go`,
+  `README.md`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, and `.mprlab/TENANT-CONSOLE.md`.
+
 
 - [x] [B092] (P1) Preserve imported tenant policies during initial Gateway convergence.
   Observed:

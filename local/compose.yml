@@ -7,6 +7,8 @@ services:
     env_file:
       - path: ${TAUTH_LOCAL_RUNTIME:-../.cache/tauth-local}/runtime.env
         required: false
+    environment:
+      TAUTH_LOCAL_API_ORIGIN: ${TAUTH_LOCAL_API_ORIGIN:-http://localhost:8082}
     command: ["--config", "/config/service.yaml"]
     ports:
       - "127.0.0.1:${TAUTH_LOCAL_API_PORT:-8082}:8080"

@@ -591,7 +591,7 @@ A successful completion consumes the request once. A repeated submission cannot 
 ## 9. CLI and Server Lifecycle
 
 - Cobra command `tauth` reads service YAML and active database revisions.
-- `console-bootstrap` installs encrypted console configuration. `tenant-import` performs the bounded migration under the enrolled owner.
+- `console-bootstrap` installs encrypted console configuration. A separate deployment GORM routine migrates tenant data to an explicit owner ID. The service contains no import command or personal account rule.
 - `tauth preflight --config=...` validates configuration and emits a versioned, redacted effective-config report (with dependency readiness) for external validators before launch, built on the shared `github.com/tyemirov/utils/preflight` builder.
 - `tauth doctor <config-paths...>` validates one or more TAuth configurations and reports issues:
   - `--cross-validate`: Check for conflicts across multiple configs (shared origins, signing keys, cookie names).

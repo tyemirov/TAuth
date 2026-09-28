@@ -50,11 +50,6 @@ var tenantSchema = []string{
 		FOREIGN KEY(tenant_id,revision) REFERENCES tenant_configurations(tenant_id,revision) ON DELETE RESTRICT,
 		FOREIGN KEY(tenant_id,secret_id) REFERENCES tenant_secrets(tenant_id,id) ON DELETE RESTRICT
 	)`,
-	`CREATE TABLE IF NOT EXISTS tenant_imports (
-		id TEXT PRIMARY KEY, source_digest TEXT NOT NULL UNIQUE,
-		owner_account_id TEXT NOT NULL REFERENCES owner_accounts(id) ON DELETE RESTRICT,
-		tenant_ids TEXT NOT NULL, completed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`,
 	`CREATE TABLE IF NOT EXISTS tenant_audit_events (
 		id TEXT PRIMARY KEY, actor_account_id TEXT NOT NULL REFERENCES owner_accounts(id) ON DELETE RESTRICT,
 		tenant_id TEXT REFERENCES tenants(id) ON DELETE RESTRICT, operation TEXT NOT NULL,

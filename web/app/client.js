@@ -1,10 +1,10 @@
 // @ts-check
-/** @typedef {{id:string,name:string,environment:string,version:number,state:string,active_revision:number|null}} Tenant */
+/** @typedef {{id:string,name:string,environment:string,version:number,state:"draft"|"active"|"suspended",active_revision:number|null}} Tenant */
 /** @typedef {{google_web_client_id:string,frontend_origins:string[],api_base_url:string,local_development:boolean,session_ttl:string,refresh_ttl:string}} ConfigurationInput */
 /** @typedef {ConfigurationInput & {revision:number,providers:string[],session_cookie_name:string,refresh_cookie_name:string}} Configuration */
-/** @typedef {{id:string,hostname:string,name:string,value:string,state:string,revision:number,expires_at:string}} Proof */
 export const PATHS = Object.freeze({
   owner: "/api/management/owner-account",
+  accounts: "/api/management/accounts",
   tenants: "/api/management/tenants",
   bootstrap: "/.well-known/tauth-console",
 });
@@ -38,6 +38,19 @@ function texts(value) {
   if (!Array.isArray(value)) throw new Error("Invalid service list");
   return value.map(text);
 }
+/** @param {unknown} value */
+export function ownerAccount(value) {
+  const account = object(value);
+  if (typeof account.administrator !== "boolean")
+    throw new Error("Invalid administrator setting");
+  if (account.state !== "active") throw new Error("Owner account is inactive");
+  return {
+    id: text(account.id),
+    displayName: text(account.display_name),
+    email: text(account.contact_email),
+    administrator: account.administrator,
+  };
+}
 /** @param {unknown} value @returns {Tenant} */
 export function tenant(value) {
   const v = object(value);
@@ -49,7 +62,7 @@ export function tenant(value) {
     name: text(v.name),
     environment: text(v.environment),
     version: integer(v.version),
-    state,
+    state: /** @type {Tenant["state"]} */ (state),
     active_revision:
       v.active_revision === null ? null : integer(v.active_revision),
   };
@@ -70,22 +83,6 @@ export function configuration(value) {
     providers: texts(v.providers),
     session_cookie_name: text(v.session_cookie_name),
     refresh_cookie_name: text(v.refresh_cookie_name),
-  };
-}
-/** @param {unknown} value @returns {Proof} */
-export function proof(value) {
-  const v = object(value);
-  const expires = text(v.expires_at);
-  if (!Number.isFinite(Date.parse(expires)))
-    throw new Error("Invalid proof expiry");
-  return {
-    id: text(v.id),
-    hostname: text(v.hostname),
-    name: text(v.name),
-    value: text(v.value),
-    state: text(v.state),
-    revision: integer(v.revision),
-    expires_at: expires,
   };
 }
 /** @param {Configuration} value @returns {ConfigurationInput} */
@@ -111,7 +108,9 @@ export class Client {
       u.protocol === "http:" &&
       ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
     if (u.origin !== origin || (u.protocol !== "https:" && !loopbackHTTP))
-      throw new Error("The console requires HTTPS or a loopback HTTP API origin");
+      throw new Error(
+        "The console requires HTTPS or a loopback HTTP API origin",
+      );
     this.origin = origin;
   }
   /** @param {string} method @param {string} path @param {AbortSignal} signal @param {unknown} [body] @param {string} [etag] @param {string} [key] */
@@ -176,17 +175,13 @@ export class Client {
   /** @param {AbortSignal} signal */
   async enroll(signal) {
     const { value } = await this.request("PUT", PATHS.owner, signal);
-    text(value.id);
-    text(value.display_name);
-    text(value.contact_email);
-    if (value.state !== "active") throw new Error("Owner account is inactive");
+    return ownerAccount(value);
   }
   /** @param {string} id @param {AbortSignal} signal */
   async selected(id, signal) {
-    const [resource, config, proofs] = await Promise.all([
+    const [resource, config] = await Promise.all([
       this.request("GET", tenantPath(id), signal),
       this.request("GET", tenantPath(id) + "/configuration", signal),
-      this.collection(tenantPath(id) + "/origin-proofs", proof, signal),
     ]);
     if (!resource.etag || !config.etag)
       throw new Error("Revision precondition is unavailable");
@@ -195,7 +190,6 @@ export class Client {
       config: configuration(config.value),
       tenantETag: resource.etag,
       configETag: config.etag,
-      proofs,
     };
   }
 }

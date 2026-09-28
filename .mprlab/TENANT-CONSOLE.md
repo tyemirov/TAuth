@@ -15,15 +15,16 @@ The main backend requirement is persistent tenant configuration with runtime act
 ## Accepted direction
 
 Accounts own tenants. One account can own multiple tenants, and each tenant has exactly one owner account.
-Migrate all current application tenants into the database and assign them to the verified Google login `vtyemirov@gmail.com`.
+Use a separate deployment migration to assign all current application tenants to the operator's verified owner ID.
 Use the same database structure for imported tenants and tenants created through the console.
 Complete the migration foundation before the tenant management UI.
 The first UI integration uses `tauth.js` and `sessionvalidator`.
 OAuth console configuration is optional future scope.
 
-The email identifies the requested initial owner during controlled enrollment.
-Bind ownership to the stable account ID after Google authentication verifies that email.
-Subsequent authorization uses the verified console subject and account ID.
+Every verified console user can enroll, regardless of email spelling or login order.
+Authorization uses the verified console subject and owner account ID.
+Configured administrators can view the account directory. All workspaces remain owner-scoped.
+The application has no migration owner or personal account rule.
 
 ## Database structure
 
@@ -70,11 +71,11 @@ Create the destination schema before the import. The product delivery starts wit
 2. Resolve each tenant's complete effective configuration, including literal YAML values and environment substitutions.
 3. Produce a redacted inventory with tenant IDs, provider types, counts, and validation errors.
 4. Create the ownership schema and the reserved console authentication configuration.
-5. Authenticate `vtyemirov@gmail.com` through Google in the console tenant.
-6. Verify the provider token, nonce, audience, issuer, subject, and verified email before the initial owner binding.
+5. Authenticate the destination account through Google in the console tenant.
+6. Verify the provider token, nonce, audience, issuer, subject, and verified email before owner enrollment.
 7. Create the owner account and persist its stable console login binding.
 8. Back up the database and validate the complete import before any tenant write.
-9. Import every existing application tenant under that owner in one database transaction.
+9. Run the separate deployment GORM migration to assign every source tenant to that owner in one transaction.
 10. Preserve tenant IDs, signing keys, cookie settings, origins, provider configuration, and account policies.
 11. Preserve existing users, identities, password hashes, refresh sessions, and OAuth grants.
 12. Record an import receipt that identifies the owner and imported tenants without secret values.
@@ -100,7 +101,7 @@ Inventory actual tenant counts and verified owner subjects during execution. Thi
 
 Migration acceptance requires these results:
 
-- Every source tenant occurs once in the database with the owner account for `vtyemirov@gmail.com`.
+- Every source tenant occurs once in the database with the explicit destination owner ID.
 - A later login through the bound Google identity lists all imported tenants.
 - Another owner account cannot read or change those tenants.
 - An account created later can own new tenants through the same schema and APIs.
@@ -268,7 +269,7 @@ The current deployment has one runtime instance. Multiple instances require revi
 
 Move existing YAML tenants through one bounded import.
 Preserve tenant IDs, account subjects, keys, cookies, provider identities, sessions, and OAuth grants.
-Assign all existing application tenants to the owner account enrolled through `vtyemirov@gmail.com`.
+Select the operator's verified owner ID as an explicit deployment migration input.
 Treat Gateway as an authorized provisioning client, separate from tenant ownership.
 After the import, all runtime tenant reads use the persistent repository.
 
@@ -325,7 +326,7 @@ Implement the following child issues sequentially. Each issue contains its techn
 | Issue | Deliverable | Required acceptance |
 | --- | --- | --- |
 | F009 | Ownership schema, verified login bindings, encrypted secrets, and console bootstrap. | Repeat login retains ownership. Distinct owners remain isolated. |
-| I212 | Bounded import and database-only tenant runtime. | Imported tenants belong to the initial owner and preserve existing authentication behavior. |
+| I212 | Bounded import and database-only tenant runtime. | Migrated tenants belong to the explicit destination owner and preserve existing authentication behavior. |
 | F010 | Owner-authorized tenant API, origin proofs, and runtime activation. | New tenants activate without restart. Failed updates retain the previous active revision. |
 | F011 | Owner-scoped Gateway credentials and provisioning client integration. | Repeat provisioning preserves tenant identity and rejects stale or unauthorized writes. |
 | F012 | MPR-UI tenant workspace, Google setup, domains, and configuration. | Real browser tests cover imported and newly created tenants. |

@@ -155,10 +155,6 @@ pre {
   gap: 0.2rem;
   min-width: 0;
 }
-.tenant-rail code {
-  font-size: 0.72rem;
-  color: var(--muted);
-}
 .tenant-heading {
   display: flex;
   justify-content: space-between;
@@ -170,10 +166,9 @@ pre {
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
-.badge {
-  border: 1px solid var(--line);
-  border-radius: 2rem;
-  padding: 0.3rem 0.8rem;
+#tenant-state {
+  margin: 0;
+  color: var(--muted);
 }
 #sections {
   display: flex;
@@ -201,19 +196,6 @@ dd {
 }
 dt {
   color: var(--muted);
-}
-#proofs {
-  list-style: none;
-  padding: 0;
-}
-#proofs li {
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--line);
-}
-#proof-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 #save-actions {
   margin-top: 1.5rem;
@@ -288,4 +270,24 @@ dialog::backdrop {
   #sections {
     max-width: calc(100vw - 2rem);
   }
+}
+
+#admin-dialog {
+  width: min(92vw, 44rem);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+#account-list {
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}
+#save-status {
+  color: var(--muted);
+}
+
+#new-authentication {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }

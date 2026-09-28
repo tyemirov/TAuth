@@ -6,6 +6,7 @@ import {
   RequestError,
   configuration,
   loadClient,
+  ownerAccount,
   tenant,
   tenantPath,
 } from "./client.js";
@@ -22,13 +23,36 @@ const el = (id) => {
 const form = /** @type {HTMLFormElement} */ (el("configuration"));
 const dialog = /** @type {HTMLDialogElement} */ (el("tenant-dialog"));
 const suspendDialog = /** @type {HTMLDialogElement} */ (el("suspend-dialog"));
+const adminDialog = /** @type {HTMLDialogElement} */ (el("admin-dialog"));
+const userMenu = el("console-user");
+const ADMIN_MENU_ACTION = "admin";
+const AUTO_SAVE_DELAY = 500;
+const AUTO_REFRESH_DELAY = 15000;
+const RETRY_DELAY = 5000;
+let saveTimer = 0,
+  renameTimer = 0,
+  editVersion = 0;
+let editBase = /** @type {import('./client.js').ConfigurationInput|null} */ (
+  null
+);
+let saveOperation = /** @type {Promise<boolean>|null} */ (null);
+let nameDraft =
+  /** @type {{id:string,name:string,environment:string,base:Tenant}|null} */ (
+    null
+  );
+let nameOperation = /** @type {Promise<boolean>|null} */ (null);
+let nameBlocked = false;
+let saveBlocked = false,
+  synchronizing = false;
 const sections = ["overview", "domains", "signin", "integration", "settings"];
 let client = /** @type {Client|null} */ (null),
   selected = /** @type {Selected|null} */ (null);
 let tenants = /** @type {Tenant[]} */ ([]),
   controller = new AbortController(),
   epoch = 0,
+  hasSession = false,
   authenticated = false,
+  administrator = false,
   busy = false;
 let section = "overview",
   dialogIntent = "create",
@@ -36,8 +60,19 @@ let section = "overview",
   returnFocus = /** @type {HTMLElement|null} */ (null);
 /** @param {string} message */ const notice = (message) => {
   el("notice").textContent = message;
+  el("notice").hidden = message === "";
 };
 function clearProtected() {
+  clearTimeout(saveTimer);
+  clearTimeout(renameTimer);
+  nameDraft = null;
+  nameOperation = null;
+  nameBlocked = false;
+  editBase = null;
+  saveBlocked = false;
+  saveOperation = null;
+  editVersion++;
+  adminDialog.close();
   controller.abort();
   controller = new AbortController();
   epoch++;
@@ -50,17 +85,18 @@ function clearProtected() {
   el("tenant-detail").hidden = true;
   el("tenant-list").replaceChildren();
   el("tenant-select").replaceChildren();
+  administrator = false;
+  userMenu.setAttribute("menu-items", "[]");
+  el("account-list").replaceChildren();
+  el("accounts-status").textContent = "";
   for (const id of [
     "tenant-name",
     "tenant-id",
     "providers",
-    "proofs",
-    "proof-actions",
     "field-error",
     "google-origins",
     "provider-summary",
     "active-revision",
-    "draft-revision",
     "tenant-state",
     "next-step",
     "dialog-error",
@@ -71,6 +107,7 @@ function clearProtected() {
   document.dispatchEvent(new Event("tauth-console:clear-secrets"));
 }
 function signOut() {
+  hasSession = false;
   authenticated = false;
   clearProtected();
   el("signed-out").hidden = false;
@@ -85,7 +122,7 @@ function showError(error) {
   }
   const message =
     error instanceof RequestError && error.status === 412
-      ? "This configuration changed in another session. Reload it before saving."
+      ? "This configuration changed in another session. Checking current values…"
       : error instanceof Error
         ? error.message
         : "The request failed.";
@@ -110,30 +147,27 @@ function showError(error) {
       input(field[0]).focus();
     }
   }
-  el("reload").hidden = !(
-    error instanceof RequestError && error.status === 412
-  );
 }
-function canActivate() {
-  if (!selected) return false;
-  const { tenant, config, proofs } = selected;
-  if (tenant.state === "active" && tenant.active_revision === config.revision)
-    return false;
-  if (
-    !config.google_web_client_id ||
-    !config.frontend_origins.length ||
-    !config.api_base_url
-  )
-    return false;
-  if (config.local_development) return true;
-  return [...config.frontend_origins, config.api_base_url].every((address) =>
-    proofs.some(
-      (proof) =>
-        proof.hostname === new URL(address).hostname &&
-        proof.revision === config.revision &&
-        proof.state === "verified" &&
-        Date.parse(proof.expires_at) > Date.now(),
-    ),
+function canResume() {
+  return selected && selected.tenant.state === "suspended" && !editBase;
+}
+function validCreation() {
+  const name = input("new-name").value.trim();
+  const origin = input("new-origin");
+  const google = input("new-google-client");
+  if (!name || !origin.validity.valid || !google.validity.valid) return false;
+  const address = new URL(origin.value);
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(address.hostname);
+  const canonical =
+    address.origin === origin.value && !address.username && !address.password;
+  return (
+    canonical &&
+    (local
+      ? ["http:", "https:"].includes(address.protocol)
+      : address.protocol === "https:" &&
+        address.hostname.includes(".") &&
+        !address.hostname.endsWith(".") &&
+        !/^[0-9.]+$/.test(address.hostname))
   );
 }
 /** @param {boolean} pending */
@@ -144,7 +178,10 @@ function pending(pending) {
     .forEach((node) => {
       /** @type {HTMLButtonElement} */ (node).disabled =
         pending ||
-        (node.id === "activate" && !canActivate()) ||
+        (node.id === "resume" && !canResume()) ||
+        (node.id === "confirm-tenant" &&
+          dialogIntent === "create" &&
+          !validCreation()) ||
         node.getAttribute("data-expired") === "true";
     });
 }
@@ -168,6 +205,10 @@ async function action(operation) {
     if (version === epoch) pending(false);
   }
 }
+/** @param {Tenant} item */
+function tenantLabel(item) {
+  return item.name === "" ? item.id : item.name;
+}
 function drawCollection() {
   const list = el("tenant-list"),
     select = el("tenant-select");
@@ -178,10 +219,8 @@ function drawCollection() {
     button.type = "button";
     button.dataset.tenant = item.id;
     const title = document.createElement("strong");
-    title.textContent = item.name;
-    const code = document.createElement("code");
-    code.textContent = item.id;
-    button.append(title, code);
+    title.textContent = tenantLabel(item);
+    button.append(title);
     button.setAttribute(
       "aria-current",
       selected?.tenant.id === item.id ? "page" : "false",
@@ -190,7 +229,7 @@ function drawCollection() {
     list.append(button);
     const option = document.createElement("option");
     option.value = item.id;
-    option.textContent = item.name;
+    option.textContent = tenantLabel(item);
     select.append(option);
   }
   if (selected)
@@ -224,92 +263,38 @@ function showSection(next) {
 }
 function render() {
   if (!selected) return;
-  const { tenant: current, config, proofs } = selected;
+  const { tenant: current, config } = selected;
   el("tenant-detail").hidden = false;
-  el("tenant-name").textContent = current.name;
+  el("tenant-name").textContent = tenantLabel(current);
   el("tenant-id").textContent = current.id;
-  el("tenant-state").textContent = current.state;
+  const authentication = {
+    active: {
+      label: "Authentication active",
+      explanation:
+        "TAuth accepts sign-ins using this configuration. Continue with integration setup.",
+    },
+    suspended: {
+      label: "Authentication suspended",
+      explanation:
+        "TAuth is not accepting sign-ins for this tenant. Resume tenant to use the saved configuration.",
+    },
+    draft: {
+      label: "Authentication unavailable",
+      explanation:
+        "This tenant has no active configuration. Its saved settings are not currently used for sign-in. Valid configuration changes apply automatically.",
+    },
+  }[current.state];
+  el("tenant-state").textContent = authentication.label;
   el("active-revision").textContent =
-    current.active_revision === null
-      ? "Not active"
-      : String(current.active_revision);
-  el("draft-revision").textContent = String(config.revision);
+    current.active_revision === null ? "None" : String(current.active_revision);
+  el("resume").hidden = current.state !== "suspended";
   el("providers").textContent =
     config.providers.join(", ") || "None configured";
-  el("next-step").textContent =
-    current.active_revision === config.revision
-      ? "The saved configuration is active. Continue with integration setup."
-      : "Configure Google and your addresses, verify your domains, then activate this saved draft.";
-  input("google-client").value = config.google_web_client_id;
-  input("frontend-origins").value = config.frontend_origins.join("\n");
-  input("api-base").value = config.api_base_url;
-  input("local-development").checked = config.local_development;
-  input("session-ttl").value = config.session_ttl;
-  input("refresh-ttl").value = config.refresh_ttl;
+  el("next-step").textContent = authentication.explanation;
+  if (!editBase) writeConfiguration(config);
   el("google-origins").textContent = config.frontend_origins.join("\n");
   el("provider-summary").textContent =
     `Current providers: ${config.providers.join(", ") || "none"}. This form preserves other provider settings.`;
-  el("reload").hidden = true;
-  const proofList = el("proofs");
-  proofList.replaceChildren();
-  for (const p of proofs.filter((p) => p.revision === config.revision)) {
-    const li = document.createElement("li");
-    const label = document.createElement("strong");
-    label.textContent = `${p.hostname} · ${p.state}`;
-    const data = document.createElement("pre");
-    data.textContent = `TXT ${p.name}\n${p.value}\nExpires ${new Date(p.expires_at).toLocaleString()}`;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "Verify TXT record";
-    button.setAttribute(
-      "data-expired",
-      String(Date.parse(p.expires_at) < Date.now()),
-    );
-    button.onclick = () =>
-      void action(async (api, signal) => {
-        await api.request(
-          "POST",
-          tenantPath(current.id) +
-            `/origin-proofs/${encodeURIComponent(p.id)}/verifications`,
-          signal,
-          {},
-          undefined,
-          crypto.randomUUID(),
-        );
-        await refreshSelected(current.id, signal);
-        notice("Domain verified.");
-      });
-    li.append(label, data, button);
-    proofList.append(li);
-  }
-  const proofActions = el("proof-actions");
-  proofActions.replaceChildren();
-  const addresses = [
-    ...config.frontend_origins,
-    ...(config.api_base_url ? [config.api_base_url] : []),
-  ];
-  for (const hostname of new Set(
-    addresses.map((value) => new URL(value).hostname),
-  )) {
-    if (["localhost", "127.0.0.1", "[::1]"].includes(hostname)) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = `Create proof for ${hostname}`;
-    button.onclick = () =>
-      void action(async (api, signal) => {
-        await api.request(
-          "POST",
-          tenantPath(current.id) + "/origin-proofs",
-          signal,
-          { revision: config.revision, hostname },
-          undefined,
-          crypto.randomUUID(),
-        );
-        await refreshSelected(current.id, signal);
-        notice("Publish the TXT record, then verify it.");
-      });
-    proofActions.append(button);
-  }
   drawCollection();
   showSection(section);
   pending(busy);
@@ -328,12 +313,21 @@ function render() {
 async function refreshSelected(id, signal) {
   const result = await client.selected(id, signal);
   if (signal.aborted || selected?.tenant.id !== id) return;
+  if (editBase) return;
+  const changed = !same(selected, result);
   selected = result;
   tenants = tenants.map((item) => (item.id === id ? result.tenant : item));
-  render();
+  if (changed) render();
+  else drawCollection();
 }
 /** @param {string} id @param {boolean} focus */
 async function selectTenant(id, focus) {
+  if (selected && editBase && !(await persistConfiguration())) return;
+  if (nameDraft && !(await persistName())) return;
+  clearTimeout(renameTimer);
+  clearTimeout(saveTimer);
+  editBase = null;
+  saveBlocked = false;
   controller.abort();
   controller = new AbortController();
   epoch++;
@@ -353,7 +347,7 @@ async function selectTenant(id, focus) {
     if (version !== epoch) return;
     selected = result;
     render();
-    notice("Tenant loaded.");
+    notice("");
     if (focus) el("tenant-name").focus();
   } catch (error) {
     if (version === epoch) showError(error);
@@ -367,13 +361,20 @@ async function openWorkspace() {
   notice("Loading your tenants…");
   const version = epoch;
   try {
-    await client.enroll(controller.signal);
+    const owner = await client.enroll(controller.signal);
     const items = await client.collection(
       PATHS.tenants,
       tenant,
       controller.signal,
     );
     if (version !== epoch) return;
+    administrator = owner.administrator;
+    userMenu.setAttribute(
+      "menu-items",
+      JSON.stringify(
+        administrator ? [{ label: "Admin", action: ADMIN_MENU_ACTION }] : [],
+      ),
+    );
     tenants = items;
     el("workspace").hidden = false;
     drawCollection();
@@ -382,27 +383,81 @@ async function openWorkspace() {
     const requested = state.get("tenant");
     if (requested) await selectTenant(requested, false);
     else if (items.length) await selectTenant(items[0].id, false);
-    else notice("Create your first tenant.");
+    else notice("");
   } catch (error) {
     if (version === epoch) {
       authenticated = false;
       showError(error);
-      el("retry-workspace").hidden = false;
     }
   }
 }
+async function loadAccounts() {
+  const version = epoch;
+  el("accounts-status").textContent = "Loading accounts…";
+  try {
+    const accounts = await client.collection(
+      PATHS.accounts,
+      ownerAccount,
+      controller.signal,
+    );
+    if (version !== epoch) return;
+    el("account-list").replaceChildren(
+      ...accounts.map((account) => {
+        const item = document.createElement("li");
+        item.textContent = `${account.displayName} · ${account.email}${account.administrator ? " · Administrator" : ""}`;
+        return item;
+      }),
+    );
+    el("accounts-status").textContent =
+      `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}`;
+  } catch (error) {
+    if (version !== epoch) return;
+    el("account-list").replaceChildren();
+    el("accounts-status").textContent =
+      error instanceof Error ? error.message : "Accounts could not load.";
+    if (error instanceof RequestError && error.status === 401) signOut();
+  }
+}
+el("console-header").addEventListener("mpr-user:menu-item", (event) => {
+  if (
+    /** @type {CustomEvent} */ (event).detail.action !== ADMIN_MENU_ACTION ||
+    !administrator
+  )
+    return;
+  adminDialog.showModal();
+  void loadAccounts();
+});
+adminDialog.addEventListener("close", () => {
+  el("account-list").replaceChildren();
+  if (authenticated)
+    /** @type {HTMLElement} */ (
+      userMenu.querySelector('[data-mpr-user="trigger"]')
+    ).focus();
+});
 /** @param {string} intent */
 function openTenantDialog(intent) {
   dialogIntent = intent;
   dialogKey = crypto.randomUUID();
   returnFocus = /** @type {HTMLElement} */ (document.activeElement);
-  input("new-name").value = intent === "rename" ? selected.tenant.name : "";
+  input("new-name").value =
+    intent === "rename" ? (nameDraft?.name ?? selected.tenant.name) : "";
   input("new-environment").value =
-    intent === "rename" ? selected.tenant.environment : "";
+    intent === "rename"
+      ? (nameDraft?.environment ?? selected.tenant.environment)
+      : "";
   el("dialog-title").textContent =
     intent === "rename" ? "Rename tenant" : "Create tenant";
-  el("confirm-tenant").textContent =
-    intent === "rename" ? "Save name" : "Create tenant";
+  el("confirm-tenant").textContent = "Create tenant";
+  el("confirm-tenant").hidden = intent === "rename";
+  const authentication = /** @type {HTMLFieldSetElement} */ (
+    el("new-authentication")
+  );
+  authentication.hidden = intent === "rename";
+  authentication.disabled = intent === "rename";
+  el("rename-environment").hidden = intent !== "rename";
+  input("new-origin").value = "";
+  input("new-google-client").value = "";
+  pending(busy);
   el("dialog-error").textContent = "";
   dialog.showModal();
   input("new-name").focus();
@@ -432,64 +487,315 @@ el("tenant-select").addEventListener(
 el("rename").onclick = () => openTenantDialog("rename");
 el("tenant-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (dialogIntent === "rename") {
+    void persistName();
+    return;
+  }
+  if (!validCreation()) return;
   void action(async (api, signal) => {
     const body = {
-      name: input("new-name").value,
-      environment: input("new-environment").value,
+      name: input("new-name").value.trim(),
+      application_origin: input("new-origin").value,
+      google_web_client_id: input("new-google-client").value,
     };
-    const result =
-      dialogIntent === "create"
-        ? await api.request(
-            "POST",
-            PATHS.tenants,
-            signal,
-            body,
-            undefined,
-            dialogKey,
-          )
-        : await api.request(
-            "PATCH",
-            tenantPath(selected.tenant.id),
-            signal,
-            body,
-            selected.tenantETag,
-          );
+    const result = await api.request(
+      "POST",
+      PATHS.tenants,
+      signal,
+      body,
+      undefined,
+      dialogKey,
+    );
     if (signal.aborted) return;
     const item = tenant(result.value);
     tenants = tenants.filter((t) => t.id !== item.id).concat(item);
     dialog.close();
     await selectTenant(item.id, true);
-    notice(dialogIntent === "create" ? "Tenant created." : "Tenant renamed.");
+    notice("Tenant created.");
   });
 });
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void action(async (api, signal) => {
-    const id = selected.tenant.id;
-    const body = {
-      google_web_client_id: input("google-client").value.trim(),
-      frontend_origins: input("frontend-origins")
-        .value.split("\n")
-        .map((v) => v.trim())
-        .filter(Boolean),
-      api_base_url: input("api-base").value.trim(),
-      local_development: input("local-development").checked,
-      session_ttl: input("session-ttl").value.trim(),
-      refresh_ttl: input("refresh-ttl").value.trim(),
-    };
-    const result = await api.request(
-      "PUT",
-      tenantPath(id) + "/configuration",
-      signal,
-      body,
-      selected.configETag,
+/** @param {import('./client.js').ConfigurationInput} value */
+function writeConfiguration(value) {
+  input("google-client").value = value.google_web_client_id;
+  input("frontend-origins").value = value.frontend_origins.join("\n");
+  input("api-base").value = value.api_base_url;
+  input("local-development").checked = value.local_development;
+  input("session-ttl").value = value.session_ttl;
+  input("refresh-ttl").value = value.refresh_ttl;
+}
+function readConfiguration() {
+  return {
+    google_web_client_id: input("google-client").value.trim(),
+    frontend_origins: input("frontend-origins")
+      .value.split("\n")
+      .map((v) => v.trim())
+      .filter(Boolean),
+    api_base_url: input("api-base").value.trim(),
+    local_development: input("local-development").checked,
+    session_ttl: input("session-ttl").value.trim(),
+    refresh_ttl: input("refresh-ttl").value.trim(),
+  };
+}
+/** @param {unknown} a @param {unknown} b */
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+async function persistConfiguration() {
+  if (saveOperation) return saveOperation;
+  if (!selected || !editBase) return true;
+  if (busy || saveBlocked) return false;
+  clearTimeout(saveTimer);
+  const version = epoch,
+    id = selected.tenant.id,
+    signal = controller.signal;
+  const local = readConfiguration(),
+    base = editBase,
+    edits = editVersion;
+  saveOperation = (async () => {
+    pending(true);
+    el("save-status").textContent = "Saving…";
+    el("field-error").textContent = "";
+    try {
+      const current = await client.selected(id, signal);
+      if (version !== epoch) return false;
+      const merged = { ...local };
+      const conflicts = [];
+      for (const key of Object.keys(local)) {
+        if (same(local[key], base[key])) merged[key] = current.config[key];
+        else if (
+          !same(current.config[key], base[key]) &&
+          !same(current.config[key], local[key])
+        )
+          conflicts.push(key);
+      }
+      if (conflicts.length) {
+        selected = current;
+        editBase = current.config;
+        if (edits === editVersion) writeConfiguration(merged);
+        else {
+          const newer = readConfiguration();
+          for (const key of Object.keys(newer))
+            if (same(newer[key], local[key])) newer[key] = merged[key];
+          writeConfiguration(newer);
+        }
+        saveBlocked = true;
+        el("field-error").textContent =
+          `Changed in another session: ${conflicts.join(", ")}. Your edits are preserved. Edit these values to resolve the conflict.`;
+        el("save-status").textContent =
+          "Changes not saved: resolve the conflict.";
+        return false;
+      }
+      const changed = Object.keys(merged).some(
+        (key) => !same(merged[key], current.config[key]),
+      );
+      if (changed) {
+        const result = await client.request(
+          "PUT",
+          tenantPath(id) + "/configuration",
+          signal,
+          merged,
+          current.configETag,
+        );
+        configuration(result.value);
+      }
+      const latest = changed ? await client.selected(id, signal) : current;
+      if (version !== epoch) return false;
+      selected = latest;
+      if (edits === editVersion) {
+        editBase = null;
+      } else {
+        const next = readConfiguration();
+        for (const key of Object.keys(next))
+          if (same(next[key], local[key])) next[key] = latest.config[key];
+        writeConfiguration(next);
+        editBase = latest.config;
+      }
+      render();
+      el("save-status").textContent = editBase
+        ? "Changes pending…"
+        : "Saved automatically.";
+      notice("Configuration saved.");
+      return !editBase;
+    } catch (error) {
+      if (version !== epoch) return false;
+      if (error instanceof RequestError && error.status === 412) {
+        el("save-status").textContent = "Checking concurrent changes…";
+      } else {
+        showError(error);
+        saveBlocked = error instanceof RequestError && error.status < 500;
+        el("save-status").textContent =
+          "Changes not saved. Your edits are preserved.";
+      }
+      return false;
+    } finally {
+      if (version === epoch) {
+        saveOperation = null;
+        pending(false);
+        if (editBase && !saveBlocked)
+          saveTimer = window.setTimeout(
+            () => void persistConfiguration(),
+            RETRY_DELAY,
+          );
+      }
+    }
+  })();
+  return saveOperation;
+}
+form.addEventListener("submit", (event) => event.preventDefault());
+form.addEventListener("input", () => {
+  if (!selected) return;
+  if (!editBase) editBase = selected.config;
+  editVersion++;
+  saveBlocked = false;
+  clearTimeout(saveTimer);
+  el("save-status").textContent = "Changes pending…";
+  notice("Changes pending…");
+  pending(busy);
+  saveTimer = window.setTimeout(
+    () => void persistConfiguration(),
+    AUTO_SAVE_DELAY,
+  );
+});
+async function persistName() {
+  if (nameOperation) return nameOperation;
+  if (!nameDraft || nameBlocked) return !nameDraft;
+  if (busy) {
+    renameTimer = window.setTimeout(() => void persistName(), AUTO_SAVE_DELAY);
+    return false;
+  }
+  const draft = nameDraft,
+    version = epoch,
+    signal = controller.signal;
+  const edited = { name: draft.name, environment: draft.environment };
+  nameOperation = (async () => {
+    pending(true);
+    try {
+      const current = await client.selected(draft.id, signal);
+      if (version !== epoch) return false;
+      const body = { ...edited };
+      for (const key of /** @type {const} */ (["name", "environment"])) {
+        if (edited[key] === draft.base[key]) body[key] = current.tenant[key];
+        else if (
+          current.tenant[key] !== draft.base[key] &&
+          current.tenant[key] !== edited[key]
+        ) {
+          nameBlocked = true;
+          draft.base = current.tenant;
+          throw new Error(
+            "This name or environment changed in another session. Your edits are preserved. Edit the value to resolve the conflict.",
+          );
+        }
+      }
+      const result = await client.request(
+        "PATCH",
+        tenantPath(draft.id),
+        signal,
+        body,
+        current.tenantETag,
+      );
+      if (version !== epoch) return false;
+      const item = tenant(result.value);
+      tenants = tenants.map((value) => (value.id === item.id ? item : value));
+      if (selected?.tenant.id === item.id) {
+        selected.tenant = item;
+        selected.tenantETag = result.etag;
+      }
+      if (
+        nameDraft === draft &&
+        draft.name === edited.name &&
+        draft.environment === edited.environment
+      )
+        nameDraft = null;
+      else if (nameDraft?.id === item.id) nameDraft.base = item;
+      render();
+      el("dialog-error").textContent = nameDraft
+        ? "Changes pending…"
+        : "Saved automatically.";
+      notice(nameDraft ? "Changes pending…" : "Tenant renamed.");
+      return !nameDraft;
+    } catch (error) {
+      if (version === epoch) {
+        if (
+          error instanceof RequestError &&
+          error.status !== 412 &&
+          error.status < 500
+        )
+          nameBlocked = true;
+        showError(error);
+      }
+      return false;
+    } finally {
+      if (version === epoch) {
+        nameOperation = null;
+        pending(false);
+        if (nameDraft && !nameBlocked)
+          renameTimer = window.setTimeout(
+            () => void persistName(),
+            RETRY_DELAY,
+          );
+      }
+    }
+  })();
+  return nameOperation;
+}
+dialog.addEventListener("close", () => {
+  clearTimeout(renameTimer);
+  if (dialogIntent === "rename") void persistName();
+});
+el("tenant-form").addEventListener("input", () => {
+  if (dialogIntent === "create") {
+    pending(busy);
+    return;
+  }
+  if (!selected) return;
+  clearTimeout(renameTimer);
+  nameDraft = {
+    id: selected.tenant.id,
+    name: input("new-name").value.trim(),
+    environment: input("new-environment").value.trim(),
+    base: nameDraft?.base || selected.tenant,
+  };
+  nameBlocked = false;
+  el("dialog-error").textContent = "Changes pending…";
+  renameTimer = window.setTimeout(() => void persistName(), AUTO_SAVE_DELAY);
+});
+async function synchronize() {
+  if (document.hidden || synchronizing || busy || saveOperation || !client)
+    return;
+  synchronizing = true;
+  const version = epoch;
+  try {
+    if (!authenticated) {
+      if (hasSession) await openWorkspace();
+      return;
+    }
+    if (adminDialog.open) await loadAccounts();
+    if (editBase) {
+      await persistConfiguration();
+      return;
+    }
+    const items = await client.collection(
+      PATHS.tenants,
+      tenant,
+      controller.signal,
     );
-    configuration(result.value);
-    await refreshSelected(id, signal);
-    notice("Draft saved. Activate it when setup is complete.");
-  });
-});
-el("activate").onclick = () =>
+    if (version !== epoch || editBase) return;
+    tenants = items;
+    if (selected) await refreshSelected(selected.tenant.id, controller.signal);
+    else if (items.length) await selectTenant(items[0].id, false);
+    else drawCollection();
+  } catch (error) {
+    if (version === epoch) showError(error);
+  } finally {
+    synchronizing = false;
+  }
+}
+window.addEventListener("focus", () => void synchronize());
+window.addEventListener("online", () => void synchronize());
+document.addEventListener("visibilitychange", () => void synchronize());
+const refreshTimer = window.setInterval(
+  () => void synchronize(),
+  AUTO_REFRESH_DELAY,
+);
+el("resume").onclick = () =>
   void action(async (api, signal) => {
     const id = selected.tenant.id;
     await api.request(
@@ -501,9 +807,8 @@ el("activate").onclick = () =>
       crypto.randomUUID(),
     );
     await refreshSelected(id, signal);
-    notice("Configuration activated.");
+    notice("Tenant resumed.");
   });
-el("reload").onclick = () => void selectTenant(selected.tenant.id, true);
 el("suspend").onclick = () => {
   returnFocus = /** @type {HTMLElement} */ (document.activeElement);
   suspendDialog.showModal();
@@ -523,14 +828,10 @@ el("confirm-suspend").onclick = () =>
     returnFocus?.focus();
     notice("Tenant suspended.");
   });
-el("retry-workspace").onclick = () => {
-  el("retry-workspace").hidden = true;
+document.addEventListener("mpr-ui:auth:authenticated", () => {
+  hasSession = true;
   void openWorkspace();
-};
-document.addEventListener(
-  "mpr-ui:auth:authenticated",
-  () => void openWorkspace(),
-);
+});
 document.addEventListener("mpr-ui:auth:unauthenticated", signOut);
 document.addEventListener("mpr-ui:auth:status-change", (event) => {
   if (/** @type {CustomEvent} */ (event).detail?.status === "unauthenticated")
@@ -545,7 +846,10 @@ window.addEventListener("hashchange", () => {
     else showSection(section);
   }
 });
-window.addEventListener("pagehide", clearProtected);
+window.addEventListener("pagehide", () => {
+  clearInterval(refreshTimer);
+  clearProtected();
+});
 async function start() {
   try {
     client = await loadClient();

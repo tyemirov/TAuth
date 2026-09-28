@@ -37,6 +37,12 @@ if [[ ! -f "${runtime}/runtime.env" ]]; then
   mv "${runtime}/runtime.env.tmp" "${runtime}/runtime.env"
 fi
 
+if ! grep -q '^TAUTH_LOCAL_OAUTH_SIGNING_KEY_BASE64=' "${runtime}/runtime.env"; then
+  oauth_signing_key="$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 2>/dev/null | base64 | tr -d '\n')"
+  printf 'TAUTH_LOCAL_OAUTH_SIGNING_KEY_BASE64=%s\n' "${oauth_signing_key}" >> "${runtime}/runtime.env"
+fi
+export TAUTH_LOCAL_API_ORIGIN="${api_origin}"
+
 mkdir -p "${runtime}/site/app"
 cp -R docs/. "${runtime}/site/"
 cp -R web/app/. "${runtime}/site/app/"

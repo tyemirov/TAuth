@@ -17,7 +17,7 @@ func TestConsoleIntegrationAndKeyExport(t *testing.T) {
 	defer func() { managementNow = originalClock }()
 
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		_, headers := owner.request("POST", "/api/management/tenants", map[string]any{"name": "Integrated application"}, 201, "Idempotency-Key", "integration-tenant")
+		_, headers := owner.request("POST", "/api/management/tenants", consoleTenantInput("Integrated application"), 201, "Idempotency-Key", "integration-tenant")
 		path := headers.Get("Location")
 		owner.request("GET", path+"/integration", nil, 409)
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
@@ -43,7 +43,7 @@ func TestConsoleIntegrationAndKeyExport(t *testing.T) {
 		owner.request("POST", path+"/key-exports", makeBody(), 403, "If-Match", activeHeaders.Get("ETag"), "Idempotency-Key", "wrong-nonce")
 		claims["nonce"] = challenge["nonce"]
 		// A challenge cannot cross tenants, owner sessions, or credential types.
-		_, otherHeaders := owner.request("POST", "/api/management/tenants", map[string]any{"name": "Other integration"}, 201, "Idempotency-Key", "other-integration")
+		_, otherHeaders := owner.request("POST", "/api/management/tenants", consoleTenantInput("Other integration"), 201, "Idempotency-Key", "other-integration")
 		otherPath := otherHeaders.Get("Location")
 		_, otherHeaders = owner.request("GET", otherPath+"/configuration", nil, 200)
 		otherSaved, otherHeaders := owner.request("PUT", otherPath+"/configuration", map[string]any{"google_web_client_id": "other-google", "frontend_origins": []string{"http://localhost:9593"}, "api_base_url": "http://localhost:9594", "local_development": true, "session_ttl": "1m", "refresh_ttl": "1h"}, 200, "If-Match", otherHeaders.Get("ETag"))
@@ -71,8 +71,8 @@ func TestConsoleIntegrationAndKeyExport(t *testing.T) {
 		staleChallenge, _ := owner.request("POST", path+"/reauthentications", map[string]any{"revision": saved["revision"], "operation": "session-key-export"}, 201, "If-Match", activeHeaders.Get("ETag"), "Idempotency-Key", "revision-challenge")
 		next, nextHeaders := owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "customer-google", "frontend_origins": []string{"http://localhost:9591"}, "api_base_url": "http://localhost:9592", "local_development": true, "session_ttl": "2m", "refresh_ttl": "1h"}, 200, "If-Match", activeHeaders.Get("ETag"))
 		stillActive, _ := owner.request("GET", path+"/integration", nil, 200)
-		if stillActive["revision"] != saved["revision"] {
-			t.Fatal("public integration exposed draft settings")
+		if stillActive["revision"] != next["revision"] {
+			t.Fatal("public integration did not use the saved configuration")
 		}
 		owner.request("POST", path+"/activations", map[string]any{"revision": next["revision"]}, 201, "If-Match", nextHeaders.Get("ETag"), "Idempotency-Key", "next-active")
 		challenge = staleChallenge

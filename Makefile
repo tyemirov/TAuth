@@ -138,3 +138,15 @@ run-tenant-app:
 .PHONY: test-customer-app
 test-customer-app:
 	$(GO) test ./internal/customerapp -count=1
+
+.PHONY: test-deployment-migration deployment-migration
+test-deployment-migration:
+	$(GO) test ./deployment/... -count=1
+
+deployment-migration:
+	$(GO) run ./deployment/tenantownership $(MIGRATION_ARGS)
+
+MIGRATION_OUTPUT ?= .cache/tenant-ownership
+.PHONY: build-deployment-migration
+build-deployment-migration:
+	CGO_ENABLED=0 $(GO) build -o "$(MIGRATION_OUTPUT)" ./deployment/tenantownership

@@ -129,7 +129,7 @@ The original observations above remain the record of the defect before correctio
 2. Configure the production console Google client and service encryption key.
 3. Verify initial-owner enrollment through live Google authentication.
 4. Qualify each enabled provider and customer backend through the selected public origins.
-5. Use the [production cutover procedure](tenant-console-operations.md#tenant-import-and-database-cutover).
+5. Use the [production cutover procedure](tenant-console-operations.md#deployment-data-migration).
 
 The captured configuration enables Google for 19 tenants, Apple for two, GitHub for one, and password authentication for two.
 This rehearsal preserved their configuration and stored data.

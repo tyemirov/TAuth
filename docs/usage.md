@@ -80,8 +80,8 @@ Supply the console inputs from `examples/console-bootstrap.yaml.example` through
 
 1. Run `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
 2. Run `docker compose up --build`.
-3. Authenticate the initial owner through the reserved console tenant.
-4. Run `docker compose exec tauth tenant-import --source /config/tenants.import.yaml --import-id local-tenants`.
+3. Authenticate the destination owner through the reserved console tenant.
+4. Stop TAuth and run the separate [deployment migration](tenant-console-operations.md#deployment-data-migration) against the retained database.
 5. Restart TAuth to load the imported active configuration.
 6. Remove the application tenant environment inputs after verification.
 

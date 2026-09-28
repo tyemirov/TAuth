@@ -1,3 +1,5 @@
+admin:
+  emails: [temirov@gmail.com, vtyemirov@gmail.com]
 server:
   listen_addr: ":8080"
   database_url: "sqlite:///data/tauth.db"
@@ -5,3 +7,25 @@ server:
   enable_cors: true
   cors_allowed_origins: ["${TAUTH_CONSOLE_ORIGIN}"]
   enable_tenant_header_override: true
+
+oauth:
+  enabled: true
+  allow_insecure_http: true
+  issuer: "${TAUTH_LOCAL_API_ORIGIN}"
+  authorization_endpoint: "${TAUTH_LOCAL_API_ORIGIN}/oauth/authorize"
+  token_endpoint: "${TAUTH_LOCAL_API_ORIGIN}/oauth/token"
+  revocation_endpoint: "${TAUTH_LOCAL_API_ORIGIN}/oauth/revoke"
+  jwks_uri: "${TAUTH_LOCAL_API_ORIGIN}/oauth/jwks"
+  login_endpoint: "${TAUTH_LOCAL_API_ORIGIN}/oauth/login"
+  consent_endpoint: "${TAUTH_LOCAL_API_ORIGIN}/oauth/consent"
+  authorization_request_ttl: "5m"
+  authorization_code_ttl: "1m"
+  active_signing_key_id: "local-oauth"
+  signing_keys:
+    - id: "local-oauth"
+      private_key_base64: "${TAUTH_LOCAL_OAUTH_SIGNING_KEY_BASE64}"
+  client_metadata:
+    request_timeout: "3s"
+    maximum_bytes: 5120
+    minimum_cache_ttl: "1m"
+    maximum_cache_ttl: "1h"

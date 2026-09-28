@@ -21,6 +21,7 @@
     >
       <a slot="brand" href="/app/">TAuth</a
       ><mpr-user
+        id="console-user"
         slot="aux"
         display-mode="avatar"
         logout-url="/app/"
@@ -40,7 +41,6 @@
         </p>
         <a href="/">Read the documentation</a>
       </section>
-      <button id="retry-workspace" hidden>Retry workspace</button>
       <section id="workspace" hidden aria-label="Tenant workspace">
         <aside class="tenant-rail" aria-label="Your tenants">
           <header>
@@ -68,7 +68,7 @@
               <h2 id="tenant-name" tabindex="-1"></h2>
               <code id="tenant-id"></code>
             </div>
-            <span id="tenant-state" class="badge"></span>
+            <p id="tenant-state" aria-describedby="next-step"></p>
           </header>
           <nav id="sections" aria-label="Tenant sections">
             <button data-section="overview">Overview</button
@@ -83,15 +83,11 @@
               <dl>
                 <dt>Active revision</dt>
                 <dd id="active-revision"></dd>
-                <dt>Saved draft revision</dt>
-                <dd id="draft-revision"></dd>
                 <dt>Providers</dt>
                 <dd id="providers"></dd>
               </dl>
               <p id="next-step"></p>
-              <button type="button" id="activate">
-                Activate saved configuration
-              </button>
+              <button type="button" id="resume" hidden>Resume tenant</button>
             </section>
             <section data-panel="domains" hidden>
               <h3>Application addresses</h3>
@@ -111,13 +107,6 @@
                 ><input id="local-development" type="checkbox" />Local
                 development with an explicit tenant header</label
               >
-              <h3>Domain ownership</h3>
-              <p>
-                Save your addresses, then publish and verify a TXT record for
-                each hostname.
-              </p>
-              <div id="proof-actions"></div>
-              <ul id="proofs"></ul>
             </section>
             <section data-panel="signin" hidden>
               <h3>Google sign-in</h3>
@@ -138,8 +127,7 @@
               <h3>Browser and backend</h3>
               <div id="integration-content">
                 <p id="integration-status">
-                  Activate the saved configuration to prepare integration
-                  settings.
+                  Set the customer API origin to prepare integration settings.
                 </p>
                 <div id="integration-ready" hidden>
                   <h4>Browser</h4>
@@ -209,26 +197,49 @@
             </section>
             <div id="save-actions">
               <p id="field-error" role="alert"></p>
-              <button type="submit" id="save">Save draft</button
-              ><button type="button" id="reload" hidden>
-                Reload current configuration
-              </button>
+              <p id="save-status" role="status">Changes save automatically.</p>
             </div>
           </form>
         </article>
       </section>
     </main>
+    <dialog id="admin-dialog" aria-labelledby="admin-title">
+      <h2 id="admin-title">Accounts</h2>
+      <p>
+        View registered accounts. Each workspace remains private to its owner.
+      </p>
+      <p id="accounts-status" role="status"></p>
+      <ul id="account-list"></ul>
+      <div class="actions"><button type="button" data-close>Close</button></div>
+    </dialog>
     <dialog id="tenant-dialog">
       <form id="tenant-form">
         <h2 id="dialog-title">Create tenant</h2>
         <label for="new-name">Name</label
-        ><input id="new-name" required maxlength="120" /><label
-          for="new-environment"
-          >Environment label</label
-        ><input id="new-environment" maxlength="40" />
+        ><input id="new-name" required maxlength="120" />
+        <fieldset id="new-authentication">
+          <label for="new-origin">Application origin</label>
+          <input
+            id="new-origin"
+            type="url"
+            required
+            placeholder="https://example.com"
+          />
+          <label for="new-google-client">Google OAuth client ID</label>
+          <input
+            id="new-google-client"
+            required
+            maxlength="256"
+            pattern="[A-Za-z0-9_\-]+\.apps\.googleusercontent\.com"
+          />
+        </fieldset>
+        <div id="rename-environment" hidden>
+          <label for="new-environment">Environment label</label>
+          <input id="new-environment" maxlength="40" />
+        </div>
         <p id="dialog-error" role="alert"></p>
         <div class="actions">
-          <button type="button" data-close>Cancel</button
+          <button type="button" data-close>Close</button
           ><button id="confirm-tenant">Create tenant</button>
         </div>
       </form>

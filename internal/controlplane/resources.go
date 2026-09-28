@@ -143,15 +143,28 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 	var suspended string
 	if len(parts) == 0 {
 		var body struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Environment string `json:"environment"`
+			ID                string `json:"id"`
+			Name              string `json:"name"`
+			Environment       string `json:"environment"`
+			ApplicationOrigin string `json:"application_origin"`
+			GoogleWebClientID string `json:"google_web_client_id"`
 		}
 		if err := decodeBody(data, &body); err != nil {
 			return result, nil, "", err
 		}
 		if strings.TrimSpace(body.Name) == "" || len(body.Name) > 120 || len(body.Environment) > 40 {
 			return result, nil, "", failure(422, "tenant_invalid")
+		}
+		if provisioningPrincipal(ctx) != nil && (body.ID == "" || body.ApplicationOrigin != "" || body.GoogleWebClientID != "") {
+			return result, nil, "", failure(422, "provisioning_creation_invalid")
+		}
+		if provisioningPrincipal(ctx) == nil {
+			if strings.TrimSpace(body.ApplicationOrigin) == "" || !googleWebClientPattern.MatchString(body.GoogleWebClientID) || len(body.GoogleWebClientID) > 256 {
+				return result, nil, "", failure(422, "tenant_configuration_required")
+			}
+			if _, err := canonicalAddress(body.ApplicationOrigin, true); err != nil {
+				return result, nil, "", err
+			}
 		}
 		var count int64
 		if err := store.db.Model(&tenantRecord{}).Where("owner_account_id = ?", owner).Count(&count).Error; err != nil {
@@ -192,13 +205,35 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 				return result, nil, "", err
 			}
 		}
-		if err := store.saveConfiguration(ctx.Request.Context(), initialConfiguration(row.ID, row.Name), 1, "owner-draft"); err != nil {
+		file := initialConfiguration(row.ID, row.Name)
+		if provisioningPrincipal(ctx) == nil {
+			file.TenantOrigins = []string{body.ApplicationOrigin}
+			file.GoogleWebClientID = body.GoogleWebClientID
+			address, _ := canonicalAddress(body.ApplicationOrigin, true)
+			local := isLocalHostname(address.Hostname())
+			if local {
+				file.AllowInsecureHTTP = true
+				file.RequireTenantHeader = true
+			}
+			if err := store.saveConfiguration(ctx.Request.Context(), file, 1, "owner-configuration"); err != nil {
+				return result, nil, "", err
+			}
+			record := configurationRecord{TenantID: row.ID, Revision: 1, LocalDevelopment: local}
+			if err := store.db.Model(&configurationRecord{}).Where("tenant_id = ? AND revision = ?", row.ID, 1).Update("local_development", local).Error; err != nil {
+				return result, nil, "", err
+			}
+			var err error
+			candidate, err = management.publishConfiguration(ctx, store, &row, file, record)
+			if err != nil {
+				return result, candidate, "", err
+			}
+		} else if err := store.saveConfiguration(ctx.Request.Context(), file, 1, "provisioning-pending"); err != nil {
 			return result, nil, "", err
 		}
 		if err := store.audit(ctx.Request.Context(), owner, row.ID, "tenant.created", "succeeded", 1); err != nil {
-			return result, nil, "", err
+			return result, candidate, "", err
 		}
-		return resourceResult{Status: 201, Body: row, Location: TenantsPath + "/" + row.ID, ETag: tenantETag(row.Version)}, nil, "", nil
+		return resourceResult{Status: 201, Body: row, Location: TenantsPath + "/" + row.ID, ETag: tenantETag(row.Version)}, candidate, "", nil
 	}
 	row, err := store.tenant(ctx.Request.Context(), owner, parts[0])
 	if err != nil {
@@ -310,16 +345,22 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 		record.Revision++
 		record.APIBaseURL = input.APIBaseURL
 		record.LocalDevelopment = input.LocalDevelopment
-		if err := store.saveConfiguration(ctx.Request.Context(), file, record.Revision, "owner-draft"); err != nil {
+		if err := store.saveConfiguration(ctx.Request.Context(), file, record.Revision, "owner-configuration"); err != nil {
 			return result, nil, "", err
 		}
 		if err := store.db.Model(&configurationRecord{}).Where("tenant_id = ? AND revision = ?", row.ID, record.Revision).Updates(map[string]any{"api_base_url": record.APIBaseURL, "local_development": record.LocalDevelopment}).Error; err != nil {
 			return result, nil, "", err
 		}
-		if err := store.audit(ctx.Request.Context(), owner, row.ID, "configuration.saved", "succeeded", record.Revision); err != nil {
-			return result, nil, "", err
+		if row.State != "suspended" {
+			candidate, err = management.publishConfiguration(ctx, store, &row, file, record)
+			if err != nil {
+				return result, candidate, "", err
+			}
 		}
-		return resourceResult{Status: 200, Body: publicConfiguration(file, record), ETag: configETag(record.Revision)}, nil, "", nil
+		if err := store.audit(ctx.Request.Context(), owner, row.ID, "configuration.saved", "succeeded", record.Revision); err != nil {
+			return result, candidate, "", err
+		}
+		return resourceResult{Status: 200, Body: publicConfiguration(file, record), ETag: configETag(record.Revision)}, candidate, "", nil
 	case "reauthentications", "key-exports":
 		result, err = management.integrationWrite(ctx, store, owner, parts, data)
 	case "origin-proofs":

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tyemirov/tauth/internal/tenants"
 	"gorm.io/gorm"
 )
 
@@ -138,7 +139,7 @@ func (management *Management) proofWrite(ctx *gin.Context, store *Store, tenant 
 	}
 	return resourceResult{Status: 201, Body: proof, Location: location}, nil
 }
-func (management *Management) checkOrigins(ctx context.Context, store *Store, tenant tenantRecord, revision int64, origins []string, api string, local bool) error {
+func (management *Management) checkOrigins(ctx context.Context, store *Store, tenant tenantRecord, origins []string, api string, local bool) error {
 	console, err := store.Console(ctx)
 	if err != nil {
 		return err
@@ -157,7 +158,7 @@ func (management *Management) checkOrigins(ctx context.Context, store *Store, te
 		}
 		for _, reserved := range console.TenantOrigins {
 			address, _ := url.Parse(reserved)
-			if parsed.Hostname() == address.Hostname() {
+			if parsed.Hostname() == address.Hostname() && (!isLocalHostname(parsed.Hostname()) || origin == reserved) {
 				return failure(409, "console_origin_reserved")
 			}
 		}
@@ -186,20 +187,7 @@ func (management *Management) checkOrigins(ctx context.Context, store *Store, te
 				return failure(409, "origin_conflict")
 			}
 		}
-		var imported int64
-		if err := store.db.Table("tenant_origins").Where("tenant_id = ? AND origin = ? AND provenance = ?", tenant.ID, origin, "operator-approved-import").Count(&imported).Error; err != nil {
-			return err
-		}
-		if imported > 0 {
-			continue
-		}
-		var proofs int64
-		if err := store.db.Model(&originProof{}).Where("tenant_id = ? AND revision = ? AND hostname = ? AND state = ? AND expires_at > ?", tenant.ID, revision, parsed.Hostname(), "verified", management.now()).Count(&proofs).Error; err != nil {
-			return err
-		}
-		if proofs == 0 {
-			return failure(422, "origin_proof_required")
-		}
+
 	}
 	return nil
 }
@@ -228,8 +216,8 @@ func (management *Management) activate(ctx *gin.Context, store *Store, tenant te
 	}
 	record := activation{ID: newID(), TenantID: tenant.ID, Revision: row.Revision, State: "succeeded", CreatedAt: management.now().UTC()}
 	var candidate PreparedRuntime
-	validation := management.checkOrigins(ctx.Request.Context(), store, tenant, row.Revision, file.TenantOrigins, row.APIBaseURL, row.LocalDevelopment)
-	if len(file.TenantOrigins) == 0 || row.APIBaseURL == "" && !row.OperatorIntegration {
+	validation := management.checkOrigins(ctx.Request.Context(), store, tenant, file.TenantOrigins, row.APIBaseURL, row.LocalDevelopment)
+	if len(file.TenantOrigins) == 0 {
 		validation = failure(422, "configuration_incomplete")
 	}
 	if validation == nil {
@@ -270,4 +258,36 @@ func (management *Management) activate(ctx *gin.Context, store *Store, tenant te
 		body = gin.H{"code": record.ErrorCode, "message": strings.ReplaceAll(record.ErrorCode, "_", " "), "details": gin.H{"activation": record}, "request_id": newID()}
 	}
 	return resourceResult{Status: status, Body: body, Location: TenantsPath + "/" + tenant.ID + "/activations/" + record.ID}, candidate, nil
+}
+
+func isLocalHostname(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// publishConfiguration prepares the runtime inside the caller's transaction.
+func (management *Management) publishConfiguration(ctx *gin.Context, store *Store, tenant *tenantRecord, file tenants.FileTenant, record configurationRecord) (PreparedRuntime, error) {
+	if tenant.SuspensionPending {
+		return nil, failure(409, "suspension_incomplete")
+	}
+	if len(file.TenantOrigins) == 0 {
+		return nil, failure(422, "configuration_incomplete")
+	}
+	if err := management.checkOrigins(ctx.Request.Context(), store, *tenant, file.TenantOrigins, record.APIBaseURL, record.LocalDevelopment); err != nil {
+		return nil, err
+	}
+	tenant.State = "active"
+	tenant.ActiveRevision = &record.Revision
+	tenant.Version++
+	if err := store.db.Model(&tenantRecord{}).Where("id = ?", tenant.ID).Updates(map[string]any{"state": tenant.State, "active_revision": record.Revision, "version": tenant.Version}).Error; err != nil {
+		return nil, err
+	}
+	config, err := store.RuntimeTenants(ctx.Request.Context())
+	if err != nil {
+		return nil, failure(422, "runtime_invalid")
+	}
+	candidate, err := management.build(ctx.Request.Context(), config)
+	if err != nil {
+		return candidate, failure(422, "runtime_invalid")
+	}
+	return candidate, nil
 }

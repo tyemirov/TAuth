@@ -27,7 +27,7 @@ The owner account ID remains the same after an email change.
 5. Supply the persistent database URL and encryption key through the service configuration.
 6. Run the bootstrap command.
 7. Start TAuth with the same service configuration.
-8. Authenticate `vtyemirov@gmail.com` through Google in the reserved console tenant.
+8. Authenticate through Google in the reserved console tenant.
 9. Send `PUT /api/management/owner-account` with the console session cookie.
 10. Record the returned owner account ID for the later import.
 
@@ -68,15 +68,72 @@ A missing bootstrap record or an incorrect encryption key prevents console start
 The bootstrap command does not replace existing console configuration.
 Console administration remains an operator operation.
 
+## Console Google client replacement
+
+Use `console-google-client-replace` to correct the console Google client ID.
+The command changes only that field in the console configuration.
+It encrypts the updated configuration and updates its digest.
+It keeps console keys, owner bindings, application tenants, and sessions.
+Existing sessions keep their original expiry. New Google login uses only the replacement client after restart.
+The command requires an exact match with the current client ID.
+An unchanged replacement or stale expected value fails without a configuration change.
+
+1. Add the console origin to the replacement Google Web client's authorized JavaScript origins.
+2. Stop all TAuth service instances that use this database.
+3. Back up the database and its encryption-key reference.
+4. Run the command with the current and replacement client IDs.
+5. Update the private console bootstrap input with the replacement client ID.
+6. Restart TAuth with the same database and encryption key.
+7. Verify the client ID at `/.well-known/tauth-console`.
+8. Complete Google login through the tenant console.
+
+```sh
+tauth --config service.yaml console-google-client-replace \
+  --expected-client-id "$CURRENT_GOOGLE_CLIENT_ID" \
+  --client-id "$NEW_GOOGLE_CLIENT_ID"
+```
+
+The command prints the console tenant ID and current Google client ID as JSON.
+If the command fails, keep the service stopped and correct the reported input or database error.
+If the receipt is lost, inspect `/.well-known/tauth-console` after restart before another replacement.
+The original bootstrap input fails after replacement. An identical bootstrap with the new client ID succeeds.
+
+For the local Compose stack, build the current source with `make up` before the procedure.
+Stop the API with `docker compose -f local/compose.yml stop tauth`.
+Keep the database volume. Run the replacement command through the Compose service:
+
+```sh
+docker compose -f local/compose.yml run --rm --no-deps tauth \
+  --config /config/service.yaml console-google-client-replace \
+  --expected-client-id "$CURRENT_GOOGLE_CLIENT_ID" \
+  --client-id "$NEW_GOOGLE_CLIENT_ID"
+```
+
+Set `TAUTH_CONSOLE_GOOGLE_CLIENT_ID` in `.cache/tauth-local/runtime.env` to the new client ID.
+Keep every other value in that file. Start the local stack with `make up`.
+The API bootstrap address is `http://localhost:8082/.well-known/tauth-console`.
+The console address is `http://localhost:8081/app/`.
+
 ## Owner resources
 
 Send the exact console `Origin` on owner requests.
 For `PUT`, also send `X-TAuth-CSRF: 1`.
 The endpoint accepts the reserved console session cookie only.
-The first owner requires the verified Google email `vtyemirov@gmail.com`.
-After enrollment, the stable subject binding controls access.
-A different subject cannot claim the enrollment email.
-Other verified console identities can then create separate owner accounts.
+Every verified console identity can create an owner account, regardless of login order or email spelling.
+The stable console subject binding controls access. Email matches do not merge accounts.
+No owner account has special tenant functionality.
+
+Configure `admin.emails` in service YAML to grant access to `GET /api/management/accounts`.
+Use the verified account email. Configuration can list approved email spellings explicitly.
+The service does not infer aliases. An empty list grants no administrator access.
+The account directory shows registered owners and supports `limit` and `cursor`.
+Ordinary users and provisioning credentials cannot read the directory.
+Administrators retain the same tenant ownership checks as all other users.
+
+```yaml
+admin:
+  emails: [administrator@example.com]
+```
 
 `PUT /api/management/owner-account` returns `201` for creation and `200` for an identical retry.
 `GET /api/management/owner-account` returns the current owner or `404` before provision.
@@ -92,51 +149,96 @@ Record live Google qualification separately from software acceptance.
 
 Production import, Gateway cutover, publication, and deployment remain separate operations under I212 and F011 through F013.
 
-## Tenant import and database cutover
+## Deployment data migration
 
-Normal service configuration contains service settings and the optional OAuth issuer configuration.
+Tenant migration is a one-off deployment routine outside the application.
+The service has no import command, migration owner, first-owner rule, or personal account rule.
+The separate `deployment/tenantownership` executable uses GORM transactions and its Migrator API.
+It is not included in the TAuth service image or invoked at service startup.
+GORM `AutoMigrate` creates the receipt schema. The deployment routine explicitly performs the data writes.
+
 The runtime rejects the `tenants` YAML field, including an empty array.
-The database contains every active application tenant and the reserved console configuration.
-Tenant environment inputs have no effect after import.
-The database and encryption key are required service inputs.
+Its database contains every active application tenant and the reserved console configuration.
+Tenant environment inputs have no effect after migration.
+The database and encryption key remain required service inputs.
 
-1. Complete console bootstrap and initial owner enrollment.
-2. Stop configuration changes in the console and Gateway.
-3. Back up the database and its encryption key.
-4. Save the complete current tenant source in a private migration file.
-5. Supply the environment inputs that the migration file references.
-6. Run the inspection command below.
-7. Compare the tenant IDs and provider counts with the operator inventory.
-8. Run the import with one stable import ID.
-9. Save the returned receipt with the migration record.
-10. Remove tenant YAML and tenant environment inputs from the service configuration.
-11. Restart the service with its database configuration.
-12. Run doctor and preflight against the service configuration.
-13. Verify existing application login, refresh, logout, and protected backend requests.
+1. Inventory every production tenant from the frozen effective configuration.
+2. Back up the production database and its encryption-key reference.
+3. Initialize the current schema and console configuration against a copy of that database.
+4. Enroll the destination owner through verified Google login and record its stable owner ID.
+5. Stop all TAuth writers and Gateway provisioning during the migration.
+6. Supply the frozen source and its referenced environment inputs to the separate migration executable.
+7. Inspect the source and compare all tenant IDs with the production inventory.
+8. Run the migration against the deployment database with the recorded owner ID.
+9. Save the receipt and compare tenant settings, owners, users, identities, and sessions with the backup.
+10. Start the database-only service and verify application login, refresh, logout, and protected requests.
+11. Resume Gateway provisioning with the matching F011 client.
+12. Remove the deployment migration routine and private source after all target databases complete the migration.
 
 ```sh
-tauth --config service.yaml tenant-import --source tenants.import.yaml --inspect
-tauth --config service.yaml tenant-import --source tenants.import.yaml --import-id initial-tenants
-tauth doctor service.yaml --json
-tauth --config service.yaml preflight
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID"
 ```
 
-Inspection reports tenant IDs, provider names, and origin counts. It does not write tenant records or report secret values.
-The importer uses one transaction for all tenants and its receipt.
-Each imported tenant belongs to the enrolled initial owner.
-The importer preserves effective keys, cookies, providers, policies, and lifetimes.
+For sources with different environment inputs, freeze each source separately:
+
+```bash
+make build-deployment-migration
+.cache/tenant-ownership freeze-source --source tenants.import.yaml > private-snapshot.json
+```
+
+The snapshot contains credentials. Keep it outside version control and do not print it in logs.
+Supply each source's declared environment when you freeze it.
+A defined empty optional value is valid.
+An undefined referenced variable is an error.
+The snapshot preserves literal dollar signs without a second environment substitution.
+Use `--snapshot private-snapshot.json` instead of `--source` to read this format.
+
+An import must produce active tenants with a valid combined runtime configuration.
+Correct overlapping cookie names before import.
+Require explicit tenant IDs when application origins overlap.
+The importer rejects invalid configurations instead of storing inactive tenants.
+
+B098 repairs the previously imported inactive definitions through the separate deployment executable.
+The repair accepts a corrected JSON snapshot, the original import ID, a repair ID, and the existing owner ID.
+It permits cookie-name changes and a stricter tenant-header requirement only.
+It rejects changed keys, providers, origins, ownership, and previously edited tenants.
+The transaction validates all runtime settings before it commits revision 2 for each selected tenant.
+A repeated invocation with the same inputs returns the recorded receipt.
+The application runtime has no import-repair behavior.
+
+```sh
+make deployment-migration MIGRATION_ARGS="--config private-service.yaml repair-import --snapshot private-corrected.json --import-id original-import --repair-id corrected-import --owner-id OWNER_ID"
+```
+
+Stop database writers and make a backup before this operation.
+Rehearse against a database copy before the actual repair.
+Compare the settings and unrelated tables after the transaction.
+Restart the service and verify each tenant through its public authentication routes.
+See the [local migration record](local-tenant-migration-2026-09-28.md) for the local result.
+
+Run the migration where the deployment database is accessible, with all writers stopped.
+For a remote deployment, run `make build-deployment-migration` with the target `GOOS` and `GOARCH`.
+Transfer `.cache/tenant-ownership` as a separate deployment artifact.
+The installed Gateway has no application data-migration hook. Run this step in the controlled cutover procedure before service acceptance.
+An ordinary `make deploy` does not execute it. Do not declare the cutover complete without its receipt and data comparison.
+
+The destination is an ordinary owner account. The migration does not grant administrator access.
+Select the operator's verified owner ID for this production transfer. Do not encode their email in application behavior.
+The transaction preserves effective keys, cookies, providers, policies, and lifetimes.
 It does not change application accounts, identities, refresh sessions, provider credentials, or OAuth grants.
-Imported active origins record operator-approved import provenance.
+All tenant writes and the completion receipt commit together.
+An identical retry returns the receipt. A changed source, destination, or conflicting tenant ID fails without partial tenant writes.
+The receipt stores a keyed source digest and contains no secret values.
 
-An identical retry returns the stored receipt.
-A changed source, conflicting tenant ID, or conflicting import ID fails without partial tenant writes.
-The receipt uses a keyed source digest and contains no secret values.
-Doctor and preflight read the active database configuration without schema changes.
+The migration also removes the obsolete `console_bootstraps.initial_owner_id` field through GORM.
+For an installation with no application tenants to migrate, run only the schema cleanup:
 
-The production cutover requires the matching Gateway release from F011.
-Do not deploy the database-only runtime with a Gateway client that still writes runtime tenant YAML.
-After verified production migration, remove the temporary importer and its source inputs through a separate cleanup change.
-Record that cleanup, the production import, publication, deployment, and live Google qualification separately.
+```sh
+make deployment-migration MIGRATION_ARGS="--config service.yaml cleanup-schema"
+```
+
+Production migration, publication, deployment, and live-provider qualification remain separate acceptance records.
 
 ## Tenant management
 
@@ -146,7 +248,11 @@ All cookie requests require the exact console Origin. Mutations also require `X-
 Send JSON with `Content-Type: application/json`.
 Responses use `Cache-Control: no-store`. CORS exposes `ETag` and `Location`.
 
-Create a draft with a name and optional environment label.
+Create an active tenant with `name`, `application_origin`, and `google_web_client_id`.
+The service generates the tenant ID, keys, cookie names, and session lifetimes.
+Creation validates and publishes the complete configuration in one transaction.
+A failed creation leaves no tenant record.
+The optional customer API origin supports integration instructions and does not control creation.
 Use one `Idempotency-Key` for each POST operation. Keep the same body and precondition on a retry.
 A changed retry returns `409`. Successful creation returns `201` and a resource Location.
 An owner can create up to 100 tenants. The service permits up to 60 recorded mutations per owner per minute.
@@ -160,27 +266,20 @@ Concurrent creation can change later pages. Each page remains owner scoped.
 Read the configuration ETag before each configuration PUT or activation POST.
 Read the tenant ETag before a metadata PATCH or suspension PATCH.
 A missing precondition returns `428`. A stale precondition returns `412`.
-Configuration PUT creates an immutable draft revision.
+Configuration PUT creates an immutable revision and applies it immediately to a tenant that is not suspended.
 It preserves imported provider and account fields outside the editable Google, origin, and lifetime settings.
-The active revision remains in use until activation succeeds.
+A failed configuration update preserves the previous revision and runtime.
+Edits to a suspended tenant do not resume authentication.
 Session lifetimes range from one minute through one hour. Refresh lifetimes cannot exceed 90 days.
 
-### Origin verification
+### Application origins
 
 Production addresses require HTTPS and DNS hostnames.
-Create an origin proof for each frontend and API hostname in the saved revision.
-Publish its exact TXT name and value in DNS.
-Create a verification under `/origin-proofs/{id}/verifications` after DNS publication.
-The service performs a DNS lookup with a five-second deadline.
-Each proof expires after 15 minutes and applies to one tenant and revision.
-A tenant can have up to 20 unexpired challenges.
-Read the proof or verification Location to obtain its current result.
-
-Activation requires verified proofs for new production hostnames.
-Imported origins retain their operator-approved provenance.
+DNS ownership verification is not a creation or activation prerequisite.
+The optional origin-proof API records DNS evidence without controlling activation.
 The service rejects reserved console hostnames and hostnames that another active tenant uses.
-Local development permits localhost, `127.0.0.1`, and `::1` without DNS proof.
-Enable the explicit local development setting and the service tenant-header setting.
+Local development permits localhost, `127.0.0.1`, and `::1` with HTTP or HTTPS.
+Creation detects these local addresses and enables the tenant-header setting.
 Each local request must send the exact tenant ID in `X-TAuth-Tenant`.
 New tenants have distinct session and refresh cookie names.
 
@@ -254,7 +353,7 @@ Never place the token in a manifest, public output, URL, or browser configuratio
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
 A machine request with the console shape or a null `provisioning` value returns `422`.
 The API validates the contribution through the same TAuth native configuration parser used by the renderer.
-Activation uses the shared management activation service and origin proofs.
+Activation uses the shared management activation service without a DNS ownership prerequisite.
 An identical generation and contribution retain the configuration revision.
 A changed contribution at the same generation fails. A console edit causes a revision conflict.
 Gateway cannot overwrite that edit or reactivate a suspended tenant.
@@ -270,11 +369,11 @@ Use this ordered production cutover:
 
 1. Record the released TAuth and Gateway versions, database backup, service encryption key reference, and initial console inputs.
 2. Stop Gateway tenant changes. Preserve each existing validator key, cookie setting, and private output reference.
-3. Complete console bootstrap, initial owner enrollment, and the bounded import described above.
+3. Complete console bootstrap, destination owner enrollment, and the bounded import described above.
 4. Verify imported ownership, provider settings, cookies, refresh behavior, and downstream validator values.
 5. Issue the scoped Gateway credential and set its private operator inputs.
 6. Install the recorded Gateway release. Run one selected tenant convergence and repeat it to verify the stable revision.
-7. Verify DNS proofs for new origins. Resolve any concurrent console revision conflict through the owner before another request.
+7. Resolve any concurrent console revision conflict through the owner before another request.
 8. Resume tenant changes. Record production import, publication, deployment, and live-provider qualification separately.
 
 The renderer now emits service settings with the database URL and encryption-key input.
@@ -295,18 +394,46 @@ Change the public runtime file before artifact publication when the API hostname
 Never put a session key or provisioning credential in this file.
 
 The workspace uses the pinned MPR-UI account controls, footer, and theme controls.
-The initial owner sees imported tenants after Google sign-in.
-Another owner starts with an empty collection and can create a named draft.
+The destination owner sees imported tenants after Google sign-in.
+Another owner starts with an empty collection and can create a tenant from the three required fields.
+
+Tenant navigation shows one label per tenant.
+The label is the display name when present, or the tenant ID when the display name is empty.
+The mobile selector and detail heading use the same label.
+The detail view also shows the tenant ID.
+
+The workspace does not show a notification after tenant data loads.
+The workspace shows authentication status as text.
+A tenant with no active configuration cannot accept sign-ins, even when all required inputs are present.
+A suspended tenant requires Resume tenant before authentication can continue.
+
 Tenant and section selection use the URL fragment, which works on GitHub Pages without a route rewrite.
 The service authorizes each selected tenant before its details appear.
 
-Save changes in Domains, Sign-in methods, or Settings to create a draft revision.
+Valid edits in Domains, Sign-in methods, or Settings apply automatically unless the tenant is suspended.
+Rename and environment edits also persist automatically.
+The workspace shows pending, saved, validation, and failure states.
+Transient failures retry without discarding edits.
+The workspace updates on a timer, on reconnect, and when the page becomes visible.
+It has no manual save, refresh, or reload buttons.
+
+The avatar menu contains Admin for configured administrators.
+That menu item opens the separate account-directory modal.
+The modal loads its account list automatically. Escape or Close returns focus to the avatar.
+Administrator access does not change tenant ownership or grant access to another workspace.
+
 The Google form lists the exact Authorized JavaScript origins.
 Other imported provider settings remain in the stored configuration.
-Publish DNS TXT proofs from Domains. Verify each proof before activation.
-Activate the saved configuration from Overview.
+Creation requires a name, application origin, and Google OAuth client ID.
+The Create button stays disabled until all three fields are valid.
+A successful creation makes the tenant active without another action.
+Overview contains Resume tenant only for suspended tenants.
 Settings supports rename, bounded session lifetimes, and confirmed suspension.
-A revision conflict preserves the form values and requires an explicit reload.
+
+Background updates preserve pending edits.
+Changes to separate fields merge with the current revision.
+A conflict on the same field preserves the local value and asks the owner to edit that value.
+The corrected value then saves automatically.
 Account and tenant changes cancel pending requests and clear protected page state.
 
 `make test-console-browser` drives Chromium against the real TLS service and test database.
@@ -316,7 +443,7 @@ Live Google qualification and Pages publication remain separate operations.
 
 ## Application integration and key export
 
-Integration reads the active revision. A newer draft does not change the public snippets.
+Integration reads the active revision. Accepted configuration edits update the public snippets automatically.
 The generated browser page uses `https://tauth.mprlab.com/tauth.js`, an explicit tenant ID, and the customer API origin.
 The [customer application example](../examples/tenant-app/README.md) supplies the complete proxy and validator instructions.
 The browser and customer API must share a cookie site and scheme.
@@ -373,7 +500,7 @@ The checker consumes the returned nonce through the tenant nonce store.
 It records the tenant, revision, time, state, and bounded evidence codes.
 It does not store response bodies, cookies, DNS addresses, or secrets.
 A retry returns the same result without another probe.
-Integration shows the latest result for the active revision and identifies saved changes that still require activation.
+Integration shows the latest result for the active revision.
 A new active revision requires a new check.
 
 A successful setup check does not prove Google sign-in or protected application authorization.
@@ -399,7 +526,7 @@ The audit operation records the owner, tenant, and new revision without the key.
 9. Install the same base64 value as `TAUTH_SESSION_KEY_BASE64` in every backend instance.
 10. Replace all old validator instances before you resume protected traffic.
 11. Restart TAuth and sign in to the console.
-12. Verify the required DNS proofs for the new revision, then activate it.
+12. Resume the tenant with the new revision.
 13. Confirm that an old session token fails validation and a new Google login reaches the protected API.
 14. Run a new setup check and resume application traffic.
 15. Keep Gateway convergence paused for this tenant. Its earlier contribution revision must not overwrite the operator change.
@@ -441,7 +568,7 @@ Record these inputs before production work:
 | Website artifact | Image digest, Pages repository, `gh-pages` publication, and selected release marker. |
 | Console Google client | Client ID, exact JavaScript origin, and provider project reference. |
 | Service | Database URL reference, database backup, encryption-key reference, API origin, and one runtime instance. |
-| Initial owner | Verified Google identity, stable console subject, and resulting owner account ID. |
+| Destination owner | Verified Google identity, stable console subject, and resulting owner account ID. |
 | Import | Frozen source inventory, import ID, receipt, tenant count, and effective validator references. |
 | Gateway credential | Secret-store reference, owner, operations, and tenant grants. |
 | Customer acceptance | Frontend origin, API origin, Google client, tenant ID, and backend release. |
@@ -450,8 +577,8 @@ Use this delivery order:
 
 1. Record the released Gateway version with F017 and the released TAuth version with F008.
 2. Freeze tenant changes and back up the active database and private configuration references.
-3. Complete the console bootstrap and verify the initial owner's live Google identity.
-4. Inspect and import the complete frozen tenant collection through the bounded import procedure.
+3. Complete the console bootstrap and verify the destination owner's live Google identity.
+4. Inspect and import the complete frozen tenant collection through the separate deployment migration procedure.
 5. Compare the import receipt, tenant count, provider configuration, cookies, and effective validator keys with the inventory.
 6. Install the database-only service configuration and restart the single TAuth instance.
 7. Complete doctor, preflight, existing application login, refresh, and protected-request checks.
@@ -459,14 +586,33 @@ Use this delivery order:
 9. Publish the Pages artifact through the declared `github_pages` resource and `gh-pages` branch.
 10. Read the public `/.mprlab-release.json` marker and compare it with the selected website release.
 11. Open `/app/` and verify the public API origin and console bootstrap response.
-12. Complete live Google login as the initial owner and compare the imported tenant collection with the receipt.
-13. Use another owner to create, configure, prove, and activate an isolated acceptance tenant.
-14. Install its customer application and complete Google login, protected access, refresh, and logout through the public origins.
-15. Confirm the cookie attributes, expected tenant check, denied origin response, and setup-check evidence.
-16. Record service deployment, website publication, import, and live Google qualification as separate outcomes.
-17. Resume tenant changes after all selected production checks pass.
-18. Remove the bounded importer through the separately reviewed cleanup change after verified production migration.
+12. Complete live Google login as the destination owner and compare the imported tenant collection with the receipt.
+13. Use another owner to create an isolated acceptance tenant from the three required fields.
+14. Verify that the new tenant accepts authentication immediately.
+15. Install its customer application and complete Google login, protected access, refresh, and logout through the public origins.
+16. Confirm the cookie attributes, expected tenant check, denied origin response, and setup-check evidence.
+17. Record service deployment, website publication, import, and live Google qualification as separate outcomes.
+18. Resume tenant changes after all selected production checks pass.
+19. Remove the bounded importer through the separately reviewed cleanup change after verified production migration.
 
 A failed check leaves the associated production record incomplete.
 Keep tenant changes frozen if the database cutover or Gateway verification fails.
 Correct the current contract before retry. Do not restore runtime tenant YAML as a second configuration authority.
+
+## September 27, 2026 local correction record
+
+B093 removes the personal-email and first-owner enrollment rules.
+F016 adds the configured administrator account directory and keeps every workspace owner-scoped.
+I213 moves migration code outside the application into a separate deployment executable.
+
+The local GORM schema cleanup removed the obsolete first-owner column and foreign key.
+A comparison of all 33 database tables found no changes to other stored values.
+The local database contains one existing console account and no application tenants at this checkpoint.
+The updated local stack is active at `http://localhost:8081/app/`.
+Its console uses the operator-selected Google client ID `212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com`.
+The administrator email list contains the two spellings approved by the operator.
+
+Focused HTTP, deployment migration, Chromium, and full `make ci` checks passed.
+The operator previously confirmed live Google authentication. A new live session after this update is not part of automated acceptance.
+The production tenant transfer, production administrator configuration, release, publication, and deployment have not run in this correction.
+Use the deployment data migration procedure above at production cutover. Record the destination owner ID and all production tenant IDs in its receipt.

@@ -50,7 +50,7 @@ func TestConsoleCORSChangesRemainRestartSafe(t *testing.T) {
 						}
 						owner.request("PUT", controlplane.OwnerPath, nil, status)
 						if stage == 0 {
-							tenant, headers := owner.request("POST", controlplane.TenantsPath, map[string]any{"name": "CORS lifecycle"}, 201, "Idempotency-Key", "cors-app")
+							tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("CORS lifecycle"), 201, "Idempotency-Key", "cors-app")
 							path = headers.Get("Location")
 							id = tenant["id"].(string)
 							_, headers = owner.request("GET", path+"/configuration", nil, 200)
@@ -59,15 +59,12 @@ func TestConsoleCORSChangesRemainRestartSafe(t *testing.T) {
 						}
 						if stage == 1 || stage == 3 {
 							if change == "origin" {
-								saved, headers := owner.request("GET", path+"/configuration", nil, 200)
-								if stage == 1 {
-									saved, headers = owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "app-client", "frontend_origins": []string{nextOrigin}, "api_base_url": "http://localhost:9694", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}, 200, "If-Match", headers.Get("ETag"))
-								}
-								status, key := 422, "rejected-origin"
+								_, headers := owner.request("GET", path+"/configuration", nil, 200)
+								status := 422
 								if stage == 3 {
-									status, key = 201, "corrected-origin"
+									status = 200
 								}
-								owner.request("POST", path+"/activations", map[string]any{"revision": saved["revision"]}, status, "If-Match", headers.Get("ETag"), "Idempotency-Key", key)
+								owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "app-client", "frontend_origins": []string{nextOrigin}, "api_base_url": "http://localhost:9694", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}, status, "If-Match", headers.Get("ETag"))
 							} else {
 								_, headers := owner.request("GET", path, nil, 200)
 								status := 422

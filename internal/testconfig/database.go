@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tyemirov/tauth/deployment/migrations"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/controlplane"
 	"github.com/tyemirov/tauth/internal/tenants"
@@ -35,7 +36,8 @@ func Prepare(t testing.TB, source appconfig.ApplicationConfig) *appconfig.Applic
 	if err := store.Bootstrap(context.Background(), console); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.Provision(context.Background(), appconfig.DefaultJWTIssuer, "fixture-owner", controlplane.InitialOwnerEmail, "Fixture owner"); err != nil {
+	owner, _, err := store.Provision(context.Background(), appconfig.DefaultJWTIssuer, "fixture-owner", "fixture@example.com", "Fixture owner")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(source.Tenants) > 0 {
@@ -43,7 +45,7 @@ func Prepare(t testing.TB, source appconfig.ApplicationConfig) *appconfig.Applic
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.Import(context.Background(), "fixture-import", document); err != nil {
+		if _, err := migrations.Apply(context.Background(), source.Server.DatabaseURL, source.Server.TenantEncryptionKey, "fixture-import", owner.ID, document); err != nil {
 			t.Fatal(err)
 		}
 	}

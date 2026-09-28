@@ -59,7 +59,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newRenderDeploymentConfigCommand())
 	rootCmd.AddCommand(newValidateServiceConfigCommand())
 	rootCmd.AddCommand(newConsoleBootstrapCommand())
-	rootCmd.AddCommand(newTenantImportCommand())
+	rootCmd.AddCommand(newConsoleGoogleClientReplaceCommand())
 	rootCmd.AddCommand(newTenantKeyReplaceCommand())
 
 	return rootCmd

@@ -228,19 +228,21 @@ The service YAML contains server settings and optional OAuth issuer settings.
 It does not accept a `tenants` field.
 
 Use [the console operations runbook](docs/tenant-console-operations.md) to initialize the database and reserved console tenant.
-Authenticate the initial owner through Google before importing application tenants.
-The initial enrollment email is `vtyemirov@gmail.com`.
-Later authorization uses the stable console subject and owner account ID.
+Every verified Google user can enroll and create an owner account.
+Authorization uses the stable console subject and owner account ID.
+Configured administrators can view the account directory. Their tenant workspaces remain owner-scoped.
 
-### 2. Import application configuration
+### 2. Migrate existing application configuration
 
-Use the bounded import command for existing effective tenant configuration.
+Run the separate deployment migration for existing effective tenant configuration.
+The TAuth service does not expose an import command or select a migration owner.
+For local source selection, frozen snapshots, and import repair, follow the [deployment migration procedure](docs/tenant-console-operations.md#deployment-data-migration).
 The `tenants.import.yaml` examples describe migration input.
 The importer preserves existing tenant IDs, keys, cookies, providers, policies, users, and sessions.
 
 ```sh
-tauth --config service.yaml tenant-import --source tenants.import.yaml --inspect
-tauth --config service.yaml tenant-import --source tenants.import.yaml --import-id initial-tenants
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID"
 ```
 
 An identical retry returns the same receipt. A changed source fails without partial writes.
@@ -281,8 +283,11 @@ Later starts use the same keys and database. Keep the key file with the database
 
 The local stack uses the same public Google client ID as the Ledger demo.
 For another Google client, set `TAUTH_LOCAL_GOOGLE_CLIENT_ID` before the first `make up`.
+After the first start, use the [console client replacement procedure](docs/tenant-console-operations.md#console-google-client-replacement).
+The database retains the console client ID. A later environment override does not change that ID.
 Authorize `http://localhost:8081` in that client's Google configuration before login.
-The initial owner enrollment uses `vtyemirov@gmail.com` under the current console contract.
+Every verified Google user can enroll, regardless of login order.
+The local `admin.emails` configuration controls access to the account directory.
 The console uses Google login only. Its required email configuration is inactive.
 The local stack does not start Pinguin.
 
@@ -294,7 +299,7 @@ The console accepts HTTP API origins only for `localhost`, `127.0.0.1`, and `[::
 
 The local Compose examples mount service configuration and a separate tenant import source.
 Complete console bootstrap with `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
-Start the service, enroll the initial owner, and then run the tenant import command through the same Compose service.
+Enroll the destination owner through the console. Use the separate deployment migration during the database cutover.
 Use `docker compose up --build` for tests of current source.
 
 The production cutover requires the matching Gateway provisioning release from F011.
@@ -305,9 +310,11 @@ Integration supplies public settings from the active revision, a complete browse
 Use the [customer application example](examples/tenant-app/README.md) for the Google cookie integration and explicit backend tenant authorization.
 See the [operations guide](docs/tenant-console-operations.md) for key replacement and the ordered production delivery record.
 
-Use Google sign-in to select imported tenants or create a draft.
+Use Google sign-in to select imported tenants or create an application tenant.
+Creation requires a name, application origin, and Google OAuth client ID.
+The service creates an active tenant in one transaction.
 The Domains, Sign-in methods, and Settings forms save configuration revisions.
-Verify domain ownership and activate the saved revision from Overview.
+Valid configuration edits apply automatically. DNS ownership verification is not required.
 See the [console operations guide](docs/tenant-console-operations.md) for bootstrap and publication inputs.
 
 ### 4. Integrate the browser helper from the product site
@@ -428,7 +435,7 @@ Use the new `avatar_url` field to render signed-in UI chrome in your frontend.
 ## Multi-tenant configuration
 
 The database owns runtime tenant configuration. The following YAML describes the bounded import source.
-Use this source with `tenant-import`, not normal service startup.
+Use this source with the separate deployment migration. Normal service startup does not read tenant YAML.
 
 ```yaml
 tenants:
