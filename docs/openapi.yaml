@@ -276,12 +276,106 @@ paths:
               schema: {$ref: "#/components/schemas/OriginVerification"}
         default:
           $ref: "#/components/responses/ManagementFailure"
+  /api/management/apps:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+    get:
+      operationId: listApps
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 128}
+      security: [{ConsoleSession: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Individual App reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AppPage"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    post:
+      operationId: createApp
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AppCreate"}
+      responses:
+        "201":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Individual App reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/App"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+  /api/management/apps/{app_id}:
+    parameters:
+      - {$ref: "#/components/parameters/ConsoleOrigin"}
+      - name: app_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: readApp
+      security: [{ConsoleSession: []}]
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Individual App reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/App"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
+    patch:
+      operationId: updateApp
+      security: [{ConsoleSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/ConsoleCSRF"}
+        - {$ref: "#/components/parameters/RevisionMatch"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AppPatch"}
+      responses:
+        "200":
+          description: The resource or cursor page. Responses have Cache-Control no-store. Creation includes Location. Individual App reads include ETag.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string}}
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/App"}
+        default:
+          $ref: "#/components/responses/ManagementFailure"
   /api/management/tenants:
     parameters:
       - {$ref: "#/components/parameters/ConsoleOrigin"}
     get:
       operationId: listTenants
       parameters:
+        - {name: app_id, in: query, schema: {type: string}}
         - name: limit
           in: query
           schema: {type: integer, minimum: 1, maximum: 100, default: 50}
@@ -1298,16 +1392,18 @@ components:
     ProvisioningCredentialInput:
       type: object
       additionalProperties: false
-      required: [name, operations, tenant_ids, allow_create]
+      required: [app_id, name, operations, tenant_ids, allow_create]
       properties:
+        app_id: {type: string, minLength: 1}
         name: {type: string, minLength: 1, maxLength: 120}
         operations: {type: array, uniqueItems: true, items: {type: string, enum: [read, configure, activate, suspend, proofs]}}
         tenant_ids: {type: array, uniqueItems: true, maxItems: 100, items: {type: string}}
         allow_create: {type: boolean}
     ProvisioningCredential:
       type: object
-      required: [id, name, operations, tenant_ids, allow_create, created_at, revoked_at]
+      required: [app_id, id, name, operations, tenant_ids, allow_create, created_at, revoked_at]
       properties:
+        app_id: {type: string, minLength: 1}
         id: {type: string}
         name: {type: string}
         operations: {type: array, items: {type: string}}
@@ -1334,6 +1430,28 @@ components:
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/OriginProof"}}
         next_cursor: {type: string}
+    AppPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/App"}}
+        next_cursor: {type: string}
+    App:
+      type: object
+      additionalProperties: false
+      required: [id, name, version]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+    AppCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+    AppPatch:
+      $ref: "#/components/schemas/AppCreate"
     TenantPage:
       type: object
       required: [items, next_cursor]
@@ -1343,8 +1461,9 @@ components:
     Tenant:
       type: object
       additionalProperties: false
-      required: [id, name, environment, version, state, active_revision]
+      required: [app_id, id, name, environment, version, state, active_revision]
       properties:
+        app_id: {type: string, minLength: 1}
         id: {type: string}
         name: {type: string}
         environment: {type: string}
@@ -1419,9 +1538,10 @@ components:
     OwnerTenantCreate:
       type: object
       additionalProperties: false
-      required: [name, application_origin, google_web_client_id]
+      required: [app_id, name, application_origin, google_web_client_id]
       description: Creates and activates a Google tenant atomically. DNS verification is not required.
       properties:
+        app_id: {type: string, minLength: 1}
         name: {type: string, minLength: 1, maxLength: 120}
         application_origin: {type: string, format: uri, description: Exact HTTPS application origin. Loopback origins can use HTTP and include a port.}
         google_web_client_id: {type: string, maxLength: 256, pattern: '^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$'}
