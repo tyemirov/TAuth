@@ -255,7 +255,7 @@ func requireEnvironmentInputs(value any) error {
 		var missing string
 		os.Expand(entry, func(name string) string {
 			value, exists := os.LookupEnv(name)
-			if !exists || value == "" {
+			if !exists {
 				missing = name
 			}
 			return value
