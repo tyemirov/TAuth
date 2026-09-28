@@ -32,7 +32,7 @@ func TestRepairInactiveImport(t *testing.T) {
 	for _, id := range []string{"first-local", "second-local"} {
 		document.Tenants = append(document.Tenants, tenants.FileTenant{ID: id, DisplayName: id, TenantOrigins: []string{"http://localhost:8000"}, JWTSigningKey: "existing-key-" + id, GoogleWebClientID: "client", SessionCookieName: id + "_session", RefreshCookieName: id + "_refresh", SessionTTL: "15m", RefreshTTL: "720h", RequireTenantHeader: true, AllowInsecureHTTP: true})
 	}
-	if _, err := migrations.Apply(ctx, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "original-import", owner.ID, document); err != nil {
+	if _, err := migrations.Apply(ctx, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "original-import", owner.ID, "fixture-app", "Fixture app", document); err != nil {
 		t.Fatal(err)
 	}
 	db, err := authkit.OpenControlDatabase(ctx, config.Server.DatabaseURL)

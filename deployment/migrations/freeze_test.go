@@ -53,3 +53,68 @@ func TestFreezeEffectiveSource(t *testing.T) {
 		t.Fatal("effective source changed")
 	}
 }
+
+func TestFreezeDeploymentContribution(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "contribution.json")
+	contribution := map[string]any{
+		"owner": "example", "id": "authentication", "kind": "tauth_tenant",
+		"desired": map[string]any{"kind": "tauth_tenant", "id": "authentication", "capability": "tauth.tenants", "version": 1, "tenant": map[string]any{
+			"id": "example", "display_name": "Example", "origins": []string{"https://example.com"},
+			"google_web_client_id": map[string]string{"resource": "private", "output": "client"}, "jwt_signing_key": map[string]string{"resource": "private", "output": "key"},
+			"cookie": map[string]string{"domain": "example.com", "session_name": "example_session", "refresh_name": "example_refresh"}}},
+		"outputs": map[string]any{"google-web-client-id": map[string]string{"value": "example.apps.googleusercontent.com"}, "jwt-signing-key": map[string]string{"value": "literal-${UNEXPANDED}-key"}},
+	}
+	encoded, err := json.Marshal(contribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command := migrations.NewCommand()
+	command.SetOut(&output)
+	command.SetArgs([]string{"freeze-contribution", "--source", source})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var document tenants.FileDocument
+	if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tenants) != 1 || document.Tenants[0].JWTSigningKey != "literal-${UNEXPANDED}-key" || document.Tenants[0].ID != "example" || document.Tenants[0].SessionTTL != "15m" {
+		t.Fatal("canonical contribution values changed")
+	}
+	delete(contribution["outputs"].(map[string]any), "jwt-signing-key")
+	encoded, err = json.Marshal(contribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err = os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	command = migrations.NewCommand()
+	command.SetOut(&output)
+	command.SetArgs([]string{"freeze-contribution", "--source", source})
+	if err := command.Execute(); err == nil {
+		t.Fatal("incomplete contribution accepted")
+	}
+	if output.Len() != 0 {
+		t.Fatal("failed conversion emitted a partial snapshot")
+	}
+}

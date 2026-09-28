@@ -1,0 +1,141 @@
+{
+  "apps": [
+    {
+      "id": "download-your-data",
+      "name": "Download Your Data",
+      "tenant_ids": [
+        "download-your-data-local"
+      ]
+    },
+    {
+      "id": "gravity",
+      "name": "Gravity Notes",
+      "tenant_ids": [
+        "gravity"
+      ]
+    },
+    {
+      "id": "hecate",
+      "name": "Hecate",
+      "tenant_ids": [
+        "hecate"
+      ]
+    },
+    {
+      "id": "iroom",
+      "name": "iRoom",
+      "tenant_ids": [
+        "iroom-local"
+      ]
+    },
+    {
+      "id": "kamu",
+      "name": "Kamu",
+      "tenant_ids": [
+        "kamu",
+        "kamu-local"
+      ]
+    },
+    {
+      "id": "ledger",
+      "name": "Ledger",
+      "tenant_ids": [
+        "ledger-local"
+      ]
+    },
+    {
+      "id": "llm-proxy",
+      "name": "LLM Proxy",
+      "tenant_ids": [
+        "llm-proxy"
+      ]
+    },
+    {
+      "id": "loopaware",
+      "name": "LoopAware",
+      "tenant_ids": [
+        "loopaware"
+      ]
+    },
+    {
+      "id": "mediaops",
+      "name": "MediaOps",
+      "tenant_ids": [
+        "mediaops"
+      ]
+    },
+    {
+      "id": "mpr-ui",
+      "name": "MPR UI",
+      "tenant_ids": [
+        "mpr-ui-delivery-admin"
+      ]
+    },
+    {
+      "id": "mprlab-investors",
+      "name": "MPR Lab Investors",
+      "tenant_ids": [
+        "mprlab-investors-local"
+      ]
+    },
+    {
+      "id": "namesignal",
+      "name": "NameSignal",
+      "tenant_ids": [
+        "namesignal"
+      ]
+    },
+    {
+      "id": "prompt-bubbles",
+      "name": "Prompt Bubbles",
+      "tenant_ids": [
+        "pb-dev",
+        "prompt-bubbles",
+        "prompt-bubbles-dev"
+      ]
+    },
+    {
+      "id": "pinguin",
+      "name": "Pinguin",
+      "tenant_ids": [
+        "pinguin"
+      ]
+    },
+    {
+      "id": "poodlescanner",
+      "name": "PoodleScanner",
+      "tenant_ids": [
+        "ps"
+      ]
+    },
+    {
+      "id": "social-threader",
+      "name": "Social Threader",
+      "tenant_ids": [
+        "social-threader"
+      ]
+    },
+    {
+      "id": "summercan",
+      "name": "SummerCan",
+      "tenant_ids": [
+        "summercan"
+      ]
+    },
+    {
+      "id": "gallery",
+      "name": "Gallery",
+      "tenant_ids": [
+        "tyemirov-gallery-development"
+      ]
+    },
+    {
+      "id": "writers-block",
+      "name": "Writer Block",
+      "tenant_ids": [
+        "writers-block"
+      ]
+    }
+  ],
+  "credentials": {}
+}
