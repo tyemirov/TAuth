@@ -431,9 +431,14 @@ Overview contains Resume tenant only for suspended tenants.
 Settings supports rename, bounded session lifetimes, and confirmed suspension.
 
 Background updates preserve pending edits.
-Changes to separate fields merge with the current revision.
-A conflict on the same field preserves the local value and asks the owner to edit that value.
-The corrected value then saves automatically.
+
+Only fields that the user changes replace their stored values.
+The latest accepted edit wins for each field.
+Concurrent changes to untouched fields remain intact.
+Validation errors apply only to the input version that produced the request.
+Newer input retries automatically after an older request fails.
+Temporary request failures, including rate limits, also retry automatically.
+
 Account and tenant changes cancel pending requests and clear protected page state.
 
 `make test-console-browser` drives Chromium against the real TLS service and test database.
