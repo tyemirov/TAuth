@@ -8,7 +8,7 @@ import (
 
 func TestConsoleTenantCreationRequiresCompleteInput(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		valid := map[string]any{"name": "Complete application", "application_origin": "http://localhost:9231", "google_web_client_id": "creation-client.apps.googleusercontent.com"}
+		valid := map[string]any{"app_id": owner.fixtureApp(), "name": "Complete application", "application_origin": "http://localhost:9231", "google_web_client_id": "creation-client.apps.googleusercontent.com"}
 		for _, field := range []string{"name", "application_origin", "google_web_client_id"} {
 			for _, absent := range []bool{true, false} {
 				body := map[string]any{}
@@ -60,7 +60,7 @@ func TestConsoleTenantCreationRequiresCompleteInput(t *testing.T) {
 		app.origin = valid["application_origin"].(string)
 		app.tenant = tenant["id"].(string)
 		app.login("new-application-user", valid["google_web_client_id"].(string))
-		production := map[string]any{"name": "Production application", "application_origin": "https://creation.example.com", "google_web_client_id": "production-creation.apps.googleusercontent.com"}
+		production := map[string]any{"app_id": owner.fixtureApp(), "name": "Production application", "application_origin": "https://creation.example.com", "google_web_client_id": "production-creation.apps.googleusercontent.com"}
 		active, _ := owner.request("POST", controlplane.TenantsPath, production, 201, "Idempotency-Key", "production-complete")
 		if active["state"] != "active" {
 			t.Fatal("production creation required an extra activation step")
@@ -76,4 +76,14 @@ func TestConsoleTenantCreationRequiresCompleteInput(t *testing.T) {
 
 func consoleTenantInput(name string) map[string]any {
 	return map[string]any{"name": name, "application_origin": "http://localhost:19091", "google_web_client_id": "fixture-client.apps.googleusercontent.com"}
+}
+
+func (owner consoleHTTP) fixtureApp() string {
+	app, _ := owner.request("POST", "/api/management/apps", map[string]any{"name": "Fixture App"}, 201, "Idempotency-Key", "fixture-app")
+	return app["id"].(string)
+}
+func (owner consoleHTTP) tenantInput(name string) map[string]any {
+	body := consoleTenantInput(name)
+	body["app_id"] = owner.fixtureApp()
+	return body
 }

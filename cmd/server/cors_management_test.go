@@ -50,7 +50,7 @@ func TestConsoleCORSChangesRemainRestartSafe(t *testing.T) {
 						}
 						owner.request("PUT", controlplane.OwnerPath, nil, status)
 						if stage == 0 {
-							tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("CORS lifecycle"), 201, "Idempotency-Key", "cors-app")
+							tenant, headers := owner.request("POST", controlplane.TenantsPath, owner.tenantInput("CORS lifecycle"), 201, "Idempotency-Key", "cors-app")
 							path = headers.Get("Location")
 							id = tenant["id"].(string)
 							_, headers = owner.request("GET", path+"/configuration", nil, 200)

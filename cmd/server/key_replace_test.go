@@ -67,7 +67,7 @@ func TestConsoleSessionKeyReplacement(t *testing.T) {
 			own, _ := owner.request("PUT", "/api/management/owner-account", nil, ownerStatus)
 			ownerID = own["id"].(string)
 			if stage == 0 {
-				tenant, headers := owner.request("POST", "/api/management/tenants", consoleTenantInput("Key replacement"), 201, "Idempotency-Key", "replace")
+				tenant, headers := owner.request("POST", "/api/management/tenants", owner.tenantInput("Key replacement"), 201, "Idempotency-Key", "replace")
 				tenantPath = headers.Get("Location")
 				tenantID = tenant["id"].(string)
 				_, headers = owner.request("GET", tenantPath+"/configuration", nil, 200)

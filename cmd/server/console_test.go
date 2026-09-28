@@ -381,12 +381,12 @@ account_management:
 			}
 			if attempt == 0 {
 				for retry := 0; retry < 2; retry++ {
-					if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID); err != nil {
+					if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID, "--app-id", "imported-app", "--app-name", "Imported App"); err != nil {
 						t.Fatal(err)
 					}
 				}
 				t.Setenv("IMPORT_GOOGLE_CLIENT", "changed-client")
-				if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID); err == nil {
+				if err := execute("deployment-migration", "--source", sourceFile, "--import-id", "initial-import", "--owner-id", ownerID, "--app-id", "imported-app", "--app-name", "Imported App"); err == nil {
 					t.Fatal("changed import accepted")
 				}
 				t.Setenv("IMPORT_GOOGLE_CLIENT", "")
