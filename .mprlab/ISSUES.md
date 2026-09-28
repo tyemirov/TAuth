@@ -1312,6 +1312,54 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B099] (P2) Persist explicit configuration edits without overwriting untouched fields.
+  Requirements:
+  Use the latest accepted edit for each changed field. Preserve concurrent changes to other fields.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Tracked changed fields by edit version and merged only those fields into the latest configuration. Removed manual conflict resolution.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B100] (P2) Preserve untouched metadata while the rename dialog stays open.
+  Requirements:
+  Track changes from the displayed dialog values. Send only metadata fields that the user changed.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Tracked metadata changes from displayed dialog values. Sent only changed fields in each PATCH and preserved concurrent environment changes.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B101] (P2) Keep newer edits pending after an obsolete validation failure.
+  Requirements:
+  Apply validation errors only to their edit version. Retry newer configuration and metadata input automatically.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Applied validation failures only to the current edit version. Retried newer configuration and metadata after obsolete errors.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B102] (P2) Retry rate-limited automatic persistence.
+  Requirements:
+  Treat HTTP 429 as temporary. Retain and retry pending configuration and metadata changes.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Classified rate limits as temporary and retained pending edits. Verified automatic retries for configuration and metadata.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
 - [x] [B098] (P1) Repair the inactive local tenant import.
   Requirements:
   - Repair the selected import through a separate, explicit-owner GORM migration.
