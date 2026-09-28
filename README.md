@@ -236,6 +236,7 @@ Configured administrators can view the account directory. Their tenant workspace
 
 Run the separate deployment migration for existing effective tenant configuration.
 The TAuth service does not expose an import command or select a migration owner.
+For local source selection, frozen snapshots, and import repair, follow the [deployment migration procedure](docs/tenant-console-operations.md#deployment-data-migration).
 The `tenants.import.yaml` examples describe migration input.
 The importer preserves existing tenant IDs, keys, cookies, providers, policies, users, and sessions.
 
@@ -309,9 +310,11 @@ Integration supplies public settings from the active revision, a complete browse
 Use the [customer application example](examples/tenant-app/README.md) for the Google cookie integration and explicit backend tenant authorization.
 See the [operations guide](docs/tenant-console-operations.md) for key replacement and the ordered production delivery record.
 
-Use Google sign-in to select imported tenants or create a draft.
+Use Google sign-in to select imported tenants or create an application tenant.
+Creation requires a name, application origin, and Google OAuth client ID.
+The service creates an active tenant in one transaction.
 The Domains, Sign-in methods, and Settings forms save configuration revisions.
-Verify domain ownership and activate the saved revision from Overview.
+Valid configuration edits apply automatically. DNS ownership verification is not required.
 See the [console operations guide](docs/tenant-console-operations.md) for bootstrap and publication inputs.
 
 ### 4. Integrate the browser helper from the product site
