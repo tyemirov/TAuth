@@ -1,11 +1,12 @@
 // @ts-check
-/** @typedef {{id:string,name:string,environment:string,version:number,state:"draft"|"active"|"suspended",active_revision:number|null}} Tenant */
+/** @typedef {{id:string,app_id:string,name:string,environment:string,version:number,state:"draft"|"active"|"suspended",active_revision:number|null}} Tenant */
 /** @typedef {{google_web_client_id:string,frontend_origins:string[],api_base_url:string,local_development:boolean,session_ttl:string,refresh_ttl:string}} ConfigurationInput */
 /** @typedef {ConfigurationInput & {revision:number,providers:string[],session_cookie_name:string,refresh_cookie_name:string}} Configuration */
 export const PATHS = Object.freeze({
   owner: "/api/management/owner-account",
   accounts: "/api/management/accounts",
   tenants: "/api/management/tenants",
+  apps: "/api/management/apps",
   bootstrap: "/.well-known/tauth-console",
 });
 export class RequestError extends Error {
@@ -59,6 +60,7 @@ export function tenant(value) {
     throw new Error("Invalid tenant state");
   return {
     id: text(v.id),
+    app_id: text(v.app_id),
     name: text(v.name),
     environment: text(v.environment),
     version: integer(v.version),
@@ -277,4 +279,11 @@ export function setupCheck(value) {
       return { path: text(e.path), status: e.status, code: text(e.code) };
     }),
   };
+}
+
+/** @typedef {{id:string,name:string,version:number}} App */
+/** @param {unknown} value @returns {App} */
+export function app(value) {
+  const v = object(value);
+  return { id: text(v.id), name: text(v.name), version: integer(v.version) };
 }

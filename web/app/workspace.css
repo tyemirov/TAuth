@@ -1,25 +1,36 @@
 :root {
   color-scheme: dark;
-  --surface: #171c25;
-  --page: #10141c;
-  --line: #343d4d;
-  --ink: #edf1f7;
-  --muted: #aeb9cb;
-  --accent: #9cc3ff;
+  --surface: #1f2126;
+  --page: #0f1114;
+  --raised: #16181c;
+  --line: #2c2f36;
+  --hover: #3b3f48;
+  --ink: #e3e5ec;
+  --muted: #c4c7d1;
+  --quiet: #727887;
+  --accent: #5d93ff;
+  --success: #95c23d;
+  --danger: #cc4b4b;
   font:
-    16px/1.5 system-ui,
+    15px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
-  background: var(--page);
   color: var(--ink);
+  background: var(--page);
 }
 :root[data-mpr-theme="light"] {
-  color-scheme: light;
   --surface: #fff;
   --page: #f3f5f9;
+  --raised: #fff;
   --line: #c5cddd;
+  --hover: #8a95a8;
   --ink: #172033;
   --muted: #536176;
+  --quiet: #536176;
   --accent: #214fa0;
+  --success: #477013;
+  --danger: #a62f2f;
 }
 * {
   box-sizing: border-box;
@@ -28,17 +39,18 @@
   display: none !important;
 }
 body {
+  margin: 0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  margin: 0;
+  font-size: 0.78rem;
 }
 main {
   width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
   flex: 1;
-  max-width: 1400px;
-  margin: auto;
-  padding: 1.5rem 1.5rem 6rem;
+  padding: 1rem 0.75rem 2rem;
 }
 a {
   color: var(--accent);
@@ -52,242 +64,459 @@ textarea {
 button {
   cursor: pointer;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  padding: 0.55rem 0.85rem;
-  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.3rem 0.55rem;
+  min-height: 28px;
+  background: var(--raised);
   color: var(--ink);
+  transition:
+    border-color 120ms,
+    background-color 120ms;
 }
-button:hover,
+button:hover {
+  border-color: var(--hover);
+  background: var(--surface);
+}
 button[aria-current="page"] {
-  border-color: var(--accent);
   color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--raised));
 }
 button:disabled {
   opacity: 0.55;
-  cursor: wait;
+  cursor: default;
 }
 :focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 3px;
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 label {
   display: block;
-  margin-top: 1rem;
+  margin: 0.65rem 0 0.2rem;
   font-weight: 600;
 }
 input:not([type="checkbox"]),
 textarea,
 select {
+  display: block;
   width: 100%;
-  max-width: 42rem;
+  max-width: 36rem;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
   background: var(--page);
   color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-  padding: 0.65rem;
+}
+textarea {
+  resize: vertical;
 }
 .check {
   display: flex;
-  gap: 0.65rem;
   align-items: center;
+  gap: 0.35rem;
+  font-weight: 400;
 }
 h1,
 h2,
-h3 {
-  line-height: 1.2;
+h3,
+h4 {
+  line-height: 1.3;
+  font-weight: 600;
 }
 h1 {
-  font-size: 1.4rem;
+  font-size: 0.95rem;
+  margin: 0;
 }
 h2 {
-  font-size: 1.75rem;
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+h3 {
+  font-size: 0.86rem;
+  margin: 0 0 0.5rem;
+}
+h4 {
+  font-size: 0.8rem;
+  margin: 0.75rem 0 0.35rem;
 }
 p {
   max-width: 70ch;
   color: var(--muted);
+  margin: 0.4rem 0 0.65rem;
 }
 pre,
 code {
   overflow-wrap: anywhere;
+  font-size: 0.72rem;
 }
 pre {
   white-space: pre-wrap;
-  padding: 1rem;
-  background: var(--page);
+  margin: 0.5rem 0;
+  padding: 0.6rem;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
+  border-radius: 4px;
+  background: var(--page);
 }
 #signed-out {
-  padding: 5rem 1rem;
+  max-width: 40rem;
+  margin: 2rem auto;
 }
 #signed-out h1 {
-  font-size: clamp(2rem, 5vw, 3.7rem);
-  max-width: 20ch;
+  font-size: 1.1rem;
 }
 #notice {
-  min-height: 2rem;
-  padding-bottom: 1rem;
   color: var(--accent);
+  margin-bottom: 0.65rem;
 }
 #workspace {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 2rem;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
 }
-.tenant-rail {
-  border-right: 1px solid var(--line);
-  padding-right: 1.5rem;
+.app-rail {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  padding: 0.5rem;
 }
-.tenant-rail header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.8rem;
-}
-.tenant-rail nav {
-  display: grid;
-  gap: 0.65rem;
-  margin-top: 1.5rem;
-}
-.tenant-rail nav button {
-  text-align: left;
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
-.tenant-heading {
+.app-rail header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: 0.35rem;
+}
+.metadata {
+  font-size: 0.68rem;
+  color: var(--quiet);
+}
+#inventory-summary {
+  margin: 0.35rem 0 0.55rem;
+}
+#app-list,
+.app-tenants {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#app-list > li + li {
+  margin-top: 2px;
+}
+#app-list button {
+  width: 100%;
+  text-align: left;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+#app-list [data-app] {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-color: transparent;
+  background: transparent;
+  padding: 0.35rem 0.25rem;
+}
+#app-list [data-app]::before {
+  content: "›";
+  color: var(--quiet);
+  width: 0.55rem;
+  flex: 0 0 0.55rem;
+}
+#app-list [aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+#app-list [data-app]:hover {
+  background: var(--surface);
+}
+#app-list [aria-expanded="true"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+.app-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.tenant-count {
+  font-size: 0.65rem;
+  color: var(--quiet);
+  flex: 0 0 auto;
+}
+.app-tenants {
+  border-left: 1px solid var(--line);
+  margin: 0.15rem 0 0.4rem 0.5rem;
+  padding-left: 0.35rem;
+}
+.app-tenants li + li {
+  margin-top: 2px;
+}
+.app-tenants button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-color: transparent;
+  padding: 0.3rem 0.35rem;
+}
+.app-tenants .create-tenant {
+  color: var(--quiet);
+}
+.tenant-heading {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 0.35rem 0 0.55rem;
+}
+.tenant-heading > div {
+  min-width: 0;
+}
+.tenant-heading h2 {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+  margin: 0.2rem 0;
 }
 .eyebrow {
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-#tenant-state {
+  letter-spacing: 0.05em;
+  color: var(--quiet);
   margin: 0;
-  color: var(--muted);
+}
+#tenant-id {
+  color: var(--quiet);
+  font-size: 0.68rem;
+}
+#authentication-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  margin: 0.1rem 0;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.65rem;
+}
+#authentication-toggle[data-state="active"] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--line));
+}
+#authentication-toggle[data-state="suspended"] {
+  color: var(--danger);
 }
 #sections {
   display: flex;
-  gap: 0.5rem;
-  overflow: auto;
-  margin: 1.5rem 0;
-  padding-bottom: 0.4rem;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
 }
 #sections button {
   white-space: nowrap;
 }
 #configuration {
-  padding: 1.5rem;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 0.8rem;
+  border-radius: 6px;
+  padding: 0.75rem;
 }
-dl {
+.lifetime-fields {
   display: grid;
-  grid-template-columns: 11rem 1fr;
-  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  max-width: 36rem;
+  margin-bottom: 0.6rem;
 }
-dd {
-  margin: 0;
+.configuration-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
 }
-dt {
-  color: var(--muted);
+.configuration-fields > section {
+  min-width: 0;
 }
-#save-actions {
-  margin-top: 1.5rem;
+#session-settings {
   border-top: 1px solid var(--line);
-  padding-top: 0.8rem;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+}
+#session-settings summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#session-settings[open] summary {
+  margin-bottom: 0.65rem;
+}
+.lifetime-fields label {
+  margin-top: 0;
+}
+.lifetime-fields p {
+  font-size: 0.68rem;
+  margin-top: 0.25rem;
+}
+#save-actions p {
+  margin: 0.15rem 0;
+  font-size: 0.68rem;
 }
 #field-error,
-#dialog-error {
-  color: #ef958d;
-}
+#dialog-error,
+#app-error,
 .danger {
-  color: #ef958d;
+  color: var(--danger);
+}
+#field-error:empty,
+#dialog-error:empty,
+#app-error:empty {
+  display: none;
 }
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.7rem;
-  margin-top: 1.5rem;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
 }
 dialog {
-  width: min(92vw, 32rem);
+  position: fixed;
+  max-height: 85vh;
+  overflow: auto;
+  width: min(92vw, 28rem);
   border: 1px solid var(--line);
-  border-radius: 0.8rem;
-  padding: 2rem;
-  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--raised);
   color: var(--ink);
+  box-shadow: 0 8px 24px #0005;
 }
 dialog::backdrop {
   background: #0009;
 }
-.mobile-selector {
-  display: none;
+.dismiss {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  font-size: 1.05rem;
+  border-color: transparent;
 }
-#empty {
-  padding: 2rem;
-}
-.tenant-heading h2 {
-  margin: 0.35rem 0;
-}
-@media (max-width: 760px) {
-  main {
-    padding: 1rem 1rem 6rem;
-  }
-  #workspace {
-    display: block;
-  }
-  .tenant-rail {
-    display: none;
-  }
-  .mobile-selector {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.7rem;
-    margin-bottom: 1.5rem;
-  }
-  .mobile-selector label {
-    grid-column: 1/-1;
-  }
-  .tenant-heading {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  #configuration {
-    padding: 1rem;
-  }
-  dl {
-    grid-template-columns: 1fr;
-  }
-  dd {
-    margin-bottom: 0.5rem;
-  }
-  #sections {
-    max-width: calc(100vw - 2rem);
-  }
-}
-
 #admin-dialog {
-  width: min(92vw, 44rem);
-  max-height: 80vh;
-  overflow-y: auto;
+  width: min(92vw, 36rem);
 }
 #account-list {
-  padding-left: 1.25rem;
+  padding-left: 1rem;
   overflow-wrap: anywhere;
 }
-#save-status {
-  color: var(--muted);
+#empty {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
-
 #new-authentication {
   border: 0;
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+@media (max-width: 760px) {
+  .configuration-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  main {
+    padding: 0.65rem 0.5rem 1rem;
+  }
+  #workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+  .app-rail nav {
+    max-height: 190px;
+    overflow-y: auto;
+  }
+  .tenant-heading {
+    flex-wrap: wrap;
+  }
+  #authentication-toggle {
+    margin-top: 0.25rem;
+  }
+  #configuration {
+    padding: 0.65rem;
+  }
+  #sections {
+    gap: 0.2rem;
+  }
+  .lifetime-fields {
+    gap: 0.5rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}
+
+.identity-heading,
+.identity-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.identity-heading {
+  flex-wrap: wrap;
+}
+.identity-name {
+  overflow-wrap: anywhere;
+}
+.identity-separator {
+  font-size: 0.68rem;
+  color: var(--quiet);
+}
+#selected-app-name {
+  font-weight: 600;
+}
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  width: 26px;
+  min-height: 26px;
+  flex: 0 0 auto;
+  border-color: transparent;
+  background: transparent;
+}
+.icon-button svg,
+#authentication-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#authentication-toggle[data-state="draft"] svg {
+  display: none;
+}
+
+#name-editor {
+  display: inline-flex;
+  flex-direction: column;
+  width: min(22ch, 65vw);
+  min-width: 0;
+}
+#edited-name {
+  min-height: 26px;
+  padding: 0.2rem 0.35rem;
+  font-weight: 600;
+}
+#name-error {
+  color: var(--danger);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+#name-error:empty {
+  display: none;
 }
