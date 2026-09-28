@@ -82,6 +82,12 @@ func (management *Management) read(ctx *gin.Context, owner string, parts []strin
 	var next string
 	if len(parts) == 0 {
 		rows := []tenantRecord{}
+		if appID, present := ctx.GetQuery("app_id"); present {
+			if _, err := store.app(ctx.Request.Context(), owner, appID); err != nil {
+				return resourceResult{}, err
+			}
+			query = query.Where("app_id = ?", appID)
+		}
 		if err := query.Where("owner_account_id = ?", owner).Scopes(credentialTenantScope(ctx)).Find(&rows).Error; err != nil {
 			return resourceResult{}, err
 		}
@@ -144,6 +150,7 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 	if len(parts) == 0 {
 		var body struct {
 			ID                string `json:"id"`
+			AppID             string `json:"app_id"`
 			Name              string `json:"name"`
 			Environment       string `json:"environment"`
 			ApplicationOrigin string `json:"application_origin"`
@@ -166,6 +173,18 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 				return result, nil, "", err
 			}
 		}
+		if principal := provisioningPrincipal(ctx); principal != nil {
+			if body.AppID != "" {
+				return result, nil, "", failure(422, "provisioning_creation_invalid")
+			}
+			body.AppID = principal.AppID
+		}
+		if strings.TrimSpace(body.AppID) == "" {
+			return result, nil, "", failure(422, "app_required")
+		}
+		if _, err := store.app(ctx.Request.Context(), owner, body.AppID); err != nil {
+			return result, nil, "", err
+		}
 		var count int64
 		if err := store.db.Model(&tenantRecord{}).Where("owner_account_id = ?", owner).Count(&count).Error; err != nil {
 			return result, nil, "", err
@@ -175,7 +194,7 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 		}
 		entropy := make([]byte, 16)
 		_, _ = rand.Read(entropy)
-		row := tenantRecord{ID: hex.EncodeToString(entropy), OwnerAccountID: owner, Name: body.Name, Environment: body.Environment, Version: 1, State: "draft"}
+		row := tenantRecord{AppID: body.AppID, ID: hex.EncodeToString(entropy), OwnerAccountID: owner, Name: body.Name, Environment: body.Environment, Version: 1, State: "draft"}
 		if body.ID != "" {
 			if provisioningPrincipal(ctx) == nil {
 				return result, nil, "", failure(403, "tenant_id_operator_only")

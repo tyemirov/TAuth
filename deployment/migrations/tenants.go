@@ -35,8 +35,11 @@ func (Receipt) TableName() string { return "tenant_imports" }
 
 // Apply moves a frozen tenant source into the current schema in one GORM transaction.
 // The destination is an ordinary owner created through verified console enrollment.
-func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID string, document tenants.FileDocument) (Receipt, error) {
+func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID, appID, appName string, document tenants.FileDocument) (Receipt, error) {
 
+	if strings.TrimSpace(appID) == "" || strings.TrimSpace(appName) == "" {
+		return Receipt{}, errors.New("migration.app_required")
+	}
 	if strings.TrimSpace(id) == "" || len(id) > 128 || strings.TrimSpace(ownerID) == "" {
 		return Receipt{}, errors.New("migration.identifier_required")
 	}
@@ -85,6 +88,7 @@ func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID string, doc
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte("active\x00"))
 	_, _ = mac.Write(encoded)
+	_, _ = mac.Write([]byte("\x00" + appID + "\x00" + appName))
 	digest := fmt.Sprintf("%x", mac.Sum(nil))
 	db, err := authkit.OpenControlDatabase(ctx, databaseURL)
 	if err != nil {
@@ -119,9 +123,20 @@ func Apply(ctx context.Context, databaseURL, encodedKey, id, ownerID string, doc
 		if _, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: all}); err != nil {
 			return err
 		}
+		var existingApp struct{ OwnerAccountID, Name string }
+		err = tx.Table("apps").Where("id = ?", appID).Take(&existingApp).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Table("apps").Create(map[string]any{"id": appID, "owner_account_id": ownerID, "name": appName, "version": 1}).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else if existingApp.OwnerAccountID != ownerID || existingApp.Name != appName {
+			return errors.New("migration.app_conflict")
+		}
 		ids := make([]string, 0, len(document.Tenants))
 		for _, file := range document.Tenants {
-			if err := tx.Table("tenants").Create(map[string]any{"id": file.ID, "owner_account_id": ownerID, "name": file.DisplayName, "state": "draft"}).Error; err != nil {
+			if err := tx.Table("tenants").Create(map[string]any{"id": file.ID, "app_id": appID, "owner_account_id": ownerID, "name": file.DisplayName, "state": "draft"}).Error; err != nil {
 				return fmt.Errorf("migration.tenant id=%s: %w", file.ID, err)
 			}
 			data, err := json.Marshal(file)

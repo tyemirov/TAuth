@@ -37,7 +37,7 @@ func TestConsoleRepairedImportAuthenticatesIsolatedTenants(t *testing.T) {
 	for _, id := range []string{"first-local", "second-local"} {
 		document.Tenants = append(document.Tenants, tenants.FileTenant{ID: id, TenantOrigins: []string{"https://shared.example.com"}, JWTSigningKey: "existing-key-" + id, GoogleWebClientID: id + "-client", SessionCookieName: id + "_session", RefreshCookieName: id + "_refresh", SessionTTL: "15m", RefreshTTL: "720h", RequireTenantHeader: true})
 	}
-	if _, err := migrations.Apply(ctx, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "original", owner.ID, document); err != nil {
+	if _, err := migrations.Apply(ctx, config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "original", owner.ID, "fixture-app", "Fixture app", document); err != nil {
 		t.Fatal(err)
 	}
 	db, err := authkit.OpenControlDatabase(ctx, config.Server.DatabaseURL)

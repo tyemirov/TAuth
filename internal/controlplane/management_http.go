@@ -74,7 +74,7 @@ func pageQuery(ctx *gin.Context) (int, string, error) {
 		return 0, "", failure(400, "cursor_invalid")
 	}
 	for key := range ctx.Request.URL.Query() {
-		if key != "limit" && key != "cursor" {
+		if key != "limit" && key != "cursor" && !(key == "app_id" && ctx.Request.URL.Path == TenantsPath) {
 			return 0, "", failure(400, "query_invalid")
 		}
 	}
@@ -143,7 +143,16 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 			management.credentials(ctx, owner)
 			return
 		}
-		path := strings.TrimPrefix(ctx.Request.URL.Path, TenantsPath)
+		root := TenantsPath
+		apps := ctx.Request.URL.Path == AppsPath || strings.HasPrefix(ctx.Request.URL.Path, AppsPath+"/")
+		if apps {
+			root = AppsPath
+			if provisioningPrincipal(ctx) != nil {
+				respondError(ctx, failure(403, "operation_denied"))
+				return
+			}
+		}
+		path := strings.TrimPrefix(ctx.Request.URL.Path, root)
 		parts := []string{}
 		if path != "" {
 			parts = strings.Split(strings.TrimPrefix(path, "/"), "/")
@@ -154,7 +163,7 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 				return
 			}
 		}
-		if len(parts) > 0 {
+		if !apps && len(parts) > 0 {
 			if _, err := management.store.tenant(ctx.Request.Context(), owner.ID, parts[0]); err != nil {
 				respondError(ctx, err)
 				return
@@ -162,6 +171,10 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 		}
 		if len(parts) > 1 && (parts[1] == "reauthentications" || parts[1] == "key-exports") && provisioningPrincipal(ctx) != nil {
 			respondError(ctx, failure(403, "operation_denied"))
+			return
+		}
+		if apps && len(parts) > 1 {
+			respondError(ctx, failure(404, "resource_not_found"))
 			return
 		}
 		methods := ""
@@ -206,7 +219,13 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 			return
 		}
 		if !mutation {
-			result, err := management.read(ctx, owner.ID, parts)
+			var result resourceResult
+			var err error
+			if apps {
+				result, err = management.readApps(ctx, owner.ID, parts)
+			} else {
+				result, err = management.read(ctx, owner.ID, parts)
+			}
 			if err != nil {
 				respondError(ctx, err)
 			} else {
@@ -279,7 +298,11 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 			if recent >= 60 {
 				return failure(429, "mutation_rate_exceeded")
 			}
-			result, prepared, suspended, err = management.write(ctx, store, owner.ID, parts, data)
+			if apps {
+				result, err = management.writeApp(ctx, store, owner.ID, parts, data)
+			} else {
+				result, prepared, suspended, err = management.write(ctx, store, owner.ID, parts, data)
+			}
 			if err != nil {
 				return err
 			}
@@ -320,6 +343,8 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 	}
 	router.Any(CredentialsPath, handler)
 	router.Any(CredentialsPath+"/*credential", handler)
+	router.Any(AppsPath, handler)
+	router.Any(AppsPath+"/*app", handler)
 	router.Any(TenantsPath, handler)
 	router.Any(TenantsPath+"/*resource", handler)
 	return nil

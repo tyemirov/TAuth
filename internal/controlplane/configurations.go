@@ -12,6 +12,7 @@ import (
 const configurationPurpose = "configuration"
 
 type tenantRecord struct {
+	AppID             string `json:"app_id"`
 	ID                string `json:"id"`
 	OwnerAccountID    string `json:"-"`
 	Name              string `json:"name"`

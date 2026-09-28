@@ -149,6 +149,51 @@ Record live Google qualification separately from software acceptance.
 
 Production import, Gateway cutover, publication, and deployment remain separate operations under I212 and F011 through F013.
 
+## App hierarchy migration
+
+F017 adds account → Apps → tenants as the current ownership model.
+App names identify containers. Tenant settings and authentication remain separate.
+Tenant rows contain the owner ID for scope checks. A composite foreign key requires the same owner as their App.
+App membership is required. The service rejects an unmigrated database at startup.
+
+1. Stop all service writers and Gateway provisioning.
+2. Back up the complete database.
+3. Prepare an explicit JSON map of App IDs, names, tenant IDs, and credential assignments.
+4. Include every existing tenant and provisioning credential once.
+5. Assign each credential to the App that contains all its granted tenants.
+6. Before migration, revoke credentials that span multiple Apps. Create their replacements after migration.
+7. Rehearse the command against a database copy.
+8. Run the same command against the stopped deployment database.
+9. Compare tenant settings, encrypted values, users, identities, and sessions with the backup.
+10. Start the service and verify App navigation and tenant authentication.
+
+```json
+{
+  "apps": [{"id": "example", "name": "Example", "tenant_ids": ["example", "example-local"]}],
+  "credentials": {"credential-id": "example"}
+}
+```
+
+Use an empty `credentials` object when the database has no provisioning credentials.
+All tenants in one App must have the same existing owner.
+For an App without tenants, set `owner_account_id` to an existing owner and set `tenant_ids` to `[]`.
+Use this empty App for that owner's provisioning credentials when the owner has no tenants.
+For an App with tenants, `owner_account_id` is optional. When specified, it must match each tenant owner.
+Revoked credentials retain their historical grants but cannot authorize requests.
+The transaction rejects missing, duplicate, or cross-owner assignments.
+It preserves tenant IDs, states, revisions, keys, and authentication data.
+It removes old POST receipts because their responses lack App membership.
+The migration stores a receipt. An identical repeat makes no changes. A changed map is rejected.
+The service does not select groups or run this migration.
+
+```sh
+make deployment-migration MIGRATION_ARGS="--config service.yaml app-hierarchy --mapping app-groups.json"
+```
+
+The local map is `deployment/migrations/local-apps-20260928.json`.
+It assigns 22 tenants to 19 Apps. Kamu has two tenants. Prompt Bubbles has three tenants.
+Production requires its own complete map and a separate deployment operation.
+
 ## Deployment data migration
 
 Tenant migration is a one-off deployment routine outside the application.
@@ -162,7 +207,7 @@ Its database contains every active application tenant and the reserved console c
 Tenant environment inputs have no effect after migration.
 The database and encryption key remain required service inputs.
 
-1. Inventory every production tenant from the frozen effective configuration.
+1. Inventory every tenant from native configuration and each repository deployment manifest.
 2. Back up the production database and its encryption-key reference.
 3. Initialize the current schema and console configuration against a copy of that database.
 4. Enroll the destination owner through verified Google login and record its stable owner ID.
@@ -177,8 +222,24 @@ The database and encryption key remain required service inputs.
 
 ```sh
 make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID"
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
 ```
+
+Deployment manifests can contain complete definitions absent from native tenant YAML files.
+Compare their declared tenant IDs with the destination inventory before an import.
+Use the selected repository's declared private inputs to resolve each contribution.
+Do not import incomplete definitions or replace an existing tenant with a duplicate definition.
+
+For a resolved Gateway contribution, use the canonical TAuth resolver to make a private snapshot:
+
+```sh
+.cache/tenant-ownership freeze-contribution --source private-contribution.json > private-snapshot.json
+make deployment-migration MIGRATION_ARGS="--config service.yaml --snapshot private-snapshot.json --import-id manifest-tenant --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
+```
+
+The command validates the complete contribution and keeps literal secret values unchanged.
+It rejects incomplete inputs without a partial JSON snapshot.
+The snapshot is deployment data. The service does not read it.
 
 For sources with different environment inputs, freeze each source separately:
 
@@ -248,7 +309,16 @@ All cookie requests require the exact console Origin. Mutations also require `X-
 Send JSON with `Content-Type: application/json`.
 Responses use `Cache-Control: no-store`. CORS exposes `ETag` and `Location`.
 
-Create an active tenant with `name`, `application_origin`, and `google_web_client_id`.
+Create an App with `POST /api/management/apps` and its `name`.
+Create an active tenant with `app_id`, `name`, `application_origin`, and `google_web_client_id`.
+The workspace supplies `app_id` from the selected App. The three tenant fields remain mandatory.
+The App must belong to the current owner.
+Use `GET /api/management/tenants?app_id=APP_ID` to list its tenants.
+App reads return an ETag. App name updates require that ETag with `PATCH /api/management/apps/APP_ID`.
+The workspace loads Apps automatically and shows every App with its tenant count.
+Select an App to expand its tenant list. Select a tenant to edit its configuration.
+The same nested list supports desktop and mobile layouts.
+The compact layout uses the Smith MPR styling tokens.
 The service generates the tenant ID, keys, cookie names, and session lifetimes.
 Creation validates and publishes the complete configuration in one transaction.
 A failed creation leaves no tenant record.
@@ -338,7 +408,8 @@ Before production cutover, record the exact released Gateway version that contai
 A Gateway release without that client cannot operate the database-only tenant contract.
 
 Create credentials through `/api/management/provisioning-credentials` with the owner cookie, console Origin, and CSRF header.
-Supply a name, permitted operations, explicit tenant IDs, and the `allow_create` grant.
+Supply `app_id`, a name, permitted operations, explicit tenant IDs, and the `allow_create` grant.
+Every granted tenant must belong to that App. Newly provisioned tenants inherit the credential's App.
 Operations are `read`, `configure`, `activate`, `suspend`, and `proofs`.
 A creation grant adds each created tenant to that credential's tenant grants.
 The service stores a digest and shows the generated token once.
@@ -408,11 +479,16 @@ A tenant with no active configuration cannot accept sign-ins, even when all requ
 A suspended tenant requires Resume tenant before authentication can continue.
 
 Tenant and section selection use the URL fragment, which works on GitHub Pages without a route rewrite.
+Anonymous bootstrap preserves bookmarked App, tenant, and section destinations through login.
+Sign-out clears the destination from an established session.
 The service authorizes each selected tenant before its details appear.
 
-Valid edits in Domains, Sign-in methods, or Settings apply automatically unless the tenant is suspended.
-Rename and environment edits also persist automatically.
-The workspace shows pending, saved, validation, and failure states.
+Configuration combines application addresses, Google sign-in, and tenant settings.
+Session settings stay collapsed until selected or until a validation error requires attention.
+Integration contains code examples, session-key export, and setup checks.
+Valid Configuration edits apply automatically unless the tenant is suspended.
+App and tenant names persist automatically. The name is the only inline metadata input.
+The workspace shows validation errors and request failures. Automatic saves do not produce success announcements.
 Transient failures retry without discarding edits.
 The workspace updates on a timer, on reconnect, and when the page becomes visible.
 It has no manual save, refresh, or reload buttons.
@@ -427,8 +503,11 @@ Other imported provider settings remain in the stored configuration.
 Creation requires a name, application origin, and Google OAuth client ID.
 The Create button stays disabled until all three fields are valid.
 A successful creation makes the tenant active without another action.
-Overview contains Resume tenant only for suspended tenants.
-Settings supports rename, bounded session lifetimes, and confirmed suspension.
+The heading shows the App and tenant names. Each pencil icon edits its name inline.
+Enter, Escape, or focus departure finishes a valid edit. Failed edits remain available for correction.
+The authentication status control pauses or resumes authentication. Pause requires confirmation.
+Configuration contains bounded session lifetimes. Integration shows the tenant ID.
+The footer contains the Documentation link.
 
 Background updates preserve pending edits.
 

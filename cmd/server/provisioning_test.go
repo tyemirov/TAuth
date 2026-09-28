@@ -13,7 +13,7 @@ import (
 
 func TestConsoleProvisioningCredentialScope(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		credentialInput := map[string]any{"name": "Gateway", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}
+		credentialInput := map[string]any{"app_id": owner.fixtureApp(), "name": "Gateway", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}
 		issued, issuedHeaders := owner.request("POST", "/api/management/provisioning-credentials", credentialInput, 201, "Idempotency-Key", "gateway-credential")
 		token := issued["token"].(string)
 		retry, _ := owner.request("POST", "/api/management/provisioning-credentials", credentialInput, 201, "Idempotency-Key", "gateway-credential")
@@ -72,10 +72,10 @@ func TestConsoleProvisioningCredentialScope(t *testing.T) {
 		machine.request("PUT", path+"/configuration", browserConfig, 422, append(auth, "If-Match", ownerHeaders.Get("ETag"))...)
 
 		machine.request("PUT", path+"/configuration", payload, 412, append(auth, "If-Match", updated.Get("ETag"))...)
-		private, privateHeaders := owner.request("POST", "/api/management/tenants", consoleTenantInput("Console only"), 201, "Idempotency-Key", "private")
+		private, privateHeaders := owner.request("POST", "/api/management/tenants", owner.tenantInput("Console only"), 201, "Idempotency-Key", "private")
 		_ = private
 		machine.request("GET", privateHeaders.Get("Location"), nil, 403, auth...)
-		deniedInput := map[string]any{"name": "Read only", "operations": []string{"read"}, "tenant_ids": []string{"gateway-app"}, "allow_create": false}
+		deniedInput := map[string]any{"app_id": owner.fixtureApp(), "name": "Read only", "operations": []string{"read"}, "tenant_ids": []string{"gateway-app"}, "allow_create": false}
 		denied, _ := owner.request("POST", "/api/management/provisioning-credentials", deniedInput, 201, "Idempotency-Key", "read-only")
 		machine.request("POST", "/api/management/tenants", body, 403, "Authorization", "Bearer "+denied["token"].(string), "Idempotency-Key", "denied")
 		machine.request("PUT", path+"/configuration", payload, 403, "Authorization", "Bearer "+denied["token"].(string), "If-Match", updated.Get("ETag"))
@@ -97,7 +97,7 @@ func TestConsoleActualGatewayClient(t *testing.T) {
 		t.Skip("selected by make test-gateway-provisioning")
 	}
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		input := map[string]any{"name": "Gateway client acceptance", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}
+		input := map[string]any{"app_id": owner.fixtureApp(), "name": "Gateway client acceptance", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}
 		credential, _ := owner.request("POST", "/api/management/provisioning-credentials", input, 201, "Idempotency-Key", "actual-gateway")
 		command := exec.Command("make", "--no-print-directory", "test-tauth-management-client")
 		command.Dir = gateway
@@ -119,7 +119,7 @@ func TestConsoleActualGatewayClient(t *testing.T) {
 
 func verifyImportedProvisioning(owner consoleHTTP, insecure, requireHeader bool) {
 	owner.t.Helper()
-	issued, _ := owner.request("POST", "/api/management/provisioning-credentials", map[string]any{"name": "Imported Gateway", "operations": []string{"read", "configure", "activate"}, "tenant_ids": []string{"imported"}, "allow_create": false}, 201, "Idempotency-Key", "imported-gateway")
+	issued, _ := owner.request("POST", "/api/management/provisioning-credentials", map[string]any{"app_id": "imported-app", "name": "Imported Gateway", "operations": []string{"read", "configure", "activate"}, "tenant_ids": []string{"imported"}, "allow_create": false}, 201, "Idempotency-Key", "imported-gateway")
 	machine := owner
 	client := *owner.client
 	client.Jar = nil
@@ -190,12 +190,12 @@ print(json.dumps(client.provision(**json.load(sys.stdin))))
 
 func TestConsoleProvisioningCannotReactivateSuspendedTenant(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", "/api/management/tenants", consoleTenantInput("Owner controlled suspension"), 201, "Idempotency-Key", "suspension-app")
+		tenant, headers := owner.request("POST", "/api/management/tenants", owner.tenantInput("Owner controlled suspension"), 201, "Idempotency-Key", "suspension-app")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		saved, headers := owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "app-client", "frontend_origins": []string{"http://localhost:9391"}, "api_base_url": "http://localhost:9392", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}, 200, "If-Match", headers.Get("ETag"))
 		etag := headers.Get("ETag")
-		credential, _ := owner.request("POST", "/api/management/provisioning-credentials", map[string]any{"name": "Activator", "operations": []string{"read", "activate"}, "tenant_ids": []string{tenant["id"].(string)}, "allow_create": false}, 201, "Idempotency-Key", "activation-credential")
+		credential, _ := owner.request("POST", "/api/management/provisioning-credentials", map[string]any{"app_id": owner.fixtureApp(), "name": "Activator", "operations": []string{"read", "activate"}, "tenant_ids": []string{tenant["id"].(string)}, "allow_create": false}, 201, "Idempotency-Key", "activation-credential")
 		machine := owner
 		client := *owner.client
 		client.Jar = nil

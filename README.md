@@ -230,6 +230,9 @@ It does not accept a `tenants` field.
 Use [the console operations runbook](docs/tenant-console-operations.md) to initialize the database and reserved console tenant.
 Every verified Google user can enroll and create an owner account.
 Authorization uses the stable console subject and owner account ID.
+Each account owns Apps. Each App contains its tenants.
+Create or select an App before tenant creation. Tenants retain separate origins, providers, keys, and sessions.
+Existing databases require the explicit [App hierarchy migration](docs/tenant-console-operations.md#app-hierarchy-migration) before service startup.
 Configured administrators can view the account directory. Their tenant workspaces remain owner-scoped.
 
 ### 2. Migrate existing application configuration
@@ -242,7 +245,7 @@ The importer preserves existing tenant IDs, keys, cookies, providers, policies, 
 
 ```sh
 make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID"
+make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
 ```
 
 An identical retry returns the same receipt. A changed source fails without partial writes.

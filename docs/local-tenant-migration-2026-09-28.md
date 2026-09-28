@@ -63,10 +63,10 @@ The local issuer is `http://localhost:8082`.
 ## Current destination state
 
 The destination is the retained local `tauth-local_tauth_data` volume.
-All 22 tenants belong to owner `J6NfFX3MVfAMfplROmxJdg`.
-Each tenant is active at revision 2.
+All 28 tenants belong to 19 Apps under owner `J6NfFX3MVfAMfplROmxJdg`.
+The original 22 tenants are active at revision 2. Six additional manifest tenants are active at revision 1.
 Revision 1 remains unchanged as the original import record.
-The service accepts authentication requests for all 22 tenants.
+The service accepts authentication requests for all 28 tenants.
 
 ## Repair evidence
 
@@ -96,3 +96,64 @@ A request with a shared origin and no tenant header returned 404.
 An unregistered origin returned 403.
 The console retained the selected Google client ID.
 Live Google credential qualification and production deployment remain separate operations.
+
+## App hierarchy result
+
+F017 added App membership through the separate deployment migration.
+The explicit map is `deployment/migrations/local-apps-20260928.json`.
+Kamu contains `kamu` and `kamu-local`.
+Prompt Bubbles contains `pb-dev`, `prompt-bubbles`, and `prompt-bubbles-dev`.
+Each other tenant has its own named App.
+
+The rehearsal and actual migration both produced 19 Apps with 22 active tenants.
+The comparison found no changes to existing data across 33 tables.
+Tenant IDs, keys, configurations, revisions, users, identities, and sessions stayed unchanged.
+All database integrity and foreign-key checks passed.
+Private backups and results remain under `.cache/tauth-local/apps-f017/`.
+The local database had no provisioning credentials to assign.
+
+`make ci` and the actual Gateway client tests passed.
+The automated browser verified App creation, tenant selection, automatic persistence, and account isolation.
+`make up` started both local services successfully.
+The console serves the App selector. All 22 live tenant nonce requests returned 200.
+The console Google client ID stayed unchanged.
+Production migration and deployment were not performed.
+
+## Deployment manifest correction
+
+B103 corrected an incomplete source inventory. The earlier scan omitted deployment manifests.
+The recursive scan found eight additional tenant IDs, including the nested iRoom repository.
+Six definitions passed canonical contribution validation and were imported into their existing Apps.
+
+| Tenant ID | App | Source repository |
+| --- | --- | --- |
+| `download-your-data` | Download Your Data | `download_your_data` |
+| `ledger` | Ledger | `ledger` |
+| `mpr-ui-demo` | MPR UI | `mpr-ui` |
+| `mprlab-investors` | MPR Lab Investors | `marcopolo.github.io` |
+| `tyemirov-gallery` | Gallery | `tyemirov.github.io` |
+| `iroom` | iRoom | `interview_room/iRoom` |
+
+Each source uses `.mprlab/deploy/resources.yml` and its declared private environment inputs.
+The separate migration command uses the canonical contribution resolver to produce private snapshots.
+The import keeps each source ID, provider configuration, key, cookie name, and origin.
+No existing tenant definition was replaced.
+
+The MailGoblin declaration contains only its ID and name. It has no complete authentication configuration.
+The ISSUES.md environment lacks `TAUTH_GITHUB_CREDENTIAL_KEY` and `ISSUES_MD_MCP_GITHUB_CREDENTIALS_KEY`.
+These two definitions remain excluded under the complete-definitions-only requirement.
+
+The rehearsal and actual import both produced 28 active tenants in 19 Apps.
+Repeated imports returned the same receipts. Existing rows across 36 tables stayed unchanged.
+All database integrity and foreign-key checks passed.
+Private snapshots and comparisons remain under `.cache/tauth-local/manifest-b103/`.
+The receipt identifiers use the `manifest-b103-` prefix and the imported tenant ID.
+
+`make test-deployment-migration` and `make ci` passed.
+All 28 live nonce requests returned 200 after `make up`.
+The console Google client ID stayed unchanged. Production services were not changed.
+
+I217 replaced the App dropdown with compact App rows and tenant counts.
+The selected App expands into its tenant list. The desktop and mobile interfaces use the same navigation.
+Browser tests verified navigation, automatic persistence, account isolation, and compact control dimensions.
+The layout uses the Smith MPR styling tokens. Dialogs support Escape and backdrop dismissal.

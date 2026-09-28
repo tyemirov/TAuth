@@ -54,7 +54,7 @@ func TestConsoleSetupDestinationRestrictions(t *testing.T) {
 	lookupManagementTXT = func(_ context.Context, name string) ([]string, error) { return []string{values[name]}, nil }
 	defer func() { lookupManagementTXT = originalDNS }()
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		_, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Setup destination"), 201, "Idempotency-Key", "setup-destination")
+		_, headers := owner.request("POST", controlplane.TenantsPath, owner.tenantInput("Setup destination"), 201, "Idempotency-Key", "setup-destination")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		config, headers := owner.request("PUT", path+"/configuration", map[string]any{"google_web_client_id": "customer-google", "frontend_origins": []string{"https://customer.example"}, "api_base_url": "https://api.customer.example", "local_development": false, "session_ttl": "15m", "refresh_ttl": "720h"}, 200, "If-Match", headers.Get("ETag"))

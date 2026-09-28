@@ -105,7 +105,7 @@ func TestConsoleTenantManagement(t *testing.T) {
 			}
 			owner.request("PUT", controlplane.OwnerPath, nil, status)
 			if attempt == 0 {
-				body := consoleTenantInput("First app")
+				body := owner.tenantInput("First app")
 				body["environment"] = "development"
 				tenant, header := owner.request("POST", "/api/management/tenants", body, 201, "Idempotency-Key", "first")
 				tenantID = tenant["id"].(string)
@@ -114,8 +114,8 @@ func TestConsoleTenantManagement(t *testing.T) {
 				if repeated["id"] != tenantID {
 					t.Fatal("retry changed tenant")
 				}
-				owner.request("POST", "/api/management/tenants", consoleTenantInput("Different"), 409, "Idempotency-Key", "first")
-				owner.request("POST", "/api/management/tenants", consoleTenantInput("Second app"), 201, "Idempotency-Key", "second")
+				owner.request("POST", "/api/management/tenants", owner.tenantInput("Different"), 409, "Idempotency-Key", "first")
+				owner.request("POST", "/api/management/tenants", owner.tenantInput("Second app"), 201, "Idempotency-Key", "second")
 				page, _ := owner.request("GET", "/api/management/tenants?limit=1", nil, 200)
 				if len(page["items"].([]any)) != 1 || page["next_cursor"] == "" {
 					t.Fatal("pagination missing")
@@ -232,7 +232,7 @@ func TestConsoleAutomaticPublicationAndDomainConflicts(t *testing.T) {
 	lookupManagementTXT = func(ctx context.Context, name string) ([]string, error) { return []string{values[name]}, nil }
 	defer func() { lookupManagementTXT = original }()
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Production"), 201, "Idempotency-Key", "production")
+		tenant, headers := owner.request("POST", controlplane.TenantsPath, owner.tenantInput("Production"), 201, "Idempotency-Key", "production")
 		path := headers.Get("Location")
 		tenantID := tenant["id"].(string)
 		owner.request("DELETE", path, nil, 405)
@@ -259,7 +259,7 @@ func TestConsoleAutomaticPublicationAndDomainConflicts(t *testing.T) {
 		input["google_web_client_id"] = ""
 		owner.request("PUT", path+"/configuration", input, 422, "If-Match", headers.Get("ETag"))
 		app.login("still-active", "production-client")
-		_, secondHeaders := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Conflict"), 201, "Idempotency-Key", "conflict")
+		_, secondHeaders := owner.request("POST", controlplane.TenantsPath, owner.tenantInput("Conflict"), 201, "Idempotency-Key", "conflict")
 		secondPath := secondHeaders.Get("Location")
 		_, secondHeaders = owner.request("GET", secondPath+"/configuration", nil, 200)
 		input["google_web_client_id"] = "other-client"
@@ -291,7 +291,7 @@ func (v blockingConsoleValidator) Validate(ctx context.Context, token, audience 
 func TestConsoleRequestRetainsRuntimeRevision(t *testing.T) {
 	validator := blockingConsoleValidator{make(chan struct{}), make(chan struct{})}
 	withManagementService(t, validator, func(owner consoleHTTP) {
-		tenant, headers := owner.request("POST", controlplane.TenantsPath, consoleTenantInput("Concurrent"), 201, "Idempotency-Key", "new")
+		tenant, headers := owner.request("POST", controlplane.TenantsPath, owner.tenantInput("Concurrent"), 201, "Idempotency-Key", "new")
 		path := headers.Get("Location")
 		_, headers = owner.request("GET", path+"/configuration", nil, 200)
 		input := map[string]any{"google_web_client_id": "old-client", "frontend_origins": []string{"http://localhost:8181"}, "api_base_url": "http://localhost:8182", "local_development": true, "session_ttl": "15m", "refresh_ttl": "720h"}

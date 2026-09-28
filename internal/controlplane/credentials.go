@@ -18,12 +18,14 @@ const CredentialsPath = "/api/management/provisioning-credentials"
 const principalContextKey = "management.provisioning-credential"
 
 type credentialInput struct {
+	AppID       string   `json:"app_id"`
 	Name        string   `json:"name"`
 	Operations  []string `json:"operations" gorm:"serializer:json"`
 	TenantIDs   []string `json:"tenant_ids" gorm:"serializer:json"`
 	AllowCreate bool     `json:"allow_create"`
 }
 type provisioningCredential struct {
+	AppID          string     `json:"app_id"`
 	Name           string     `json:"name"`
 	Operations     []string   `json:"operations" gorm:"serializer:json"`
 	TenantIDs      []string   `json:"tenant_ids" gorm:"serializer:json"`
@@ -171,7 +173,7 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 		respondError(ctx, err)
 		return
 	}
-	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 120 || len(input.Operations) == 0 || len(input.TenantIDs) > 100 || input.TenantIDs == nil {
+	if strings.TrimSpace(input.AppID) == "" || strings.TrimSpace(input.Name) == "" || len(input.Name) > 120 || len(input.Operations) == 0 || len(input.TenantIDs) > 100 || input.TenantIDs == nil {
 		respondError(ctx, failure(422, "credential_invalid"))
 		return
 	}
@@ -213,9 +215,16 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 			return err
 		}
 		local := store.local(tx)
+		if _, err := local.app(ctx.Request.Context(), owner.ID, input.AppID); err != nil {
+			return err
+		}
 		for _, tenantID := range input.TenantIDs {
-			if _, err := local.tenant(ctx.Request.Context(), owner.ID, tenantID); err != nil {
+			tenant, err := local.tenant(ctx.Request.Context(), owner.ID, tenantID)
+			if err != nil {
 				return err
+			}
+			if tenant.AppID != input.AppID {
+				return failure(422, "credential_app_mismatch")
 			}
 		}
 		var count int64
@@ -226,7 +235,7 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 			return failure(429, "credential_limit")
 		}
 		token := "tauthp_" + newID() + newID()
-		result = provisioningCredential{Name: input.Name, Operations: input.Operations, TenantIDs: input.TenantIDs, AllowCreate: input.AllowCreate, ID: newID(), OwnerAccountID: owner.ID, Digest: store.digest([]byte(token)), CreatedAt: management.now().UTC()}
+		result = provisioningCredential{AppID: input.AppID, Name: input.Name, Operations: input.Operations, TenantIDs: input.TenantIDs, AllowCreate: input.AllowCreate, ID: newID(), OwnerAccountID: owner.ID, Digest: store.digest([]byte(token)), CreatedAt: management.now().UTC()}
 		if err := tx.Create(&result).Error; err != nil {
 			return err
 		}

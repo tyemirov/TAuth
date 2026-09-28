@@ -183,7 +183,16 @@ func TestConsoleBrowserWorkspace(t *testing.T) {
 	unnamed.TenantOrigins = []string{"https://unnamed.example.com"}
 	unnamed.SessionCookieName = "unnamed_session"
 	unnamed.RefreshCookieName = "unnamed_refresh"
-	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "browser-import", owner.ID, tenants.FileDocument{Tenants: []tenants.FileTenant{imported, unnamed}}); err != nil {
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "browser-import", owner.ID, "fixture-app", "Fixture app", tenants.FileDocument{Tenants: []tenants.FileTenant{imported, unnamed}}); err != nil {
+		t.Fatal(err)
+	}
+	another := imported
+	another.ID = "another-app-browser"
+	another.DisplayName = "Other App production"
+	another.TenantOrigins = []string{"https://another.example.com"}
+	another.SessionCookieName = "another_session"
+	another.RefreshCookieName = "another_refresh"
+	if _, err := migrations.Apply(context.Background(), config.Server.DatabaseURL, config.Server.TenantEncryptionKey, "other-app-import", owner.ID, "z-fixture-app", "Other App", tenants.FileDocument{Tenants: []tenants.FileTenant{another}}); err != nil {
 		t.Fatal(err)
 	}
 	// Exercise the persisted inactive state produced by the withdrawn import path.
