@@ -180,6 +180,43 @@ make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants
 make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID"
 ```
 
+For sources with different environment inputs, freeze each source separately:
+
+```bash
+make build-deployment-migration
+.cache/tenant-ownership freeze-source --source tenants.import.yaml > private-snapshot.json
+```
+
+The snapshot contains credentials. Keep it outside version control and do not print it in logs.
+Supply each source's declared environment when you freeze it.
+A defined empty optional value is valid.
+An undefined referenced variable is an error.
+The snapshot preserves literal dollar signs without a second environment substitution.
+Use `--snapshot private-snapshot.json` instead of `--source` to read this format.
+
+An import must produce active tenants with a valid combined runtime configuration.
+Correct overlapping cookie names before import.
+Require explicit tenant IDs when application origins overlap.
+The importer rejects invalid configurations instead of storing inactive tenants.
+
+B098 repairs the previously imported inactive definitions through the separate deployment executable.
+The repair accepts a corrected JSON snapshot, the original import ID, a repair ID, and the existing owner ID.
+It permits cookie-name changes and a stricter tenant-header requirement only.
+It rejects changed keys, providers, origins, ownership, and previously edited tenants.
+The transaction validates all runtime settings before it commits revision 2 for each selected tenant.
+A repeated invocation with the same inputs returns the recorded receipt.
+The application runtime has no import-repair behavior.
+
+```sh
+make deployment-migration MIGRATION_ARGS="--config private-service.yaml repair-import --snapshot private-corrected.json --import-id original-import --repair-id corrected-import --owner-id OWNER_ID"
+```
+
+Stop database writers and make a backup before this operation.
+Rehearse against a database copy before the actual repair.
+Compare the settings and unrelated tables after the transaction.
+Restart the service and verify each tenant through its public authentication routes.
+See the [local migration record](local-tenant-migration-2026-09-28.md) for the local result.
+
 Run the migration where the deployment database is accessible, with all writers stopped.
 For a remote deployment, run `make build-deployment-migration` with the target `GOOS` and `GOARCH`.
 Transfer `.cache/tenant-ownership` as a separate deployment artifact.
@@ -211,7 +248,11 @@ All cookie requests require the exact console Origin. Mutations also require `X-
 Send JSON with `Content-Type: application/json`.
 Responses use `Cache-Control: no-store`. CORS exposes `ETag` and `Location`.
 
-Create a draft with a name and optional environment label.
+Create an active tenant with `name`, `application_origin`, and `google_web_client_id`.
+The service generates the tenant ID, keys, cookie names, and session lifetimes.
+Creation validates and publishes the complete configuration in one transaction.
+A failed creation leaves no tenant record.
+The optional customer API origin supports integration instructions and does not control creation.
 Use one `Idempotency-Key` for each POST operation. Keep the same body and precondition on a retry.
 A changed retry returns `409`. Successful creation returns `201` and a resource Location.
 An owner can create up to 100 tenants. The service permits up to 60 recorded mutations per owner per minute.
@@ -225,27 +266,20 @@ Concurrent creation can change later pages. Each page remains owner scoped.
 Read the configuration ETag before each configuration PUT or activation POST.
 Read the tenant ETag before a metadata PATCH or suspension PATCH.
 A missing precondition returns `428`. A stale precondition returns `412`.
-Configuration PUT creates an immutable draft revision.
+Configuration PUT creates an immutable revision and applies it immediately to a tenant that is not suspended.
 It preserves imported provider and account fields outside the editable Google, origin, and lifetime settings.
-The active revision remains in use until activation succeeds.
+A failed configuration update preserves the previous revision and runtime.
+Edits to a suspended tenant do not resume authentication.
 Session lifetimes range from one minute through one hour. Refresh lifetimes cannot exceed 90 days.
 
-### Origin verification
+### Application origins
 
 Production addresses require HTTPS and DNS hostnames.
-Create an origin proof for each frontend and API hostname in the saved revision.
-Publish its exact TXT name and value in DNS.
-Create a verification under `/origin-proofs/{id}/verifications` after DNS publication.
-The service performs a DNS lookup with a five-second deadline.
-Each proof expires after 15 minutes and applies to one tenant and revision.
-A tenant can have up to 20 unexpired challenges.
-Read the proof or verification Location to obtain its current result.
-
-Activation requires verified proofs for new production hostnames.
-Imported origins retain their operator-approved provenance.
+DNS ownership verification is not a creation or activation prerequisite.
+The optional origin-proof API records DNS evidence without controlling activation.
 The service rejects reserved console hostnames and hostnames that another active tenant uses.
-Local development permits localhost, `127.0.0.1`, and `::1` without DNS proof.
-Enable the explicit local development setting and the service tenant-header setting.
+Local development permits localhost, `127.0.0.1`, and `::1` with HTTP or HTTPS.
+Creation detects these local addresses and enables the tenant-header setting.
 Each local request must send the exact tenant ID in `X-TAuth-Tenant`.
 New tenants have distinct session and refresh cookie names.
 
@@ -319,7 +353,7 @@ Never place the token in a manifest, public output, URL, or browser configuratio
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
 A machine request with the console shape or a null `provisioning` value returns `422`.
 The API validates the contribution through the same TAuth native configuration parser used by the renderer.
-Activation uses the shared management activation service and origin proofs.
+Activation uses the shared management activation service without a DNS ownership prerequisite.
 An identical generation and contribution retain the configuration revision.
 A changed contribution at the same generation fails. A console edit causes a revision conflict.
 Gateway cannot overwrite that edit or reactivate a suspended tenant.
@@ -339,7 +373,7 @@ Use this ordered production cutover:
 4. Verify imported ownership, provider settings, cookies, refresh behavior, and downstream validator values.
 5. Issue the scoped Gateway credential and set its private operator inputs.
 6. Install the recorded Gateway release. Run one selected tenant convergence and repeat it to verify the stable revision.
-7. Verify DNS proofs for new origins. Resolve any concurrent console revision conflict through the owner before another request.
+7. Resolve any concurrent console revision conflict through the owner before another request.
 8. Resume tenant changes. Record production import, publication, deployment, and live-provider qualification separately.
 
 The renderer now emits service settings with the database URL and encryption-key input.
@@ -361,17 +395,45 @@ Never put a session key or provisioning credential in this file.
 
 The workspace uses the pinned MPR-UI account controls, footer, and theme controls.
 The destination owner sees imported tenants after Google sign-in.
-Another owner starts with an empty collection and can create a named draft.
+Another owner starts with an empty collection and can create a tenant from the three required fields.
+
+Tenant navigation shows one label per tenant.
+The label is the display name when present, or the tenant ID when the display name is empty.
+The mobile selector and detail heading use the same label.
+The detail view also shows the tenant ID.
+
+The workspace does not show a notification after tenant data loads.
+The workspace shows authentication status as text.
+A tenant with no active configuration cannot accept sign-ins, even when all required inputs are present.
+A suspended tenant requires Resume tenant before authentication can continue.
+
 Tenant and section selection use the URL fragment, which works on GitHub Pages without a route rewrite.
 The service authorizes each selected tenant before its details appear.
 
-Save changes in Domains, Sign-in methods, or Settings to create a draft revision.
+Valid edits in Domains, Sign-in methods, or Settings apply automatically unless the tenant is suspended.
+Rename and environment edits also persist automatically.
+The workspace shows pending, saved, validation, and failure states.
+Transient failures retry without discarding edits.
+The workspace updates on a timer, on reconnect, and when the page becomes visible.
+It has no manual save, refresh, or reload buttons.
+
+The avatar menu contains Admin for configured administrators.
+That menu item opens the separate account-directory modal.
+The modal loads its account list automatically. Escape or Close returns focus to the avatar.
+Administrator access does not change tenant ownership or grant access to another workspace.
+
 The Google form lists the exact Authorized JavaScript origins.
 Other imported provider settings remain in the stored configuration.
-Publish DNS TXT proofs from Domains. Verify each proof before activation.
-Activate the saved configuration from Overview.
+Creation requires a name, application origin, and Google OAuth client ID.
+The Create button stays disabled until all three fields are valid.
+A successful creation makes the tenant active without another action.
+Overview contains Resume tenant only for suspended tenants.
 Settings supports rename, bounded session lifetimes, and confirmed suspension.
-A revision conflict preserves the form values and requires an explicit reload.
+
+Background updates preserve pending edits.
+Changes to separate fields merge with the current revision.
+A conflict on the same field preserves the local value and asks the owner to edit that value.
+The corrected value then saves automatically.
 Account and tenant changes cancel pending requests and clear protected page state.
 
 `make test-console-browser` drives Chromium against the real TLS service and test database.
@@ -381,7 +443,7 @@ Live Google qualification and Pages publication remain separate operations.
 
 ## Application integration and key export
 
-Integration reads the active revision. A newer draft does not change the public snippets.
+Integration reads the active revision. Accepted configuration edits update the public snippets automatically.
 The generated browser page uses `https://tauth.mprlab.com/tauth.js`, an explicit tenant ID, and the customer API origin.
 The [customer application example](../examples/tenant-app/README.md) supplies the complete proxy and validator instructions.
 The browser and customer API must share a cookie site and scheme.
@@ -438,7 +500,7 @@ The checker consumes the returned nonce through the tenant nonce store.
 It records the tenant, revision, time, state, and bounded evidence codes.
 It does not store response bodies, cookies, DNS addresses, or secrets.
 A retry returns the same result without another probe.
-Integration shows the latest result for the active revision and identifies saved changes that still require activation.
+Integration shows the latest result for the active revision.
 A new active revision requires a new check.
 
 A successful setup check does not prove Google sign-in or protected application authorization.
@@ -464,7 +526,7 @@ The audit operation records the owner, tenant, and new revision without the key.
 9. Install the same base64 value as `TAUTH_SESSION_KEY_BASE64` in every backend instance.
 10. Replace all old validator instances before you resume protected traffic.
 11. Restart TAuth and sign in to the console.
-12. Verify the required DNS proofs for the new revision, then activate it.
+12. Resume the tenant with the new revision.
 13. Confirm that an old session token fails validation and a new Google login reaches the protected API.
 14. Run a new setup check and resume application traffic.
 15. Keep Gateway convergence paused for this tenant. Its earlier contribution revision must not overwrite the operator change.
@@ -525,12 +587,13 @@ Use this delivery order:
 10. Read the public `/.mprlab-release.json` marker and compare it with the selected website release.
 11. Open `/app/` and verify the public API origin and console bootstrap response.
 12. Complete live Google login as the destination owner and compare the imported tenant collection with the receipt.
-13. Use another owner to create, configure, prove, and activate an isolated acceptance tenant.
-14. Install its customer application and complete Google login, protected access, refresh, and logout through the public origins.
-15. Confirm the cookie attributes, expected tenant check, denied origin response, and setup-check evidence.
-16. Record service deployment, website publication, import, and live Google qualification as separate outcomes.
-17. Resume tenant changes after all selected production checks pass.
-18. Remove the bounded importer through the separately reviewed cleanup change after verified production migration.
+13. Use another owner to create an isolated acceptance tenant from the three required fields.
+14. Verify that the new tenant accepts authentication immediately.
+15. Install its customer application and complete Google login, protected access, refresh, and logout through the public origins.
+16. Confirm the cookie attributes, expected tenant check, denied origin response, and setup-check evidence.
+17. Record service deployment, website publication, import, and live Google qualification as separate outcomes.
+18. Resume tenant changes after all selected production checks pass.
+19. Remove the bounded importer through the separately reviewed cleanup change after verified production migration.
 
 A failed check leaves the associated production record incomplete.
 Keep tenant changes frozen if the database cutover or Gateway verification fails.

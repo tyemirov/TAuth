@@ -1413,11 +1413,26 @@ components:
       type: object
       additionalProperties: false
     TenantCreate:
+      oneOf:
+        - $ref: "#/components/schemas/OwnerTenantCreate"
+        - $ref: "#/components/schemas/ProvisioningTenantCreate"
+    OwnerTenantCreate:
       type: object
       additionalProperties: false
-      required: [name]
+      required: [name, application_origin, google_web_client_id]
+      description: Creates and activates a Google tenant atomically. DNS verification is not required.
       properties:
-        id: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,63}$', description: A declared tenant ID requires a provisioning creation grant.}
+        name: {type: string, minLength: 1, maxLength: 120}
+        application_origin: {type: string, format: uri, description: Exact HTTPS application origin. Loopback origins can use HTTP and include a port.}
+        google_web_client_id: {type: string, maxLength: 256, pattern: '^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$'}
+        environment: {type: string, maxLength: 40}
+    ProvisioningTenantCreate:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      description: A provisioning credential creates a declared tenant for complete provider configuration through the deployment workflow.
+      properties:
+        id: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,63}$'}
         name: {type: string, minLength: 1, maxLength: 120}
         environment: {type: string, maxLength: 40}
     TenantPatch:
