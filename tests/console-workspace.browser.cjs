@@ -83,6 +83,58 @@ test(
         });
       } else void request.continue();
     });
+    for (const destination of [
+      {
+        fragment: "app=z-fixture-app",
+        app: "z-fixture-app",
+        tenant: "another-app-browser",
+        section: "configuration",
+      },
+      {
+        fragment: "tenant=unnamed-browser&section=integration",
+        app: "fixture-app",
+        tenant: "unnamed-browser",
+        section: "integration",
+      },
+    ]) {
+      await page.goto(
+        process.env.TAUTH_CONSOLE_URL + "#" + destination.fragment,
+      );
+      await page.waitForSelector("#fixture-google-login", { visible: true });
+      await page.waitForFunction(
+        () =>
+          document.getElementById("notice").textContent ===
+          "Sign in to manage your tenants.",
+      );
+      assert.equal(
+        await page.evaluate(() => location.hash),
+        "#" + destination.fragment,
+      );
+      await page.click("#fixture-google-login");
+      await page.waitForFunction(
+        (id) => document.getElementById("tenant-id").textContent === id,
+        {},
+        destination.tenant,
+      );
+      assert.equal(
+        await page.$eval(
+          '[data-app][aria-expanded="true"]',
+          (node) => node.dataset.app,
+        ),
+        destination.app,
+      );
+      assert.equal(
+        await page.$eval(
+          '[data-section][aria-current="page"]',
+          (node) => node.dataset.section,
+        ),
+        destination.section,
+      );
+      await page.evaluate(() => logout());
+      await page.waitForSelector("#signed-out:not([hidden])");
+      assert.equal(await page.evaluate(() => location.hash), "");
+      await page.goto("about:blank");
+    }
     await page.goto(process.env.TAUTH_CONSOLE_URL);
     assert.equal(await page.title(), "TAuth · Tenant workspace");
     await page.waitForSelector("#fixture-google-login", {
