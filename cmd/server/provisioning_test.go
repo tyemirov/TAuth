@@ -99,20 +99,30 @@ func TestConsoleActualGatewayClient(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
 		input := map[string]any{"app_id": owner.fixtureApp(), "name": "Gateway client acceptance", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}
 		credential, _ := owner.request("POST", "/api/management/provisioning-credentials", input, 201, "Idempotency-Key", "actual-gateway")
+		secondApp, _ := owner.request("POST", "/api/management/apps", map[string]any{"name": "Second Gateway App"}, 201, "Idempotency-Key", "second-gateway-app")
+		secondInput := map[string]any{"app_id": secondApp["id"], "name": "Second App acceptance", "operations": []string{"read", "configure", "activate", "suspend"}, "tenant_ids": []string{}, "allow_create": true}
+		secondCredential, _ := owner.request("POST", "/api/management/provisioning-credentials", secondInput, 201, "Idempotency-Key", "second-app-credential")
+		credentials, err := json.Marshal(map[string]any{"gateway-fixture": map[string]any{"authentication": credential["token"], "second-authentication": secondCredential["token"]}})
+		if err != nil {
+			t.Fatal(err)
+		}
 		command := exec.Command("make", "--no-print-directory", "test-tauth-management-client")
 		command.Dir = gateway
-		command.Env = append(os.Environ(), "TAUTH_MANAGEMENT_TEST_URL="+owner.gatewayURL, "TAUTH_MANAGEMENT_TEST_TOKEN="+credential["token"].(string), "MPRLAB_TAUTH_MANAGEMENT_URL="+owner.gatewayURL, "MPRLAB_TAUTH_PROVISIONING_CREDENTIAL="+credential["token"].(string))
+		command.Env = append(os.Environ(), "TAUTH_MANAGEMENT_TEST_URL="+owner.gatewayURL, "MPRLAB_TAUTH_MANAGEMENT_URL="+owner.gatewayURL, "MPRLAB_TAUTH_PROVISIONING_CREDENTIALS="+string(credentials))
 		output, err := command.CombinedOutput()
 		if err != nil {
 			t.Fatalf("Gateway client: %v\n%s", err, output)
 		}
 		collection, _ := owner.request("GET", "/api/management/tenants", nil, 200)
-		if len(collection["items"].([]any)) != 1 {
-			t.Fatal("Gateway did not create exactly one tenant")
+		if len(collection["items"].([]any)) != 2 {
+			t.Fatal("Gateway did not create exactly two tenants")
 		}
-		tenant := collection["items"].([]any)[0].(map[string]any)
-		if tenant["id"] != "gateway-acceptance" || tenant["active_revision"] != float64(2) {
-			t.Fatalf("unstable Gateway result: %v", tenant)
+		apps := map[string]any{"gateway-acceptance": input["app_id"], "gateway-acceptance-second": secondApp["id"]}
+		for _, item := range collection["items"].([]any) {
+			tenant := item.(map[string]any)
+			if tenant["active_revision"] != float64(2) || tenant["app_id"] != apps[tenant["id"].(string)] {
+				t.Fatalf("incorrect App or revision: %v", tenant)
+			}
 		}
 	})
 }
