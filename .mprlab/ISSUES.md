@@ -984,6 +984,16 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Improvements
 
+- [x] [I222] Rehearse production tenant migration with App ownership.
+  Requirements: Use isolated copies of the gathered production data and the current source.
+  Requirements: Verify App grouping, owner isolation, credentials, unchanged authentication data, retry, restart, and backup restoration.
+  Requirements: Record executed evidence and distinguish migration readiness from production deployment.
+  Resolution: Imported 20 captured production tenants into 20 Apps and verified sessions for 30 existing profiles.
+  Resolution: Verified import retries, backup restoration, owner isolation, and unchanged authentication data.
+  Resolution: Reproduced the installed Gateway credential mismatch and recorded B106 as a deployment blocker.
+  Validation: The production-copy console suite, deployment migration suite, and `make ci` passed.
+  Evidence: `docs/production-app-rehearsal-2026-09-28.md` and `deployment/migrations/production-apps-20260928.json`.
+
 - [x] [I221] Edit App and tenant names inline.
   Requirements: Replace rename dialogs with inline name inputs. Remove the environment label field.
   Requirements: Save valid edits automatically without success announcements. Show errors beside the affected input.
@@ -1362,6 +1372,18 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes
+
+- [!] [B106] (P1) Qualify Gateway provisioning with App-scoped credentials.
+  Requirements: Select the credential for each App and its current or removed tenant contributions.
+  Requirements: Preserve App isolation and repeat the full production contribution operation through the installed Gateway.
+  Blocked: The installed Gateway v4.7.1 retains the single-credential contract. The corrected source needs coordinated release and installed-handler qualification.
+  Validation: I222 reproduced `management.creation_denied` with the installed client and 20 captured production contributions.
+  Validation: Separate operations with the correct App credentials passed for all 20 tenants.
+  Resolution: Gateway B595 selects credentials by contribution owner and resource ID under the existing P005 cutover preparation.
+  Validation: The corrected shared Ansible handler provisioned all 20 production-copy Apps and repeated the operation without changes.
+  Validation: Real-service acceptance now verifies two Apps, separate credentials, and HTTPS activation without DNS proofs.
+  Validation: Final `make ci` passed in both repositories after the source correction.
+  Evidence: `docs/production-app-rehearsal-2026-09-28.md`.
 
 - [x] [B104] Migrate credential owners without tenants.
   Observed: App ownership requires a tenant, so an owner with only provisioning credentials cannot migrate.

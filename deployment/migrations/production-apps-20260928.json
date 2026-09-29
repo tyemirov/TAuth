@@ -1,0 +1,145 @@
+{
+  "apps": [
+    {
+      "id": "download-your-data",
+      "name": "Download Your Data",
+      "tenant_ids": [
+        "download-your-data"
+      ]
+    },
+    {
+      "id": "gravity",
+      "name": "Gravity Notes",
+      "tenant_ids": [
+        "gravity"
+      ]
+    },
+    {
+      "id": "hecate",
+      "name": "Hecate",
+      "tenant_ids": [
+        "hecate"
+      ]
+    },
+    {
+      "id": "iroom",
+      "name": "iRoom",
+      "tenant_ids": [
+        "iroom"
+      ]
+    },
+    {
+      "id": "issues-md",
+      "name": "ISSUES.ED",
+      "tenant_ids": [
+        "issues-md"
+      ]
+    },
+    {
+      "id": "kamu",
+      "name": "Kamu",
+      "tenant_ids": [
+        "kamu"
+      ]
+    },
+    {
+      "id": "ledger",
+      "name": "Ledger",
+      "tenant_ids": [
+        "ledger"
+      ]
+    },
+    {
+      "id": "llm-proxy",
+      "name": "LLM Proxy",
+      "tenant_ids": [
+        "llm-proxy"
+      ]
+    },
+    {
+      "id": "loopaware",
+      "name": "LoopAware",
+      "tenant_ids": [
+        "loopaware"
+      ]
+    },
+    {
+      "id": "mediaops",
+      "name": "MediaOps",
+      "tenant_ids": [
+        "mediaops"
+      ]
+    },
+    {
+      "id": "mpr-ui",
+      "name": "MPR UI",
+      "tenant_ids": [
+        "mpr-ui-demo"
+      ]
+    },
+    {
+      "id": "mprlab-investors",
+      "name": "MPR Lab Investors",
+      "tenant_ids": [
+        "mprlab-investors"
+      ]
+    },
+    {
+      "id": "namesignal",
+      "name": "NameSignal",
+      "tenant_ids": [
+        "namesignal"
+      ]
+    },
+    {
+      "id": "pinguin",
+      "name": "Pinguin",
+      "tenant_ids": [
+        "pinguin"
+      ]
+    },
+    {
+      "id": "prompt-bubbles",
+      "name": "Prompt Bubbles",
+      "tenant_ids": [
+        "prompt-bubbles"
+      ]
+    },
+    {
+      "id": "poodlescanner",
+      "name": "PoodleScanner",
+      "tenant_ids": [
+        "ps"
+      ]
+    },
+    {
+      "id": "social-threader",
+      "name": "Social Threader",
+      "tenant_ids": [
+        "social-threader"
+      ]
+    },
+    {
+      "id": "summercan",
+      "name": "SummerCan",
+      "tenant_ids": [
+        "summercan"
+      ]
+    },
+    {
+      "id": "gallery",
+      "name": "Gallery",
+      "tenant_ids": [
+        "tyemirov-gallery"
+      ]
+    },
+    {
+      "id": "writers-block",
+      "name": "Writer Block",
+      "tenant_ids": [
+        "writers-block"
+      ]
+    }
+  ],
+  "credentials": {}
+}

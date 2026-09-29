@@ -404,7 +404,7 @@ Audit records contain resource identifiers, revisions, operations, results, and 
 
 F011 requires the Gateway client implemented by F017 in the primary Gateway repository.
 No released version is allocated by this source change.
-Before production cutover, record the exact released Gateway version that contains F017.
+Before production cutover, record the released Gateway version that contains F017 and the B595 credential selection change.
 A Gateway release without that client cannot operate the database-only tenant contract.
 
 Create credentials through `/api/management/provisioning-credentials` with the owner cookie, console Origin, and CSRF header.
@@ -417,7 +417,10 @@ A repeated creation request returns metadata without the token. Revoke a lost to
 DELETE revokes the credential. GET returns metadata only.
 
 The Gateway client sends `Authorization: Bearer <token>` without browser cookies or Origin.
-Store the token in the operator's private environment as `MPRLAB_TAUTH_PROVISIONING_CREDENTIAL`.
+Store the App tokens in the operator's private environment as `MPRLAB_TAUTH_PROVISIONING_CREDENTIALS`.
+Use a JSON map from contribution owner to resource ID to token, such as `{"kamu":{"authentication":"tauthp_<token>"}}`.
+Assign each contribution the credential for its destination App.
+Keep credentials for removed contributions until their tenant suspension succeeds.
 Set `MPRLAB_TAUTH_MANAGEMENT_URL` to the TAuth service origin.
 Never place the token in a manifest, public output, URL, or browser configuration.
 
