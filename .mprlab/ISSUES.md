@@ -1373,6 +1373,17 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B110] (P1) Install browser dependencies for Go CI.
+  Goal: Run the complete Go test suite in GitHub Actions.
+  Actual result: PR 181 failed because `TestSecurityBrowserRefresh` could not load Puppeteer in the Go test job.
+  Requirements: Set up Node and install the locked npm dependencies before Go tests.
+  Requirements: Include the workflow and browser test inputs in its path filters.
+  Validation: Run the browser refresh test with memory and SQLite stores. Run `make ci`.
+  Resolution: The Go workflow sets up Node and runs `npm ci` before the test suite.
+  Resolution: Path filters include the workflow, npm lockfile, and browser regression inputs.
+  Validation: The browser refresh test passed for both stores. Final `make ci` passed.
+  Files: `.github/workflows/go-tests.yml`.
+
 - [x] [B109] (P1) Limit password reset email delivery.
   Goal:
   Repeated reset requests cannot send unlimited email or retain unlimited reset challenges.
