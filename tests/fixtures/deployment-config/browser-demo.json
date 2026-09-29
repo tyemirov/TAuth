@@ -94,7 +94,6 @@
             "password_signup": {
               "enabled": true
             },
-            "return_challenge_tokens": false,
             "email_verification_ttl": "30m",
             "email_delivery": {
               "server_address": "pinguin:50051",

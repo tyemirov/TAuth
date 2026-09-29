@@ -84,6 +84,7 @@ async function loadAuthClient(fetchImpl, broadcastSink, options = {}) {
   }
 
   const context = {
+    navigator: { locks: { request: async (_name, operation) => operation() } },
     fetch: fetchImpl,
     console,
     setTimeout,
