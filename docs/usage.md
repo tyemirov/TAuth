@@ -61,7 +61,7 @@ Key notes:
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
 - **Apple OAuth**: Set `apple_oauth.enabled: true` to expose the browser Apple endpoints. Add native iOS App IDs under `native_client_ids` to expose the native Apple endpoints. Enabled providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and registered HTTPS callback URI.
 - **Account management**: Set `account_management.enabled: true` to use persisted account IDs and account routes.
-- **Challenge delivery**: Set `email_delivery` for production account management. Keep `return_challenge_tokens` false outside tests.
+- **Challenge delivery**: Account management requires `email_delivery`. Challenge tokens are sent only through the configured email channel.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 - **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google, GitHub, or password authentication for the TAuth login page.
 - **OAuth persistence**: TAuth requires a persistent database for requests, authorization codes, consent grants, and refresh sessions.
@@ -442,7 +442,6 @@ account_management:
   enabled: true
   password_signup:
     enabled: true
-  return_challenge_tokens: false
   email_verification_ttl: "30m"
   email_delivery:
     server_address: "pinguin-grpc:50051"
@@ -468,7 +467,7 @@ Or call `POST /auth/password/login` directly with `credentials: "include"`. The 
 
 Signup, reset, and password-link flows use tenant-specific, single-use challenge tokens. TAuth stores only challenge hashes.
 
-Production config must set `return_challenge_tokens: false`. It must also contain the complete `email_delivery` block. TAuth sends each challenge link through Pinguin and puts the token in the URL fragment.
+Account management requires the complete `email_delivery` block. TAuth sends each challenge link through Pinguin and puts the token in the URL fragment.
 
 ```js
 await signupPasswordCredential({
@@ -805,9 +804,7 @@ Starts a password signup when `account_management.enabled` and `account_manageme
   }
   ```
 
-  Tests can set `return_challenge_tokens: true`. That mode also returns `verification_token`.
-
-  Production config keeps this value false. TAuth queues one Pinguin email that contains the public verification URL and a fragment token.
+  TAuth sends one Pinguin email that contains the public verification URL and a fragment token. Tests obtain tokens from an injected email sender.
 
 - **Errors**:
   - `404` with `error: "account_management_not_configured"` when account management is disabled
@@ -839,7 +836,7 @@ Starts password reset. The response shape is intentionally the same for known an
   { "email": "user@example.com" }
   ```
 
-- **Response**: `202 Accepted` with `status`, `account_id` when known, and `expires_unix`. When `return_challenge_tokens: true`, known accounts receive `reset_token`. Production sends known-account reset links through Pinguin and keeps the same response shape for unknown accounts.
+- **Response**: `202 Accepted` with exactly `{"status":"accepted"}`. Known accounts receive reset links through Pinguin. Unknown accounts, throttled requests, and delivery failures receive the same public response. One reset per account is permitted each minute. A new reset replaces the previous challenge. See the [authentication request limits](../README.md#authentication-request-limits) for source and global limits.
 
 ### 6.2i `POST /auth/password/reset/complete`
 
