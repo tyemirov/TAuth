@@ -2,6 +2,7 @@ package authkit
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 
@@ -304,6 +305,7 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
 func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
+	router = router.Group("", boundedAuthBody)
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -423,13 +425,12 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 
 		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
 		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
-		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
-			logAuthError("auth.session.issue_refresh", issueErr)
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
+		if errors.Is(issueErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(issueErr) {
+			contextGin.AbortWithStatus(http.StatusNoContent)
 			return
 		}
-		if revokeErr := refreshTokens.Revoke(contextGin, tenantID, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
-			logAuthError("auth.session.revoke_previous", revokeErr)
+		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
+			logAuthError("auth.session.issue_refresh", issueErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
@@ -540,7 +541,13 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorAppleReturnToInvalid})
 			return
 		}
-		stateToken, stateErr := createAppleOAuthState(clock, config, tenantID, nonceToken, returnTo)
+		browserSecret, browserHash, browserErr := generateRefreshOpaque()
+		if browserErr != nil {
+			logAuthError("auth.login.apple.browser", browserErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		stateToken, stateErr := createAppleOAuthState(clock, config, tenantID, nonceToken, returnTo, browserHash)
 		if stateErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.apple.state", stateErr)
@@ -554,6 +561,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
+		http.SetCookie(contextGin.Writer, &http.Cookie{Name: appleBrowserCookie(stateToken), Value: browserSecret, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, MaxAge: int(effectiveDuration(config.NonceTTL, 5*time.Minute).Seconds())})
 		contextGin.Redirect(http.StatusFound, redirectURL)
 	})
 
@@ -571,6 +579,12 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleStateInvalid})
 			return
 		}
+		browserCookie, browserErr := contextGin.Request.Cookie(appleBrowserCookie(state))
+		if browserErr != nil || subtle.ConstantTimeCompare([]byte(hashOpaque(browserCookie.Value)), []byte(statePayload.BrowserHash)) != 1 {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleStateInvalid})
+			return
+		}
+		http.SetCookie(contextGin.Writer, &http.Cookie{Name: appleBrowserCookie(state), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, MaxAge: -1})
 		if !config.AppleOAuth.Enabled {
 			recordMetric(metricAuthLoginFailure)
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAppleLoginNotConfigured})
@@ -852,9 +866,14 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
-		profile, authErr := passwordCredentials.AuthenticatePassword(contextGin, tenantID, normalizedEmail, inbound.Password)
+		profile, authErr := passwordCredentials.AuthenticatePassword(withRequestSource(contextGin.Request.Context(), contextGin.Request), tenantID, normalizedEmail, inbound.Password)
 		if authErr != nil {
 			recordMetric(metricAuthLoginFailure)
+			if errors.Is(authErr, ErrAuthenticationRateLimited) {
+				contextGin.Header("Retry-After", "60")
+				contextGin.AbortWithStatus(http.StatusTooManyRequests)
+				return
+			}
 			if errors.Is(authErr, ErrPasswordCredentialInvalid) {
 				logAuthWarning("auth.login.password.invalid_credentials", nil)
 				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorPasswordCredentialInvalid})
@@ -914,7 +933,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorPasswordSignupNotConfigured})
 			return
 		}
-		if !config.ReturnChallengeTokens && (emailChallengeSender == nil || strings.TrimSpace(config.EmailVerificationURL) == "") {
+		if emailChallengeSender == nil || strings.TrimSpace(config.EmailVerificationURL) == "" {
 			contextGin.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": errorEmailVerificationDeliveryMissing})
 			return
 		}
@@ -969,7 +988,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				return
 			}
 		}
-		contextGin.JSON(http.StatusAccepted, challengePayload(config, "verification_token", challenge))
+		contextGin.JSON(http.StatusAccepted, challengePayload(challenge))
 	})
 
 	router.POST("/auth/password/verify-email", func(contextGin *gin.Context) {
@@ -1018,20 +1037,16 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 		expiresAt := clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute))
-		challenge, resetErr := store.StartPasswordReset(contextGin, tenantID, inbound.Email, expiresAt.Unix())
+		challenge, resetErr := store.StartPasswordReset(withRequestSource(contextGin.Request.Context(), contextGin.Request), tenantID, inbound.Email, expiresAt.Unix())
 		if resetErr != nil {
-			if !errors.Is(resetErr, ErrAccountNotFound) && !errors.Is(resetErr, ErrPasswordCredentialInvalid) {
+			if !errors.Is(resetErr, ErrAccountNotFound) && !errors.Is(resetErr, ErrPasswordCredentialInvalid) && !errors.Is(resetErr, ErrAuthenticationRateLimited) {
 				logAuthError("auth.account.reset_start", resetErr)
-				contextGin.AbortWithStatus(http.StatusInternalServerError)
-				return
 			}
-			challenge = fakeChallenge(expiresAt.Unix())
 		} else if config.EmailDeliveryEnabled && emailChallengeSender != nil {
 			resetURL, resetURLErr := buildEmailChallengeURL(config.PasswordResetURL, challenge.Token)
 			if resetURLErr != nil {
 				cancelAccountChallenge(contextGin, store, tenantID, challenge)
 				logAuthError("auth.account.password_reset_url", resetURLErr)
-				challenge = fakeChallenge(expiresAt.Unix())
 			} else if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
 				Kind:      EmailChallengeKindPasswordReset,
 				TenantID:  tenantID,
@@ -1041,10 +1056,9 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			}); deliveryErr != nil {
 				cancelAccountChallenge(contextGin, store, tenantID, challenge)
 				logAuthError("auth.account.password_reset_delivery", deliveryErr)
-				challenge = fakeChallenge(expiresAt.Unix())
 			}
 		}
-		contextGin.JSON(http.StatusAccepted, challengePayload(config, "reset_token", challenge))
+		contextGin.JSON(http.StatusAccepted, gin.H{"status": "accepted"})
 	})
 
 	router.POST("/auth/password/reset/complete", func(contextGin *gin.Context) {
@@ -1444,15 +1458,13 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 
 		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
 		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
+		if errors.Is(issueErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(issueErr) {
+			contextGin.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
 		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
 			recordMetric(metricAuthRefreshFailure)
 			logAuthError("auth.refresh.issue_refresh", issueErr)
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		if revokeErr := refreshTokens.Revoke(contextGin, tenantID, currentTokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
-			recordMetric(metricAuthRefreshFailure)
-			logAuthError("auth.refresh.revoke_previous", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
@@ -1557,7 +1569,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				return
 			}
 		}
-		contextGin.JSON(http.StatusAccepted, challengePayload(config, "verification_token", challenge))
+		contextGin.JSON(http.StatusAccepted, challengePayload(challenge))
 	})
 
 	accountRoutes.POST("/password/link/verify", func(contextGin *gin.Context) {
@@ -2015,14 +2027,11 @@ func accountProfilePayload(profile AccountProfile) gin.H {
 	}
 }
 
-func challengePayload(config ServerConfig, tokenField string, challenge AccountChallenge) gin.H {
+func challengePayload(challenge AccountChallenge) gin.H {
 	payload := gin.H{
 		"status":       "accepted",
 		"account_id":   challenge.AccountID,
 		"expires_unix": challenge.ExpiresUnix,
-	}
-	if config.ReturnChallengeTokens {
-		payload[tokenField] = challenge.Token
 	}
 	return payload
 }
@@ -2048,14 +2057,6 @@ func cancelAccountChallenge(ctx context.Context, store AccountManagementStore, t
 	if cancelErr := store.CancelAccountChallenge(ctx, tenantID, challenge.AccountID, challenge.Token); cancelErr != nil {
 		logAuthError("auth.account.challenge_cancel", cancelErr)
 	}
-}
-
-func fakeChallenge(expiresUnix int64) AccountChallenge {
-	token, _, tokenErr := generateRefreshOpaque()
-	if tokenErr != nil {
-		token = "accepted"
-	}
-	return AccountChallenge{Token: token, ExpiresUnix: expiresUnix}
 }
 
 func effectiveDuration(value time.Duration, fallback time.Duration) time.Duration {

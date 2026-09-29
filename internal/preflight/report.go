@@ -108,7 +108,6 @@ type tenantPayload struct {
 	PasswordUserCount          int                         `json:"password_user_count"`
 	AccountManagementEnabled   bool                        `json:"account_management_enabled"`
 	PasswordSignupEnabled      bool                        `json:"password_signup_enabled"`
-	ReturnChallengeTokens      bool                        `json:"return_challenge_tokens"`
 	EmailVerificationTTL       string                      `json:"email_verification_ttl"`
 	EmailDeliveryConfigured    bool                        `json:"email_delivery_configured"`
 	EmailVerificationURL       string                      `json:"email_verification_url,omitempty"`
@@ -301,7 +300,6 @@ func buildTenantPayloads(config tenants.Config, registry authkit.TenantRegistry,
 			PasswordUserCount:          len(tenant.PasswordUsers()),
 			AccountManagementEnabled:   tenant.AccountManagement().Enabled(),
 			PasswordSignupEnabled:      tenant.AccountManagement().PasswordSignupEnabled(),
-			ReturnChallengeTokens:      tenant.AccountManagement().ReturnChallengeTokens(),
 			EmailVerificationTTL:       tenant.AccountManagement().EmailVerificationTTL().String(),
 			EmailDeliveryConfigured:    tenant.AccountManagement().EmailDelivery().Enabled(),
 			EmailVerificationURL:       tenant.AccountManagement().EmailDelivery().EmailVerificationURL(),

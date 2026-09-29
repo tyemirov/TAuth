@@ -68,8 +68,28 @@ func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, tenantID stri
 		PreviousTokenID: previousTokenID,
 		IssuedAtUnix:    now.Unix(),
 	}
-	if err := store.db.WithContext(ctx).Create(&record).Error; err != nil {
+	var rotationErr error
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if previousTokenID != "" {
+			if err := lockRefreshFamily(tx, tenantID, previousTokenID); err != nil {
+				return err
+			}
+			result := tx.Model(&refreshTokenRecord{}).Where("tenant_id = ? AND token_id = ? AND user_id = ? AND revoked_at_unix = 0 AND expires_unix > ?", tenantID, previousTokenID, applicationUserID, now.Unix()).Update("revoked_at_unix", now.Unix())
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				rotationErr = ErrRefreshTokenRevoked
+				return revokeRefreshFamily(tx, tenantID, previousTokenID, now.Unix())
+			}
+		}
+		return tx.Create(&record).Error
+	})
+	if err != nil {
 		return "", "", fmt.Errorf("refresh_store.issue.%s: %w", store.driverLabel, err)
+	}
+	if rotationErr != nil {
+		return "", "", rotationErr
 	}
 	return tokenID, opaqueToken, nil
 }
@@ -90,12 +110,40 @@ func (store *DatabaseRefreshTokenStore) Validate(ctx context.Context, tenantID s
 	}
 	now := time.Now().UTC()
 	if record.RevokedAtUnix != 0 {
+		if err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockRefreshFamily(tx, tenantID, record.TokenID); err != nil {
+				return err
+			}
+			return revokeRefreshFamily(tx, tenantID, record.TokenID, now.Unix())
+		}); err != nil {
+			return "", "", 0, fmt.Errorf("refresh_store.reuse.%s: %w", store.driverLabel, err)
+		}
 		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenRevoked)
 	}
 	if time.Unix(record.ExpiresUnix, 0).Before(now) {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.%s: %w", store.driverLabel, ErrRefreshTokenExpired)
 	}
 	return record.UserID, record.TokenID, record.ExpiresUnix, nil
+}
+
+// lockRefreshFamily serializes rotations and reuse revocation on the immutable root.
+func lockRefreshFamily(tx *gorm.DB, tenantID, tokenID string) error {
+	// One write statement acquires the root lock before later reads on both SQLite and Postgres.
+	result := tx.Exec(`WITH RECURSIVE ancestors AS (
+		SELECT token_id, previous_token_id FROM refresh_tokens WHERE tenant_id = ? AND token_id = ?
+		UNION SELECT parent.token_id, parent.previous_token_id FROM refresh_tokens parent JOIN ancestors child ON parent.token_id = child.previous_token_id WHERE parent.tenant_id = ?
+	) UPDATE refresh_tokens SET issued_at_unix = issued_at_unix WHERE tenant_id = ? AND token_id IN (SELECT token_id FROM ancestors WHERE previous_token_id = '')`, tenantID, tokenID, tenantID, tenantID)
+	return result.Error
+}
+
+func revokeRefreshFamily(tx *gorm.DB, tenantID, tokenID string, nowUnix int64) error {
+	return tx.Exec(`WITH RECURSIVE ancestors AS (
+		SELECT token_id, previous_token_id FROM refresh_tokens WHERE tenant_id = ? AND token_id = ?
+		UNION SELECT parent.token_id, parent.previous_token_id FROM refresh_tokens parent JOIN ancestors child ON parent.token_id = child.previous_token_id WHERE parent.tenant_id = ?
+	), family AS (
+		SELECT token_id FROM ancestors WHERE previous_token_id = ''
+		UNION SELECT child.token_id FROM refresh_tokens child JOIN family parent ON child.previous_token_id = parent.token_id WHERE child.tenant_id = ?
+	) UPDATE refresh_tokens SET revoked_at_unix = ? WHERE tenant_id = ? AND token_id IN (SELECT token_id FROM family)`, tenantID, tokenID, tenantID, tenantID, nowUnix, tenantID).Error
 }
 
 // Revoke marks a refresh token as revoked.

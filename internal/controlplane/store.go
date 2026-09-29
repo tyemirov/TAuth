@@ -125,7 +125,7 @@ func (store *Store) Bootstrap(ctx context.Context, file tenants.FileTenant) erro
 		return err
 	}
 	file = document.Tenants[0]
-	if file.ID != ConsoleTenantID || len(file.TenantOrigins) != 1 || file.GoogleWebClientID == "" || !bool(file.AccountManagement.Enabled) || bool(file.AccountManagement.ReturnChallengeTokens) || bool(file.PasswordAuth.Enabled) || bool(file.AccountManagement.PasswordSignup.Enabled) || bool(file.AppleOAuth.Enabled) || bool(file.GitHubOAuth.Enabled) || file.GoogleNativeClientID != "" || len(file.GoogleNativeClients) > 0 || file.AllowedUsers != nil || file.CookieDomain != "" || file.SessionCookieName != "tauth_console_session" || file.RefreshCookieName != "tauth_console_refresh" {
+	if file.ID != ConsoleTenantID || len(file.TenantOrigins) != 1 || file.GoogleWebClientID == "" || !bool(file.AccountManagement.Enabled) || bool(file.PasswordAuth.Enabled) || bool(file.AccountManagement.PasswordSignup.Enabled) || bool(file.AppleOAuth.Enabled) || bool(file.GitHubOAuth.Enabled) || file.GoogleNativeClientID != "" || len(file.GoogleNativeClients) > 0 || file.AllowedUsers != nil || file.CookieDomain != "" || file.SessionCookieName != "tauth_console_session" || file.RefreshCookieName != "tauth_console_refresh" {
 		return errors.New("management.console_configuration_invalid")
 	}
 	data, err := json.Marshal(file)

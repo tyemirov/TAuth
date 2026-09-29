@@ -664,3 +664,80 @@ func newResourceValidator(t *testing.T, issuer string, keys JWKSet, clock func()
 	}
 	return validator
 }
+
+func TestSecurityOAuthPasswordSharesJSONBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+	if listenErr != nil {
+		t.Fatalf("listen: %v", listenErr)
+	}
+	issuer := "http://" + listener.Addr().String()
+	appConfig, tenantConfig := loadOAuthTestConfig(t, issuer)
+
+	baseConfig := authkit.ServerConfig{AppJWTIssuer: "tauth", SessionTTL: 15 * time.Minute, RefreshTTL: time.Hour, NonceTTL: 5 * time.Minute}
+	tenantRegistry, registryErr := authkit.BuildTenantRegistry(baseConfig, tenantConfig, authkit.NewSameSiteResolver(false))
+	if registryErr != nil {
+		t.Fatalf("build tenant registry: %v", registryErr)
+	}
+	users := web.NewInMemoryUsers()
+	refreshSessions := authkit.NewMemoryRefreshTokenStore()
+	passwords := authkit.NewMemoryPasswordCredentialStore()
+	passwordHash, hashErr := authkit.HashPassword(testOAuthPassword)
+	if hashErr != nil {
+		t.Fatalf("hash password: %v", hashErr)
+	}
+	if seedErr := passwords.UpsertPasswordCredential(context.Background(), "demo", authkit.PasswordCredentialSeed{
+		UserEmail: "user@example.com", DisplayName: "Demo User", PasswordHash: passwordHash,
+	}); seedErr != nil {
+		t.Fatalf("seed password: %v", seedErr)
+	}
+
+	registry, oauthRegistryErr := NewRegistry(tenantConfig)
+	if oauthRegistryErr != nil {
+		t.Fatalf("build oauth registry: %v", oauthRegistryErr)
+	}
+	signer, signerErr := NewSigner(appConfig.OAuthServer())
+	if signerErr != nil {
+		t.Fatalf("build signer: %v", signerErr)
+	}
+	store := NewMemoryStore()
+	nonces := authkit.NewMemoryNonceStore(5 * time.Minute)
+	oauthHandler, handlerErr := NewServer(
+		appConfig.OAuthServer(), registry, store, signer, fixtureMetadataResolver{},
+		authkit.NewOAuthBrowserSessions(tenantRegistry, users, refreshSessions, nonces, passwords),
+	)
+	if handlerErr != nil {
+		t.Fatalf("build server: %v", handlerErr)
+	}
+	router := gin.New()
+	if mountErr := oauthHandler.Mount(router); mountErr != nil {
+		t.Fatalf("mount server: %v", mountErr)
+	}
+	authkit.MountAuthRoutesWithPassword(router, tenantRegistry, users, refreshSessions, nonces, passwords, nil, nil)
+	httpServer := &http.Server{Handler: router, ReadHeaderTimeout: time.Second}
+	go func() { _ = httpServer.Serve(listener) }()
+	t.Cleanup(func() { _ = httpServer.Shutdown(context.Background()) })
+
+	jar, jarErr := cookiejar.New(nil)
+	if jarErr != nil {
+		t.Fatalf("cookie jar: %v", jarErr)
+	}
+	client := &http.Client{Jar: jar, CheckRedirect: func(request *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+
+	for attempt := 0; attempt < 5; attempt++ {
+		response, err := client.Post(issuer+"/auth/password/login", "application/json", strings.NewReader(`{"email":"user@example.com","password":"wrong"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertStatus(t, response, http.StatusUnauthorized)
+		response.Body.Close()
+	}
+	response := doRequest(t, client, http.MethodGet, authorizationURL(issuer, pkceChallenge(strings.Repeat("a", 43)), "budget", testOAuthRedirect, testOAuthResource, testOAuthScope, testOAuthClient), nil)
+	assertStatus(t, response, http.StatusSeeOther)
+	location := response.Header.Get("Location")
+	response.Body.Close()
+	form := url.Values{"request": {queryValue(t, location, "request")}, "provider": {"password"}, "email": {"user@example.com"}, "password": {testOAuthPassword}}
+	response = doRequest(t, client, http.MethodPost, issuer+"/oauth/login", strings.NewReader(form.Encode()))
+	assertStatus(t, response, http.StatusTooManyRequests)
+	response.Body.Close()
+}

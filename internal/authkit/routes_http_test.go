@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -254,6 +255,9 @@ type revokeFailureRefreshStore struct {
 }
 
 func (store revokeFailureRefreshStore) Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
+	if previousTokenID != "" {
+		return "", "", store.revokeErr
+	}
 	return store.delegate.Issue(ctx, tenantID, applicationUserID, expiresUnix, previousTokenID)
 }
 
@@ -4207,9 +4211,10 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 
 	router := gin.New()
 	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
-	server := newInProcessServer(router, true)
+	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	client := server.Client()
+	client.Jar, _ = cookiejar.New(nil)
 	client.CheckRedirect = func(request *http.Request, requests []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
@@ -4240,6 +4245,10 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 		if query.Get("client_id") != "com.example.web" || query.Get("redirect_uri") != config.AppleOAuth.RedirectURI {
 			testingHandle.Fatalf("unexpected Apple authorization query: %s", authorizationURL.RawQuery)
 		}
+		cookies := startResponse.Cookies()
+		if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteNoneMode {
+			testingHandle.Fatal("Apple correlation cookie must support secure cross-site form POST")
+		}
 		return query, state
 	}
 
@@ -4250,6 +4259,34 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 	if callbackErr != nil {
 		testingHandle.Fatalf("build Apple callback request: %v", callbackErr)
 	}
+	// A second browser has the signed state but lacks the initiating cookie.
+	otherBrowser := *client
+	otherBrowser.Jar = nil
+	foreignResponse, foreignErr := otherBrowser.Do(callbackRequest)
+	if foreignErr != nil {
+		testingHandle.Fatal(foreignErr)
+	}
+	foreignResponse.Body.Close()
+	if foreignResponse.StatusCode != http.StatusUnauthorized {
+		testingHandle.Fatalf("foreign browser callback: want 401, got %d", foreignResponse.StatusCode)
+	}
+	wrongCookieRequest, _ := http.NewRequest(http.MethodGet, callbackURL, nil)
+	wrongCookieRequest.AddCookie(&http.Cookie{Name: appleBrowserCookie(state), Value: "wrong-browser-secret"})
+	wrongCookieResponse, wrongCookieErr := otherBrowser.Do(wrongCookieRequest)
+	if wrongCookieErr != nil {
+		testingHandle.Fatal(wrongCookieErr)
+	}
+	wrongCookieResponse.Body.Close()
+	if wrongCookieResponse.StatusCode != http.StatusUnauthorized {
+		testingHandle.Fatalf("wrong browser cookie accepted: %d", wrongCookieResponse.StatusCode)
+	}
+	callbackForm := url.Values{"code": {"apple-code"}, "state": {state}}
+	callbackRequest, callbackErr = http.NewRequest(http.MethodPost, server.URL+"/auth/apple/callback", strings.NewReader(callbackForm.Encode()))
+	if callbackErr != nil {
+		testingHandle.Fatal(callbackErr)
+	}
+	callbackRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	callbackRequest.Header.Set("Origin", "https://appleid.apple.com")
 	callbackResponse, callbackErr := client.Do(callbackRequest)
 	if callbackErr != nil {
 		testingHandle.Fatalf("Apple callback request failed: %v", callbackErr)
@@ -4270,6 +4307,15 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 	}
 	if profile["user_id"] != "apple:apple-subject" || profile["user_email"] != "apple@example.com" {
 		testingHandle.Fatalf("unexpected Apple profile: %#v", profile)
+	}
+	cleared := false
+	for _, cookie := range callbackResponse.Cookies() {
+		if cookie.Name == appleBrowserCookie(state) && cookie.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		testingHandle.Fatal("Apple callback did not clear its browser binding")
 	}
 	cookies := captureAuthCookies(authCookieState{}, callbackResponse.Cookies(), config)
 	if cookies.session == "" || cookies.refresh == "" {

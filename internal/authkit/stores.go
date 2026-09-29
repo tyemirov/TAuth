@@ -13,6 +13,8 @@ type UserStore interface {
 
 // RefreshTokenStore manages long-lived refresh tokens.
 type RefreshTokenStore interface {
+	// Issue atomically consumes a nonempty parent and creates its only successor.
+	// Reuse revokes the family. An empty parent creates an independent session.
 	Issue(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (tokenID string, tokenOpaque string, err error)
 	Validate(ctx context.Context, tenantID string, tokenOpaque string) (applicationUserID string, tokenID string, expiresUnix int64, err error)
 	Revoke(ctx context.Context, tenantID string, tokenID string) error

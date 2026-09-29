@@ -130,7 +130,6 @@ type testTenantPayload struct {
 	PasswordUserCount          int                             `json:"password_user_count"`
 	AccountManagementEnabled   bool                            `json:"account_management_enabled"`
 	PasswordSignupEnabled      bool                            `json:"password_signup_enabled"`
-	ReturnChallengeTokens      bool                            `json:"return_challenge_tokens"`
 	EmailVerificationTTL       string                          `json:"email_verification_ttl"`
 	EmailDeliveryConfigured    bool                            `json:"email_delivery_configured"`
 	EmailVerificationURL       string                          `json:"email_verification_url"`
@@ -222,7 +221,7 @@ func TestBuildRedactedReportRedactsOrigins(testingHandle *testing.T) {
 	if tenant.PasswordAuthEnabled || tenant.PasswordUserCount != 0 {
 		testingHandle.Fatalf("unexpected password auth report fields")
 	}
-	if tenant.AccountManagementEnabled || tenant.PasswordSignupEnabled || tenant.ReturnChallengeTokens {
+	if tenant.AccountManagementEnabled || tenant.PasswordSignupEnabled {
 		testingHandle.Fatalf("unexpected account management report fields")
 	}
 	if tenant.EmailVerificationTTL == "" || tenant.PasswordResetTTL == "" {

@@ -37,6 +37,12 @@ type databaseAuthorizationRequest struct {
 	ExpiresAtUnix    int64  `gorm:"column:expires_at_unix;index;not null"`
 }
 
+type databaseCapacityLock struct {
+	ID int `gorm:"primaryKey"`
+}
+
+func (databaseCapacityLock) TableName() string { return "oauth_capacity_lock" }
+
 func (databaseAuthorizationRequest) TableName() string { return oauthAuthorizationRequestsTable }
 
 type databaseAuthorizationCode struct {
@@ -105,9 +111,13 @@ func NewDatabaseStore(ctx context.Context, databaseURL string) (*DatabaseStore, 
 		&databaseAuthorizationCode{},
 		&databaseConsent{},
 		&databaseOAuthRefreshToken{},
+		&databaseCapacityLock{},
 	)
 	if openErr != nil {
 		return nil, openErr
+	}
+	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&databaseCapacityLock{ID: 1}).Error; err != nil {
+		return nil, fmt.Errorf("oauth_store.capacity.initialize: %w", err)
 	}
 	return &DatabaseStore{db: database, driverLabel: driverLabel}, nil
 }
@@ -126,8 +136,32 @@ func (store *DatabaseStore) CreateAuthorizationRequest(ctx context.Context, requ
 		Resource: request.Resource, ResourceName: request.ResourceName, Scope: request.Scope, DisclosurePolicy: request.DisclosurePolicy, State: request.State,
 		CodeChallenge: request.CodeChallenge, CreatedAtUnix: request.CreatedAtUnix, ExpiresAtUnix: request.ExpiresAtUnix,
 	}
-	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
+	var capacityErr error
+	createErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&databaseCapacityLock{}).Where("id = 1").Update("id", 1).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("expires_at_unix <= ?", request.CreatedAtUnix).Delete(&databaseAuthorizationRequest{}).Error; err != nil {
+			return err
+		}
+		var globalCount, tenantCount int64
+		if err := tx.Model(&databaseAuthorizationRequest{}).Count(&globalCount).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&databaseAuthorizationRequest{}).Where("tenant_id = ?", request.TenantID).Count(&tenantCount).Error; err != nil {
+			return err
+		}
+		if globalCount >= maximumPendingGlobal || tenantCount >= maximumPendingPerTenant {
+			capacityErr = ErrAuthorizationCapacity
+			return nil
+		}
+		return tx.Create(&record).Error
+	})
+	if createErr != nil {
 		return "", fmt.Errorf("oauth_store.request.create.%s: %w", store.driverLabel, createErr)
+	}
+	if capacityErr != nil {
+		return "", capacityErr
 	}
 	return token, nil
 }

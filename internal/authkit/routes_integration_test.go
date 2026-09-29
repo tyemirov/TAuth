@@ -553,7 +553,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
-	config.ReturnChallengeTokens = true
+	sender := enableTestChallengeDelivery(&config)
 	config.EmailVerificationTTL = time.Minute
 	config.PasswordResetTTL = time.Minute
 	registry := singleTenantRegistry(config)
@@ -561,7 +561,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
 
 	signupBody := []byte(`{"email":"New@Example.com","password":"correct horse battery staple","display_name":"New User"}`)
 	signupResponse := httptest.NewRecorder()
@@ -575,7 +575,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken, _ := signupPayload["verification_token"].(string)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
 	accountID, _ := signupPayload["account_id"].(string)
 	if verificationToken == "" {
 		testingHandle.Fatalf("expected verification token and account id, got %#v", signupPayload)
@@ -621,7 +621,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(resetStartResponse.Body).Decode(&resetStartPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode reset start payload: %v", decodeErr)
 	}
-	resetToken, _ := resetStartPayload["reset_token"].(string)
+	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindPasswordReset)
 	if resetToken == "" {
 		testingHandle.Fatalf("expected reset token in test config")
 	}
@@ -659,7 +659,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
-	config.ReturnChallengeTokens = true
+	sender := enableTestChallengeDelivery(&config)
 	config.EmailVerificationTTL = time.Minute
 	config.PasswordResetTTL = time.Minute
 	config.AllowedUsers = allowedUsers
@@ -668,7 +668,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"New@Example.com","password":"correct horse battery staple"}`)))
@@ -681,7 +681,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken, _ := signupPayload["verification_token"].(string)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
 	if verificationToken == "" {
 		testingHandle.Fatalf("expected verification token, got %#v", signupPayload)
 	}
@@ -705,7 +705,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	if decodeErr := json.NewDecoder(resetStartResponse.Body).Decode(&resetStartPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode reset start payload: %v", decodeErr)
 	}
-	resetToken, _ := resetStartPayload["reset_token"].(string)
+	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindPasswordReset)
 	if resetToken == "" {
 		testingHandle.Fatalf("expected reset token, got %#v", resetStartPayload)
 	}
@@ -897,14 +897,14 @@ func TestAccountManagementRejectsUnlinkingLastIdentity(testingHandle *testing.T)
 	config.PasswordAuthEnabled = true
 	config.AccountManagementEnabled = true
 	config.PasswordSignupEnabled = true
-	config.ReturnChallengeTokens = true
+	sender := enableTestChallengeDelivery(&config)
 	config.EmailVerificationTTL = time.Minute
 	registry := singleTenantRegistry(config)
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"solo@example.com","password":"correct horse battery staple"}`)))
@@ -914,7 +914,7 @@ func TestAccountManagementRejectsUnlinkingLastIdentity(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken, _ := signupPayload["verification_token"].(string)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
 
 	verifyResponse := httptest.NewRecorder()
 	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/password/verify-email", bytes.NewBuffer([]byte(`{"token":"`+verificationToken+`"}`)))
@@ -1902,7 +1902,7 @@ func TestAuthRefreshRevokeFailure(t *testing.T) {
 			return "user", "token", time.Now().Add(time.Minute).Unix(), nil
 		},
 		issueFunc: func(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
-			return "token-new", "opaque-new", nil
+			return "", "", errors.New("rotation_fail")
 		},
 		revokeFunc: func(ctx context.Context, tenantID string, tokenID string) error {
 			return errors.New("revoke_fail")

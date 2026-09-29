@@ -240,9 +240,9 @@ func TestLoadConfigParsesAccountManagement(testingHandle *testing.T) {
 		PasswordSignup: FilePasswordSignup{
 			Enabled: true,
 		},
-		ReturnChallengeTokens: true,
-		EmailVerificationTTL:  "45m",
-		PasswordResetTTL:      "20m",
+		EmailDelivery:        FileEmailDelivery{ServerAddress: "localhost:50051", APIKey: "fixture", EmailVerificationURL: "https://app.example/verify", PasswordResetURL: "https://app.example/reset", PasswordLinkURL: "https://app.example/link", ConnectionTimeoutSeconds: 1, OperationTimeoutSeconds: 1},
+		EmailVerificationTTL: "45m",
+		PasswordResetTTL:     "20m",
 	}
 	config, loadErr := LoadConfigFromDocument(FileDocument{Tenants: []FileTenant{tenant}})
 	if loadErr != nil {
@@ -253,7 +253,7 @@ func TestLoadConfigParsesAccountManagement(testingHandle *testing.T) {
 		testingHandle.Fatalf("expected tenant to exist")
 	}
 	settings := loadedTenant.AccountManagement()
-	if !settings.Enabled() || !settings.PasswordSignupEnabled() || !settings.ReturnChallengeTokens() {
+	if !settings.Enabled() || !settings.PasswordSignupEnabled() {
 		testingHandle.Fatalf("unexpected account management booleans: %#v", settings)
 	}
 	if settings.EmailVerificationTTL() != 45*time.Minute || settings.PasswordResetTTL() != 20*time.Minute {
@@ -1390,4 +1390,23 @@ func sameStringSlices(a, b []string) bool {
 
 func containsStableCode(err error, code string) bool {
 	return strings.Contains(err.Error(), code)
+}
+
+func TestSecurityRejectChallengeTokenConfiguration(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		file, err := os.CreateTemp(t.TempDir(), "tenants-*.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = file.WriteString("tenants:\n  - id: demo\n    account_management:\n      return_challenge_tokens: " + value + "\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(file.Name()); err == nil || !strings.Contains(err.Error(), "return_challenge_tokens") {
+			t.Fatalf("obsolete configuration was not rejected: %v", err)
+		}
+	}
 }

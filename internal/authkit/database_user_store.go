@@ -169,9 +169,12 @@ func (databaseAccountChallengeRecord) TableName() string {
 
 // NewDatabaseUserStore constructs a DatabaseUserStore backed by the provided database URL.
 func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUserStore, error) {
-	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseGitHubCredential{})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
 	if openErr != nil {
 		return nil, openErr
+	}
+	if err := databaseHandle.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&abuseBudgetLock{ID: 1}).Error; err != nil {
+		return nil, err
 	}
 	store := &DatabaseUserStore{
 		db:                   databaseHandle,
@@ -325,6 +328,9 @@ func (store *DatabaseUserStore) AuthenticatePassword(ctx context.Context, tenant
 	}
 	if passwordErr := validatePlainPassword(password); passwordErr != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
+	}
+	if err := store.reserveAuthenticationBudget(ctx, "password", tenantID, normalizedEmail, 5, 30); err != nil {
+		return PasswordCredentialProfile{}, err
 	}
 	var record passwordCredentialRecord
 	queryErr := store.db.WithContext(ctx).
@@ -560,6 +566,9 @@ func (store *DatabaseUserStore) StartPasswordReset(ctx context.Context, tenantID
 	if emailErr != nil {
 		return AccountChallenge{}, ErrPasswordCredentialInvalid
 	}
+	if err := store.reserveAuthenticationBudget(ctx, "reset", tenantID, normalizedEmail, 1, 10); err != nil {
+		return AccountChallenge{}, err
+	}
 	token, tokenHash, tokenErr := generateRefreshOpaque()
 	if tokenErr != nil {
 		return AccountChallenge{}, fmt.Errorf("%s.account_reset_token.%s: %w", userStoreErrorPrefix, store.driverLabel, tokenErr)
@@ -587,8 +596,29 @@ func (store *DatabaseUserStore) StartPasswordReset(ctx context.Context, tenantID
 		ExpiresUnix:     expiresUnix,
 		CreatedAtUnix:   now,
 	}
-	if createErr := store.db.WithContext(ctx).Create(&challenge).Error; createErr != nil {
+	var capacityExceeded bool
+	createErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&abuseBudgetLock{}).Where("id = ?", 1).Update("id", 1).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("challenge_kind = ? AND (expires_unix <= ? OR (tenant_id = ? AND account_id = ?))", accountChallengePasswordReset, now, tenantID, record.AccountID).Delete(&databaseAccountChallengeRecord{}).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&databaseAccountChallengeRecord{}).Where("challenge_kind = ?", accountChallengePasswordReset).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= maximumResetChallenges {
+			capacityExceeded = true
+			return nil
+		}
+		return tx.Create(&challenge).Error
+	})
+	if createErr != nil {
 		return AccountChallenge{}, fmt.Errorf("%s.account_reset_create.%s: %w", userStoreErrorPrefix, store.driverLabel, createErr)
+	}
+	if capacityExceeded {
+		return AccountChallenge{}, ErrAuthenticationRateLimited
 	}
 	return AccountChallenge{AccountID: record.AccountID, Token: token, ExpiresUnix: expiresUnix}, nil
 }

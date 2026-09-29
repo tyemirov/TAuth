@@ -181,6 +181,11 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 		ExpiresAtUnix: now.Add(server.config.AuthorizationRequestTTL()).Unix(),
 	}
 	requestToken, createErr := server.store.CreateAuthorizationRequest(request.Context(), pending)
+	if errors.Is(createErr, ErrAuthorizationCapacity) {
+		response.Header().Set("Retry-After", "60")
+		writeOAuthError(response, http.StatusTooManyRequests, "temporarily_unavailable")
+		return
+	}
 	if createErr != nil {
 		writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		return
@@ -262,6 +267,11 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 		loginAccepted, loginErr = server.browserSessions.LoginGoogle(request.Context(), response, request, pending.TenantID, request.PostForm.Get("google_id_token"), request.PostForm.Get("nonce_token"))
 	}
 	if loginErr != nil {
+		if errors.Is(loginErr, authkit.ErrAuthenticationRateLimited) {
+			response.Header().Set("Retry-After", "60")
+			writeOAuthError(response, http.StatusTooManyRequests, "temporarily_unavailable")
+			return
+		}
 		writeOAuthError(response, http.StatusInternalServerError, "server_error")
 		return
 	}

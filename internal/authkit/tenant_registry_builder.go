@@ -51,7 +51,6 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		accountManagement := tenant.AccountManagement()
 		tenantServerConfig.AccountManagementEnabled = accountManagement.Enabled()
 		tenantServerConfig.PasswordSignupEnabled = accountManagement.PasswordSignupEnabled()
-		tenantServerConfig.ReturnChallengeTokens = accountManagement.ReturnChallengeTokens()
 		tenantServerConfig.EmailDeliveryEnabled = accountManagement.EmailDelivery().Enabled()
 		tenantServerConfig.AppJWTSigningKey = tenant.SigningKey()
 		tenantServerConfig.CookieDomain = tenant.CookieDomain()
