@@ -11,6 +11,21 @@ import (
 	"testing"
 )
 
+func TestSecurityCredentialMutationLimit(t *testing.T) {
+	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
+		input := map[string]any{"app_id": owner.fixtureApp(), "name": "limited", "operations": []string{"read"}, "tenant_ids": []string{}, "allow_create": false}
+		// App creation consumes one mutation. Each credential cycle consumes two.
+		for index := 0; index < 29; index++ {
+			_, headers := owner.request("POST", "/api/management/provisioning-credentials", input, 201, "Idempotency-Key", fmt.Sprintf("limited-%d", index))
+			owner.request("DELETE", headers.Get("Location"), nil, 204)
+			owner.request("DELETE", headers.Get("Location"), nil, 204)
+		}
+		owner.request("POST", "/api/management/provisioning-credentials", input, 201, "Idempotency-Key", "last-allowed")
+		owner.request("POST", "/api/management/provisioning-credentials", input, 429, "Idempotency-Key", "blocked")
+		owner.request("POST", "/api/management/provisioning-credentials", input, 201, "Idempotency-Key", "last-allowed")
+	})
+}
+
 func TestConsoleProvisioningCredentialScope(t *testing.T) {
 	withManagementService(t, consoleGoogleValidator{}, func(owner consoleHTTP) {
 		credentialInput := map[string]any{"app_id": owner.fixtureApp(), "name": "Gateway", "operations": []string{"read", "configure", "activate", "suspend", "proofs"}, "tenant_ids": []string{}, "allow_create": true}

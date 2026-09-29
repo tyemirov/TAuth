@@ -255,6 +255,9 @@ func runServer(command *cobra.Command, arguments []string) error {
 		Addr:              listenAddr,
 		Handler:           publisher,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	shutdownOnce := sync.Once{}
