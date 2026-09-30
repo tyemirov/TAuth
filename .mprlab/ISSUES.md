@@ -1437,10 +1437,10 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Retained credentials have a per-owner capacity. Creation removes old revoked credentials and their receipts.
   Focused HTTP tests passed. `make ci` passed after the final code change.
 
-- [!] [B106] (P1) Qualify Gateway provisioning with App-scoped credentials.
+- [x] [B106] (P1) Qualify Gateway provisioning with App-scoped credentials.
   Requirements: Select the credential for each App and its current or removed tenant contributions.
   Requirements: Preserve App isolation and repeat the full production contribution operation through the installed Gateway.
-  Blocked: The installed Gateway v4.7.1 retains the single-credential contract. The corrected source needs coordinated release and installed-handler qualification.
+  Prior failure: Gateway v4.7.1 used one credential across Apps. The source correction required qualification through an installed release.
   Validation: I222 reproduced `management.creation_denied` with the installed client and 20 captured production contributions.
   Validation: Separate operations with the correct App credentials passed for all 20 tenants.
   Resolution: Gateway B595 selects credentials by contribution owner and resource ID under the existing P005 cutover preparation.
@@ -1448,6 +1448,13 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   Validation: Real-service acceptance now verifies two Apps, separate credentials, and HTTPS activation without DNS proofs.
   Validation: Final `make ci` passed in both repositories after the source correction.
   Evidence: `docs/production-app-rehearsal-2026-09-28.md`.
+  Resolution: Installed Gateway v5.0.0 and the sealed TAuth v2.2.6 container passed the isolated production-copy rehearsal on 2026-09-30.
+  Validation: All 20 Apps retained their effective settings. Repeated operations retained the same revisions.
+  Validation: Cross-App requests returned HTTP 403. A removed contribution suspended its tenant. The other 19 tenants stayed active.
+  Validation: Import retries, backup restoration, 30 session profiles, and all 13 original database tables passed comparison.
+  Validation: `make test-console` passed with the private rehearsal overlay. Production operations remain separate.
+  Validation: Final `make ci` passed. Changed prose passed the scoped language review and `git diff --check`.
+  Evidence: `docs/production-release-qualification-2026-09-30.md`.
 
 - [x] [B104] Migrate credential owners without tenants.
   Observed: App ownership requires a tenant, so an owner with only provisioning credentials cannot migrate.
