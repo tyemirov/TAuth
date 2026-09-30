@@ -207,6 +207,9 @@ Its database contains every active application tenant and the reserved console c
 Tenant environment inputs have no effect after migration.
 The database and encryption key remain required service inputs.
 
+Remove `return_challenge_tokens` from the frozen import source before validation.
+The current tenant contract rejects this obsolete field.
+
 1. Inventory every tenant from native configuration and each repository deployment manifest.
 2. Back up the production database and its encryption-key reference.
 3. Initialize the current schema and console configuration against a copy of that database.
@@ -423,6 +426,13 @@ Assign each contribution the credential for its destination App.
 Keep credentials for removed contributions until their tenant suspension succeeds.
 Set `MPRLAB_TAUTH_MANAGEMENT_URL` to the TAuth service origin.
 Never place the token in a manifest, public output, URL, or browser configuration.
+
+Credential creation and initial convergence share the owner mutation budget.
+If the service returns `management.mutation_rate_exceeded`, wait for the one-minute budget to expire.
+Then repeat the unchanged operation.
+
+B106 passed the [installed release qualification](production-release-qualification-2026-09-30.md) with Gateway v5.0.0 and sealed TAuth v2.2.6.
+Production import, publication, deployment, and live Google qualification remain separate operations.
 
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
 A machine request with the console shape or a null `provisioning` value returns `422`.

@@ -2,7 +2,7 @@
 
 I222 tested the current TAuth source against an isolated production database copy.
 The data migration passed.
-Production deployment remains blocked by B106: the installed Gateway uses one credential across multiple Apps.
+At this rehearsal, B106 blocked production deployment because Gateway v4.7.1 used one credential across Apps.
 The rehearsal made no production changes.
 
 ## Source And Inputs
@@ -116,7 +116,7 @@ This rehearsal qualifies the copied data migration and current application behav
 It does not qualify the complete installed Gateway deployment, live Google enrollment, or live provider operations.
 No release, publication, production import, or deployment ran.
 
-Before deployment, resolve B106 and repeat the Gateway qualification.
+The [installed release qualification](production-release-qualification-2026-09-30.md) subsequently resolved B106.
 Use the [deployment data migration procedure](tenant-console-operations.md#deployment-data-migration) for the controlled cutover.
 Enroll the real owner through verified console login and pass its stable account ID explicitly.
 Prepare the production console configuration and encryption key.
@@ -140,5 +140,6 @@ The private evidence is under `.cache/production-app-rehearsal-b106/`.
 TAuth's real-service client acceptance now uses two separate Apps and two credentials.
 It verifies tenant membership, stable revisions, and an HTTPS origin without DNS proofs.
 Gateway and TAuth final `make ci` passed after the source correction.
-The installed Gateway v4.7.1 remains unchanged.
-B106 remains a deployment qualification gate until the corrected Gateway release and selected TAuth release pass the complete installed-handler rehearsal.
+The source rehearsal used installed Gateway v4.7.1.
+On 2026-09-30, installed Gateway v5.0.0 and sealed TAuth v2.2.6 passed the complete handler rehearsal.
+The [qualification record](production-release-qualification-2026-09-30.md) contains the results and the remaining production operations.
