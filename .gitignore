@@ -12,6 +12,7 @@ tools/
 !web/app/runtime.json
 !deployment/migrations/local-apps-20260928.json
 !deployment/migrations/production-apps-20260928.json
+!deployment/migrations/20260930-tenant-console.json
 # Managed by gix gitignore workflow
 .env.*
 !examples/tauth-demo/.env.tauth.example
