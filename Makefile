@@ -13,7 +13,7 @@ test-local-lifecycle:
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle
+ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment
 
 .PHONY: up down
 up down:
@@ -103,7 +103,7 @@ MPRLAB_GATEWAY_EXECUTABLE ?= mprlab-gateway
 
 .PHONY: release publish deploy
 
-release publish deploy:
+release publish:
 	@application_root="$$(git rev-parse --show-toplevel)"; \
 	if ! command -v "$(MPRLAB_GATEWAY_EXECUTABLE)" >/dev/null 2>&1; then \
 		printf 'Gateway runtime is unavailable: %s. Install a released runtime and add its command directory to PATH.\n' \
@@ -111,6 +111,10 @@ release publish deploy:
 		exit 2; \
 	fi; \
 	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" "app-$@" --app-root "$${application_root}"
+
+deploy:
+	@application_root="$$(git rev-parse --show-toplevel)"; \
+	exec bash "$${application_root}/deployment/deploy.sh" "$${application_root}" "$(MPRLAB_GATEWAY_EXECUTABLE)" "$(GO)"
 
 .PHONY: test-apple-callback-cors
 test-apple-callback-cors:
@@ -140,9 +144,12 @@ run-tenant-app:
 test-customer-app:
 	$(GO) test ./internal/customerapp -count=1
 
-.PHONY: test-deployment-migration deployment-migration
+.PHONY: test-deployment-migration test-automatic-deployment deployment-migration
 test-deployment-migration:
 	$(GO) test ./deployment/... -count=1
+
+test-automatic-deployment:
+	bash tests/automatic-deployment.sh
 
 deployment-migration:
 	$(GO) run ./deployment/tenantownership $(MIGRATION_ARGS)
