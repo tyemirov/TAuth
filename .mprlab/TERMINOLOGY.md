@@ -101,6 +101,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `timestamped migration`: A fixed deployment data change with a timestamp identifier and a durable completion receipt.
+- `one-off migration`: A timestamped migration that runs automatically once within `make deploy`.
+- `server encryption key`: The private TAuth key that protects stored tenant and console configuration.
+- `cutover`: The bounded transfer from the previous persisted configuration to the current database contract.
+
 - `Web Locks`: The browser API that serializes operations across pages with the same origin.
 - `request budget`: The maximum number of requests permitted within one time window.
 - `cooldown`: The time that must pass before another request is permitted.

@@ -85,6 +85,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F018] (P1) Run timestamped data migrations automatically within deployment.
+  Goal:
+  Keep `make release && make publish && make deploy` as the complete production application procedure.
+  Requirements:
+  - Package the separate migration executable and fixed timestamped input in the release.
+  - Prepare the initial server encryption key and App-scoped Gateway credentials automatically.
+  - Keep the server key across deployments and copy its existing remote reference.
+  - Stop database writers and back up the database before a cutover.
+  - Keep existing verified identities, client keys, tenant settings, users, and sessions.
+  - Commit data changes and the completion receipt together.
+  - Skip a completed migration during every later deployment.
+  - Keep application migration policy in TAuth and resource convergence in Gateway.
+  Validation:
+  Verify the migration CLI, production database copy, Make boundary, real Ansible, container startup, existing sessions, and deployment repeats.
+  Status:
+  Resolved 2026-09-30: `make ci` passed with the automatic deployment test.
+  The production-copy migration kept all original rows in 13 tables and all current settings for 20 tenants.
+  An interrupted migration kept the original database. Its retry kept later source writes.
+  The container test verified the existing client session, App-scoped credentials, and a repeat with zero changes.
+  Production release, publication, deployment, and live Google qualification have not run for this change.
+  Changed files:
+  `.gitignore`, `Dockerfile`, `Makefile`, `deployment/deploy.sh`, `deployment/migrations/command.go`, `deployment/migrations/cutover.go`, `deployment/migrations/cutover_test.go`, `deployment/migrations/20260930-tenant-console.json`, `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, `deployment/rollout/inputs.yml`, `deployment/rollout/cutover.yml`, `tests/installed-gateway.sh`, `tests/automatic-deployment.sh`, `README.md`, `ARCHITECTURE.md`, `.mprlab/POLICY.md`, `.mprlab/TERMINOLOGY.md`, `docs/tenant-console-operations.md`, `docs/production-release-qualification-2026-09-30.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
 - [x] [F017] (P1) Add Apps between owner accounts and tenants.
   Goal: Let each account own Apps, with each App containing its tenants.
   Requirements: Keep tenant credentials and sessions isolated. Require an owned App for tenant creation.
