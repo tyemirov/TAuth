@@ -46,6 +46,17 @@ func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, tenantID string
 		return "", "", fmt.Errorf("refresh_store.issue.memory: %w", err)
 	}
 	nowUnix := time.Now().UTC().Unix()
+	if previousTokenID != "" {
+		parent := store.byID[previousTokenID]
+		if parent == nil || parent.TenantID != tenantID || parent.UserID != applicationUserID {
+			return "", "", ErrRefreshTokenNotFound
+		}
+		if parent.RevokedAtUnix != 0 || parent.ExpiresUnix <= nowUnix {
+			store.revokeFamily(parent, nowUnix)
+			return "", "", ErrRefreshTokenRevoked
+		}
+		parent.RevokedAtUnix = nowUnix
+	}
 
 	record := &memoryRecord{
 		TenantID:        tenantID,
@@ -80,12 +91,33 @@ func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tenantID str
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
+		store.revokeFamily(rec, time.Now().UTC().Unix())
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenRevoked)
 	}
 	if time.Unix(rec.ExpiresUnix, 0).Before(time.Now().UTC()) {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenExpired)
 	}
 	return rec.UserID, rec.TokenID, rec.ExpiresUnix, nil
+}
+
+func (store *MemoryRefreshTokenStore) revokeFamily(record *memoryRecord, nowUnix int64) {
+	root := record
+	for root.PreviousTokenID != "" {
+		root = store.byID[root.PreviousTokenID]
+	}
+	family := map[string]bool{root.TokenID: true}
+	for changed := true; changed; {
+		changed = false
+		for _, candidate := range store.byID {
+			if candidate.TenantID == root.TenantID && family[candidate.PreviousTokenID] && !family[candidate.TokenID] {
+				family[candidate.TokenID] = true
+				changed = true
+			}
+		}
+	}
+	for id := range family {
+		store.byID[id].RevokedAtUnix = nowUnix
+	}
 }
 
 // Revoke marks a token as revoked.

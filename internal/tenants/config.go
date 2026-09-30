@@ -92,7 +92,6 @@ type PasswordUser struct {
 type AccountManagement struct {
 	enabled               bool
 	passwordSignupEnabled bool
-	returnChallengeTokens bool
 	emailVerificationTTL  time.Duration
 	emailDelivery         EmailDelivery
 	passwordResetTTL      time.Duration
@@ -568,11 +567,6 @@ func (settings AccountManagement) Enabled() bool {
 // PasswordSignupEnabled indicates whether public password signup is available.
 func (settings AccountManagement) PasswordSignupEnabled() bool {
 	return settings.passwordSignupEnabled
-}
-
-// ReturnChallengeTokens indicates whether challenge tokens are returned in HTTP responses.
-func (settings AccountManagement) ReturnChallengeTokens() bool {
-	return settings.returnChallengeTokens
 }
 
 // EmailVerificationTTL returns the email-verification challenge lifetime.
@@ -1250,14 +1244,13 @@ func parseAccountManagement(raw FileAccountManagement, tenantID TenantID, allowI
 		}
 		passwordResetTTL = parsedTTL
 	}
-	emailDelivery, emailDeliveryErr := parseEmailDelivery(raw.EmailDelivery, tenantID, allowInsecureHTTP, enabled && !bool(raw.ReturnChallengeTokens))
+	emailDelivery, emailDeliveryErr := parseEmailDelivery(raw.EmailDelivery, tenantID, allowInsecureHTTP, enabled)
 	if emailDeliveryErr != nil {
 		return AccountManagement{}, emailDeliveryErr
 	}
 	return AccountManagement{
 		enabled:               enabled,
 		passwordSignupEnabled: passwordSignupEnabled,
-		returnChallengeTokens: bool(raw.ReturnChallengeTokens),
 		emailVerificationTTL:  emailVerificationTTL,
 		emailDelivery:         emailDelivery,
 		passwordResetTTL:      passwordResetTTL,
@@ -1738,12 +1731,11 @@ type FilePasswordUser struct {
 
 // FileAccountManagement represents the raw account-management tenant block.
 type FileAccountManagement struct {
-	Enabled               yamlBool           `json:"enabled" yaml:"enabled"`
-	PasswordSignup        FilePasswordSignup `json:"password_signup" yaml:"password_signup"`
-	ReturnChallengeTokens yamlBool           `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
-	EmailVerificationTTL  string             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
-	EmailDelivery         FileEmailDelivery  `json:"email_delivery" yaml:"email_delivery"`
-	PasswordResetTTL      string             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+	Enabled              yamlBool           `json:"enabled" yaml:"enabled"`
+	PasswordSignup       FilePasswordSignup `json:"password_signup" yaml:"password_signup"`
+	EmailVerificationTTL string             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	EmailDelivery        FileEmailDelivery  `json:"email_delivery" yaml:"email_delivery"`
+	PasswordResetTTL     string             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
 }
 
 // FileEmailDelivery represents raw tenant notification service settings.

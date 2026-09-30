@@ -139,18 +139,29 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 	if ctx.Request.Method == "DELETE" && id != "" {
 		management.mutation.Lock()
 		defer management.mutation.Unlock()
-		var row provisioningCredential
-		err := store.db.WithContext(ctx.Request.Context()).First(&row, "id = ? AND owner_account_id = ?", id, owner.ID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = failure(404, "credential_not_found")
-		}
-		if err != nil {
-			respondError(ctx, err)
-			return
-		}
-		if row.RevokedAt == nil {
-			err = store.db.WithContext(ctx.Request.Context()).Model(&provisioningCredential{}).Where("id = ?", id).Update("revoked_at", management.now().UTC()).Error
-		}
+		err := store.db.WithContext(ctx.Request.Context()).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&consoleBootstrap{}).Where("id = ?", ConsoleTenantID).Update("id", ConsoleTenantID).Error; err != nil {
+				return err
+			}
+			var row provisioningCredential
+			err := tx.First(&row, "id = ? AND owner_account_id = ?", id, owner.ID).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return failure(404, "credential_not_found")
+			}
+			if err != nil {
+				return err
+			}
+			if row.RevokedAt != nil {
+				return nil
+			}
+			if err := management.checkMutationRate(tx, owner.ID); err != nil {
+				return err
+			}
+			if err := tx.Model(&provisioningCredential{}).Where("id = ?", id).Update("revoked_at", management.now().UTC()).Error; err != nil {
+				return err
+			}
+			return tx.Exec("INSERT INTO tenant_audit_events (id, actor_account_id, tenant_id, operation, result, created_at) VALUES (?, ?, NULL, ?, ?, ?)", newID(), owner.ID, "credential.revoke", "success", management.now().UTC()).Error
+		})
 		if err != nil {
 			respondError(ctx, err)
 			return
@@ -214,6 +225,24 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		if err := management.checkMutationRate(tx, owner.ID); err != nil {
+			return err
+		}
+		cutoff := management.now().UTC().Add(-30 * 24 * time.Hour)
+		expired := tx.Model(&provisioningCredential{}).Select("'"+CredentialsPath+"/' || id").Where("owner_account_id = ? AND revoked_at < ?", owner.ID, cutoff)
+		if err := tx.Where("owner_account_id = ? AND path = ? AND location IN (?)", owner.ID, CredentialsPath, expired).Delete(&receiptRecord{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("owner_account_id = ? AND revoked_at < ?", owner.ID, cutoff).Delete(&provisioningCredential{}).Error; err != nil {
+			return err
+		}
+		var retained int64
+		if err := tx.Model(&provisioningCredential{}).Where("owner_account_id = ?", owner.ID).Count(&retained).Error; err != nil {
+			return err
+		}
+		if retained >= 1000 {
+			return failure(429, "credential_retention_limit")
+		}
 		local := store.local(tx)
 		if _, err := local.app(ctx.Request.Context(), owner.ID, input.AppID); err != nil {
 			return err
@@ -244,6 +273,9 @@ func (management *Management) credentials(ctx *gin.Context, owner Owner) {
 			return err
 		}
 		if err := tx.Create(&receiptRecord{OwnerAccountID: owner.ID, Path: CredentialsPath, Key: key, Digest: digest, Response: string(encoded), Status: 201, Location: CredentialsPath + "/" + result.ID}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("INSERT INTO tenant_audit_events (id, actor_account_id, tenant_id, operation, result, created_at) VALUES (?, ?, NULL, ?, ?, ?)", newID(), owner.ID, "credential.create", "success", management.now().UTC()).Error; err != nil {
 			return err
 		}
 		result.Token = token

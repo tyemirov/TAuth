@@ -131,8 +131,11 @@ func (sessions *OAuthBrowserSessions) LoginPassword(
 	if emailErr != nil || strings.TrimSpace(password) == "" || !isAllowedUser(normalizedEmail, config.AllowedUsers) {
 		return false, nil
 	}
-	credential, authenticateErr := sessions.passwordCredentials.AuthenticatePassword(ctx, tenantID, normalizedEmail, password)
+	credential, authenticateErr := sessions.passwordCredentials.AuthenticatePassword(withRequestSource(ctx, request), tenantID, normalizedEmail, password)
 	if authenticateErr != nil {
+		if errors.Is(authenticateErr, ErrAuthenticationRateLimited) {
+			return false, authenticateErr
+		}
 		return false, nil
 	}
 	profile, profileErr := sessions.applicationProfile(ctx, config, tenantID, credential)

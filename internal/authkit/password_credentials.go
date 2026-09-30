@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -53,6 +54,8 @@ type passwordHashComparer func(hashedPassword []byte, password []byte) error
 
 // MemoryPasswordCredentialStore stores password credentials in memory.
 type MemoryPasswordCredentialStore struct {
+	now                  func() time.Time
+	abuseBudgets         map[string]abuseBudgetRecord
 	githubCredentials    map[githubCredentialIdentity][]byte
 	mu                   sync.RWMutex
 	tenants              map[string]map[string]passwordCredential
@@ -65,6 +68,8 @@ type MemoryPasswordCredentialStore struct {
 // NewMemoryPasswordCredentialStore constructs an empty in-memory credential store.
 func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 	return &MemoryPasswordCredentialStore{
+		now:                  time.Now,
+		abuseBudgets:         make(map[string]abuseBudgetRecord),
 		githubCredentials:    make(map[githubCredentialIdentity][]byte),
 		tenants:              make(map[string]map[string]passwordCredential),
 		accounts:             make(map[string]map[string]*accountRecord),
@@ -132,6 +137,9 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	}
 	if err := validatePlainPassword(password); err != nil {
 		return PasswordCredentialProfile{}, ErrPasswordCredentialInvalid
+	}
+	if err := store.reserveAuthenticationBudget(ctx, "password", tenantID, normalizedEmail, 5, 30); err != nil {
+		return PasswordCredentialProfile{}, err
 	}
 	store.mu.RLock()
 	tenantCredentials := store.tenants[tenantID]

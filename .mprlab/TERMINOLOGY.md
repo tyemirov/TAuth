@@ -101,6 +101,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `Web Locks`: The browser API that serializes operations across pages with the same origin.
+- `request budget`: The maximum number of requests permitted within one time window.
+- `cooldown`: The time that must pass before another request is permitted.
+- `bcrypt`: The password hash algorithm used by TAuth.
+
 - `App`: An account-owned resource that contains related application tenants.
 
 - `tenant console`: The TAuth browser frontend through which an owner configures application tenants.
@@ -152,7 +157,7 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `protected resource`: A service that accepts a resource-bound TAuth access token.
 - `render request`: The schema-v1 JSON document that contains normalized TAuth
   resource contributions and resolved output envelopes.
-- `refresh-token family`: The sequence of opaque rotating refresh tokens for one consent grant.
+- `refresh-token family`: The sequence of opaque rotating refresh tokens for one application session or OAuth consent grant.
 - `resource indicator`: The exact protected-resource identifier that becomes the access-token audience.
 
 ## MPR Lab Technical Verbs

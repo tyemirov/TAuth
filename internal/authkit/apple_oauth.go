@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	appleBrowserHashClaim = "browser_hash"
 	// AppleCallbackPath receives the Apple authorization response.
 	AppleCallbackPath           = "/auth/apple/callback"
 	appleIssuer                 = "https://appleid.apple.com"
@@ -45,9 +46,10 @@ var (
 )
 
 type appleOAuthState struct {
-	TenantID string
-	Nonce    string
-	ReturnTo string
+	TenantID    string
+	Nonce       string
+	ReturnTo    string
+	BrowserHash string
 }
 
 type appleTokenResponse struct {
@@ -109,7 +111,7 @@ func buildAppleAuthorizationRedirect(config AppleOAuthConfig, state string, nonc
 	return authorizationURL.String(), nil
 }
 
-func createAppleOAuthState(clock Clock, config ServerConfig, tenantID string, nonce string, returnTo string) (string, error) {
+func createAppleOAuthState(clock Clock, config ServerConfig, tenantID string, nonce string, returnTo string, browserHash string) (string, error) {
 	now := clock.Now().UTC()
 	claims := jwt.MapClaims{
 		"iss":                   config.AppJWTIssuer,
@@ -118,6 +120,7 @@ func createAppleOAuthState(clock Clock, config ServerConfig, tenantID string, no
 		"exp":                   now.Add(effectiveDuration(config.NonceTTL, 5*time.Minute)).Unix(),
 		appleStateTenantIDClaim: strings.TrimSpace(tenantID),
 		appleStateNonceClaim:    strings.TrimSpace(nonce),
+		appleBrowserHashClaim:   browserHash,
 	}
 	trimmedReturnTo := strings.TrimSpace(returnTo)
 	if trimmedReturnTo != "" {
@@ -168,8 +171,14 @@ func validateAppleOAuthState(registry TenantRegistry, state string) (ServerConfi
 		}
 		returnTo = validatedReturnTo
 	}
-	return config, appleOAuthState{TenantID: tenantID, Nonce: nonce, ReturnTo: returnTo}, nil
+	browserHash := readStringMapClaim(verifiedClaims, "browser_hash")
+	if browserHash == "" {
+		return ServerConfig{}, appleOAuthState{}, fmt.Errorf("%w: missing_browser", errAppleOAuthInvalidState)
+	}
+	return config, appleOAuthState{TenantID: tenantID, Nonce: nonce, ReturnTo: returnTo, BrowserHash: browserHash}, nil
 }
+
+func appleBrowserCookie(state string) string { return "__Host-tauth_apple_" + hashOpaque(state)[:16] }
 
 func validateAppleOAuthReturnTo(config ServerConfig, returnTo string) (string, error) {
 	trimmedReturnTo := strings.TrimSpace(returnTo)

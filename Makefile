@@ -5,6 +5,7 @@ GO ?= go
 STATICCHECK ?= staticcheck
 INEFFASSIGN ?= ineffassign
 GO_TAGS ?= nodynamic,webp_encoder
+GO_TEST_FLAGS ?=
 
 .PHONY: test-local-lifecycle
 test-local-lifecycle:
@@ -29,7 +30,7 @@ lint:
 	$(INEFFASSIGN) ./...
 
 test-go:
-	$(GO) test ./...
+	$(GO) test $(GO_TEST_FLAGS) ./...
 
 .PHONY: test-console
 test-console:

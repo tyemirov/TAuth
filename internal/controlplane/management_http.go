@@ -31,6 +31,17 @@ type receiptRecord struct {
 	Location                                    string
 }
 
+func (management *Management) checkMutationRate(tx *gorm.DB, ownerID string) error {
+	var recent int64
+	if err := tx.Model(&auditEvent{}).Where("actor_account_id = ? AND created_at > ?", ownerID, management.now().UTC().Add(-time.Minute)).Count(&recent).Error; err != nil {
+		return err
+	}
+	if recent >= 60 {
+		return failure(429, "mutation_rate_exceeded")
+	}
+	return nil
+}
+
 func (receiptRecord) TableName() string { return "management_receipts" }
 func respond(ctx *gin.Context, result resourceResult) {
 	if result.Location != "" {
@@ -291,12 +302,8 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 					return err
 				}
 			}
-			var recent int64
-			if err := tx.Model(&auditEvent{}).Where("actor_account_id = ? AND created_at > ?", owner.ID, management.now().UTC().Add(-time.Minute)).Count(&recent).Error; err != nil {
+			if err := management.checkMutationRate(tx, owner.ID); err != nil {
 				return err
-			}
-			if recent >= 60 {
-				return failure(429, "mutation_rate_exceeded")
 			}
 			if apps {
 				result, err = management.writeApp(ctx, store, owner.ID, parts, data)

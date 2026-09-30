@@ -60,7 +60,7 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool, configur
 	document.Tenants[0].GoogleWebClientID = ""
 	document.Tenants[0].PasswordAuth = tenants.FilePasswordAuth{}
 	document.Tenants[0].GitHubOAuth = tenants.FileGitHubOAuth{Enabled: true, ClientID: "github-client", ClientSecret: "test-secret", RedirectURI: issuer + tenants.GitHubCallbackPath}
-	document.Tenants[0].AccountManagement = tenants.FileAccountManagement{Enabled: true, ReturnChallengeTokens: true}
+	document.Tenants[0].AccountManagement = tenants.FileAccountManagement{Enabled: true, EmailDelivery: tenants.FileEmailDelivery{ServerAddress: "localhost:50051", APIKey: "fixture", EmailVerificationURL: "https://app.example/verify", PasswordResetURL: "https://app.example/reset", PasswordLinkURL: "https://app.example/link", ConnectionTimeoutSeconds: 1, OperationTimeoutSeconds: 1}}
 	for _, option := range configure {
 		option(&document)
 	}

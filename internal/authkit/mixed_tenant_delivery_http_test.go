@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -22,9 +21,6 @@ type tenantSelectiveEmailSender struct {
 
 func (sender *tenantSelectiveEmailSender) SendEmailChallenge(_ context.Context, request EmailChallengeRequest) error {
 	sender.requests <- request
-	if request.TenantID == "token-only" {
-		return errors.New("notification.pinguin.tenant_not_configured")
-	}
 	return nil
 }
 
@@ -33,11 +29,9 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
 	modes := []struct {
 		id           string
 		deliverEmail bool
-		returnTokens bool
 	}{
 		{id: "email-only", deliverEmail: true},
-		{id: "token-only", returnTokens: true},
-		{id: "email-and-token", deliverEmail: true, returnTokens: true},
+		{id: "second-email", deliverEmail: true},
 	}
 	var document strings.Builder
 	document.WriteString("tenants:\n")
@@ -59,8 +53,7 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
       enabled: true
       password_signup:
         enabled: true
-      return_challenge_tokens: %[2]t
-`, mode.id, mode.returnTokens)
+`, mode.id)
 		if mode.deliverEmail {
 			document.WriteString(`      email_delivery:
         server_address: pinguin:50051
@@ -171,18 +164,10 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
 				default:
 				}
 				token := deliveryToken
-				if mode.returnTokens {
-					returned, ok := payload[flow.tokenField].(string)
-					if !ok || returned == "" {
-						t.Fatalf("expected %s in response", flow.tokenField)
-					}
-					if mode.deliverEmail && returned != deliveryToken {
-						t.Fatal("response and email contain different challenge tokens")
-					}
-					token = returned
-				} else if _, present := payload[flow.tokenField]; present {
+				if _, present := payload[flow.tokenField]; present {
 					t.Fatalf("response exposed %s", flow.tokenField)
 				}
+
 				post(flow.completePath, map[string]string{"token": token, "password": "replacement correct horse battery staple"}, cookies, http.StatusOK)
 			})
 		}

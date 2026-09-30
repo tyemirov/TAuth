@@ -4,58 +4,57 @@ mprlab_resources:
   release:
     scheme: semver
   resources:
-    - kind: private_values
-      id: oauth-private
+    oauth-private:
+      kind: private_values
       bindings:
         oauth-signing-key: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
         tenant-encryption-key: TAUTH_TENANT_ENCRYPTION_KEY
-    - kind: compose_project
-      id: runtime
+    runtime:
+      kind: compose_project
       retired_services:
-        - project: mprlab-nginx-gateway
-          service: tauth-api
+        mprlab-nginx-gateway/tauth-api: {}
       images:
-        - id: tauth-image
+        tauth-image:
           repository: ghcr.io/tyemirov/tauth
           build:
             context: .
             dockerfile: Dockerfile
             platforms:
-              - linux/amd64
-              - linux/arm64
+            - linux/amd64
+            - linux/arm64
       services:
-        - id: tauth-api
+        tauth-api:
           image: tauth-image
           placement:
             group: gateway
             cardinality: one
           command:
-            - --config=/config/config.yml
+            '0': --config=/config/config.yml
           environment:
             TAUTH_TENANT_ENCRYPTION_KEY:
               resource: oauth-private
               output: tenant-encryption-key
           assets:
-            - managed: tauth.config
-              target: /config/config.yml
-              mode: "0600"
+            /config/config.yml:
+              managed: tauth.config
+              mode: '0600'
           mounts:
-            - volume: data
-              target: /data
+            /data:
+              volume: data
               read_only: false
           ports:
-            - container_port: 8080
+            '8080': {}
           readiness:
             protocol: http
             port: 8080
             path: /health
             expected_status: 200
       volumes:
-        - id: data
+        data:
           name: mprlab-nginx-gateway_tauth-data
           retention: retain
-    - kind: runtime_capability
-      id: http
+    http:
+      kind: runtime_capability
       name: tauth.http
       version: 1
       project: runtime
@@ -69,8 +68,8 @@ mprlab_resources:
         protocol: http
         path: /health
         expected_status: 200
-    - kind: runtime_capability
-      id: tenants
+    tenants:
+      kind: runtime_capability
       name: tauth.tenants
       version: 1
       project: runtime
@@ -84,8 +83,8 @@ mprlab_resources:
         protocol: http
         path: /health
         expected_status: 200
-    - kind: runtime_capability
-      id: oauth
+    oauth:
+      kind: runtime_capability
       name: tauth.oauth
       version: 1
       project: runtime
@@ -99,8 +98,8 @@ mprlab_resources:
         protocol: http
         path: /health
         expected_status: 200
-    - kind: tauth_authorization_server
-      id: oauth-server
+    oauth-server:
+      kind: tauth_authorization_server
       capability: tauth.oauth
       version: 1
       server:
@@ -115,7 +114,7 @@ mprlab_resources:
         authorization_code_ttl: 1m
         active_signing_key_id: oauth-2026-08
         signing_keys:
-          - id: oauth-2026-08
+          oauth-2026-08:
             private_key:
               resource: oauth-private
               output: oauth-signing-key
@@ -124,12 +123,12 @@ mprlab_resources:
           maximum_bytes: 5120
           minimum_cache_ttl: 1m
           maximum_cache_ttl: 1h
-    - kind: caddy_route
-      id: public-api
+    public-api:
+      kind: caddy_route
       hostname: tauth-api.mprlab.com
       listener: https
       handlers:
-        - id: default
+        default:
           path_prefix: /
           upstream: tauth.http
           transport:
@@ -141,19 +140,19 @@ mprlab_resources:
         mode: automatic
       access:
         trusted_networks:
-          - 127.0.0.1/32
-          - 172.19.0.0/16
-          - 192.168.1.158/32
+        - 127.0.0.1/32
+        - 172.19.0.0/16
+        - 192.168.1.158/32
         rate_limit:
           events: 300
           window_seconds: 10
-    - kind: health_check
-      id: public-health
+    public-health:
+      kind: health_check
       protocol: http
       url: https://tauth-api.mprlab.com/health
       expected_status: 200
-    - kind: github_pages
-      id: browser-helper
+    browser-helper:
+      kind: github_pages
       repository: tyemirov/tauth
       branch: gh-pages
       domain: tauth.mprlab.com

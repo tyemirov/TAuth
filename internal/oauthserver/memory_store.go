@@ -12,6 +12,7 @@ import (
 
 var (
 	ErrAuthorizationRequestInvalid = errors.New("oauth.authorization_request_invalid")
+	ErrAuthorizationCapacity       = errors.New("oauth.authorization_capacity_exceeded")
 	ErrAuthorizationCodeInvalid    = errors.New("oauth.authorization_code_invalid")
 	ErrRefreshTokenInvalid         = errors.New("oauth.refresh_token_invalid")
 	ErrRefreshTokenReuse           = errors.New("oauth.refresh_token_reuse")
@@ -19,6 +20,8 @@ var (
 )
 
 const (
+	maximumPendingPerTenant   = 1000
+	maximumPendingGlobal      = 10000
 	refreshTokenStatusActive  = "active"
 	refreshTokenStatusRotated = "rotated"
 	refreshTokenStatusRevoked = "revoked"
@@ -67,8 +70,21 @@ func (store *MemoryStore) CreateAuthorizationRequest(ctx context.Context, reques
 		return "", tokenErr
 	}
 	store.mu.Lock()
+	defer store.mu.Unlock()
+	tenantCount := 0
+	for key, existing := range store.requests {
+		if existing.request.ExpiresAtUnix <= request.CreatedAtUnix {
+			delete(store.requests, key)
+			continue
+		}
+		if existing.request.TenantID == request.TenantID {
+			tenantCount++
+		}
+	}
+	if tenantCount >= maximumPendingPerTenant || len(store.requests) >= maximumPendingGlobal {
+		return "", ErrAuthorizationCapacity
+	}
 	store.requests[digest] = memoryAuthorizationRequest{request: request}
-	store.mu.Unlock()
 	return token, nil
 }
 

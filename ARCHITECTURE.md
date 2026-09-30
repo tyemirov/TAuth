@@ -403,7 +403,6 @@ tenants:
       enabled: true
       password_signup:
         enabled: true
-      return_challenge_tokens: false
       email_verification_ttl: "30m"
       email_delivery:
         server_address: "pinguin-grpc:50051"
@@ -439,7 +438,7 @@ Validation rules baked into the loader:
 - `password_auth.enabled` gates `/auth/password/login`. Each configured user requires a normalized email and a bcrypt hash.
 - `account_management.enabled` gates persisted account IDs and account routes. Public signup also requires `password_signup.enabled`.
 - Production account management requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
-- `return_challenge_tokens` is for tests. Production responses do not contain challenge tokens. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments.
+- Account management requires email delivery. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments. HTTP responses contain no challenge tokens. Tests use an injected email sender.
 - Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
 - Cookie names are mandatory. Use a different name for each tenant that shares a cookie domain.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.

@@ -186,12 +186,11 @@ type passwordAuthResource struct {
 }
 
 type accountManagementResource struct {
-	Enabled               bool                   `json:"enabled" yaml:"enabled"`
-	PasswordSignup        passwordSignup         `json:"password_signup,omitempty" yaml:"password_signup"`
-	ReturnChallengeTokens bool                   `json:"return_challenge_tokens" yaml:"return_challenge_tokens"`
-	EmailVerificationTTL  string                 `json:"email_verification_ttl" yaml:"email_verification_ttl"`
-	EmailDelivery         *emailDeliveryResource `json:"email_delivery,omitempty"`
-	PasswordResetTTL      string                 `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+	Enabled              bool                   `json:"enabled" yaml:"enabled"`
+	PasswordSignup       passwordSignup         `json:"password_signup,omitempty" yaml:"password_signup"`
+	EmailVerificationTTL string                 `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	EmailDelivery        *emailDeliveryResource `json:"email_delivery,omitempty"`
+	PasswordResetTTL     string                 `json:"password_reset_ttl" yaml:"password_reset_ttl"`
 }
 
 type emailDeliveryResource struct {
@@ -341,12 +340,11 @@ type nativeAppleOAuth struct {
 }
 
 type nativeAccountManagement struct {
-	Enabled               bool                 `yaml:"enabled"`
-	PasswordSignup        passwordSignup       `yaml:"password_signup"`
-	ReturnChallengeTokens bool                 `yaml:"return_challenge_tokens"`
-	EmailVerificationTTL  string               `yaml:"email_verification_ttl"`
-	EmailDelivery         *nativeEmailDelivery `yaml:"email_delivery,omitempty"`
-	PasswordResetTTL      string               `yaml:"password_reset_ttl"`
+	Enabled              bool                 `yaml:"enabled"`
+	PasswordSignup       passwordSignup       `yaml:"password_signup"`
+	EmailVerificationTTL string               `yaml:"email_verification_ttl"`
+	EmailDelivery        *nativeEmailDelivery `yaml:"email_delivery,omitempty"`
+	PasswordResetTTL     string               `yaml:"password_reset_ttl"`
 }
 
 type nativeEmailDelivery struct {
@@ -590,11 +588,10 @@ func buildTenant(item contribution) (nativeTenant, error) {
 			account.PasswordResetTTL = "15m"
 		}
 		nativeAccount := &nativeAccountManagement{
-			Enabled:               account.Enabled,
-			PasswordSignup:        account.PasswordSignup,
-			ReturnChallengeTokens: account.ReturnChallengeTokens,
-			EmailVerificationTTL:  account.EmailVerificationTTL,
-			PasswordResetTTL:      account.PasswordResetTTL,
+			Enabled:              account.Enabled,
+			PasswordSignup:       account.PasswordSignup,
+			EmailVerificationTTL: account.EmailVerificationTTL,
+			PasswordResetTTL:     account.PasswordResetTTL,
 		}
 		if account.EmailDelivery != nil {
 			apiKey, outputErr := requireOutput(item, "email-delivery-api-key")

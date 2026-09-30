@@ -95,7 +95,7 @@ func newGitHubHTTPFixture(t *testing.T, database bool, accountManaged bool) *git
 		JWTSigningKey: "test-signing-key", SessionCookieName: "github_session", RefreshCookieName: "github_refresh", SessionTTL: "30m", RefreshTTL: "720h",
 	}
 	if accountManaged {
-		rawTenant.AccountManagement = tenants.FileAccountManagement{Enabled: true, ReturnChallengeTokens: true}
+		rawTenant.AccountManagement = tenants.FileAccountManagement{Enabled: true, EmailDelivery: tenants.FileEmailDelivery{ServerAddress: "localhost:50051", APIKey: "fixture", EmailVerificationURL: "https://app.example/verify", PasswordResetURL: "https://app.example/reset", PasswordLinkURL: "https://app.example/link", ConnectionTimeoutSeconds: 1, OperationTimeoutSeconds: 1}}
 	}
 	config, err := tenants.LoadConfigFromDocument(tenants.FileDocument{Tenants: []tenants.FileTenant{rawTenant}})
 	if err != nil {

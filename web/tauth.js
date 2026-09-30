@@ -1308,7 +1308,27 @@
     return error;
   }
 
-  async function readCurrentProfile() {
+  // Share the browser recovery lock with the bundled MPR UI client.
+  var authRecoveryLockPrefix = "mpr-ui:auth:recovery:v2:";
+
+  /**
+   * @template T
+   * @param {() => Promise<T>} operation
+   * @returns {Promise<T>}
+   */
+  function withSessionRecoveryLock(operation) {
+    var options = requireOptions();
+    var baseUrl = options.baseUrl.replace(/\/$/, "");
+    var scope = [baseUrl, options.tenantId, options.sessionEndpoint]
+      .map(encodeURIComponent).join(":");
+    return navigator.locks.request(authRecoveryLockPrefix + scope, operation);
+  }
+
+  function readCurrentProfile() {
+    return withSessionRecoveryLock(readCurrentProfileInsideLock);
+  }
+
+  async function readCurrentProfileInsideLock() {
     var options = requireOptions();
     try {
       var response = await fetch(
@@ -1360,7 +1380,11 @@
     });
   }
 
-  async function refreshSession() {
+  function refreshSession() {
+    return withSessionRecoveryLock(refreshSessionInsideLock);
+  }
+
+  async function refreshSessionInsideLock() {
     var options = requireOptions();
     try {
       var refreshResponse = await fetch(

@@ -50,19 +50,19 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		t.Fatalf("application resource manifest root is not the exact versionless contract: %#v", resourceKeys)
 	}
 
-	resources, available := resourcesDocument["resources"].([]any)
+	resources, available := resourcesDocument["resources"].(map[string]any)
 	if !available {
-		t.Fatalf("application resource manifest has no resources list: %#v", resourcesDocument["resources"])
+		t.Fatalf("application resource manifest has no resources map: %#v", resourcesDocument["resources"])
 	}
 	resourceIdentities := make([]string, 0, len(resources))
 	var runtimeProject map[string]any
 	var browserHelperPages map[string]any
-	for _, resourceValue := range resources {
+	for resourceID, resourceValue := range resources {
 		resource, resourceAvailable := resourceValue.(map[string]any)
 		if !resourceAvailable {
 			t.Fatalf("application resource is not a mapping: %#v", resourceValue)
 		}
-		resourceIdentity := stringField(t, resource, "kind") + "/" + stringField(t, resource, "id")
+		resourceIdentity := stringField(t, resource, "kind") + "/" + resourceID
 		resourceIdentities = append(resourceIdentities, resourceIdentity)
 		if resourceIdentity == "compose_project/runtime" {
 			runtimeProject = resource
@@ -120,13 +120,13 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	if _, available := runtimeProject["profiles"]; available {
 		t.Fatalf("runtime Compose project retains obsolete profiles: %#v", runtimeProject["profiles"])
 	}
-	services, available := runtimeProject["services"].([]any)
+	services, available := runtimeProject["services"].(map[string]any)
 	if !available || len(services) != 1 {
 		t.Fatalf("runtime Compose project must declare exactly one service: %#v", runtimeProject["services"])
 	}
-	runtimeService, available := services[0].(map[string]any)
+	runtimeService, available := services["tauth-api"].(map[string]any)
 	if !available {
-		t.Fatalf("runtime Compose service is not a mapping: %#v", services[0])
+		t.Fatalf("runtime Compose service is not a mapping: %#v", services["tauth-api"])
 	}
 	placement, available := runtimeService["placement"].(map[string]any)
 	if !available || len(placement) != 2 {
@@ -141,19 +141,13 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	if _, available := runtimeService["environment_files"]; available {
 		t.Fatalf("runtime Compose service retains obsolete environment files: %#v", runtimeService["environment_files"])
 	}
-	retiredServices, available := runtimeProject["retired_services"].([]any)
+	retiredServices, available := runtimeProject["retired_services"].(map[string]any)
 	if !available || len(retiredServices) != 1 {
-		t.Fatalf("runtime Compose project must retire exactly one legacy service: %#v", runtimeProject["retired_services"])
+		t.Fatalf("runtime Compose project must retire exactly one service: %#v", runtimeProject["retired_services"])
 	}
-	retiredService, available := retiredServices[0].(map[string]any)
-	if !available || len(retiredService) != 2 {
-		t.Fatalf("legacy service retirement must contain only project and service: %#v", retiredServices[0])
-	}
-	if project := stringField(t, retiredService, "project"); project != "mprlab-nginx-gateway" {
-		t.Fatalf("legacy service retirement has unexpected Compose project: %q", project)
-	}
-	if service := stringField(t, retiredService, "service"); service != "tauth-api" {
-		t.Fatalf("legacy service retirement has unexpected service: %q", service)
+	retiredService, available := retiredServices["mprlab-nginx-gateway/tauth-api"].(map[string]any)
+	if !available || len(retiredService) != 0 {
+		t.Fatalf("service retirement must use its project/service key and an empty body: %#v", retiredServices)
 	}
 
 	manifestText := string(manifestDocument)

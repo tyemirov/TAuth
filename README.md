@@ -474,7 +474,6 @@ tenants:
       enabled: true
       password_signup:
         enabled: true
-      return_challenge_tokens: false
       email_verification_ttl: "30m"
       email_delivery:
         server_address: "pinguin-grpc:50051"
@@ -512,7 +511,7 @@ Rules enforced at the tenant configuration boundary:
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
 - `account_management.enabled` enables the complete account lifecycle. `password_signup.enabled` requires account management.
 - `email_delivery` configures Pinguin for signup verification, password reset, and password linking. The API key selects the Pinguin tenant. TAuth adds the single-use token to the URL fragment of the matching public page.
-- Keep `return_challenge_tokens` false outside tests. TAuth then requires all Pinguin settings and challenge URLs. It does not return challenge tokens in HTTP response bodies.
+- Account management requires all Pinguin settings and challenge URLs. Challenge tokens are delivered only by email. Remove the obsolete `return_challenge_tokens` field from configuration.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose unique values per tenant to avoid overwriting each other’s cookies when they share a cookie domain (for example `app_session_notes`, `app_refresh_notes`).
 - `nonce_ttl` defaults to `5m` if omitted; `allow_insecure_http` defaults to `false` and should only be `true` for localhost development. With that flag enabled, cookies downgrade to `SameSite=Lax` and omit the `Secure` bit so browsers accept them over HTTP.
 - Values support shell-style environment expansion (`${TENANT_COOKIE_DOMAIN}` or `$TENANT_COOKIE_DOMAIN`) during the bounded import. Normal runtime reads do not expand tenant environment inputs. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved so password hashes are not mistaken for env placeholders.
@@ -583,3 +582,44 @@ The doctor command performs comprehensive validation including:
 ## License
 
 MIT (or your preferred license). Add a `LICENSE` file accordingly.
+
+## Authentication request limits
+
+Authentication bodies have a 32 KiB limit. OAuth forms retain their 16 KiB limit.
+The HTTP server uses a 15-second read limit, a 30-second write limit, and a
+60-second idle limit.
+
+Password login permits five attempts per tenant and email address per minute.
+It also permits 30 attempts per connection source and 1,000 attempts across the
+service per minute. JSON login and OAuth login share these limits. A rejected
+login returns HTTP 429 with `Retry-After: 60`. Budgets include successful attempts.
+
+Source identity comes from the connection peer. Deployments behind a proxy share
+the proxy source budget. PostgreSQL and SQLite deployments share budgets through
+the database. Memory deployments share them within one process.
+
+Password reset permits one request per tenant and email address per minute,
+10 per connection source, and 1,000 across the service per minute. Each accepted
+request replaces the previous reset challenge for that account. Reset initiation
+always returns `202` with `{"status":"accepted"}` after valid input, including
+unknown accounts, throttled requests, and delivery errors. Email delivery remains
+synchronous, so response duration can depend on the delivery service.
+
+Rate-limit records expire after one minute and are removed at the next admission.
+Their global capacity is 10,000 records. Reset challenges have a global capacity
+of 10,000 records. Expired reset challenges are removed during creation.
+Pending OAuth authorization requests have a capacity of 1,000 per tenant and
+10,000 globally. Creation removes expired requests and returns HTTP 429 when
+capacity is full.
+
+Owner credential creation and revocation share the console limit of 60 mutations
+per owner per minute. Idempotent replays do not use that budget. Each owner can
+retain 1,000 credentials, including revoked credentials, with at most 20 active.
+Creation removes credentials revoked more than 30 days ago and their receipts.
+
+Refresh-token rotation consumes a parent and inserts its successor atomically.
+Reuse revokes the refresh-token family. Clients must serialize refresh requests, including
+session refresh requests. The bundled client uses Web Locks to coordinate tabs
+from the same origin. It requires a secure browser context with Web Locks. Apple browser login uses a separate host-only, secure
+cookie for each transaction. The callback requires this cookie with the signed
+state and clears it after validation.

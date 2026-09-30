@@ -1373,6 +1373,70 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B111] (P2) Use one recovery lock for equivalent base URLs.
+  Goal: Keep browser tabs authenticated after session expiry.
+  Expected result: Base URLs with and without a last slash use the same recovery lock.
+  Actual result: Equivalent base URLs use different locks. Requests at the same time use one refresh token twice and revoke its family.
+  Requirements: Remove the last slash from the base URL before the client makes the lock scope.
+  Validation: Use the Chromium browser test with memory and SQLite stores. Use `make ci`.
+  Initial result: Both stores returned an unauthenticated state for the next session restore.
+  Resolution: The client removes the last slash from the base URL in the recovery lock scope.
+  Validation: Chromium confirmed that both tabs and a later session restore stayed authenticated with memory and SQLite stores.
+  Validation: `make ci` passed. The changed prose has no language-checker findings.
+  Repository result: Governor reported six existing managed-file differences. The issue tracker retains existing language-checker findings.
+  Files: `web/tauth.js`, `tests/auth-refresh.browser.cjs`, `.mprlab/ISSUES.md`.
+
+- [x] [B110] (P1) Install browser dependencies for Go CI.
+  Goal: Run the complete Go test suite in GitHub Actions.
+  Actual result: PR 181 failed because `TestSecurityBrowserRefresh` could not load Puppeteer in the Go test job.
+  Requirements: Set up Node and install the locked npm dependencies before Go tests.
+  Requirements: Include the workflow and browser test inputs in its path filters.
+  Validation: Run the browser refresh test with memory and SQLite stores. Run `make ci`.
+  Resolution: The Go workflow sets up Node and runs `npm ci` before the test suite.
+  Resolution: Path filters include the workflow, npm lockfile, and browser regression inputs.
+  Validation: The browser refresh test passed for both stores. Final `make ci` passed.
+  Files: `.github/workflows/go-tests.yml`.
+
+- [x] [B109] (P1) Limit password reset email delivery.
+  Goal:
+  Repeated reset requests cannot send unlimited email or retain unlimited reset challenges.
+  Requirements:
+  - Enforce an atomic account cooldown plus source and global request budgets.
+  - Keep reset state bounded in memory and persistent stores.
+  - Return the same public response when a request is throttled.
+  Validation:
+  - Compare known, unknown, and throttled HTTP responses.
+  - Verify one delivery per cooldown and recovery after expiry.
+  Actual result before the change:
+  Four consecutive reset requests sent four emails for one account.
+  Resolution:
+  Reset requests now have account, source, and global budgets before challenge creation and email delivery.
+  Each account has one outstanding reset challenge. Expired reset records are removed during creation.
+  Tests verify one email during the cooldown, recovery after expiry, and rejection of the replaced challenge.
+  Focused memory and SQLite tests passed. `make ci` passed after the final code change.
+
+- [x] [B108] (P1) Remove public account challenge secrets.
+  Goal: Deliver account challenges only through the configured email channel.
+  Actual result: An optional configuration field returns usable challenge tokens in public responses.
+  Requirements: Remove the configuration field and response path. Use the test email sender for lifecycle tests.
+  Validation: Verify that signup, reset, and link responses contain no challenge token. Verify completion through email.
+  Resolution:
+  The public challenge-token option and all HTTP token-return paths were removed.
+  Account management requires email delivery. Tests obtain secrets from the injected sender.
+  Tests cover signup, reset, link completion, and rejection of the removed YAML field.
+  Focused tests passed. `make ci` passed after the final code change.
+
+- [x] [B107] (P1) Limit owner credential mutations.
+  Goal: Apply the owner mutation limit to credential creation and revocation.
+  Actual result: Credential requests bypass the shared limit and retain rows after revocation.
+  Requirements: Count credential mutations. Bound retained credentials and receipts. Preserve owner isolation and idempotent retries.
+  Validation: Exercise repeated creation and revocation through HTTP. Run `make ci` after the security changes.
+  Resolution:
+  Credential creation and revocation now use the shared transactional owner mutation limit and audit log.
+  Idempotent requests retain their existing responses without another mutation count.
+  Retained credentials have a per-owner capacity. Creation removes old revoked credentials and their receipts.
+  Focused HTTP tests passed. `make ci` passed after the final code change.
+
 - [!] [B106] (P1) Qualify Gateway provisioning with App-scoped credentials.
   Requirements: Select the credential for each App and its current or removed tenant contributions.
   Requirements: Preserve App isolation and repeat the full production contribution operation through the installed Gateway.
@@ -2309,7 +2373,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Changed files: `internal/oauthserver/account_disablement_integration_test.go` and `internal/oauthserver/store_contract_test.go`.
   - Changed files: `README.md`, `docs/usage.md`, and `.mprlab/ISSUES.md`.
 
-- [ ] [B056] (P1) Make application refresh token rotation atomic.
+- [x] [B056] (P1) Make application refresh token rotation atomic.
   Goal:
   One application refresh token creates at most one active successor.
   The session and refresh routes issue a new token before they revoke the old token.
@@ -2332,6 +2396,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Race one token through `GET /auth/session`.
   - Verify that exactly one request succeeds for each store.
   - Run `make ci`.
+  Resolution:
+  Atomic rotation and family revocation now use the same store boundary for both public refresh routes.
+  Chromium tests verify concurrent tab restoration and later refreshes with memory and SQLite stores.
+  The client uses Web Locks shared with the console recovery client.
+  Focused HTTP and browser tests passed. `make ci` passed after the final code change.
 
 - [ ] [B057] (P1) Reject replayed native Google ID tokens.
   Goal:
@@ -2357,7 +2426,7 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Verify that the replay returns `invalid_nonce`.
   - Run `make ci`.
 
-- [ ] [B058] (P1) Bind Apple OAuth state to the first browser.
+- [x] [B058] (P1) Bind Apple OAuth state to the first browser.
   Goal:
   Only the browser that starts Apple login can complete that login.
   The signed Apple state has no secret that identifies the first browser.
@@ -2380,6 +2449,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Submit its callback in browser A and verify success.
   - Verify that TAuth clears the correlation cookie.
   - Run `make ci`.
+  Resolution:
+  Signed Apple state now contains the hash of a per-transaction browser cookie.
+  The callback requires the secure cookie before the provider exchange and then clears it.
+  Tests reject missing and incorrect cookies and accept the valid form callback.
+  Focused tests passed. `make ci` passed after the final code change.
 
 - [ ] [B059] (P1) Consume persistent one-time tokens atomically.
   Goal:
@@ -2429,8 +2503,15 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Verify that each password creation path rejects a one-byte password.
   - Verify that valid passwords continue to work.
   - Run `make ci`.
+  Progress 2026-09-29:
+  Memory and database stores enforce shared account, source, and global password request budgets before bcrypt work.
+  JSON and OAuth login share the budget. Tests verify HTTP 429 across both interfaces.
+  Database migration preserves existing users and adds persistent budgets.
+  Remaining: Define the minimum password length and progressive failure delay required by B060.
+  The selected audit finding concerns unlimited guesses. Its fixed one-minute request budget is implemented.
+  Validation: Focused checks and final `make ci` passed for the completed audit scope.
 
-- [ ] [B061] (P1) Bound public authentication request bodies.
+- [x] [B061] (P1) Bound public authentication request bodies.
   Goal:
   Each public authentication request has a finite body size and read time.
   The authentication parsers have no body size limit, and the HTTP server has no body read time limit.
@@ -2452,6 +2533,11 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Verify that slow bodies stop at the configured time limit.
   - Verify that normal provider and password bodies succeed.
   - Run `make ci`.
+  Resolution:
+  Authentication bodies now have a 32 KiB limit before parsing.
+  The server has finite read, write, and idle limits. OAuth forms retain their existing limit.
+  HTTP tests cover fixed-length, chunked, and slow request bodies.
+  Focused tests passed. `make ci` passed after the final code change.
 
 - [ ] [B062] (P1) Bound transient state storage.
   Goal:
@@ -2476,6 +2562,12 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Verify that memory and database record counts stay bounded.
   - Advance time and verify physical removal of expired records.
   - Run `make ci`.
+  Progress 2026-09-29:
+  Pending OAuth requests now have atomic tenant and global capacity limits in memory and database stores.
+  Creation removes expired requests. Tests verify capacity rejection, expiry cleanup, and preservation of requests during migration.
+  B109 adds reset cooldowns and bounded reset state.
+  Remaining: Complete signup limits, access-time cleanup, and scheduled cleanup for the other transient records required by B062.
+  Validation: Focused checks and final `make ci` passed for the completed audit scope.
 
 - [ ] [B063] (P2) Synchronize the in-memory user store.
   Goal:
@@ -2518,6 +2610,12 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
   - Verify that all public fields are equal.
   - Verify that the trusted recovery channel still receives the challenge.
   - Run `make ci`.
+  Progress 2026-09-29:
+  Reset initiation now returns exactly `{"status":"accepted"}` for known, unknown, throttled, and failed-delivery requests.
+  Public responses contain no account identity, expiry, or recovery secret.
+  HTTP tests compare known, unknown, and throttled responses. Email-based recovery still works.
+  Remaining: Email delivery is synchronous. The uniform timing requirement remains open.
+  Validation: Focused checks and final `make ci` passed for the completed audit scope.
 
 - [ ] [B065] (P2) Use trusted HTTPS signals for credential routes.
   Goal:

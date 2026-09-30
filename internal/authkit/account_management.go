@@ -245,6 +245,9 @@ func (store *MemoryPasswordCredentialStore) StartPasswordReset(ctx context.Conte
 	if emailErr != nil {
 		return AccountChallenge{}, ErrPasswordCredentialInvalid
 	}
+	if err := store.reserveAuthenticationBudget(ctx, "reset", tenantID, normalizedEmail, 1, 10); err != nil {
+		return AccountChallenge{}, err
+	}
 	token, tokenHash, tokenErr := generateRefreshOpaque()
 	if tokenErr != nil {
 		return AccountChallenge{}, fmt.Errorf("account.reset.token: %w", tokenErr)
@@ -259,6 +262,23 @@ func (store *MemoryPasswordCredentialStore) StartPasswordReset(ctx context.Conte
 	account := store.accounts[tenantID][credential.accountID]
 	if account == nil {
 		return AccountChallenge{}, ErrAccountNotFound
+	}
+	now := store.now().Unix()
+	resetCount := 0
+	for storedTenant, challenges := range store.challenges {
+		for hash, challenge := range challenges {
+			if challenge.kind != accountChallengePasswordReset {
+				continue
+			}
+			if challenge.expiresUnix <= now || (storedTenant == tenantID && challenge.accountID == account.accountID) {
+				delete(challenges, hash)
+			} else {
+				resetCount++
+			}
+		}
+	}
+	if resetCount >= maximumResetChallenges {
+		return AccountChallenge{}, ErrAuthenticationRateLimited
 	}
 	store.challenges[tenantID][tokenHash] = &accountChallengeRecord{
 		accountID:   account.accountID,
