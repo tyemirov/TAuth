@@ -1,0 +1,191 @@
+{
+  "owner_emails": [
+    "temirov@gmail.com",
+    "vtyemirov@gmail.com"
+  ],
+  "console_origin": "https://tauth.mprlab.com",
+  "console_source_tenant": "mpr-ui-demo",
+  "management_url": "https://tauth-api.mprlab.com",
+  "apps": [
+    {
+      "id": "download-your-data",
+      "name": "Download Your Data",
+      "tenant_ids": [
+        "download-your-data"
+      ],
+      "contribution_owner": "download-your-data",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "gravity",
+      "name": "Gravity Notes",
+      "tenant_ids": [
+        "gravity"
+      ],
+      "contribution_owner": "gravity",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "hecate",
+      "name": "Hecate",
+      "tenant_ids": [
+        "hecate"
+      ],
+      "contribution_owner": "hecate",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "iroom",
+      "name": "iRoom",
+      "tenant_ids": [
+        "iroom"
+      ],
+      "contribution_owner": "iroom",
+      "contribution_id": "auth"
+    },
+    {
+      "id": "issues-md",
+      "name": "ISSUES.ED",
+      "tenant_ids": [
+        "issues-md"
+      ],
+      "contribution_owner": "issues-md",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "kamu",
+      "name": "Kamu",
+      "tenant_ids": [
+        "kamu"
+      ],
+      "contribution_owner": "kamu",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "ledger",
+      "name": "Ledger",
+      "tenant_ids": [
+        "ledger"
+      ],
+      "contribution_owner": "ledger",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "llm-proxy",
+      "name": "LLM Proxy",
+      "tenant_ids": [
+        "llm-proxy"
+      ],
+      "contribution_owner": "llm-proxy",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "loopaware",
+      "name": "LoopAware",
+      "tenant_ids": [
+        "loopaware"
+      ],
+      "contribution_owner": "loopaware",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "mediaops",
+      "name": "MediaOps",
+      "tenant_ids": [
+        "mediaops"
+      ],
+      "contribution_owner": "mediaops",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "mpr-ui",
+      "name": "MPR UI",
+      "tenant_ids": [
+        "mpr-ui-demo"
+      ],
+      "contribution_owner": "mpr-ui",
+      "contribution_id": "demo-authentication"
+    },
+    {
+      "id": "mprlab-investors",
+      "name": "MPR Lab Investors",
+      "tenant_ids": [
+        "mprlab-investors"
+      ],
+      "contribution_owner": "investor-portal",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "namesignal",
+      "name": "NameSignal",
+      "tenant_ids": [
+        "namesignal"
+      ],
+      "contribution_owner": "namesignal",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "pinguin",
+      "name": "Pinguin",
+      "tenant_ids": [
+        "pinguin"
+      ],
+      "contribution_owner": "pinguin",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "prompt-bubbles",
+      "name": "Prompt Bubbles",
+      "tenant_ids": [
+        "prompt-bubbles"
+      ],
+      "contribution_owner": "prompts",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "poodlescanner",
+      "name": "PoodleScanner",
+      "tenant_ids": [
+        "ps"
+      ],
+      "contribution_owner": "poodlescanner",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "social-threader",
+      "name": "Social Threader",
+      "tenant_ids": [
+        "social-threader"
+      ],
+      "contribution_owner": "social-threader",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "summercan",
+      "name": "SummerCan",
+      "tenant_ids": [
+        "summercan"
+      ],
+      "contribution_owner": "summercan",
+      "contribution_id": "authentication"
+    },
+    {
+      "id": "gallery",
+      "name": "Gallery",
+      "tenant_ids": [
+        "tyemirov-gallery"
+      ],
+      "contribution_owner": "tyemirov-site",
+      "contribution_id": "gallery-auth"
+    },
+    {
+      "id": "writers-block",
+      "name": "Writer Block",
+      "tenant_ids": [
+        "writers-block"
+      ],
+      "contribution_owner": "writerblock",
+      "contribution_id": "authentication"
+    }
+  ]
+}

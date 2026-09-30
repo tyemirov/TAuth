@@ -1,0 +1,35 @@
+---
+- name: Read existing TAuth deployment inputs
+  hosts: gateway
+  gather_facts: false
+  any_errors_fatal: true
+  become_flags: -H -S -n -k
+  environment:
+    DOCKER_CONTEXT: "{{ mprlab_docker_context }}"
+  tasks:
+    - name: Require one selected migration destination
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+        quiet: true
+    - name: Verify fresh host operation authority
+      ansible.builtin.command:
+        argv: [id, -u]
+      changed_when: false
+    - name: Require the existing production data volume
+      ansible.builtin.command:
+        argv: ["{{ mprlab_docker_cli }}", volume, inspect, "{{ tauth_cutover_volume }}"]
+      changed_when: false
+    - name: Inspect the persistent server encryption key
+      no_log: true
+      ansible.builtin.command:
+        argv: [test, -f, "{{ mprlab_runtime_root }}/application-migrations/tauth/{{ tauth_cutover_id }}/key"]
+      changed_when: false
+      failed_when: tauth_existing_key.rc not in [0, 1]
+      register: tauth_existing_key
+    - name: Recover the existing server encryption key
+      when: tauth_existing_key.rc == 0
+      no_log: true
+      ansible.builtin.fetch:
+        src: "{{ mprlab_runtime_root }}/application-migrations/tauth/{{ tauth_cutover_id }}/key"
+        dest: "{{ tauth_recovered_key }}"
+        flat: true
