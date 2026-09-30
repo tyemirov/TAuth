@@ -1373,6 +1373,19 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B111] (P2) Use one recovery lock for equivalent base URLs.
+  Goal: Keep browser tabs authenticated after session expiry.
+  Expected result: Base URLs with and without a last slash use the same recovery lock.
+  Actual result: Equivalent base URLs use different locks. Requests at the same time use one refresh token twice and revoke its family.
+  Requirements: Remove the last slash from the base URL before the client makes the lock scope.
+  Validation: Use the Chromium browser test with memory and SQLite stores. Use `make ci`.
+  Initial result: Both stores returned an unauthenticated state for the next session restore.
+  Resolution: The client removes the last slash from the base URL in the recovery lock scope.
+  Validation: Chromium confirmed that both tabs and a later session restore stayed authenticated with memory and SQLite stores.
+  Validation: `make ci` passed. The changed prose has no language-checker findings.
+  Repository result: Governor reported six existing managed-file differences. The issue tracker retains existing language-checker findings.
+  Files: `web/tauth.js`, `tests/auth-refresh.browser.cjs`, `.mprlab/ISSUES.md`.
+
 - [x] [B110] (P1) Install browser dependencies for Go CI.
   Goal: Run the complete Go test suite in GitHub Actions.
   Actual result: PR 181 failed because `TestSecurityBrowserRefresh` could not load Puppeteer in the Go test job.
