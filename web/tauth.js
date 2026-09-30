@@ -1318,7 +1318,8 @@
    */
   function withSessionRecoveryLock(operation) {
     var options = requireOptions();
-    var scope = [options.baseUrl, options.tenantId, options.sessionEndpoint]
+    var baseUrl = options.baseUrl.replace(/\/$/, "");
+    var scope = [baseUrl, options.tenantId, options.sessionEndpoint]
       .map(encodeURIComponent).join(":");
     return navigator.locks.request(authRecoveryLockPrefix + scope, operation);
   }
