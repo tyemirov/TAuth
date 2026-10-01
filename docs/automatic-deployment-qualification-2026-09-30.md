@@ -36,6 +36,7 @@ The migration keeps existing client keys and session settings.
 | Server key preparation | Creation, retention, remote recovery, and conflict rejection passed. Invalid recovery data did not change private inputs. |
 | Real Ansible and Docker | Writer shutdown, packaged migration, service health, and the existing client session passed. |
 | Generated Gateway credential | The assigned tenant configuration was accessible. The console tenant returned `403`. |
+| Gateway suspension request | The generated credential suspended its assigned tenant. The existing client session then returned `404`. |
 | Repeated cutover | The old source container was absent. The migration made zero changes and kept the service active. |
 
 The container test used the installed Gateway v5.0.0 Ansible toolchain and the current TAuth image.
@@ -46,6 +47,9 @@ These checks did not execute a production fleet deployment or a live Google logi
 Private evidence remains in the ignored `.cache/automatic-cutover-f018` directory.
 The CI log is `.cache/f018-ci.log`.
 The production-copy log is `.cache/f018-production-cutover.log`.
+B112 adds the HTTP suspension regression. Its initial request returned `403 management.operation_denied` before the grant correction.
+The regression logs are `.cache/b112-regression-before.log` and `.cache/b112-regression-after.log`.
+The correction CI log is `.cache/b112-ci.log`.
 No secret value is included in this report.
 
 ## Documentation checks
