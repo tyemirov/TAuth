@@ -77,4 +77,24 @@ source_container=""
 "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
   "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
 [ "$(docker inspect --format '{{.State.Running}}' "$service_container")" = true ]
-printf 'Automatic cutover, old session, scoped Gateway credential, and repeated deployment passed.\n'
+# Gateway removes a contribution by suspending the tenant with its current resource ETag.
+status="$(curl --silent --dump-header "$test_root/tenant.headers" --output "$test_root/tenant.json" --write-out '%{http_code}' \
+  --header "Authorization: Bearer $gateway_token" \
+  "http://127.0.0.1:$port/api/management/tenants/product")"
+if [ "$status" != 200 ]; then cat "$test_root/tenant.json"; exit 1; fi
+tenant_etag="$(awk 'tolower($1) == "etag:" { sub(/\r$/, "", $2); print $2 }' "$test_root/tenant.headers")"
+[ -n "$tenant_etag" ]
+status="$(curl --silent --output "$test_root/suspended.json" --write-out '%{http_code}' \
+  --request PATCH --header 'Content-Type: application/json' \
+  --header "Authorization: Bearer $gateway_token" --header "If-Match: $tenant_etag" \
+  --data '{"state":"suspended"}' "http://127.0.0.1:$port/api/management/tenants/product")"
+if [ "$status" != 200 ]; then cat "$test_root/suspended.json"; exit 1; fi
+python3 - "$test_root/suspended.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))['state'] == 'suspended'
+PY
+status="$(curl --silent --output "$test_root/suspended-profile.json" --write-out '%{http_code}' \
+  --header 'Origin: https://console.example.com' --header 'X-TAuth-Tenant: product' \
+  --header "Cookie: product_session=$token" "http://127.0.0.1:$port/me")"
+if [ "$status" != 404 ]; then printf 'Suspended tenant authentication returned %s, expected 404.\n' "$status" >&2; exit 1; fi
+printf 'Automatic cutover, old session, scoped Gateway credential, repeated deployment, and tenant removal passed.\n'
