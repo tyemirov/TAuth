@@ -85,9 +85,9 @@ The canonical deployment file has no `TAUTH_TENANT_ENCRYPTION_KEY` assignment.
 The operator file has no `MPRLAB_TAUTH_MANAGEMENT_URL` or `MPRLAB_TAUTH_PROVISIONING_CREDENTIALS` assignment.
 Existing local test keys are not production inputs.
 
-Use the [production cutover procedure](tenant-console-operations.md#gateway-provisioning-and-cutover).
-Complete verified owner enrollment and prepare the App credentials.
-Record the production encryption key and console configuration.
-Stop writers before capture of a fresh backup and the bounded import.
-Preserve existing tenant keys, providers, cookies, and ownership assignments.
-Record import, publication, deployment, and live-provider qualification separately.
+The source now defines the [automatic production command contract](tenant-console-operations.md#production-command-contract).
+F018 packages the timestamped migration and prepares the server encryption key and App credentials inside `make deploy`.
+The sealed v2.2.6 artifact predates F018 and does not contain this automation.
+Prepare a new release from the completed source before publication and deployment.
+Use only `make release && make publish && make deploy` for that application operation.
+Record import, publication, deployment, and live-provider qualification results separately.

@@ -341,8 +341,16 @@ Each operator supplies service settings and secret configuration.
 The database owns tenant identities, origins, provider clients, cookie policy, and encrypted tenant secrets. The MPR Lab manifest names the image, retained data, tenant resources, public routes, and health contract.
 It contains no secret values or host paths.
 
-The root `make release`, `make publish`, and `make deploy` commands use the installed `mprlab-gateway` runtime.
-Each command passes the selected Git root through `--app-root`.
+The complete production procedure is `make release && make publish && make deploy`.
+Release and publication delegate to the installed `mprlab-gateway` runtime with the selected Git root.
+Deployment first runs the repository-owned timestamped data cutover through the installed Ansible toolchain.
+It then delegates resource convergence to that same captured Gateway package.
+The published service image contains both the service and the separate migration executable.
+The `20260930-tenant-console` receipt records completed data changes.
+Later deployments read that receipt and skip the migration.
+The database candidate and receipt replace the stopped source database together.
+Deployment creates or recovers the private server encryption key automatically.
+Existing tenant keys and client credentials remain unchanged.
 `MPRLAB_GATEWAY_EXECUTABLE` selects an explicit installed command path.
 `MPRLAB_GATEWAY_OPERATOR_ROOT` selects the operator inventory and private config root.
 Its default is `$HOME/.config/mprlab-gateway`.
@@ -354,8 +362,9 @@ render request, TAuth defaults, output-name resolution, native config assembly,
 and native validation. The command returns service configuration through standard output.
 Gateway sends tenant contributions through the scoped management API.
 Persisted contribution bindings protect console edits and preserve retry revisions.
-The production cutover requires the Gateway provisioning client from F011. TAuth carries no production lifecycle script or alternative
-controller. The README defines the render request envelope. It does not define
+The production cutover requires the Gateway provisioning client from F011.
+TAuth owns data migration policy. Gateway owns resource convergence.
+The README defines the render request envelope. It does not define
 a second `resources.yml` schema.
 
 ### 5.1 Tenant import source

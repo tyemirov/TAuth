@@ -173,6 +173,26 @@ See [GitHub operations and errors](docs/usage.md#github-login-operations) for tr
 
 ## Deploy TAuth for a hosted product
 
+The complete MPR Lab application procedure is:
+
+```sh
+make release && make publish && make deploy
+```
+
+`make release` validates source and packages the service, website, and migration executable.
+`make publish` publishes those sealed artifacts.
+`make deploy` prepares private server inputs, runs pending timestamped migrations, and reconciles the service through Gateway.
+A one-off migration runs automatically once within deployment.
+Its durable receipt prevents another run during later deployments.
+No separate migration, console bootstrap, credential generation, or encryption-key command is required.
+
+The `20260930-tenant-console` migration captures the stopped service configuration and backs up the database.
+It preserves existing tenant settings, client keys, users, and sessions.
+It imports the Apps and binds their owner to the existing verified Google identity.
+Deployment creates the server encryption key automatically and preserves it in private deployment inputs.
+This server key never goes to application clients.
+See the [production command contract](docs/tenant-console-operations.md#production-command-contract) for the migration and recovery boundaries.
+
 TAuth reads service settings from YAML and tenant configuration from its persistent owner database.
 The operator owns service secrets, routing, and deployment orchestration. This repository ships the generic service, configuration schema,
 neutral examples, and validation commands. For the MPR Lab deployment, the
@@ -232,24 +252,19 @@ Every verified Google user can enroll and create an owner account.
 Authorization uses the stable console subject and owner account ID.
 Each account owns Apps. Each App contains its tenants.
 Create or select an App before tenant creation. Tenants retain separate origins, providers, keys, and sessions.
-Existing databases require the explicit [App hierarchy migration](docs/tenant-console-operations.md#app-hierarchy-migration) before service startup.
+The timestamped production migration assigns App membership before service startup.
 Configured administrators can view the account directory. Their tenant workspaces remain owner-scoped.
 
 ### 2. Migrate existing application configuration
 
-Run the separate deployment migration for existing effective tenant configuration.
+`make deploy` runs the packaged migration for existing effective tenant configuration.
 The TAuth service does not expose an import command or select a migration owner.
-For local source selection, frozen snapshots, and import repair, follow the [deployment migration procedure](docs/tenant-console-operations.md#deployment-data-migration).
+For internal operations and test tools, see the [deployment migration reference](docs/tenant-console-operations.md#deployment-data-migration).
 The `tenants.import.yaml` examples describe migration input.
 The importer preserves existing tenant IDs, keys, cookies, providers, policies, users, and sessions.
 
-```sh
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
-```
-
-An identical retry returns the same receipt. A changed source fails without partial writes.
-Remove tenant environment inputs after the verified import.
+An identical deployment retry reads the same completion receipt.
+The migration uses a database candidate. A failed migration leaves the original database unchanged.
 The service reads active tenant revisions from the database after restart.
 
 ### 3. Start and verify the service
@@ -306,7 +321,8 @@ Enroll the destination owner through the console. Use the separate deployment mi
 Use `docker compose up --build` for tests of current source.
 
 The production cutover requires the matching Gateway provisioning release from F011.
-Release, publication, deployment, and live-provider qualification remain separate operations.
+Production uses the three commands above. The local Compose commands are development tools.
+Release, publication, deployment, and live-provider qualification retain separate evidence records.
 
 The tenant workspace is at `/app/` on the product site.
 Integration supplies public settings from the active revision, a complete browser example, protected key export, and persisted setup evidence.

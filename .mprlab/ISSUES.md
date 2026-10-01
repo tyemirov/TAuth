@@ -85,6 +85,29 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## Features
 
+- [x] [F018] (P1) Run timestamped data migrations automatically within deployment.
+  Goal:
+  Keep `make release && make publish && make deploy` as the complete production application procedure.
+  Requirements:
+  - Package the separate migration executable and fixed timestamped input in the release.
+  - Prepare the initial server encryption key and App-scoped Gateway credentials automatically.
+  - Keep the server key across deployments and copy its existing remote reference.
+  - Stop database writers and back up the database before a cutover.
+  - Keep existing verified identities, client keys, tenant settings, users, and sessions.
+  - Commit data changes and the completion receipt together.
+  - Skip a completed migration during every later deployment.
+  - Keep application migration policy in TAuth and resource convergence in Gateway.
+  Validation:
+  Verify the migration CLI, production database copy, Make boundary, real Ansible, container startup, existing sessions, and deployment repeats.
+  Status:
+  Resolved 2026-09-30: `make ci` passed with the automatic deployment test.
+  The production-copy migration kept all original rows in 13 tables and all current settings for 20 tenants.
+  An interrupted migration kept the original database. Its retry kept later source writes.
+  The container test verified the existing client session, App-scoped credentials, and a repeat with zero changes.
+  Production release, publication, deployment, and live Google qualification have not run for this change.
+  Changed files:
+  `.gitignore`, `Dockerfile`, `Makefile`, `deployment/deploy.sh`, `deployment/migrations/command.go`, `deployment/migrations/cutover.go`, `deployment/migrations/cutover_test.go`, `deployment/migrations/20260930-tenant-console.json`, `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, `deployment/rollout/inputs.yml`, `deployment/rollout/cutover.yml`, `tests/installed-gateway.sh`, `tests/automatic-deployment.sh`, `README.md`, `ARCHITECTURE.md`, `.mprlab/POLICY.md`, `.mprlab/TERMINOLOGY.md`, `docs/tenant-console-operations.md`, `docs/production-release-qualification-2026-09-30.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
 - [x] [F017] (P1) Add Apps between owner accounts and tenants.
   Goal: Let each account own Apps, with each App containing its tenants.
   Requirements: Keep tenant credentials and sessions isolated. Require an owned App for tenant creation.
@@ -1372,6 +1395,31 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 
 ## BugFixes
+
+- [x] [B112] (P2) {F018} Allow generated Gateway credentials to suspend removed tenants.
+  Goal:
+  Let Gateway suspend a migrated tenant when its application removes the tenant contribution.
+  Current behavior:
+  The timestamped migration omits `suspend` from generated credential grants.
+  Gateway sends `PATCH /api/management/tenants/{id}` with `state=suspended` during contribution removal.
+  TAuth returns `403 management.operation_denied` and keeps the tenant active.
+  Requirements:
+  - Add `suspend` to generated Gateway credential grants.
+  - Keep the credential scoped to its assigned App and tenants.
+  - Verify suspension and denied authentication through the real migrated HTTP service.
+  Validation:
+  Run `make test-automatic-deployment` and `make ci`.
+  Initial result:
+  The HTTP regression returned `403 management.operation_denied` before the grant correction.
+  Resolution:
+  Added the `suspend` grant. The credential keeps its assigned App and tenant scope.
+  Validation:
+  The Ansible/Docker regression and `make ci` passed.
+  The generated credential suspended its tenant. The existing session then returned `404`.
+  The console tenant remained outside the credential scope.
+  Document checks found no new findings. Governor retained the existing managed-file differences.
+  Files:
+  `deployment/migrations/cutover.go`, `tests/automatic-deployment.sh`, `.mprlab/ISSUES.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
 
 - [x] [B111] (P2) Use one recovery lock for equivalent base URLs.
   Goal: Keep browser tabs authenticated after session expiry.

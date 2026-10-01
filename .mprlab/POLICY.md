@@ -90,6 +90,25 @@ This is a binding product principle for every user interface.
 - The values `0600` and `7777` have no governance meaning.
 - This rule does not change service authorization or operation authority.
 
+## Application Deployment Contract
+
+- Keep `make release && make publish && make deploy` as the complete production application procedure.
+- Make `make release` validate source, package migrations, and seal all release artifacts.
+- Make `make publish` publish the sealed artifacts without a rebuild.
+- Make `make deploy` prepare private inputs and run pending timestamped migrations automatically.
+- Keep application migration policy in this repository and resource convergence in the installed Gateway runtime.
+- Give each migration one fixed timestamp identifier and a durable completion receipt.
+- Back up the database and stop its writers before a data cutover.
+- Commit migration data and its completion receipt together.
+- Skip a completed migration during every subsequent deployment.
+- Resume incomplete deployment work through `make deploy` without reversing committed data.
+- Never require a separate production migration, bootstrap, credential-generation, or key-generation command.
+- Generate a missing server encryption key automatically before the first encrypted database initialization.
+- Keep that key across releases, deployments, restarts, and database recovery.
+- Keep server encryption keys private. Never supply them to application clients.
+- Keep existing client credentials and tenant session keys during a migration.
+- Use “one-off migration” to mean a timestamped migration that runs automatically once within deployment.
+
 ## Selected Manifest Contract
 
 Apply this section when the task changes or validates a selected application manifest.

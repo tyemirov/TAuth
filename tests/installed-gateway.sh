@@ -11,16 +11,20 @@ make_command="$(command -v make)"
 git_command="$(command -v git)"
 mkdir -p "$application_root" "$runtime_bin" "$tools_bin"
 cp "$repository_root/Makefile" "$application_root/Makefile"
+mkdir -p "$application_root/deployment" "$application_root/.mprlab/deploy"
+cp "$repository_root/deployment/deploy.sh" "$application_root/deployment/deploy.sh"
 git -C "$application_root" init --quiet
 application_root="$(cd "$application_root" && pwd -P)"
 ln -s "$git_command" "$tools_bin/git"
 ln -s "$(command -v dirname)" "$tools_bin/dirname"
+ln -s "$(command -v bash)" "$tools_bin/bash"
 
 # The application Makefile is real. Only its external Gateway dependency is controlled.
 cat > "$fixture_root/gateway.c" <<'C'
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 int main(int argc, char **argv) {
     char directory[4096];
@@ -29,6 +33,13 @@ int main(int argc, char **argv) {
     for (int index = 1; index < argc; index++) printf("arg=%s\n", argv[index]);
     const char *operator_root = getenv("MPRLAB_GATEWAY_OPERATOR_ROOT");
     printf("operator=%s\n", operator_root == NULL ? "" : operator_root);
+    if (argc > 1 && strcmp(argv[1], "run") == 0) {
+        printf("key=%s\n", getenv("TAUTH_TENANT_ENCRYPTION_KEY"));
+        printf("management=%s\n", getenv("MPRLAB_TAUTH_MANAGEMENT_URL"));
+        printf("credentials=%s\n", getenv("MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"));
+        printf("sudo=%s\n", getenv("DEPLOY_SUDO_PASSWORD_FIXTURE"));
+        if (getenv("DEPLOY_SUDO_PASSWORD_INHERITED") != NULL) return 43;
+    }
     if (getenv("TEST_GATEWAY_FAILURE") != NULL) {
         fprintf(stderr, "gateway fixture failure\n");
         return 42;
@@ -40,7 +51,7 @@ cc "$fixture_root/gateway.c" -o "$runtime_bin/mprlab-gateway"
 unset MPRLAB_GATEWAY_EXECUTABLE MAKEFLAGS MFLAGS TEST_GATEWAY_FAILURE
 export MPRLAB_GATEWAY_OPERATOR_ROOT="$fixture_root/operator with spaces"
 
-for operation in release publish deploy; do
+for operation in release publish; do
   expected="$(printf 'cwd=%s\narg=app-%s\narg=--app-root\narg=%s\noperator=%s' \
     "$application_root" "$operation" "$application_root" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
   for selection in path explicit; do
@@ -84,5 +95,19 @@ for operation in release publish deploy; do
   grep -F 'gateway fixture failure' "$fixture_root/failure.log" >/dev/null
   grep -F 'Error 42' "$fixture_root/failure.log" >/dev/null
 done
+
+mkdir -p "$MPRLAB_GATEWAY_OPERATOR_ROOT"
+printf "TAUTH_TENANT_ENCRYPTION_KEY='canonical-key'\n" > "$application_root/.mprlab/deploy/.env"
+printf "MPRLAB_TAUTH_MANAGEMENT_URL='https://fixture.invalid'\nMPRLAB_TAUTH_PROVISIONING_CREDENTIALS='canonical-map'\nDEPLOY_SUDO_PASSWORD_FIXTURE='canonical-sudo'\n" > "$MPRLAB_GATEWAY_OPERATOR_ROOT/private.env"
+expected="$(printf 'cwd=%s\narg=run\narg=./deployment/rollout\narg=%s\narg=%s\noperator=%s\nkey=canonical-key\nmanagement=https://fixture.invalid\ncredentials=canonical-map\nsudo=canonical-sudo' "$application_root" "$application_root" "$runtime_bin/mprlab-gateway" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
+actual="$(TAUTH_TENANT_ENCRYPTION_KEY=inherited-key MPRLAB_TAUTH_MANAGEMENT_URL=inherited-url \
+  MPRLAB_TAUTH_PROVISIONING_CREDENTIALS=inherited-map DEPLOY_SUDO_PASSWORD_INHERITED=inherited-sudo \
+  PATH="$runtime_bin:$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy \
+  "GO=$runtime_bin/mprlab-gateway" "MPRLAB_GATEWAY_EXECUTABLE=$runtime_bin/mprlab-gateway")"
+if [ "$actual" != "$expected" ]; then printf 'Unexpected deployment boundary\n%s\n' "$actual" >&2; exit 1; fi
+status=0
+PATH="$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy > "$fixture_root/deploy-missing.log" 2>&1 || status=$?
+[ "$status" -eq 2 ]
+grep -F 'Gateway runtime is unavailable:' "$fixture_root/deploy-missing.log" >/dev/null
 
 printf 'Installed Gateway Make integration passed.\n'

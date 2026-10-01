@@ -197,5 +197,6 @@ func NewCommand() *cobra.Command {
 	}}
 	contribution.Flags().StringVar(&contributionPath, "source", "", "Resolved deployment contribution JSON")
 	command.AddCommand(contribution)
+	command.AddCommand(newCutoverCommand())
 	return command
 }
