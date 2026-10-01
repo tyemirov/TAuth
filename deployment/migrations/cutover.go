@@ -416,7 +416,7 @@ func applyCutover(ctx context.Context, databaseURL string, plan CutoverPlan, key
 			token := credentials[app.ContributionOwner][app.ContributionID]
 			mac := hmac.New(sha256.New, key)
 			_, _ = mac.Write([]byte(token))
-			operations, _ := json.Marshal([]string{"read", "configure", "activate", "proofs"})
+			operations, _ := json.Marshal([]string{"read", "configure", "activate", "suspend", "proofs"})
 			ids, _ := json.Marshal(app.TenantIDs)
 			if err := tx.Table("provisioning_credentials").Create(map[string]any{"id": CutoverID + "-" + app.ID, "app_id": app.ID, "owner_account_id": owner.ID, "name": "Gateway deployment", "operations": string(operations), "tenant_ids": string(ids), "allow_create": false, "digest": fmt.Sprintf("%x", mac.Sum(nil)), "created_at": now}).Error; err != nil {
 				return err
