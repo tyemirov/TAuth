@@ -1396,6 +1396,31 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B112] (P2) {F018} Allow generated Gateway credentials to suspend removed tenants.
+  Goal:
+  Let Gateway suspend a migrated tenant when its application removes the tenant contribution.
+  Current behavior:
+  The timestamped migration omits `suspend` from generated credential grants.
+  Gateway sends `PATCH /api/management/tenants/{id}` with `state=suspended` during contribution removal.
+  TAuth returns `403 management.operation_denied` and keeps the tenant active.
+  Requirements:
+  - Add `suspend` to generated Gateway credential grants.
+  - Keep the credential scoped to its assigned App and tenants.
+  - Verify suspension and denied authentication through the real migrated HTTP service.
+  Validation:
+  Run `make test-automatic-deployment` and `make ci`.
+  Initial result:
+  The HTTP regression returned `403 management.operation_denied` before the grant correction.
+  Resolution:
+  Added the `suspend` grant. The credential keeps its assigned App and tenant scope.
+  Validation:
+  The Ansible/Docker regression and `make ci` passed.
+  The generated credential suspended its tenant. The existing session then returned `404`.
+  The console tenant remained outside the credential scope.
+  Document checks found no new findings. Governor retained the existing managed-file differences.
+  Files:
+  `deployment/migrations/cutover.go`, `tests/automatic-deployment.sh`, `.mprlab/ISSUES.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
 - [x] [B111] (P2) Use one recovery lock for equivalent base URLs.
   Goal: Keep browser tabs authenticated after session expiry.
   Expected result: Base URLs with and without a last slash use the same recovery lock.
