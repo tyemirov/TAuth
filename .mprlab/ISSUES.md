@@ -1396,6 +1396,15 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B115] (P1) Declare the current Gateway execution policy.
+  Goal: The installed Gateway accepts the application manifest before release.
+  Requirements: Declare enabled CI, positive timeouts, and finite provider observations in the selected manifest.
+  Resolution: Added the execution policy required by B607. Kept the application resources and release scheme.
+  Validation: Gateway v5.0.4 completed the release plan through native Ansible in a local fixture.
+  The plan reported zero changes and zero failures. The Governor check retained six existing managed-file differences.
+  Changed prose and whitespace checks passed. Production release, publication, and deployment did not run.
+  Files: `.mprlab/deploy/resources.yml`, `.mprlab/POLICY.md`, and `.mprlab/ISSUES.md`.
+
 - [x] [B112] (P2) {F018} Allow generated Gateway credentials to suspend removed tenants.
   Goal:
   Let Gateway suspend a migrated tenant when its application removes the tenant contribution.

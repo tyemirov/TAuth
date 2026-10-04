@@ -3,6 +3,73 @@ mprlab_resources:
   owner: tauth
   release:
     scheme: semver
+  defaults:
+    timeouts:
+      startup: 30s
+      completion: 2m
+      readiness: 2m
+      request: 15s
+      shutdown: 5s
+  operations:
+    ci:
+      timeouts:
+        completion: 350s
+    app-plan-release: &plan-policy
+      timeouts:
+        completion: 2m
+      polling: &provider-polling
+        initial: 2s
+        maximum: 10s
+        increment: 1s
+        multiplier: 2
+        attempt_limit: 4
+    app-plan-publish: *plan-policy
+    app-plan-deploy: *plan-policy
+    app-release:
+      timeouts:
+        completion: 30m
+      polling: *provider-polling
+    app-publish:
+      timeouts:
+        completion: 4h
+      polling: *provider-polling
+    app-deploy:
+      timeouts:
+        completion: 20m
+      polling: *provider-polling
+    deployment.http-health:
+      polling:
+        initial: 1s
+        maximum: 1s
+        increment: 0s
+        multiplier: 1
+        attempt_limit: 3
+    deployment.resource.recovery:
+      polling:
+        initial: 1s
+        maximum: 1s
+        increment: 0s
+        multiplier: 1
+        attempt_limit: 3
+    app_deploy.health.same_host:
+      polling:
+        initial: 15s
+        maximum: 30s
+        increment: 0s
+        multiplier: 2
+        attempt_limit: 3
+    app_deploy.pages.deployment_status_poll:
+      polling:
+        initial: 1s
+        maximum: 10s
+        increment: 0s
+        multiplier: 2
+        attempt_limit: 120
+  ci:
+    enabled: true
+    command:
+      '0': make
+      '1': ci
   resources:
     oauth-private:
       kind: private_values
