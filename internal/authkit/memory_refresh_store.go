@@ -172,3 +172,19 @@ func (store *MemoryRefreshTokenStore) hash(opaque string) string {
 func (store *MemoryRefreshTokenStore) hashKey(tenantID string, hashValue string) string {
 	return tenantID + "::" + hashValue
 }
+
+// PurgeUser removes all application refresh tokens for one tenant and user.
+func (store *MemoryRefreshTokenStore) PurgeUser(ctx context.Context, tenantID, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("refresh_store.user_purge: %w", err)
+	}
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	for id, record := range store.byID {
+		if record.TenantID == tenantID && record.UserID == userID {
+			delete(store.byHash, store.hashKey(tenantID, record.Hash))
+			delete(store.byID, id)
+		}
+	}
+	return nil
+}

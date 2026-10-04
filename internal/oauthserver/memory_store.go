@@ -364,3 +364,28 @@ func validatePKCEChallenge(challenge string) error {
 	}
 	return nil
 }
+
+// PurgeUser removes codes, consents, and refresh grants for one tenant and user.
+func (store *MemoryStore) PurgeUser(ctx context.Context, tenantID, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("oauth_store.user_purge: %w", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for id, consent := range store.consents {
+		if consent.TenantID == tenantID && consent.UserID == userID {
+			delete(store.consents, id)
+		}
+	}
+	for id, record := range store.codes {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			delete(store.codes, id)
+		}
+	}
+	for id, record := range store.refreshTokens {
+		if record.grant.TenantID == tenantID && record.grant.UserID == userID {
+			delete(store.refreshTokens, id)
+		}
+	}
+	return nil
+}

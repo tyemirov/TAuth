@@ -38,7 +38,13 @@ func (databaseGitHubCredential) TableName() string { return "github_credentials"
 
 // SaveGitHubCredential stores an encrypted credential for one exact identity.
 func (store *DatabaseUserStore) SaveGitHubCredential(ctx context.Context, tenantID, userID string, encrypted []byte) error {
-	if err := store.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "user_id"}}, DoUpdates: clause.AssignmentColumns([]string{"ciphertext"})}).Create(&databaseGitHubCredential{TenantID: tenantID, UserID: userID, Ciphertext: encrypted}).Error; err != nil {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := RequireActiveAccountWrite(ctx, tx, tenantID, userID); err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "user_id"}}, DoUpdates: clause.AssignmentColumns([]string{"ciphertext"})}).Create(&databaseGitHubCredential{TenantID: tenantID, UserID: userID, Ciphertext: encrypted}).Error
+	})
+	if err != nil {
 		return fmt.Errorf("github.credential_save: %w", err)
 	}
 	return nil

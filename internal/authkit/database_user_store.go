@@ -27,6 +27,7 @@ var errUserStoreRolesScanType = errors.New("user_store.roles.scan_type")
 type DatabaseUserStore struct {
 	db                   *gorm.DB
 	driverLabel          string
+	databaseIdentity     string
 	now                  func() time.Time
 	passwordHashComparer passwordHashComparer
 }
@@ -121,15 +122,16 @@ func (passwordCredentialRecord) TableName() string {
 }
 
 type databaseAccountRecord struct {
-	TenantID        string   `gorm:"column:tenant_id;primaryKey"`
-	AccountID       string   `gorm:"column:account_id;primaryKey"`
-	UserEmail       string   `gorm:"column:user_email;not null"`
-	UserDisplayName string   `gorm:"column:user_display_name;not null"`
-	UserAvatarURL   string   `gorm:"column:user_avatar_url;not null"`
-	AccountState    string   `gorm:"column:account_state;not null"`
-	UserRoles       roleList `gorm:"column:user_roles;type:text;not null"`
-	CreatedAtUnix   int64    `gorm:"column:created_at_unix;not null"`
-	LastUpdatedUnix int64    `gorm:"column:last_updated_unix;not null"`
+	TenantID            string   `gorm:"column:tenant_id;primaryKey"`
+	AccountID           string   `gorm:"column:account_id;primaryKey"`
+	UserEmail           string   `gorm:"column:user_email;not null"`
+	UserDisplayName     string   `gorm:"column:user_display_name;not null"`
+	DisplayNameOverride *string  `gorm:"column:display_name_override"`
+	UserAvatarURL       string   `gorm:"column:user_avatar_url;not null"`
+	AccountState        string   `gorm:"column:account_state;not null"`
+	UserRoles           roleList `gorm:"column:user_roles;type:text;not null"`
+	CreatedAtUnix       int64    `gorm:"column:created_at_unix;not null"`
+	LastUpdatedUnix     int64    `gorm:"column:last_updated_unix;not null"`
 }
 
 func (databaseAccountRecord) TableName() string {
@@ -169,7 +171,7 @@ func (databaseAccountChallengeRecord) TableName() string {
 
 // NewDatabaseUserStore constructs a DatabaseUserStore backed by the provided database URL.
 func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUserStore, error) {
-	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
 	if openErr != nil {
 		return nil, openErr
 	}
@@ -179,6 +181,7 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 	store := &DatabaseUserStore{
 		db:                   databaseHandle,
 		driverLabel:          driverLabel,
+		databaseIdentity:     hashOpaque(databaseURL),
 		now:                  time.Now,
 		passwordHashComparer: bcrypt.CompareHashAndPassword,
 	}
@@ -239,19 +242,35 @@ func (store *DatabaseUserStore) upsertUserProfile(ctx context.Context, tenantID 
 		CreatedAtUnix:   now.Unix(),
 		LastUpdatedUnix: now.Unix(),
 	}
-	err := store.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "tenant_id"},
-			{Name: "user_id"},
-		},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"user_email",
-			"user_display_name",
-			"user_avatar_url",
-			"user_roles",
-			"last_updated_unix",
-		}),
-	}).Create(&record).Error
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := RequireActiveAccountWrite(ctx, tx, tenantID, applicationUserID); err != nil {
+			return err
+		}
+		if isAccountSessionID(applicationUserID) {
+			profile, err := store.accountProfileWithTx(ctx, tx, tenantID, applicationUserID)
+			if err != nil {
+				return err
+			}
+			record.UserEmail = profile.UserEmail
+			record.UserDisplayName = profile.DisplayName
+			record.UserAvatarURL = profile.AvatarURL
+			record.UserRoles = roleList(profile.Roles)
+			roles = profile.Roles
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "tenant_id"},
+				{Name: "user_id"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"user_email",
+				"user_display_name",
+				"user_avatar_url",
+				"user_roles",
+				"last_updated_unix",
+			}),
+		}).Create(&record).Error
+	})
 	if err != nil {
 		return "", nil, fmt.Errorf("%s.upsert.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
@@ -278,22 +297,39 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 		CreatedAtUnix:   now.Unix(),
 		LastUpdatedUnix: now.Unix(),
 	}
-	err := store.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "tenant_id"},
-			{Name: "user_email"},
-		},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"user_id",
-			"account_id",
-			"user_display_name",
-			"user_avatar_url",
-			"password_hash",
-			"email_verified",
-			"managed_by_config",
-			"last_updated_unix",
-		}),
-	}).Create(&record).Error
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Reserve the writer before resolving the current credential binding.
+		if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id IN (SELECT account_id FROM password_credentials WHERE tenant_id = ? AND user_email = ?)", tenantID, tenantID, record.UserEmail).Update("last_updated_unix", gorm.Expr("last_updated_unix")).Error; err != nil {
+			return err
+		}
+		var previous passwordCredentialRecord
+		lookupErr := tx.Where("tenant_id = ? AND user_email = ?", tenantID, record.UserEmail).Take(&previous).Error
+		if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return lookupErr
+		}
+		if lookupErr == nil && previous.AccountID != "" {
+			if err := lockActiveAccount(ctx, tx, tenantID, previous.AccountID); err != nil {
+				return err
+			}
+			record.AccountID = previous.AccountID
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "tenant_id"},
+				{Name: "user_email"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"user_id",
+				"account_id",
+				"user_display_name",
+				"user_avatar_url",
+				"password_hash",
+				"email_verified",
+				"managed_by_config",
+				"last_updated_unix",
+			}),
+		}).Create(&record).Error
+	})
 	if err != nil {
 		return fmt.Errorf("%s.password_credential.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
@@ -523,11 +559,14 @@ func (store *DatabaseUserStore) VerifyEmailChallenge(ctx context.Context, tenant
 		if challengeErr != nil {
 			return challengeErr
 		}
-		if updateErr := tx.Model(&databaseAccountRecord{}).
-			Where("tenant_id = ? AND account_id = ?", tenantID, challenge.AccountID).
-			Updates(map[string]interface{}{"account_state": accountStateActive, "last_updated_unix": store.now().UTC().Unix()}).Error; updateErr != nil {
-			return updateErr
+		activation := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, challenge.AccountID, accountStatePendingVerification).Updates(map[string]interface{}{"account_state": accountStateActive, "last_updated_unix": store.now().UTC().Unix()})
+		if activation.Error != nil {
+			return activation.Error
 		}
+		if activation.RowsAffected != 1 {
+			return ErrAccountNotActive
+		}
+
 		if updateErr := tx.Model(&passwordCredentialRecord{}).
 			Where("tenant_id = ? AND user_email = ?", tenantID, challenge.UserEmail).
 			Updates(map[string]interface{}{"email_verified": true, "account_id": challenge.AccountID, "last_updated_unix": store.now().UTC().Unix()}).Error; updateErr != nil {
@@ -598,6 +637,9 @@ func (store *DatabaseUserStore) StartPasswordReset(ctx context.Context, tenantID
 	}
 	var capacityExceeded bool
 	createErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveAccount(ctx, tx, tenantID, record.AccountID); err != nil {
+			return err
+		}
 		if err := tx.Model(&abuseBudgetLock{}).Where("id = ?", 1).Update("id", 1).Error; err != nil {
 			return err
 		}
@@ -634,6 +676,16 @@ func (store *DatabaseUserStore) CompletePasswordReset(ctx context.Context, tenan
 		challenge, challengeErr := store.consumeDatabaseChallenge(ctx, tx, tenantID, token, accountChallengePasswordReset)
 		if challengeErr != nil {
 			return challengeErr
+		}
+		current, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, challenge.AccountID)
+		if profileErr != nil {
+			return profileErr
+		}
+		if current.State == accountStateDisabled {
+			return ErrAccountDisabled
+		}
+		if err := lockActiveAccount(ctx, tx, tenantID, challenge.AccountID); err != nil {
+			return err
 		}
 		if updateErr := tx.Model(&passwordCredentialRecord{}).
 			Where("tenant_id = ? AND user_email = ? AND account_id = ?", tenantID, challenge.UserEmail, challenge.AccountID).
@@ -683,11 +735,16 @@ func (store *DatabaseUserStore) ChangePassword(ctx context.Context, tenantID str
 	if compareErr := store.passwordHashComparer([]byte(record.PasswordHash), []byte(currentPassword)); compareErr != nil {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
-	if updateErr := store.db.WithContext(ctx).Model(&passwordCredentialRecord{}).
-		Where("tenant_id = ? AND user_email = ?", tenantID, record.UserEmail).
-		Updates(map[string]interface{}{"password_hash": passwordHash, "last_updated_unix": store.now().UTC().Unix()}).Error; updateErr != nil {
+	updateErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+			return err
+		}
+		return tx.Model(&passwordCredentialRecord{}).Where("tenant_id = ? AND user_email = ? AND account_id = ?", tenantID, record.UserEmail, accountID).Updates(map[string]interface{}{"password_hash": passwordHash, "last_updated_unix": store.now().UTC().Unix()}).Error
+	})
+	if updateErr != nil {
 		return AccountProfile{}, fmt.Errorf("%s.account_change_password.%s: %w", userStoreErrorPrefix, store.driverLabel, updateErr)
 	}
+
 	return accountProfile, nil
 }
 
@@ -716,6 +773,11 @@ func (store *DatabaseUserStore) EnsurePasswordAccount(ctx context.Context, tenan
 			accountID = generatedAccountID
 		} else if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
 			return validateErr
+		}
+		if strings.TrimSpace(record.AccountID) != "" {
+			if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+				return err
+			}
 		}
 		now := store.now().UTC().Unix()
 		var existingAccount databaseAccountRecord
@@ -797,6 +859,9 @@ func (store *DatabaseUserStore) CreatePasswordLink(ctx context.Context, tenantID
 	}
 	now := store.now().UTC().Unix()
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+			return err
+		}
 		if _, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID); profileErr != nil {
 			return profileErr
 		}
@@ -836,6 +901,9 @@ func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID
 		}
 		if challenge.AccountID != accountID {
 			return ErrAccountChallengeInvalid
+		}
+		if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+			return err
 		}
 		now := store.now().UTC().Unix()
 		identity := databaseAccountIdentityRecord{
@@ -944,7 +1012,7 @@ func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenan
 		}
 		accountID = record.AccountID
 		result = tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStateActive).
-			Updates(map[string]interface{}{"user_email": normalized.UserEmail, "user_display_name": normalized.DisplayName, "user_avatar_url": normalized.AvatarURL, "last_updated_unix": now})
+			Updates(map[string]interface{}{"user_email": normalized.UserEmail, "user_display_name": gorm.Expr("COALESCE(display_name_override, ?)", normalized.DisplayName), "user_avatar_url": normalized.AvatarURL, "last_updated_unix": now})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -1014,6 +1082,9 @@ func (store *DatabaseUserStore) UnlinkIdentity(ctx context.Context, tenantID str
 		normalizedProviderID = normalizedEmail
 	}
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+			return err
+		}
 		count, countErr := store.identityCountWithTx(ctx, tx, tenantID, accountID)
 		if countErr != nil {
 			return countErr
@@ -1110,6 +1181,9 @@ func (store *DatabaseUserStore) accountProfileWithTx(ctx context.Context, tx *go
 			return AccountProfile{}, ErrAccountNotFound
 		}
 		return AccountProfile{}, queryErr
+	}
+	if account.DisplayNameOverride != nil {
+		account.UserDisplayName = *account.DisplayNameOverride
 	}
 	return AccountProfile{
 		AccountID:   account.AccountID,

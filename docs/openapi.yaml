@@ -13,6 +13,120 @@ info:
 servers:
   - url: https://auth.example.com
 paths:
+  /auth/account:
+    patch:
+      operationId: correctAccountProfile
+      description: >-
+        Correct the display name of the authenticated active tenant account.
+        The tenant must enable account management. The session cookie name is tenant-specific.
+        The server keeps the override across provider login. Email and all other input fields are unsupported.
+      parameters:
+        - name: X-TAuth-Tenant
+          in: header
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [display_name]
+              properties:
+                display_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  description: The server removes outer whitespace and rejects control characters.
+      responses:
+        "200":
+          description: The current account profile. The response uses Cache-Control no-store.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, user_email, display, avatar_url, roles, state]
+                properties:
+                  user_id: {type: string}
+                  user_email: {type: string, format: email}
+                  display: {type: string}
+                  avatar_url: {type: string}
+                  roles: {type: array, items: {type: string}}
+                  state: {type: string, const: active}
+        "400":
+          description: The JSON is invalid or contains unknown fields.
+          content:
+            application/json:
+              schema: {type: object, required: [error], properties: {error: {type: string, const: invalid_json}}}
+        "401": {description: The session is missing or invalid.}
+        "403": {description: The account is not active.}
+        "404": {description: Account management is disabled or the tenant account is missing.}
+        "415": {description: The request media type is unsupported.}
+        "422":
+          description: The display name is missing, empty, too long, or contains control characters.
+          content:
+            application/json:
+              schema: {type: object, required: [error], properties: {error: {type: string, const: invalid_display_name}}}
+        "500": {description: The profile update failed.}
+    delete:
+      operationId: eraseAccount
+      description: >-
+        Initiate account erasure with the tenant session cookie and a key saved before the request.
+        Repeat the same tenant and key to recover the operation after session revocation.
+        Unknown keys require an authenticated account. The server cannot rotate an existing key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status_key]
+              properties:
+                status_key: {type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Canonical base64url encoding of 32 random bytes without padding.}
+      responses:
+        "202":
+          description: The durable operation. Completion requires all declared phases.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Location: {schema: {type: string, const: /auth/account-erasure}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AccountErasureOperation"}
+        "400": {description: Invalid JSON or unknown fields.}
+        "401": {description: Unknown status key and no valid tenant session.}
+        "403": {description: The account cannot initiate erasure.}
+        "404": {description: Account management is disabled or the account is missing.}
+        "409": {description: The error is status_key_conflict or configured_credential. No new operation is created.}
+        "415": {description: Unsupported request media type.}
+        "422": {description: The status key is not canonical base64url for 32 bytes.}
+        "500": {description: Operation persistence failed.}
+        "503": {description: The mounted stores do not support durable erasure.}
+  /auth/account-erasure:
+    get:
+      operationId: readAccountErasure
+      description: >-
+        Read an existing operation in the selected tenant. Authorization is Bearer followed by
+        the saved status key. This request cannot create an account or operation.
+        Incomplete operations do not expire. Completed receipts expire after 30 days.
+      parameters:
+        - {name: Authorization, in: header, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: The operation state. Provider revocation gaps remain blocked.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AccountErasureOperation"}
+        "400": {description: Invalid status key.}
+        "401": {description: Missing status capability.}
+        "404": {description: Unknown key or expired receipt.}
+        "500": {description: Status persistence read failed.}
+        "503": {description: The mounted stores do not support durable erasure.}
   /api/management/tenants/{tenant_id}/integration:
     get:
       security: [{ConsoleSession: []}]
@@ -1273,6 +1387,17 @@ components:
           schema:
             $ref: "#/components/schemas/OAuthError"
   schemas:
+    AccountErasureOperation:
+      type: object
+      additionalProperties: false
+      required: [operation_id, state, reason, created_at, updated_at, expires_at]
+      properties:
+        operation_id: {type: string}
+        state: {type: string, enum: [pending, running, blocked, completed]}
+        reason: {type: string, enum: ["", provider_revocation_unavailable, provider_revocation_failed, oauth_purge_failed, refresh_purge_failed, user_purge_failed]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        expires_at: {type: [string, "null"], format: date-time}
     SetupCheck:
       type: object
       additionalProperties: false

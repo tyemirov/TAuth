@@ -209,6 +209,14 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if storeErr != nil {
 		return storeErr
 	}
+	erasures, erasureErr := authkit.NewAccountErasureCoordinator(persistentUserStore, userStore, refreshStore, persistentOAuthStore, nil)
+	if erasureErr != nil {
+		return erasureErr
+	}
+	if err := erasures.Resume(shutdownContext); err != nil {
+		logger.Error("account erasure recovery blocked", zap.Error(err))
+	}
+	go erasures.Run(shutdownContext, func(err error) { logger.Error("account erasure recovery blocked", zap.Error(err)) })
 	if err := authkit.ResumeAccountDisablements(shutdownContext, persistentUserStore, refreshStore, persistentOAuthStore, time.Now().UTC().Unix()); err != nil {
 		return err
 	}

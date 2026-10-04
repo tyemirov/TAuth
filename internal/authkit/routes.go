@@ -311,6 +311,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		clock = NewSystemClock()
 	}
 	accountStore, _ := passwordCredentials.(AccountManagementStore)
+	mountAccountErasureRoutes(router, registry, users, passwordCredentials, refreshTokens, oauthGrants)
 	if nonces == nil {
 		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
 			return registry.Config(tenantID).NonceTTL
@@ -1499,8 +1500,9 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 		recordMetric(metricAuthLogoutSuccess)
 	})
 
-	accountRoutes := router.Group("/auth/account")
+	accountRoutes := router.Group(accountProfilePath)
 	accountRoutes.Use(RequireSession(registry))
+	mountAccountProfileRoute(accountRoutes, registry, accountStore, users)
 	accountRoutes.POST("/password/change", func(contextGin *gin.Context) {
 		tenantID, config, accountID, store, ok := currentAccountContext(contextGin, registry, accountStore)
 		if !ok {

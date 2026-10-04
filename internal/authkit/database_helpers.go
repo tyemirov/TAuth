@@ -25,7 +25,7 @@ const (
 	schemaMigrationLookupByName  = "store_name = ?"
 	schemaErrorFormat            = "%s.schema.%s: %w"
 	refreshStoreSchemaVersion    = 1
-	userStoreSchemaVersion       = 6
+	userStoreSchemaVersion       = 8
 	nonceStoreSchemaVersion      = 1
 	oauthStoreSchemaVersion      = 3
 )

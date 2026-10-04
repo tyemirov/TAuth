@@ -114,10 +114,18 @@ func NewDatabaseGitHubTransactionStore(ctx context.Context, databaseURL string) 
 }
 
 func (store *databaseGitHubTransactions) create(ctx context.Context, transaction githubTransaction) error {
-	if err := store.db.WithContext(ctx).Where("expires_at_unix <= ?", transaction.CreatedAtUnix).Delete(&githubTransaction{}).Error; err != nil {
-		return fmt.Errorf("github_login_store.purge: %w", err)
-	}
-	if err := store.db.WithContext(ctx).Create(&transaction).Error; err != nil {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if transaction.AccountID != "" {
+			if err := lockActiveAccount(ctx, tx, transaction.TenantID, transaction.AccountID); err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("expires_at_unix <= ?", transaction.CreatedAtUnix).Delete(&githubTransaction{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&transaction).Error
+	})
+	if err != nil {
 		return fmt.Errorf("github_login_store.create: %w", err)
 	}
 	return nil

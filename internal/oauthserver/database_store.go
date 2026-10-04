@@ -98,8 +98,9 @@ func (databaseOAuthRefreshToken) TableName() string { return oauthRefreshTokensT
 
 // DatabaseStore is the durable SQLite or Postgres OAuth transaction store.
 type DatabaseStore struct {
-	db          *gorm.DB
-	driverLabel string
+	db               *gorm.DB
+	driverLabel      string
+	databaseIdentity string
 }
 
 // NewDatabaseStore opens and migrates the OAuth transaction tables.
@@ -119,7 +120,7 @@ func NewDatabaseStore(ctx context.Context, databaseURL string) (*DatabaseStore, 
 	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&databaseCapacityLock{ID: 1}).Error; err != nil {
 		return nil, fmt.Errorf("oauth_store.capacity.initialize: %w", err)
 	}
-	return &DatabaseStore{db: database, driverLabel: driverLabel}, nil
+	return &DatabaseStore{db: database, driverLabel: driverLabel, databaseIdentity: authkit.ErasureDatabaseIdentity(databaseURL)}, nil
 }
 
 // Driver returns the selected database adapter name.
@@ -268,7 +269,7 @@ func (store *DatabaseStore) SaveConsent(ctx context.Context, consent Consent) (C
 		Resource: consent.Resource, Scope: consent.Scope, DisclosurePolicy: consent.DisclosurePolicy, CreatedAtUnix: consent.CreatedAtUnix,
 		ExpiresAtUnix: consent.ExpiresAtUnix, RevokedAtUnix: consent.RevokedAtUnix,
 	}
-	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
+	if createErr := store.createUserRecord(ctx, record.TenantID, record.UserID, &record); createErr != nil {
 		return Consent{}, fmt.Errorf("oauth_store.consent.create.%s: %w", store.driverLabel, createErr)
 	}
 	return consent, nil
@@ -284,7 +285,7 @@ func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant Au
 		ClientID: grant.ClientID, RedirectURI: grant.RedirectURI, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy,
 		CodeChallenge: grant.CodeChallenge, ExpiresAtUnix: grant.ExpiresAtUnix,
 	}
-	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
+	if createErr := store.createUserRecord(ctx, record.TenantID, record.UserID, &record); createErr != nil {
 		return "", fmt.Errorf("oauth_store.code.create.%s: %w", store.driverLabel, createErr)
 	}
 	return code, nil
@@ -303,6 +304,12 @@ func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code st
 		}
 		if record.ConsumedAtUnix != 0 || record.ExpiresAtUnix <= exchange.NowUnix || record.ClientID != exchange.ClientID || record.Resource != exchange.Resource || !pkceVerifierMatches(record.CodeChallenge, exchange.CodeVerifier) {
 			return ErrAuthorizationCodeInvalid
+		}
+		if err := authkit.RequireActiveAccountWrite(ctx, transaction, record.TenantID, record.UserID); err != nil {
+			if errors.Is(err, authkit.ErrAccountNotActive) {
+				return ErrAuthorizationCodeInvalid
+			}
+			return err
 		}
 		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
 			return err
@@ -339,7 +346,7 @@ func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant Refresh
 		return "", tokenErr
 	}
 	record := refreshRecordFromGrant(digest, grant, time.Now().UTC().Unix())
-	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
+	if createErr := store.createUserRecord(ctx, record.TenantID, record.UserID, &record); createErr != nil {
 		return "", fmt.Errorf("oauth_store.refresh.create.%s: %w", store.driverLabel, createErr)
 	}
 	return token, nil
@@ -388,6 +395,12 @@ func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken
 		}
 		if consentErr != nil {
 			return consentErr
+		}
+		if err := authkit.RequireActiveAccountWrite(ctx, transaction, record.TenantID, record.UserID); err != nil {
+			if errors.Is(err, authkit.ErrAccountNotActive) {
+				return ErrRefreshTokenInvalid
+			}
+			return err
 		}
 		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
 			return err
@@ -533,3 +546,31 @@ func RevokeTenantGrants(ctx context.Context, db *gorm.DB, tenantID string, nowUn
 	}
 	return nil
 }
+
+// PurgeUser atomically removes codes, consents, and refresh grants for one tenant and user.
+func (store *DatabaseStore) PurgeUser(ctx context.Context, tenantID, userID string) error {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, model := range []any{&databaseAuthorizationCode{}, &databaseOAuthRefreshToken{}, &databaseConsent{}} {
+			if err := tx.Where("tenant_id = ? AND user_id = ?", tenantID, userID).Delete(model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("oauth_store.user_purge: %w", err)
+	}
+	return nil
+}
+
+func (store *DatabaseStore) createUserRecord(ctx context.Context, tenantID, userID string, record any) error {
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authkit.RequireActiveAccountWrite(ctx, tx, tenantID, userID); err != nil {
+			return err
+		}
+		return tx.Create(record).Error
+	})
+}
+
+// ErasureDatabaseIdentity identifies the selected database without disclosing its URL.
+func (store *DatabaseStore) ErasureDatabaseIdentity() string { return store.databaseIdentity }

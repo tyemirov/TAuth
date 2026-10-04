@@ -639,3 +639,73 @@ session refresh requests. The bundled client uses Web Locks to coordinate tabs
 from the same origin. It requires a secure browser context with Web Locks. Apple browser login uses a separate host-only, secure
 cookie for each transaction. The callback requires this cookie with the signed
 state and clears it after validation.
+
+## Account display name
+
+`PATCH /auth/account` accepts `{"display_name":"Parent Name"}` with the tenant session cookie.
+The tenant must enable `account_management.enabled`.
+The server removes outer whitespace. The name must contain 1 to 200 characters and no control characters.
+The server rejects email changes and unknown fields with HTTP 400.
+Invalid names return HTTP 422. Unsupported media types return HTTP 415.
+
+The HTTP 200 response contains the current account profile with `Cache-Control: no-store`.
+The server keeps the explicit name across refresh and future provider login.
+The account and its stored user profile update in one database transaction.
+`GET /auth/session` reads the current account name.
+Previously issued session tokens keep their signed claims until refresh or login issues a new token.
+The operation does not change verified email credentials or tenant console owner accounts.
+
+## Account erasure
+
+`DELETE /auth/account` accepts `{"status_key":"CLIENT_GENERATED_KEY"}` as JSON.
+Generate the key from 32 random bytes. Encode it as base64url without padding.
+Save the key before the first request. Send the tenant session cookie on that request.
+The tenant must enable `account_management.enabled`.
+Unknown JSON fields return HTTP 400. Invalid keys return HTTP 422.
+
+The HTTP 202 response contains `operation_id`, `state`, `reason`, `created_at`,
+`updated_at`, and `expires_at`. Its Location is `/auth/account-erasure`.
+Read that resource with `Authorization: Bearer CLIENT_GENERATED_KEY`.
+Status reads return HTTP 200 and use `Cache-Control: no-store`.
+Keep the key private. Do not put it in a URL or log it.
+The server stores its hash. It does not store the key.
+
+A repeated DELETE with the same tenant and key returns the existing operation,
+even after session revocation or a lost response. An unknown key requires a valid
+session before operation creation. A second key for the same account returns
+HTTP 409 with `status_key_conflict`. Status reads cannot create an account.
+Unknown keys and expired receipts return HTTP 404.
+
+The operation states are `pending`, `running`, `blocked`, and `completed`.
+A blocked operation has one of these reasons: `provider_revocation_unavailable`,
+`provider_revocation_failed`, `oauth_purge_failed`, `refresh_purge_failed`, or
+`user_purge_failed`. Incomplete operations do not expire. A completed receipt
+expires after 30 days. Completion removes its account ID and phase details.
+The server removes expired receipts during automatic recovery.
+
+Initiation puts the account in `erasing` in the same transaction as operation
+creation. Account login, profile changes, identity linking, password changes,
+credential seeds, and dependent token writes cannot reactivate that account.
+Configured password credentials return HTTP 409 with `configured_credential`
+before initiation. That conflict keeps the account active and creates no operation.
+Tenant configuration and console owner accounts remain intact.
+
+Each phase records durable progress. Recovery runs at startup and every 30 seconds,
+with at most 25 operations per scan and retry delays from 30 seconds to one hour.
+A fenced lease prevents an expired worker from completing another worker's job.
+Each phase has a 15-second deadline. The supported storage contract requires
+canonical database user profiles and database refresh and OAuth stores for the
+same selected database URL. Unsupported store combinations return HTTP 503.
+
+Provider revocation runs before local credential removal. Apple identities and
+stored GitHub grants require a qualified provider revoker. The current server
+has no such revoker. Those operations remain blocked and retain their credentials.
+Local unlinking does not count as provider revocation.
+Accounts without those grants can complete erasure of account profiles,
+identities, passwords, challenges, GitHub credential rows, and application refresh rows.
+Erasure also removes OAuth authorization codes, consents, and refresh grants.
+
+Completion does not delete RevenueCat records or backups. Previously issued
+access tokens can remain valid in an offline verifier until their expiry.
+Database schema version 8 adds the operation table through automatic startup
+migration and preserves existing account data.
