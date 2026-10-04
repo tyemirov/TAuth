@@ -525,6 +525,7 @@ Rules enforced at the tenant configuration boundary:
 - Durations use Go's `time.ParseDuration` syntax, for example `15m` or `720h`. Zero or negative values are invalid.
 - `cookie_domain` can be blank for host-only cookies. A specified value must be a valid registrable domain, for example `.example.com`.
 - `password_auth.enabled` gates `POST /auth/password/login`. Configured password users are seeded at startup into the active store; persistent deployments keep credentials in the same database as refresh tokens and profiles. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
+  Startup keeps inactive account credentials and profiles unchanged. An inactive configured account does not prevent startup or pending account disablement recovery.
 - `account_management.enabled` enables the complete account lifecycle. `password_signup.enabled` requires account management.
 - `email_delivery` configures Pinguin for signup verification, password reset, and password linking. The API key selects the Pinguin tenant. TAuth adds the single-use token to the URL fragment of the matching public page.
 - Account management requires all Pinguin settings and challenge URLs. Challenge tokens are delivered only by email. Remove the obsolete `return_challenge_tokens` field from configuration.

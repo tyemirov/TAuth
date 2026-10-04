@@ -344,18 +344,22 @@ func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userSto
 		configuredEmails := make([]string, 0, len(tenant.PasswordUsers()))
 		for _, passwordUser := range tenant.PasswordUsers() {
 			configuredEmails = append(configuredEmails, passwordUser.Email())
-			_, _, profileErr := userStore.UpsertPasswordUser(ctx, tenantID, passwordUser.Email(), passwordUser.DisplayName(), passwordUser.AvatarURL())
-			if profileErr != nil {
-				return fmt.Errorf("password_auth.seed_profile tenant=%s user=%s: %w", tenantID, passwordUser.Email(), profileErr)
-			}
 			credentialErr := passwordCredentialStore.UpsertPasswordCredential(ctx, tenantID, authkit.PasswordCredentialSeed{
 				UserEmail:    passwordUser.Email(),
 				DisplayName:  passwordUser.DisplayName(),
 				AvatarURL:    passwordUser.AvatarURL(),
 				PasswordHash: passwordUser.PasswordHash(),
 			})
+			// Configuration cannot overwrite an inactive account's credentials or profile.
+			if errors.Is(credentialErr, authkit.ErrAccountNotActive) {
+				continue
+			}
 			if credentialErr != nil {
 				return fmt.Errorf("password_auth.seed_credential tenant=%s user=%s: %w", tenantID, passwordUser.Email(), credentialErr)
+			}
+			_, _, profileErr := userStore.UpsertPasswordUser(ctx, tenantID, passwordUser.Email(), passwordUser.DisplayName(), passwordUser.AvatarURL())
+			if profileErr != nil {
+				return fmt.Errorf("password_auth.seed_profile tenant=%s user=%s: %w", tenantID, passwordUser.Email(), profileErr)
 			}
 		}
 		reconcileErr := passwordCredentialStore.ReconcilePasswordCredentials(ctx, tenantID, configuredEmails)

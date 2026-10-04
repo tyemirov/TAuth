@@ -25,7 +25,7 @@ func PermissiveCORS(allowedOrigins []string) (gin.HandlerFunc, error) {
 	return cors.New(cors.Config{
 		AllowOrigins:     sanitized,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "X-Requested-With", "X-Client", "X-TAuth-Tenant", "X-TAuth-CSRF", "If-Match", "Idempotency-Key"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Requested-With", "X-Client", "X-TAuth-Tenant", "X-TAuth-CSRF", "If-Match", "Idempotency-Key"},
 		ExposeHeaders:    []string{"Content-Type", "ETag", "Location"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,

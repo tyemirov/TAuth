@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,8 +47,68 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		resourceKeys = append(resourceKeys, resourceKey)
 	}
 	slices.Sort(resourceKeys)
-	if !slices.Equal(resourceKeys, []string{"owner", "release", "resources"}) {
+	if !slices.Equal(resourceKeys, []string{"ci", "defaults", "operations", "owner", "release", "resources"}) {
 		t.Fatalf("application resource manifest root is not the exact versionless contract: %#v", resourceKeys)
+	}
+	ciPolicy := mappingField(t, resourcesDocument, "ci")
+	command := mappingField(t, ciPolicy, "command")
+	if len(ciPolicy) != 2 || ciPolicy["enabled"] != true || len(command) != 2 || command["0"] != "make" || command["1"] != "ci" {
+		t.Fatalf("application CI must enable the ordered make ci command: %#v", ciPolicy)
+	}
+	defaults := mappingField(t, resourcesDocument, "defaults")
+	timeouts := mappingField(t, defaults, "timeouts")
+	if len(defaults) != 1 || len(timeouts) != 5 {
+		t.Fatalf("application default timeout shape is not canonical: %#v", defaults)
+	}
+	for _, field := range []string{"startup", "completion", "readiness", "request", "shutdown"} {
+		if durationField(t, timeouts, field) <= 0 {
+			t.Fatalf("application default timeout %s must be positive", field)
+		}
+	}
+	operations := mappingField(t, resourcesDocument, "operations")
+	expectedOperations := map[string][]string{
+		"ci":                           {"timeouts"},
+		"app-plan-release":             {"polling", "timeouts"},
+		"app-plan-publish":             {"polling", "timeouts"},
+		"app-plan-deploy":              {"polling", "timeouts"},
+		"app-release":                  {"polling", "timeouts"},
+		"app-publish":                  {"polling", "timeouts"},
+		"app-deploy":                   {"polling", "timeouts"},
+		"deployment.http-health":       {"polling"},
+		"deployment.resource.recovery": {"polling"},
+		"app_deploy.health.same_host":  {"polling"},
+		"app_deploy.pages.deployment_status_poll": {"polling"},
+	}
+	if len(operations) != len(expectedOperations) {
+		t.Fatalf("application operation policy has unexpected operations: %#v", operations)
+	}
+	for name, expectedFields := range expectedOperations {
+		policy := mappingField(t, operations, name)
+		fields := make([]string, 0, len(policy))
+		for field := range policy {
+			fields = append(fields, field)
+		}
+		slices.Sort(fields)
+		if !slices.Equal(fields, expectedFields) {
+			t.Fatalf("operation %s has unexpected policy fields: %#v", name, fields)
+		}
+		if slices.Contains(fields, "timeouts") {
+			overrides := mappingField(t, policy, "timeouts")
+			if len(overrides) != 1 || durationField(t, overrides, "completion") <= 0 {
+				t.Fatalf("operation %s must declare a positive completion timeout: %#v", name, overrides)
+			}
+		}
+		if slices.Contains(fields, "polling") {
+			polling := mappingField(t, policy, "polling")
+			initial := durationField(t, polling, "initial")
+			maximum := durationField(t, polling, "maximum")
+			increment := durationField(t, polling, "increment")
+			multiplier, multiplierOK := polling["multiplier"].(int)
+			attemptLimit, attemptLimitOK := polling["attempt_limit"].(int)
+			if len(polling) != 5 || initial <= 0 || maximum < initial || increment < 0 || !multiplierOK || multiplier < 1 || !attemptLimitOK || attemptLimit < 1 {
+				t.Fatalf("operation %s must declare finite positive polling: %#v", name, polling)
+			}
+		}
 	}
 
 	resources, available := resourcesDocument["resources"].(map[string]any)
@@ -353,4 +414,22 @@ func testRepositoryRoot(t *testing.T) string {
 		t.Fatal("resolve repository contract test path")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(testFilename), ".."))
+}
+
+func mappingField(t *testing.T, document map[string]any, fieldName string) map[string]any {
+	t.Helper()
+	value, available := document[fieldName].(map[string]any)
+	if !available {
+		t.Fatalf("manifest field %s is not a mapping: %#v", fieldName, document[fieldName])
+	}
+	return value
+}
+
+func durationField(t *testing.T, document map[string]any, fieldName string) time.Duration {
+	t.Helper()
+	value, err := time.ParseDuration(stringField(t, document, fieldName))
+	if err != nil {
+		t.Fatalf("manifest field %s is not a duration: %v", fieldName, err)
+	}
+	return value
 }
