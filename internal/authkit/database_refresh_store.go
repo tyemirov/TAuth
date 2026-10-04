@@ -14,8 +14,9 @@ const refreshTokenTableName = "refresh_tokens"
 
 // DatabaseRefreshTokenStore persists rotating refresh tokens using GORM.
 type DatabaseRefreshTokenStore struct {
-	db          *gorm.DB
-	driverLabel string
+	db               *gorm.DB
+	driverLabel      string
+	databaseIdentity string
 }
 
 // Driver exposes the selected database driver label.
@@ -45,8 +46,9 @@ func NewDatabaseRefreshTokenStore(ctx context.Context, databaseURL string) (*Dat
 		return nil, openErr
 	}
 	return &DatabaseRefreshTokenStore{
-		db:          databaseHandle,
-		driverLabel: driverLabel,
+		db:               databaseHandle,
+		driverLabel:      driverLabel,
+		databaseIdentity: hashOpaque(databaseURL),
 	}, nil
 }
 
@@ -70,6 +72,9 @@ func (store *DatabaseRefreshTokenStore) Issue(ctx context.Context, tenantID stri
 	}
 	var rotationErr error
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := RequireActiveAccountWrite(ctx, tx, tenantID, applicationUserID); err != nil {
+			return err
+		}
 		if previousTokenID != "" {
 			if err := lockRefreshFamily(tx, tenantID, previousTokenID); err != nil {
 				return err
@@ -190,4 +195,17 @@ func RevokeTenantSessions(ctx context.Context, db *gorm.DB, tenantID string) err
 		return fmt.Errorf("refresh_store.suspend tenant=%s: %w", tenantID, err)
 	}
 	return nil
+}
+
+// PurgeUser removes all application refresh-token rows for one tenant and user.
+func (store *DatabaseRefreshTokenStore) PurgeUser(ctx context.Context, tenantID, userID string) error {
+	if err := store.db.WithContext(ctx).Where("tenant_id = ? AND user_id = ?", tenantID, userID).Delete(&refreshTokenRecord{}).Error; err != nil {
+		return fmt.Errorf("refresh_store.user_purge: %w", err)
+	}
+	return nil
+}
+
+// ErasureDatabaseIdentity identifies the selected database without disclosing its URL.
+func (store *DatabaseRefreshTokenStore) ErasureDatabaseIdentity() string {
+	return store.databaseIdentity
 }

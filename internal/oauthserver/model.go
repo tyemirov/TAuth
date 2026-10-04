@@ -141,6 +141,7 @@ type Store interface {
 	RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error
 	RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error
 	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
+	PurgeUser(ctx context.Context, tenantID string, userID string) error
 }
 
 // AuthorizationCompletion binds one pending request to its consent and code.

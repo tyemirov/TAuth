@@ -30,6 +30,7 @@ type PasswordCredentialStore interface {
 
 // AccountManagementStore manages first-party account lifecycle records.
 type AccountManagementStore interface {
+	CorrectAccountDisplayName(context.Context, string, string, AccountDisplayName, UserStore) (AccountProfile, error)
 	SaveGitHubCredential(context.Context, string, string, []byte) error
 	LoadGitHubCredential(context.Context, string, string) ([]byte, error)
 	AccountIdentities(ctx context.Context, tenantID string, accountID string) ([]AccountIdentity, error)

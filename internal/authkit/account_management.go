@@ -74,12 +74,13 @@ type AccountProviderIdentity struct {
 }
 
 type accountRecord struct {
-	accountID   string
-	userEmail   string
-	displayName string
-	avatarURL   string
-	state       string
-	roles       []string
+	accountID           string
+	userEmail           string
+	displayName         string
+	displayNameOverride bool
+	avatarURL           string
+	state               string
+	roles               []string
 }
 
 type accountIdentityRecord struct {
@@ -517,7 +518,9 @@ func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Co
 			return AccountProfile{}, ErrAccountNotActive
 		}
 		account.userEmail = normalizedIdentity.UserEmail
-		account.displayName = defaultDisplayName(normalizedIdentity.DisplayName, normalizedIdentity.UserEmail)
+		if !account.displayNameOverride {
+			account.displayName = defaultDisplayName(normalizedIdentity.DisplayName, normalizedIdentity.UserEmail)
+		}
 		account.avatarURL = strings.TrimSpace(normalizedIdentity.AvatarURL)
 		return profileFromAccount(account), nil
 	}
