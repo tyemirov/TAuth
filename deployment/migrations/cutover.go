@@ -257,17 +257,37 @@ func applyCutover(ctx context.Context, databaseURL string, plan CutoverPlan, key
 	for _, tenant := range document.Tenants {
 		byID[tenant.ID] = tenant
 	}
-	var assigned []string
+	// The source defines the inventory. The plan grants credentials only to known assignments.
+	assigned, appIDs := map[string]bool{}, map[string]bool{}
+	var imports, credentialApps []CutoverApp
 	for _, app := range plan.Apps {
-		assigned = append(assigned, app.TenantIDs...)
+		appIDs[app.ID] = true
+		present := app
+		present.TenantIDs = nil
 		for _, id := range app.TenantIDs {
-			if _, ok := byID[id]; !ok {
-				return receipt, errors.New("cutover.inventory_incomplete")
+			assigned[id] = true
+			if _, ok := byID[id]; ok {
+				present.TenantIDs = append(present.TenantIDs, id)
 			}
 		}
+		if len(present.TenantIDs) > 0 {
+			imports = append(imports, present)
+			credentialApps = append(credentialApps, present)
+		}
 	}
-	if len(assigned) != len(byID) {
-		return receipt, errors.New("cutover.inventory_incomplete")
+	for _, tenant := range document.Tenants {
+		if assigned[tenant.ID] {
+			continue
+		}
+		id := "imported-" + tenant.ID
+		if appIDs[id] {
+			return receipt, fmt.Errorf("cutover.imported_app_conflict: %s", id)
+		}
+		name := strings.TrimSpace(tenant.DisplayName)
+		if name == "" {
+			name = tenant.ID
+		}
+		imports = append(imports, CutoverApp{ID: id, Name: name, TenantIDs: []string{tenant.ID}})
 	}
 	consoleSource, ok := byID[plan.ConsoleSourceTenant]
 	if !ok || consoleSource.GoogleWebClientID == "" {
@@ -400,7 +420,7 @@ func applyCutover(ctx context.Context, databaseURL string, plan CutoverPlan, key
 		_ = stageRaw.Close()
 		return receipt, closeErr
 	}
-	for _, app := range plan.Apps {
+	for _, app := range imports {
 		subset := tenants.FileDocument{}
 		for _, id := range app.TenantIDs {
 			subset.Tenants = append(subset.Tenants, byID[id])
@@ -412,7 +432,7 @@ func applyCutover(ctx context.Context, databaseURL string, plan CutoverPlan, key
 	}
 	credentials := plan.CredentialMap(key)
 	err = stageDB.Transaction(func(tx *gorm.DB) error {
-		for _, app := range plan.Apps {
+		for _, app := range credentialApps {
 			token := credentials[app.ContributionOwner][app.ContributionID]
 			mac := hmac.New(sha256.New, key)
 			_, _ = mac.Write([]byte(token))

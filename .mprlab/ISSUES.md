@@ -1396,6 +1396,27 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B121] (P1) Preserve the complete source during the tenant cutover.
+  Goal: Migration preserves all tenant configurations without requiring an exact application inventory.
+  Evidence: The source has 21 tenants. The plan has 20 and rejects `rsvp-production` before data changes.
+  Requirements: Import every source tenant. Skip absent planned tenants. Give unassigned tenants separate Apps without Gateway credentials.
+  Keep each planned credential limited to its present assigned tenants and preserve existing accounts and sessions.
+  Validation: CLI migration, source configuration equality, account retention, existing HTTP sessions, and credential isolation passed.
+  Resolution: The source defines the inventory. Separate Apps retain unassigned tenants. Empty App names use the tenant ID.
+  Absent planned tenants receive no App or credential. Planned credentials cover only present assigned tenants.
+  The 21-tenant configuration passed a local rehearsal with an earlier database copy. Independent review and `make ci` passed.
+  Files: `deployment/migrations/cutover.go`, `deployment/migrations/cutover_test.go`, `tests/automatic-deployment.sh`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
+- [x] [B122] (P1) Use durable configuration inputs for the cutover.
+  Goal: Migration can run without an existing source container.
+  Requirements: Read the materialized host configuration. Stop existing TAuth database writers and reject unrelated writers.
+  Keep receipt retries independent of source files and preserve the original database on failure.
+  Validation: Real Docker and Ansible passed without a source container. Unrelated writer rejection preserved the original database.
+  Resolution: The cutover reads one durable host configuration. It stops present TAuth writers and requires no active database writers.
+  A completed retry needs no source file and keeps the service active. Independent review and `make ci` passed.
+  Production TAuth remains stopped at the operator's request.
+  Files: `deployment/rollout/cutover.yml`, `tests/automatic-deployment.sh`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
 - [x] [B120] (P1) Select the cutover source by its database volume.
   Goal: The timestamped migration selects the existing TAuth configuration source.
   Evidence: The deployed source uses project `mprlab-tauth-runtime`. The cutover filter uses `mprlab-nginx-gateway` and returns zero containers.

@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"github.com/tyemirov/tauth/deployment/migrations"
+	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/controlplane"
+	"github.com/tyemirov/tauth/internal/tenants"
+	"gopkg.in/yaml.v3"
 )
 
 func TestAutomaticCutoverCLI(t *testing.T) {
@@ -28,8 +31,22 @@ func TestAutomaticCutoverCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	extraProfile, err := users.UpsertGoogleAccount(context.Background(), "rsvp-production", authkit.GoogleAccountIdentity{Subject: "rsvp-user", UserEmail: "guest@example.com", DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := filepath.Join(root, "source.yaml")
 	payload := "server:\n  database_url: sqlite:///data/tauth.db\ntenants:\n  - id: product\n    display_name: Product\n    tenant_origins: [https://console.example.com]\n    google_web_client_id: existing-google-client\n    jwt_signing_key: existing-client-key\n    session_cookie_name: product_session\n    refresh_cookie_name: product_refresh\n    session_ttl: 15m\n    refresh_ttl: 720h\n    account_management:\n      return_challenge_tokens: false\n"
+	payload += `  - id: rsvp-production
+    tenant_origins: [https://rsvp.example.com]
+    google_web_client_id: rsvp-google-client
+    jwt_signing_key: rsvp-client-key
+    session_cookie_name: rsvp_session
+    refresh_cookie_name: rsvp_refresh
+    session_ttl: 30m
+    refresh_ttl: 240h
+`
+
 	write := func(path string, value []byte) {
 		t.Helper()
 		f, e := os.Create(path)
@@ -46,7 +63,7 @@ func TestAutomaticCutoverCLI(t *testing.T) {
 	write(source, []byte(payload))
 	keyFile := filepath.Join(root, "key")
 	write(keyFile, []byte(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))))
-	plan := map[string]any{"owner_emails": []string{"owner@example.com"}, "console_origin": "https://console.example.com", "console_source_tenant": "product", "management_url": "https://auth.example.com", "apps": []map[string]any{{"id": "product", "name": "Product", "tenant_ids": []string{"product"}, "contribution_owner": "product", "contribution_id": "authentication"}}}
+	plan := map[string]any{"owner_emails": []string{"owner@example.com"}, "console_origin": "https://console.example.com", "console_source_tenant": "product", "management_url": "https://auth.example.com", "apps": []map[string]any{{"id": "product", "name": "Product", "tenant_ids": []string{"product", "absent-product"}, "contribution_owner": "product", "contribution_id": "authentication"}, {"id": "absent", "name": "Absent", "tenant_ids": []string{"absent"}, "contribution_owner": "absent", "contribution_id": "authentication"}}}
 	encoded, _ := json.Marshal(plan)
 	planFile := filepath.Join(root, "plan.json")
 	write(planFile, encoded)
@@ -70,6 +87,15 @@ func TestAutomaticCutoverCLI(t *testing.T) {
 	if before["completed"] != false {
 		t.Fatal("unexpected receipt")
 	}
+	// Reject an App ID collision before creating any migration candidate.
+	write(planFile, bytes.Replace(encoded, []byte(`"id":"absent"`), []byte(`"id":"imported-rsvp-production"`), 1))
+	if _, err = run("--source", source); err == nil || !strings.Contains(err.Error(), "cutover.imported_app_conflict") {
+		t.Fatal("imported App ID collision accepted", err)
+	}
+	if _, err = os.Stat(database + ".20260930-before.db"); !os.IsNotExist(err) {
+		t.Fatal("App ID collision reached database backup")
+	}
+	write(planFile, encoded)
 	if _, err = run("--source", source); err != nil {
 		t.Fatal(err)
 	}
@@ -85,13 +111,42 @@ func TestAutomaticCutoverCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	tenants, err := store.ApplicationTenants(context.Background())
+	actual, err := store.ApplicationTenants(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tenants.Tenants) != 1 || tenants.Tenants[0].JWTSigningKey != "existing-client-key" {
-		t.Fatal("client key changed")
+	expectedSource, err := appconfig.ParseImportSource([]byte(strings.ReplaceAll(payload, "    account_management:\n      return_challenge_tokens: false\n", "")))
+	if err != nil {
+		t.Fatal(err)
 	}
+	expected, err := tenants.ResolveDocument(expectedSource.TenantDocument())
+	if err != nil || !reflect.DeepEqual(actual, expected) {
+		t.Fatal("source tenant configuration changed", err)
+	}
+	db, err := authkit.OpenControlDatabase(context.Background(), "sqlite://"+database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var credentials []struct{ AppID, TenantIDs string }
+	if err = db.Table("provisioning_credentials").Find(&credentials).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 || credentials[0].AppID != "product" || credentials[0].TenantIDs != `["product"]` {
+		t.Fatal("credential scope expanded or absent App received a credential")
+	}
+	var apps []struct{ ID, Name string }
+	if err = db.Table("apps").Order("id").Find(&apps).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) != 2 || apps[0].ID != "imported-rsvp-production" || apps[0].Name != "rsvp-production" || apps[1].ID != "product" {
+		t.Fatal("unassigned tenant App missing or absent App imported")
+	}
+
 	if _, err = os.Stat(database + ".20260930-before.db"); err != nil {
 		t.Fatal("missing backup", err)
 	}
@@ -113,6 +168,10 @@ func TestAutomaticCutoverCLI(t *testing.T) {
 	restored, found, err := accounts.AuthenticateGoogleAccount(context.Background(), "product", authkit.GoogleAccountIdentity{Subject: "123456789", UserEmail: "owner@example.com"})
 	if err != nil || !found || restored.AccountID != profile.AccountID {
 		t.Fatal("existing account changed", err)
+	}
+	restoredExtra, found, err := accounts.AuthenticateGoogleAccount(context.Background(), "rsvp-production", authkit.GoogleAccountIdentity{Subject: "rsvp-user", UserEmail: "guest@example.com"})
+	if err != nil || !found || restoredExtra.AccountID != extraProfile.AccountID {
+		t.Fatal("unassigned tenant account changed", err)
 	}
 	write(keyFile, []byte(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))))
 	if _, err = run("--status"); err == nil {
@@ -289,6 +348,15 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+	user, roles, err = users.UpsertGoogleUser(context.Background(), "rsvp-production", "rsvp-user", "guest@example.com", "Guest", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraToken, _, err := authkit.MintAppJWT(authkit.NewSystemClock(), "rsvp-production", user, "guest@example.com", "Guest", "", roles, "tauth", []byte("rsvp-client-key"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	save("rsvp-session-token", []byte(extraToken))
 	save("session-token", []byte(token))
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
 	save("key", []byte(key))
@@ -300,7 +368,16 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	save("gateway-token", []byte(cutoverPlan.CredentialMap(bytes.Repeat([]byte{7}, 32))["product"]["authentication"]))
-	save("source.yaml", []byte("server:\n  database_url: sqlite:///data/tauth.db\ntenants:\n  - id: product\n    display_name: Product\n    tenant_origins: [https://console.example.com]\n    google_web_client_id: existing-google-client\n    jwt_signing_key: existing-client-key\n    session_cookie_name: product_session\n    refresh_cookie_name: product_refresh\n    session_ttl: 15m\n    refresh_ttl: 720h\n"))
+	save("source.yaml", []byte("server:\n  database_url: sqlite:///data/tauth.db\ntenants:\n  - id: product\n    display_name: Product\n    tenant_origins: [https://console.example.com]\n    google_web_client_id: existing-google-client\n    jwt_signing_key: existing-client-key\n    session_cookie_name: product_session\n    refresh_cookie_name: product_refresh\n    session_ttl: 15m\n    refresh_ttl: 720h\n"+`  - id: rsvp-production
+    display_name: RSVP
+    tenant_origins: [https://rsvp.example.com]
+    google_web_client_id: rsvp-google-client
+    jwt_signing_key: rsvp-client-key
+    session_cookie_name: rsvp_session
+    refresh_cookie_name: rsvp_refresh
+    session_ttl: 30m
+    refresh_ttl: 240h
+`))
 	save("service.yaml", []byte("server:\n  listen_addr: ':8080'\n  database_url: sqlite:///data/tauth.db\n  tenant_encryption_key: "+key+"\n  enable_cors: true\n  cors_allowed_origins: [https://accounts.google.com]\n  cors_allowed_origin_exceptions: [https://accounts.google.com]\n  enable_tenant_header_override: true\n"))
 }
 
@@ -381,8 +458,16 @@ func TestAutomaticProductionSnapshotCutover(t *testing.T) {
 	if err = json.Unmarshal(output.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt["completed"] != true || len(actual.Tenants) != 20 {
-		t.Fatal("incomplete production migration")
+	var original tenants.FileDocument
+	if err = yaml.Unmarshal([]byte(captured.Config), &original); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := tenants.ResolveDocument(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt["completed"] != true || !reflect.DeepEqual(actual, expected) {
+		t.Fatal("production source configuration changed")
 	}
 	payload, _ = json.Marshal(actual)
 	save("migrated-tenants.json", payload)

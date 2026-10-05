@@ -13,8 +13,12 @@ It prepares the server encryption key and App-scoped operator credentials automa
 It keeps the key in private local inputs and a remote recovery reference.
 Native deployment planning runs before writer shutdown.
 
-The Ansible cutover selects the existing production container and its exact database volume.
-It captures the stopped service configuration and environment.
+The Ansible cutover reads the materialized host configuration at `state/tauth/config.tauth.yml` under the runtime root.
+It stops existing TAuth database writers and rejects unrelated active writers.
+The first migration requires no previous service container.
+The migration preserves every source tenant, including tenants absent from the public App assignment plan.
+Each unassigned tenant receives a separate owner App without a Gateway credential.
+Absent planned tenants receive no App or credential. Each credential covers only its present assigned tenants.
 SQLite creates a fresh backup for each pending attempt.
 The migration changes a private database candidate and commits its completion receipt with the data.
 Deployment replaces the original database after the candidate succeeds.
@@ -51,6 +55,21 @@ B112 adds the HTTP suspension regression. Its initial request returned `403 mana
 The regression logs are `.cache/b112-regression-before.log` and `.cache/b112-regression-after.log`.
 The correction CI log is `.cache/b112-ci.log`.
 No secret value is included in this report.
+
+## B121 and B122 repair results
+
+The CLI regression reproduced `cutover.inventory_incomplete` with one unassigned tenant and two absent planned tenants.
+The Docker and Ansible regression reproduced the source-container assertion with a valid durable configuration and no service container.
+The repairs preserve all source configuration and limit each Gateway credential to its assigned tenants.
+The tests verify existing sessions for an assigned tenant and an unassigned tenant through the new HTTP service.
+The unassigned tenant configuration returns `403` to the assigned Gateway credential.
+An unrelated active writer causes failure before database changes. A present TAuth writer stops before migration.
+A completed retry requires no source file and keeps the current service active.
+A private local rehearsal combines the captured 21-tenant configuration with an earlier production database copy.
+This rehearsal checks configuration equality and the completion receipt. It does not verify current production account data.
+
+`make ci` and independent review passed after the final correction.
+These repairs do not execute a production deployment. The production TAuth container remains stopped at the operator's request.
 
 ## Documentation checks
 
