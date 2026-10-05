@@ -13,8 +13,6 @@ on:
       - "tsconfig.json"
       - ".github/workflows/frontend-tests.yml"
   pull_request:
-    branches:
-      - master
     paths:
       - "web/**"
       - "docs/**"

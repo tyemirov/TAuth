@@ -1396,6 +1396,56 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [ ] [B118] (P2) Use the request context for account database operations.
+  Goal: Account database operations use a context that remains valid after the HTTP handler returns.
+  Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.
+  The password login handler passes its Gin context to `EnsurePasswordAccount` in `internal/authkit/routes.go`.
+  Requirements: Pass the HTTP request context to database operations. Keep request cancellation.
+  Validation: Run the erasure HTTP tests with the race detector and run `make ci`.
+
+- [x] [B117] (P1) Return the erasure receipt after a concurrent account purge.
+  Goal: Concurrent deletion requests return the same operation after the account is absent.
+  Requirements: Read the current receipt within the database transaction. Keep tenant isolation and receipt expiry.
+  Deliverables: Transaction repair, a controlled HTTP race test, and CI for stacked pull requests.
+  Resolution: Read the receipt by tenant and capability within the transaction after the account is absent. Keep receipt expiry.
+  Removed the PR target branch filters so CI runs for stacked pull requests.
+  Validation: The controlled HTTP test reproduced the CI error before the repair. All erasure HTTP tests passed five times after the repair.
+  Independent review, `make ci`, and whitespace checks passed. Separate race detector failures are recorded in B118.
+  Files: `internal/authkit/database_account_erasure.go`, `internal/authkit/account_erasure_http_test.go`, both test workflows, and `.mprlab/ISSUES.md`.
+
+- [x] [B116] (P1) Verify the current manifest execution policy.
+  Goal: The repository test accepts the current manifest contract and rejects invalid execution policy.
+  Requirements: Verify the CI command, positive timeouts, and finite polling.
+  Deliverables: Manifest contract test repair.
+  Resolution: Updated the exact root fields. Verified the CI command, timeout values, operation fields, and finite polling.
+  Validation: The original manifest test failed. The repaired test, independent review, and `make ci` passed.
+  Files: `tests/repository_neutrality_contract_test.go` and `.mprlab/ISSUES.md`.
+
+- [x] [B115] (P1) Declare the current Gateway execution policy.
+  Goal: The installed Gateway accepts the application manifest before release.
+  Requirements: Declare enabled CI, positive timeouts, and finite provider observations in the selected manifest.
+  Resolution: Added the execution policy required by B607. Kept the application resources and release scheme.
+  Validation: Gateway v5.0.4 completed the release plan through native Ansible in a local fixture.
+  The plan reported zero changes and zero failures. The Governor check retained six existing managed-file differences.
+  Changed prose and whitespace checks passed. Production release, publication, and deployment did not run.
+  Files: `.mprlab/deploy/resources.yml`, `.mprlab/POLICY.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B113] (P1) Start the server with inactive configured accounts.
+  Goal: An inactive configured password account must not prevent server startup.
+  Requirements: Keep the account inactive. Complete pending account disablement before the server accepts traffic.
+  Deliverables: Startup repair and HTTP tests for disabled and disabling accounts.
+  Resolution: Startup leaves inactive credentials and profiles unchanged. It continues with other configured users and pending account disablement.
+  Validation: Both startup scenarios failed before the repair. The repaired HTTP tests, independent review, and `make ci` passed.
+  Files: `cmd/server/main.go`, `cmd/server/account_lifecycle_restart_test.go`, `README.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B114] (P1) Permit the account erasure status header through CORS.
+  Goal: A browser client from a permitted origin can read account erasure status.
+  Requirements: Permit `Authorization` in the CORS response. Keep origin restrictions.
+  Deliverables: CORS repair and HTTP tests through the production server.
+  Resolution: CORS permits `Authorization` for configured origins. Missing keys, unknown keys, and unknown origins remain rejected.
+  Validation: The preflight test failed before the repair. The repaired HTTP tests, independent review, and `make ci` passed.
+  Files: `internal/web/cors.go`, `cmd/server/account_erasure_cors_test.go`, and `.mprlab/ISSUES.md`.
+
 - [x] [B112] (P2) {F018} Allow generated Gateway credentials to suspend removed tenants.
   Goal:
   Let Gateway suspend a migrated tenant when its application removes the tenant contribution.

@@ -115,7 +115,13 @@ Apply this section when the task changes or validates a selected application man
 
 - Keep the selected application manifest versionless.
 - Keep `owner`, `release`, and `resources` as the current baseline fields.
-- Each later gateway must accept every manifest that an earlier versionless gateway accepted.
+- Apply the B607 execution policy contract before the general extension rules below.
+- Declare CI and execution policy in `.mprlab/deploy/resources.yml`.
+- Enable CI with the `make ci` command.
+- Declare positive startup, completion, readiness, request, and shutdown timeouts.
+- Declare finite polling for provider observations without a reliable event source.
+- Keep execution policy outside Gateway defaults, separate files, CLI options, and environment overrides.
+- After this cutover, each later gateway must accept every manifest that an earlier versionless gateway accepted.
 - Keep each accepted field name, type, requirement, and function.
 - A field added to an existing shape must be optional.
 - A field added to an existing shape must have one canonical default.
