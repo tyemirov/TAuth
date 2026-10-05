@@ -1396,6 +1396,16 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B120] (P1) Select the cutover source by its database volume.
+  Goal: The timestamped migration selects the existing TAuth configuration source.
+  Evidence: The deployed source uses project `mprlab-tauth-runtime`. The cutover filter uses `mprlab-nginx-gateway` and returns zero containers.
+  Requirements: Select one source by the expected volume and service label. Verify its configuration and reject unrelated database writers.
+  Resolution: Replaced the project filter with the expected volume filter. Kept the service label and source checks.
+  Validation: The Docker and Ansible fixture reproduced the assertion failure. The repaired fixture and repeat passed.
+  The corrected read-only host query selected one source. Independent review, `make ci`, and whitespace checks passed.
+  Production deployment did not run during this repair.
+  Files: `deployment/rollout/cutover.yml`, `tests/automatic-deployment.sh`, and `.mprlab/ISSUES.md`.
+
 - [x] [B119] (P1) Read the current Gateway record before the deployment cutover.
   Goal: Deployment uses the sealed image and migration input from the current release.
   Evidence: Gateway v5.0.4 sealed and published v2.2.7. The cutover command failed because it read the obsolete `selected-release.json` file.
