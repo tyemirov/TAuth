@@ -248,31 +248,24 @@ func selectedImage(root string) (string, string, error) {
 	if !filepath.IsAbs(lifecycle) {
 		lifecycle = filepath.Join(root, lifecycle)
 	}
-	var selection struct {
-		Version string `json:"version"`
+	var current struct {
+		Release struct {
+			Version   string                                        `json:"version"`
+			Artifacts []struct{ ID, Kind, Path, Repository string } `json:"artifacts"`
+		} `json:"release"`
 	}
-	payload, err := os.ReadFile(filepath.Join(lifecycle, "selected-release.json"))
+	payload, err := os.ReadFile(filepath.Join(lifecycle, "current-release.json"))
 	if err != nil {
 		return "", "", err
 	}
-	if err = json.Unmarshal(payload, &selection); err != nil {
+	if err = json.Unmarshal(payload, &current); err != nil {
 		return "", "", err
 	}
-	if !strings.HasPrefix(selection.Version, "v") || strings.ContainsAny(selection.Version, "/\\") {
+	if !strings.HasPrefix(current.Release.Version, "v") || strings.ContainsAny(current.Release.Version, "/\\") {
 		return "", "", errors.New("cutover.release_selection_invalid")
 	}
-	releaseRoot := filepath.Join(lifecycle, "releases", selection.Version)
-	var receipt struct {
-		Artifacts []struct{ ID, Kind, Path, Repository string } `json:"artifacts"`
-	}
-	payload, err = os.ReadFile(filepath.Join(releaseRoot, "receipt.json"))
-	if err != nil {
-		return "", "", err
-	}
-	if err = json.Unmarshal(payload, &receipt); err != nil {
-		return "", "", err
-	}
-	for _, artifact := range receipt.Artifacts {
+	releaseRoot := filepath.Join(lifecycle, "releases", current.Release.Version)
+	for _, artifact := range current.Release.Artifacts {
 		if artifact.ID != "tauth-image" || artifact.Kind != "container_image" {
 			continue
 		}

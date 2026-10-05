@@ -1396,6 +1396,15 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B119] (P1) Read the current Gateway record before the deployment cutover.
+  Goal: Deployment uses the sealed image and migration input from the current release.
+  Evidence: Gateway v5.0.4 sealed and published v2.2.7. The cutover command failed because it read the obsolete `selected-release.json` file.
+  Requirements: Read the embedded release in `current-release.json`. Remove obsolete receipt reads.
+  Resolution: Read the version and artifacts from the embedded current release. Removed both obsolete receipt reads.
+  Validation: The CLI test reproduced the missing-file error before the repair and reached input preflight after the repair.
+  Focused deployment tests, independent review, `make ci`, and whitespace checks passed. Production deployment did not run.
+  Files: `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, and `.mprlab/ISSUES.md`.
+
 - [ ] [B118] (P2) Use the request context for account database operations.
   Goal: Account database operations use a context that remains valid after the HTTP handler returns.
   Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.
