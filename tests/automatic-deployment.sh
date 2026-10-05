@@ -7,30 +7,26 @@ image="tauth-automatic-cutover:contract-$$"
 volume="tauth-automatic-cutover-$$"
 source_container=""
 service_container=""
+writer_volume=""
 cleanup() {
   status=$?
   if [ -n "$source_container" ]; then docker container rm --force "$source_container" >/dev/null; fi
   if [ -n "$service_container" ]; then docker container rm --force "$service_container" >/dev/null; fi
+  if [ -n "$writer_volume" ]; then docker volume rm "$writer_volume" >/dev/null; fi
   docker volume rm "$volume" >/dev/null
   docker image rm "$image" >/dev/null
   rm -rf "$test_root"
   exit "$status"
 }
 trap cleanup EXIT
-mkdir -p "$test_root/remote"
+mkdir -p "$test_root/remote/state/tauth"
 TAUTH_AUTOMATIC_DEPLOYMENT_ROOT="$test_root" make test-deployment-migration
 docker build --tag "$image" "$repository_root" >"$test_root/build.log" 2>&1
 docker volume create "$volume" >/dev/null
 docker run --rm --entrypoint=/bin/sh --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$test_root,dst=/fixture,readonly" "$image" -c 'cp /fixture/tauth.db /data/tauth.db'
-# The previous service is a controlled dependency. Docker, Ansible, migration, and the new service are real.
-source_container="$(docker run --detach --network=none \
-  --entrypoint='sh' \
-  --label com.docker.compose.project=mprlab-tauth-runtime \
-  --label com.docker.compose.service=tauth-api \
-  --mount "type=volume,src=$volume,dst=/data" \
-  --mount "type=bind,src=$test_root/source.yaml,dst=/config/config.yml,readonly" \
-  "$image" -c 'sleep 86400' --config=/config/config.yml)"
+# The host retains its materialized configuration independently of any container.
+cp "$test_root/source.yaml" "$test_root/remote/state/tauth/config.tauth.yml"
 
 package_root="$(python3 -c 'from pathlib import Path; print((Path.home()/".local/share/mprlab-gateway/active").resolve())')"
 export ANSIBLE_CONFIG="$package_root/runtime/deploy/ansible/ansible.cfg"
@@ -43,9 +39,22 @@ inventory={'all':{'children':{'gateway':{'hosts':{'cutover-fixture':{'ansible_co
 variables={'tauth_cutover_image':os.environ['TAUTH_AUTOMATIC_IMAGE'],'tauth_cutover_volume':os.environ['TAUTH_AUTOMATIC_VOLUME'],'tauth_cutover_id':'20260930-tenant-console','tauth_cutover_plan':str(p/'plan.json'),'tauth_cutover_key':str(p/'key')}
 (p/'variables.json').write_text(json.dumps(variables))
 PY
+# An unrelated volume writer must fail before a database change.
+source_container="$(docker run --detach --network=none --entrypoint=sh \
+  --mount "type=volume,src=$volume,dst=/data" "$image" -c 'sleep 86400')"
+before="$(docker run --rm --entrypoint=sha256sum --mount "type=volume,src=$volume,dst=/data,readonly" "$image" /data/tauth.db)"
+if "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
+  "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json" >"$test_root/writer-rejection.log" 2>&1; then
+  printf 'Unrelated writer was accepted.\n' >&2; exit 1
+fi
+after="$(docker run --rm --entrypoint=sha256sum --mount "type=volume,src=$volume,dst=/data,readonly" "$image" /data/tauth.db)"
+[ "$before" = "$after" ]
+[ "$(docker inspect --format '{{.State.Running}}' "$source_container")" = true ]
+docker container rm --force "$source_container" >/dev/null
+source_container=""
+# The first migration must succeed with no previous service container.
 "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
   "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
-[ "$(docker inspect --format '{{.State.Running}}' "$source_container")" = false ]
 service_container="$(docker run --detach --publish 127.0.0.1::8080 \
   --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$test_root/service.yaml,dst=/config/config.yml,readonly" \
@@ -62,6 +71,11 @@ status="$(curl --silent --output "$test_root/profile.json" --write-out '%{http_c
   --header 'Origin: https://console.example.com' --header 'X-TAuth-Tenant: product' \
   --header "Cookie: product_session=$token" "http://127.0.0.1:$port/me")"
 if [ "$status" != 200 ]; then cat "$test_root/profile.json"; exit 1; fi
+extra_token="$(cat "$test_root/rsvp-session-token")"
+status="$(curl --silent --output "$test_root/rsvp-profile.json" --write-out '%{http_code}' \
+  --header 'Origin: https://rsvp.example.com' --header 'X-TAuth-Tenant: rsvp-production' \
+  --header "Cookie: rsvp_session=$extra_token" "http://127.0.0.1:$port/me")"
+if [ "$status" != 200 ]; then cat "$test_root/rsvp-profile.json"; exit 1; fi
 gateway_token="$(cat "$test_root/gateway-token")"
 status="$(curl --silent --output "$test_root/configuration.json" --write-out '%{http_code}' \
   --header "Authorization: Bearer $gateway_token" \
@@ -71,9 +85,12 @@ status="$(curl --silent --output "$test_root/denied.json" --write-out '%{http_co
   --header "Authorization: Bearer $gateway_token" \
   "http://127.0.0.1:$port/api/management/tenants/tauth-console/configuration")"
 if [ "$status" != 403 ]; then cat "$test_root/denied.json"; exit 1; fi
-# Completed deployments need no old configuration container and must preserve the running service.
-docker container rm "$source_container" >/dev/null
-source_container=""
+status="$(curl --silent --output "$test_root/rsvp-denied.json" --write-out '%{http_code}' \
+  --header "Authorization: Bearer $gateway_token" \
+  "http://127.0.0.1:$port/api/management/tenants/rsvp-production/configuration")"
+if [ "$status" != 403 ]; then cat "$test_root/rsvp-denied.json"; exit 1; fi
+# Completed deployments need no source file and must preserve the running service.
+rm "$test_root/remote/state/tauth/config.tauth.yml"
 "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
   "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
 [ "$(docker inspect --format '{{.State.Running}}' "$service_container")" = true ]
@@ -97,4 +114,23 @@ status="$(curl --silent --output "$test_root/suspended-profile.json" --write-out
   --header 'Origin: https://console.example.com' --header 'X-TAuth-Tenant: product' \
   --header "Cookie: product_session=$token" "http://127.0.0.1:$port/me")"
 if [ "$status" != 404 ]; then printf 'Suspended tenant authentication returned %s, expected 404.\n' "$status" >&2; exit 1; fi
-printf 'Automatic cutover, old session, scoped Gateway credential, repeated deployment, and tenant removal passed.\n'
+# A separate pending database exercises shutdown of a present TAuth writer.
+writer_volume="${volume}-writer"
+docker volume create "$writer_volume" >/dev/null
+docker run --rm --entrypoint=/bin/sh --mount "type=volume,src=$writer_volume,dst=/data" \
+  --mount "type=bind,src=$test_root,dst=/fixture,readonly" "$image" -c 'cp /fixture/tauth.db /data/tauth.db'
+cp "$test_root/source.yaml" "$test_root/remote/state/tauth/config.tauth.yml"
+source_container="$(docker run --detach --network=none --entrypoint=sh \
+  --label com.docker.compose.service=tauth-api \
+  --mount "type=volume,src=$writer_volume,dst=/data" "$image" -c 'sleep 86400')"
+python3 - "$test_root/variables.json" "$writer_volume" <<'PYV'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1])
+variables=json.loads(p.read_text())
+variables['tauth_cutover_volume']=sys.argv[2]
+p.write_text(json.dumps(variables))
+PYV
+"$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
+  "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
+[ "$(docker inspect --format '{{.State.Running}}' "$source_container")" = false ]
+printf 'Automatic cutover without a source container, writer rejection, preserved sessions, credential isolation, repeated deployment, and tenant removal passed.\n'

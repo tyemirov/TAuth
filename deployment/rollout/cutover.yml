@@ -76,39 +76,23 @@
     - name: Execute the pending timestamped migration
       when: not (tauth_cutover_status.stdout | from_json).completed
       block:
-        - name: Locate the existing TAuth configuration source
+        - name: Capture the durable materialized configuration
+          no_log: true
+          ansible.builtin.copy:
+            remote_src: true
+            src: "{{ mprlab_runtime_root }}/state/tauth/config.tauth.yml"
+            dest: "{{ tauth_cutover_root }}/source.yaml"
+        - name: Locate active TAuth database writers
           ansible.builtin.command:
             argv:
               - "{{ mprlab_docker_cli }}"
               - container
               - ls
-              - --all
               - --quiet
               - "--filter=volume={{ tauth_cutover_volume }}"
               - --filter=label=com.docker.compose.service=tauth-api
-          register: tauth_cutover_source
+          register: tauth_cutover_tauth_writers
           changed_when: false
-        - name: Require one existing configuration source
-          ansible.builtin.assert:
-            that: tauth_cutover_source.stdout_lines | length == 1
-            quiet: true
-        - name: Inspect the exact source container
-          no_log: true
-          ansible.builtin.command:
-            argv: ["{{ mprlab_docker_cli }}", inspect, "{{ tauth_cutover_source.stdout_lines[0] }}"]
-          register: tauth_cutover_inspect
-          changed_when: false
-        - name: Select the source command and mounted data
-          no_log: true
-          ansible.builtin.set_fact:
-            tauth_cutover_container: "{{ (tauth_cutover_inspect.stdout | from_json)[0] }}"
-            tauth_cutover_config_arguments: "{{ (tauth_cutover_inspect.stdout | from_json)[0].Config.Cmd | select('match', '^--config=/.+') | list }}"
-        - name: Require the expected database volume and source configuration
-          ansible.builtin.assert:
-            that:
-              - tauth_cutover_container.Mounts | selectattr('Name', 'defined') | selectattr('Name', 'equalto', tauth_cutover_volume) | selectattr('Destination', 'equalto', '/data') | list | length == 1
-              - tauth_cutover_config_arguments | length == 1
-            quiet: true
         - name: Locate all current database writers
           ansible.builtin.command:
             argv: ["{{ mprlab_docker_cli }}", container, ls, --quiet, "--filter=volume={{ tauth_cutover_volume }}"]
@@ -116,25 +100,21 @@
           changed_when: false
         - name: Reject an unrelated active database writer
           ansible.builtin.assert:
-            that: tauth_cutover_writers.stdout_lines | difference(tauth_cutover_source.stdout_lines) | length == 0
+            that: tauth_cutover_writers.stdout_lines | difference(tauth_cutover_tauth_writers.stdout_lines) | length == 0
             quiet: true
-        - name: Stop the selected TAuth writer
+        - name: Stop existing TAuth database writers
           ansible.builtin.command:
-            argv: ["{{ mprlab_docker_cli }}", stop, "{{ tauth_cutover_source.stdout_lines[0] }}"]
-          when: tauth_cutover_writers.stdout_lines | length > 0
-        - name: Capture the stopped service configuration
-          no_log: true
+            argv: ["{{ mprlab_docker_cli }}", stop, "{{ item }}"]
+          loop: "{{ tauth_cutover_tauth_writers.stdout_lines }}"
+        - name: Inspect the stopped database volume
           ansible.builtin.command:
-            argv:
-              - "{{ mprlab_docker_cli }}"
-              - cp
-              - "{{ tauth_cutover_source.stdout_lines[0] }}:{{ tauth_cutover_config_arguments[0] | regex_replace('^--config=', '') }}"
-              - "{{ tauth_cutover_root }}/source.yaml"
-        - name: Capture the exact source environment
-          no_log: true
-          ansible.builtin.copy:
-            content: "{{ tauth_cutover_container.Config.Env | to_json }}"
-            dest: "{{ tauth_cutover_root }}/environment.json"
+            argv: ["{{ mprlab_docker_cli }}", container, ls, --quiet, "--filter=volume={{ tauth_cutover_volume }}"]
+          register: tauth_cutover_remaining_writers
+          changed_when: false
+        - name: Require no active database writers
+          ansible.builtin.assert:
+            that: tauth_cutover_remaining_writers.stdout_lines | length == 0
+            quiet: true
         - name: Back up and migrate the stopped database
           ansible.builtin.command:
             argv:
@@ -153,6 +133,5 @@
               - --key-file=/cutover/key
               - --plan=/cutover/plan.json
               - --source=/cutover/source.yaml
-              - --environment=/cutover/environment.json
           register: tauth_cutover_result
           changed_when: tauth_cutover_result.rc == 0
