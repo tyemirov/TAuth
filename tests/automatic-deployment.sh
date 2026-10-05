@@ -55,6 +55,34 @@ source_container=""
 # The first migration must succeed with no previous service container.
 "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
   "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
+# The independent console repair must run after the original receipt is complete.
+python3 - "$test_root" <<'PYFIXTURE'
+import json,pathlib,sys
+root=pathlib.Path(sys.argv[1])
+(root/'console-plan.json').write_text(json.dumps({'expected_client_id':'existing-google-client','client_id':'corrected-console.apps.googleusercontent.com','console_origin':'https://console.example.com'}))
+variables=json.loads((root/'variables.json').read_text())
+variables.update(tauth_cutover_id='20261005-console-google-client',tauth_cutover_plan=str(root/'console-plan.json'))
+(root/'console-variables.json').write_text(json.dumps(variables))
+PYFIXTURE
+source_container="$(docker run --detach --network=none --entrypoint=sh \
+  --mount "type=volume,src=$volume,dst=/data" "$image" -c 'sleep 86400')"
+before="$(docker run --rm --entrypoint=sha256sum --mount "type=volume,src=$volume,dst=/data,readonly" "$image" /data/tauth.db)"
+if "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
+  "$repository_root/deployment/rollout/console-google-client.yml" --extra-vars "@$test_root/console-variables.json" >"$test_root/console-writer-rejection.log" 2>&1; then
+  printf 'Unrelated console migration writer was accepted.\n' >&2; exit 1
+fi
+after="$(docker run --rm --entrypoint=sha256sum --mount "type=volume,src=$volume,dst=/data,readonly" "$image" /data/tauth.db)"
+[ "$before" = "$after" ]
+[ "$(docker inspect --format '{{.State.Running}}' "$source_container")" = true ]
+docker container rm --force "$source_container" >/dev/null
+source_container="$(docker run --detach --network=none --entrypoint=sh \
+  --label com.docker.compose.service=tauth-api \
+  --mount "type=volume,src=$volume,dst=/data" "$image" -c 'sleep 86400')"
+"$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
+  "$repository_root/deployment/rollout/console-google-client.yml" --extra-vars "@$test_root/console-variables.json"
+[ "$(docker inspect --format '{{.State.Running}}' "$source_container")" = false ]
+docker container rm "$source_container" >/dev/null
+source_container=""
 service_container="$(docker run --detach --publish 127.0.0.1::8080 \
   --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$test_root/service.yaml,dst=/config/config.yml,readonly" \
@@ -93,6 +121,9 @@ if [ "$status" != 403 ]; then cat "$test_root/rsvp-denied.json"; exit 1; fi
 rm "$test_root/remote/state/tauth/config.tauth.yml"
 "$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
   "$repository_root/deployment/rollout/cutover.yml" --extra-vars "@$test_root/variables.json"
+[ "$(docker inspect --format '{{.State.Running}}' "$service_container")" = true ]
+"$package_root/toolchain/bin/ansible-playbook" -i "$test_root/inventory.json" \
+  "$repository_root/deployment/rollout/console-google-client.yml" --extra-vars "@$test_root/console-variables.json"
 [ "$(docker inspect --format '{{.State.Running}}' "$service_container")" = true ]
 # Gateway removes a contribution by suspending the tenant with its current resource ETag.
 status="$(curl --silent --dump-header "$test_root/tenant.headers" --output "$test_root/tenant.json" --write-out '%{http_code}' \

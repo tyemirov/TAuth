@@ -25,8 +25,12 @@ func init() {
 			fmt.Println(`{"version":"fixture","source_commit":"fixture","platform":"fixture","lifecycle_contract":4}`)
 		}
 	case "ansible-playbook":
-		fmt.Println("fixture: cutover input preflight reached")
-		os.Exit(7)
+		if os.Getenv("TAUTH_ROLLOUT_ALL_PHASES") == "1" {
+			fmt.Println("fixture phase:", strings.Join(os.Args[1:], " "))
+		} else {
+			fmt.Println("fixture: cutover input preflight reached")
+			os.Exit(7)
+		}
 	default:
 		os.Exit(8)
 	}
@@ -64,6 +68,9 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	if err = writeFile(planPath, []byte(plan)); err != nil {
 		t.Fatal(err)
 	}
+	if err = writeFile(filepath.Join(filepath.Dir(planPath), "20261005-console-google-client.json"), []byte(`{"expected_client_id":"fixture-old","client_id":"fixture-new.apps.googleusercontent.com","console_origin":"https://console.example.com"}`)); err != nil {
+		t.Fatal(err)
+	}
 	imagePath := filepath.Join(releaseRoot, "image.oci.tar")
 	image, err := os.Create(imagePath)
 	if err != nil {
@@ -93,6 +100,28 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	if err == nil || !strings.Contains(string(output), "fixture: cutover input preflight reached") || !strings.Contains(string(output), "cutover.input_preflight:") {
 		t.Fatalf("rollout did not consume the current release: %v\n%s", err, output)
 	}
+	operatorRoot := t.TempDir()
+	if output, err := exec.Command("mkdir", "-p", filepath.Join(root, ".mprlab/deploy")).CombinedOutput(); err != nil {
+		t.Fatalf("create fixture directory: %v %s", err, output)
+	}
+	if err = writeFile(filepath.Join(root, ".mprlab/deploy/.env"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = writeFile(filepath.Join(operatorRoot, "private.env"), nil); err != nil {
+		t.Fatal(err)
+	}
+	command = exec.Command(rollout, root, gateway)
+	command.Env = append(os.Environ(), "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot, "TAUTH_TENANT_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	output, err = command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("full rollout failed: %v\n%s", err, output)
+	}
+	oldPhase := strings.Index(string(output), "/deployment/rollout/cutover.yml")
+	newPhase := strings.Index(string(output), "/deployment/rollout/console-google-client.yml")
+	if oldPhase < 0 || newPhase <= oldPhase {
+		t.Fatalf("independent migration phase absent or out of order: %s", output)
+	}
+
 }
 
 func TestPersistentServerKeyPreparation(t *testing.T) {
