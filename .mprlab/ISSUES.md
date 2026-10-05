@@ -1396,6 +1396,24 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B124] (P0) Use the authorized Google client for the production console.
+  Goal: Permit Google sign-in at the production console origin.
+  Evidence: The completed tenant migration copied the demo client into the console. Google rejects the console origin for that client.
+  The existing TAuth client already authorizes the production console origin.
+  Requirements:
+  - Keep the completed tenant migration and its receipt unchanged.
+  - Apply a separate timestamped migration through the standard deployment command.
+  - Back up the stopped database and change only the console Google client.
+  - Publish the corrected candidate and its completion receipt together.
+  - Preserve tenant settings, keys, accounts, and owner bindings.
+  - Reject an unexpected current client or a conflicting receipt.
+  - Keep completed retries independent of active service state.
+  Validation: CLI and real Docker/Ansible checks passed for preservation, conflicts, candidate failure, retry, and active-service retry.
+  Independent review and `make ci` passed on October 5, 2026.
+  Resolution: The automatic migration publishes the corrected console client and its receipt together.
+  Production Google sign-in remains a separate acceptance step.
+  Changed files: migration command, public plan, rollout, tests, deployment runbook, `README.md`, and `.gitignore`.
+
 - [x] [B123] (P0) Accept the disabled challenge-token constraint in deployment contributions.
   Goal: Current Gateway contributions can provision tenants without challenge-token disclosure.
   Evidence: The published renderer rejected `return_challenge_tokens:false` in 19 retained tenant contributions.

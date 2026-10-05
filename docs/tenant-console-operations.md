@@ -24,7 +24,7 @@ The migration executable remains separate from normal service startup.
 The internal migration commands below are development and diagnostic tools.
 They are not production operator prerequisites.
 
-The production migration identifier is `20260930-tenant-console`.
+The tenant migration identifier is `20260930-tenant-console`.
 Its public input is `deployment/migrations/20260930-tenant-console.json`.
 The release seals this input and the migration executable together.
 
@@ -45,7 +45,8 @@ Deployment performs these operations automatically:
    - Apply the migration to a private database candidate.
    - Keep the existing verified Google identity, tenant settings, client keys, and application data.
    - Commit the candidate database and completion receipt together.
-8. Reconcile the service and verify its health through Gateway.
+8. Apply the pending console client correction described below.
+9. Reconcile the service and verify its health through Gateway.
 
 The migration reads `state/tauth/config.tauth.yml` from the host runtime root.
 It can run when no TAuth container is present.
@@ -63,6 +64,26 @@ The server encryption key protects database configuration with AES-256-GCM.
 The tenant console change introduced this key. The previous file-backed runtime did not require it.
 Clients never receive this key.
 Deployment preserves existing client credentials and tenant session keys.
+
+## Production console client correction
+
+B124 adds the separate `20261005-console-google-client` migration.
+The original tenant migration and its completion receipt remain unchanged.
+The new sealed plan identifies the console origin, expected current client, and authorized replacement client.
+The replacement is the existing TAuth Google client that authorizes `https://tauth.mprlab.com`.
+
+Deployment checks the new receipt independently of the tenant migration receipt.
+A pending correction stops the authorized database writers and rejects other active writers.
+It backs up the stopped database and changes the console client in a private candidate.
+The candidate contains the corrected configuration and its completion receipt before atomic publication.
+All tenant settings, accounts, owner bindings, and encryption keys remain unchanged.
+
+An unexpected current client, origin, plan, or key rejects the correction.
+A replacement client without the matching receipt also rejects the correction.
+An interruption before candidate publication leaves the original database unchanged.
+The next deployment creates a fresh candidate from the database backup.
+A completed retry reads its receipt and leaves the running service active.
+Verify Google sign-in and the migrated tenant list after deployment completes.
 
 ## Service inputs
 

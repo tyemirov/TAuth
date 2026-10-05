@@ -103,6 +103,10 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cutover.sealed_plan: %w", err)
 	}
+	consolePlanPath := filepath.Join(releaseRoot, "inputs/deployment/migrations/"+migrations.ConsoleGoogleClientID+".json")
+	if _, err = migrations.LoadConsoleGoogleClientPlan(consolePlanPath); err != nil {
+		return fmt.Errorf("console_client.sealed_plan: %w", err)
+	}
 	localRoot, err := os.MkdirTemp("", migrations.CutoverID+"-")
 	if err != nil {
 		return err
@@ -152,6 +156,18 @@ func run(ctx context.Context, args []string) error {
 	}
 	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("cutover.migration_failed: %w", err)
+	}
+	variables["tauth_cutover_plan"] = consolePlanPath
+	variables["tauth_cutover_id"] = migrations.ConsoleGoogleClientID
+	payload, err = json.Marshal(variables)
+	if err != nil {
+		return err
+	}
+	if err = writeFile(variablesPath, payload); err != nil {
+		return err
+	}
+	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+		return fmt.Errorf("console_client.migration_failed: %w", err)
 	}
 	return execute(ctx, native, "app-deploy", "--app-root", root)
 }

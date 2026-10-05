@@ -189,6 +189,7 @@ No separate migration, console bootstrap, credential generation, or encryption-k
 The `20260930-tenant-console` migration captures the stopped service configuration and backs up the database.
 It preserves existing tenant settings, client keys, users, and sessions.
 It imports the Apps and binds their owner to the existing verified Google identity.
+The separate `20261005-console-google-client` migration corrects the console Google client without changing tenant ownership or keys.
 Deployment creates the server encryption key automatically and preserves it in private deployment inputs.
 This server key never goes to application clients.
 See the [production command contract](docs/tenant-console-operations.md#production-command-contract) for the migration and recovery boundaries.
