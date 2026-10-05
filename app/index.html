@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en" data-mpr-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TAuth · Tenant workspace</title>
+    <meta
+      name="description"
+      content="Manage application sign-in, domains, and tenant integration."
+    />
+    <link rel="stylesheet" href="./vendor/mpr-ui.css" />
+    <link rel="stylesheet" href="./workspace.css" />
+    <script src="/tauth.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./workspace.js"></script>
+  </head>
+  <body>
+    <mpr-header id="console-header">
+      <a slot="brand" href="/app/">TAuth</a
+      ><mpr-user
+        id="console-user"
+        slot="aux"
+        display-mode="avatar"
+        logout-url="/app/"
+        logout-label="Sign out"
+      ></mpr-user>
+    </mpr-header>
+    <main>
+      <div id="notice" role="status" aria-live="polite">Loading workspace…</div>
+      <section id="signed-out">
+        <p class="eyebrow">Application authentication</p>
+        <h1>Your applications. Your sign-in settings.</h1>
+        <p>
+          Sign in with Google through the account control to manage your
+          tenants.
+        </p>
+        <a href="/">Read the documentation</a>
+      </section>
+      <section id="workspace" hidden aria-label="Tenant workspace">
+        <aside class="app-rail" aria-label="Apps and tenants">
+          <header>
+            <h1>Apps</h1>
+            <button id="create-app">+ Create App</button>
+          </header>
+          <p id="inventory-summary" class="metadata"></p>
+          <nav aria-label="Apps and tenants"><ul id="app-list"></ul></nav>
+        </aside>
+        <section id="empty" hidden>
+          <div id="empty-app-heading" class="identity-name" hidden>
+            <h2 id="empty-app-name"></h2>
+            <button
+              type="button"
+              id="rename-empty-app"
+              class="icon-button"
+              aria-label="Rename App"
+              title="Rename App"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m16 3 5 5-12 12-6 1 1-6Z M13 6l5 5" />
+              </svg>
+            </button>
+          </div>
+          <h2 id="empty-title">Create your first App</h2>
+          <p>
+            An App groups its tenants. Each tenant has separate sign-in and
+            domain settings.
+          </p>
+        </section>
+        <article id="tenant-detail" hidden>
+          <header class="tenant-heading">
+            <div class="identity-heading">
+              <div class="identity-name">
+                <span id="selected-app-name"></span>
+                <button
+                  type="button"
+                  id="rename-app"
+                  class="icon-button"
+                  aria-label="Rename App"
+                  title="Rename App"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m16 3 5 5-12 12-6 1 1-6Z M13 6l5 5" />
+                  </svg>
+                </button>
+              </div>
+              <span class="identity-separator" aria-hidden="true">/</span>
+              <div class="identity-name">
+                <h2 id="tenant-name" tabindex="-1"></h2>
+                <button
+                  type="button"
+                  id="rename"
+                  class="icon-button"
+                  aria-label="Rename tenant"
+                  title="Rename tenant"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m16 3 5 5-12 12-6 1 1-6Z M13 6l5 5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="authentication-toggle"
+              aria-describedby="next-step"
+            >
+              <span id="tenant-state"></span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path id="authentication-icon" />
+              </svg>
+            </button>
+          </header>
+          <nav id="sections" aria-label="Tenant sections">
+            <button data-section="configuration">Configuration</button>
+            <button data-section="integration">Integration</button>
+          </nav>
+          <form id="configuration" aria-busy="false">
+            <section data-panel="configuration">
+              <p id="next-step"></p>
+              <div class="configuration-fields">
+                <section aria-label="Application addresses">
+                  <h3>Application addresses</h3>
+                  <label for="frontend-origins"
+                    >Frontend origins, one per line</label
+                  ><textarea
+                    id="frontend-origins"
+                    rows="3"
+                    aria-describedby="origins-help"
+                  ></textarea>
+                  <p id="origins-help">
+                    Use exact origins, such as https://app.example.com. Include
+                    the port for local development.
+                  </p>
+                  <label for="api-base">Customer API origin</label
+                  ><input id="api-base" type="url" /><label class="check"
+                    ><input id="local-development" type="checkbox" />Local
+                    development with an explicit tenant header</label
+                  >
+                </section>
+                <section aria-label="Google sign-in">
+                  <h3>Google sign-in</h3>
+                  <label for="google-client">Google web client ID</label
+                  ><input id="google-client" autocomplete="off" />
+                  <p>
+                    In the Google Cloud client, add these Authorized JavaScript
+                    origins:
+                  </p>
+                  <pre id="google-origins"></pre>
+                  <p id="provider-summary"></p>
+                </section>
+              </div>
+              <details id="session-settings">
+                <summary>Session settings</summary>
+                <div class="lifetime-fields">
+                  <div>
+                    <label for="session-ttl">Session lifetime</label
+                    ><input
+                      id="session-ttl"
+                      required
+                      aria-describedby="session-help"
+                    />
+                    <p id="session-help">Use 1m through 1h.</p>
+                  </div>
+                  <div>
+                    <label for="refresh-ttl">Refresh lifetime</label
+                    ><input
+                      id="refresh-ttl"
+                      required
+                      aria-describedby="refresh-help"
+                    />
+                    <p id="refresh-help">
+                      Use a duration no longer than 2160h (90 days).
+                    </p>
+                  </div>
+                </div>
+              </details>
+            </section>
+            <section data-panel="integration" hidden>
+              <h3>Browser and backend</h3>
+              <p class="metadata">Tenant ID: <code id="tenant-id"></code></p>
+              <p>
+                The browser credential callback sends its nonce and ID token to
+                your customer API at <code>/auth/google</code>.
+              </p>
+
+              <div id="integration-content">
+                <p id="integration-status">
+                  Set the customer API origin to prepare integration settings.
+                </p>
+                <div id="integration-ready" hidden>
+                  <h4>Browser</h4>
+                  <p>
+                    Save this complete page as your browser example. It contains
+                    public settings only.
+                  </p>
+                  <pre id="browser-example"></pre>
+                  <h4>Backend</h4>
+                  <p>
+                    Use the
+                    <a
+                      href="https://github.com/tyemirov/TAuth/tree/master/examples/tenant-app"
+                      >runnable Go customer API example</a
+                    >. Set the public values below and install the exported key
+                    in its secret store.
+                  </p>
+                  <pre id="backend-example"></pre>
+                  <p>
+                    Proxy these exact auth routes and /me to TAuth. The customer
+                    API binds the tenant and uses host-only cookies.
+                  </p>
+                  <pre id="proxy-routes"></pre>
+                  <button type="button" id="export-session-key">
+                    Export session key
+                  </button>
+                  <h4>Setup check</h4>
+                  <p>
+                    Check the verified API destination, tenant binding, CORS,
+                    and signed-out routes. Complete a browser sign-in
+                    separately.
+                  </p>
+                  <button type="button" id="run-setup-check">
+                    Run setup check
+                  </button>
+                  <pre id="setup-result" role="status"></pre>
+                </div>
+              </div>
+            </section>
+            <div id="save-actions">
+              <p id="field-error" role="alert"></p>
+            </div>
+          </form>
+        </article>
+      </section>
+    </main>
+    <span id="name-editor" hidden aria-busy="false">
+      <input
+        id="edited-name"
+        maxlength="120"
+        required
+        aria-describedby="name-error"
+      />
+      <span id="name-error" role="alert"></span>
+    </span>
+    <dialog id="admin-dialog" aria-labelledby="admin-title">
+      <h2 id="admin-title">Accounts</h2>
+      <p>
+        View registered accounts. Each workspace remains private to its owner.
+      </p>
+      <p id="accounts-status" role="status"></p>
+      <ul id="account-list"></ul>
+      <div class="actions">
+        <button
+          type="button"
+          data-close
+          aria-label="Dismiss account directory"
+          class="dismiss"
+        >
+          ×
+        </button>
+      </div>
+    </dialog>
+    <dialog id="app-dialog" aria-labelledby="app-dialog-title">
+      <form id="app-form">
+        <h2 id="app-dialog-title">Create App</h2>
+        <label for="app-name">Name</label>
+        <input id="app-name" required maxlength="120" />
+        <p id="app-error" role="alert"></p>
+        <div class="actions">
+          <button
+            type="button"
+            data-close
+            aria-label="Dismiss App editor"
+            class="dismiss"
+          >
+            ×</button
+          ><button id="confirm-app">Create App</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="tenant-dialog">
+      <form id="tenant-form">
+        <h2 id="dialog-title">Create tenant</h2>
+        <label for="new-name">Name</label
+        ><input id="new-name" required maxlength="120" />
+        <fieldset id="new-authentication">
+          <label for="new-origin">Application origin</label>
+          <input
+            id="new-origin"
+            type="url"
+            required
+            placeholder="https://example.com"
+          />
+          <label for="new-google-client">Google OAuth client ID</label>
+          <input
+            id="new-google-client"
+            required
+            maxlength="256"
+            pattern="[A-Za-z0-9_\-]+\.apps\.googleusercontent\.com"
+          />
+        </fieldset>
+        <p id="dialog-error" role="alert"></p>
+        <div class="actions">
+          <button
+            type="button"
+            data-close
+            aria-label="Dismiss name editor"
+            class="dismiss"
+          >
+            ×</button
+          ><button id="confirm-tenant">Create tenant</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="suspend-dialog">
+      <h2>Suspend this tenant?</h2>
+      <p>
+        Suspension stops new sign-ins and revokes refresh sessions. Issued
+        access tokens can remain valid until expiry.
+      </p>
+      <p>Application users will need to sign in again after reactivation.</p>
+      <div class="actions">
+        <button data-close>Cancel</button
+        ><button id="confirm-suspend" class="danger">Suspend tenant</button>
+      </div>
+    </dialog>
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <h2 id="export-title">Export backend session key</h2>
+      <p id="export-message" role="status"></p>
+      <div id="reauth-google"></div>
+      <div id="export-key-panel" hidden>
+        <label for="export-key">Base64 session key</label>
+        <pre id="export-key" tabindex="0"></pre>
+      </div>
+      <button id="dismiss-export">Clear key</button>
+    </dialog>
+    <mpr-footer
+      horizontal-links='{"links":[{"label":"Documentation","href":"/"}]}'
+      sticky="false"
+      prefix-text="TAuth by Marco Polo Research Lab"
+      theme-switcher="square"
+      theme-config='{"attribute":"data-mpr-theme","targets":["document","body"],"initialMode":"dark","modes":[{"value":"light","attributeValue":"light"},{"value":"dark","attributeValue":"dark"}]}'
+    ></mpr-footer>
+  </body>
+</html>
