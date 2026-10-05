@@ -1396,6 +1396,17 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [x] [B123] (P0) Accept the disabled challenge-token constraint in deployment contributions.
+  Goal: Current Gateway contributions can provision tenants without challenge-token disclosure.
+  Evidence: The published renderer rejected `return_challenge_tokens:false` in 19 retained tenant contributions.
+  Requirements: Accept only false or an omitted field. Reject true, null, and incorrect types.
+  Keep the field outside native configuration, stored tenant configuration, and runtime behavior.
+  Keep unknown-field rejection and use the same constraint for rendering and management provisioning.
+  Validation: Use the renderer CLI and management HTTP API with synthetic contributions for both tenant resource kinds.
+  Resolved: The shared decoder accepts false or omission and rejects all other values before configuration changes.
+  The CLI and HTTP regression tests passed after the expected failures. The challenge-response security test and `make ci` passed.
+  Independent review found no actionable issues. The runbook also describes the B122 migration without a source container.
+
 - [x] [B121] (P1) Preserve the complete source during the tenant cutover.
   Goal: Migration preserves all tenant configurations without requiring an exact application inventory.
   Evidence: The source has 21 tenants. The plan has 20 and rejects `rsvp-production` before data changes.
