@@ -14,8 +14,6 @@ on:
       - "web/tauth.js"
       - ".github/workflows/go-tests.yml"
   pull_request:
-    branches:
-      - master
     paths:
       - "**/*.go"
       - "go.mod"

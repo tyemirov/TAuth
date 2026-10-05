@@ -1396,6 +1396,23 @@ Read @AGENTS.md, @README.md and ARCHITECTURE.md and follow the links to document
 
 ## BugFixes
 
+- [ ] [B118] (P2) Use the request context for account database operations.
+  Goal: Account database operations use a context that remains valid after the HTTP handler returns.
+  Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.
+  The password login handler passes its Gin context to `EnsurePasswordAccount` in `internal/authkit/routes.go`.
+  Requirements: Pass the HTTP request context to database operations. Keep request cancellation.
+  Validation: Run the erasure HTTP tests with the race detector and run `make ci`.
+
+- [x] [B117] (P1) Return the erasure receipt after a concurrent account purge.
+  Goal: Concurrent deletion requests return the same operation after the account is absent.
+  Requirements: Read the current receipt within the database transaction. Keep tenant isolation and receipt expiry.
+  Deliverables: Transaction repair, a controlled HTTP race test, and CI for stacked pull requests.
+  Resolution: Read the receipt by tenant and capability within the transaction after the account is absent. Keep receipt expiry.
+  Removed the PR target branch filters so CI runs for stacked pull requests.
+  Validation: The controlled HTTP test reproduced the CI error before the repair. All erasure HTTP tests passed five times after the repair.
+  Independent review, `make ci`, and whitespace checks passed. Separate race detector failures are recorded in B118.
+  Files: `internal/authkit/database_account_erasure.go`, `internal/authkit/account_erasure_http_test.go`, both test workflows, and `.mprlab/ISSUES.md`.
+
 - [x] [B116] (P1) Verify the current manifest execution policy.
   Goal: The repository test accepts the current manifest contract and rejects invalid execution policy.
   Requirements: Verify the CI command, positive timeouts, and finite polling.

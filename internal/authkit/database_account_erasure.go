@@ -68,6 +68,16 @@ func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantI
 			return lookup
 		}
 		if changed.RowsAffected != 1 {
+			// A concurrent worker can complete the receipt and remove its account
+			// after the request's initial status lookup. Read that receipt under
+			// the database reservation before rejecting the absent account.
+			lookup = tx.Where("tenant_id = ? AND status_hash = ? AND (expires_unix = 0 OR expires_unix > ?)", tenantID, keyHash, now).Take(&job).Error
+			if lookup == nil {
+				return nil
+			}
+			if !errors.Is(lookup, gorm.ErrRecordNotFound) {
+				return lookup
+			}
 			return ErrAccountNotActive
 		}
 		var configured int64

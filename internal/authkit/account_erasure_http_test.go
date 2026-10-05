@@ -225,6 +225,43 @@ func TestAccountErasureHTTPConfiguredCredentialConflict(t *testing.T) {
 	}
 }
 
+func TestAccountErasureHTTPRetryAfterConcurrentCompletion(t *testing.T) {
+	fixture := newErasureHTTPFixture(t)
+	key := newErasureStatusKey(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var paused atomic.Bool
+	var unblock sync.Once
+	defer unblock.Do(func() { close(release) })
+	if err := fixture.accounts.db.Callback().Query().After("gorm:query").Register("fixture:pause_erasure_lookup", func(db *gorm.DB) {
+		if _, ok := db.Statement.Dest.(*databaseAccountErasure); ok && errors.Is(db.Error, gorm.ErrRecordNotFound) && paused.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type response struct {
+		status int
+		body   map[string]any
+	}
+	result := make(chan response, 1)
+	go func() {
+		status, body := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", key)
+		result <- response{status: status, body: body}
+	}()
+	<-entered
+	status, completed := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", key)
+	if status != http.StatusAccepted || completed["state"] != erasureCompleted {
+		t.Fatalf("concurrent completion: %d %+v", status, completed)
+	}
+	unblock.Do(func() { close(release) })
+	retry := <-result
+	if retry.status != http.StatusAccepted || retry.body["operation_id"] != completed["operation_id"] || retry.body["state"] != erasureCompleted {
+		t.Fatalf("retry after account purge: %d %+v", retry.status, retry.body)
+	}
+}
+
 func TestAccountErasureHTTPConcurrentLostResponseAndExpiry(t *testing.T) {
 	fixture := newErasureHTTPFixture(t)
 	key := newErasureStatusKey(t)
