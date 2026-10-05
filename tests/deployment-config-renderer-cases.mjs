@@ -121,6 +121,21 @@ assert.equal(githubOutput.includes('tenants:'), false);
 assert.equal(githubOutput.includes(githubTenant.outputs[githubClientOutput].value), false);
 assert.equal(githubOutput.includes(githubTenant.outputs[githubSecretOutput].value), false);
 
+for (const template of [browserTenant('challenge', ['https://ui.example.invalid']), githubTenant]) {
+  for (const present of [false, true]) {
+    const contribution = structuredClone(template);
+    contribution.desired.tenant.account_management = { enabled: false };
+    if (present) contribution.desired.tenant.account_management.return_challenge_tokens = false;
+    const output = render([fixture.contributions[0], contribution]);
+    assert.equal(output.includes('return_challenge_tokens'), false);
+  }
+  for (const value of [true, null, 'false', 0, {}, []]) {
+    const contribution = structuredClone(template);
+    contribution.desired.tenant.account_management = { enabled: false, return_challenge_tokens: value };
+    rejectRequest({ schema_version: 1, contributions: [contribution] }, invalidRequestCode);
+  }
+}
+
 for (const change of [
   tenant => { delete tenant.desired.tenant.github_oauth; },
   tenant => { tenant.desired.tenant.github_oauth.enabled = false; },

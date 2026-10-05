@@ -36,12 +36,19 @@ Deployment performs these operations automatically:
 4. Prepare App-scoped Gateway credentials in the canonical private operator input.
 5. Validate the published artifacts and complete native deployment planning.
 6. Read the durable migration receipt.
-7. If the receipt is absent, stop the selected writer and capture its configuration and environment.
-8. Back up the stopped database through SQLite.
-9. Apply the migration to a private database candidate.
-10. Keep the existing verified Google identity, tenant settings, client keys, and application data.
-11. Commit the candidate database and completion receipt together.
-12. Reconcile the service and verify its health through Gateway.
+7. If the receipt is missing:
+   - Make a copy of the stored host configuration.
+   - Reject active containers from other services that use the database volume.
+   - Stop any active TAuth containers that use the database volume.
+   - Make sure that no active containers use the database volume.
+   - Back up the stopped database through SQLite.
+   - Apply the migration to a private database candidate.
+   - Keep the existing verified Google identity, tenant settings, client keys, and application data.
+   - Commit the candidate database and completion receipt together.
+8. Reconcile the service and verify its health through Gateway.
+
+The migration reads `state/tauth/config.tauth.yml` from the host runtime root.
+It can run when no TAuth container is present.
 
 The migration requires one distinct Google subject from the selected existing account identities.
 Email addresses select the source records. A verified provider binding establishes the identity.
@@ -499,6 +506,9 @@ Production import runs within `make deploy`. Publication and live Google qualifi
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
 A machine request with the console shape or a null `provisioning` value returns `422`.
 The API validates the contribution through the same TAuth native configuration parser used by the renderer.
+In a deployment contribution, `account_management.return_challenge_tokens` can be omitted or set to `false`.
+The renderer and API reject `true`, `null`, and other value types.
+The field has no native configuration or runtime representation. Challenge tokens remain available only through email delivery.
 Activation uses the shared management activation service without a DNS ownership prerequisite.
 An identical generation and contribution retain the configuration revision.
 A changed contribution at the same generation fails. A console edit causes a revision conflict.

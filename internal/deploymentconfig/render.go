@@ -34,9 +34,10 @@ const (
 )
 
 var (
-	errInvalidRequest = errors.New("deployment_config.invalid_request")
-	errInvalidOutput  = errors.New("deployment_config.invalid_output")
-	errInvalidConfig  = errors.New("deployment_config.invalid_config")
+	errInvalidRequest           = errors.New("deployment_config.invalid_request")
+	errInvalidOutput            = errors.New("deployment_config.invalid_output")
+	errInvalidConfig            = errors.New("deployment_config.invalid_config")
+	errChallengeTokenDisclosure = errors.New("deployment_config.challenge_token_disclosure_forbidden: return_challenge_tokens must be false")
 )
 
 // Render reads one strict deployment request and returns validated TAuth YAML.
@@ -186,11 +187,23 @@ type passwordAuthResource struct {
 }
 
 type accountManagementResource struct {
-	Enabled              bool                   `json:"enabled" yaml:"enabled"`
-	PasswordSignup       passwordSignup         `json:"password_signup,omitempty" yaml:"password_signup"`
-	EmailVerificationTTL string                 `json:"email_verification_ttl" yaml:"email_verification_ttl"`
-	EmailDelivery        *emailDeliveryResource `json:"email_delivery,omitempty"`
-	PasswordResetTTL     string                 `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+	ChallengeTokenDisclosure challengeTokenDisclosureConstraint `json:"return_challenge_tokens,omitempty" yaml:"-"`
+	Enabled                  bool                               `json:"enabled" yaml:"enabled"`
+	PasswordSignup           passwordSignup                     `json:"password_signup,omitempty" yaml:"password_signup"`
+	EmailVerificationTTL     string                             `json:"email_verification_ttl" yaml:"email_verification_ttl"`
+	EmailDelivery            *emailDeliveryResource             `json:"email_delivery,omitempty"`
+	PasswordResetTTL         string                             `json:"password_reset_ttl" yaml:"password_reset_ttl"`
+}
+
+// challengeTokenDisclosureConstraint accepts only the disabled deployment-resource value.
+// It has no native configuration or runtime representation.
+type challengeTokenDisclosureConstraint struct{}
+
+func (*challengeTokenDisclosureConstraint) UnmarshalJSON(data []byte) error {
+	if !bytes.Equal(bytes.TrimSpace(data), []byte("false")) {
+		return errChallengeTokenDisclosure
+	}
+	return nil
 }
 
 type emailDeliveryResource struct {
