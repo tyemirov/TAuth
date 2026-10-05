@@ -84,7 +84,7 @@
               - ls
               - --all
               - --quiet
-              - --filter=label=com.docker.compose.project=mprlab-nginx-gateway
+              - "--filter=volume={{ tauth_cutover_volume }}"
               - --filter=label=com.docker.compose.service=tauth-api
           register: tauth_cutover_source
           changed_when: false

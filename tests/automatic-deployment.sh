@@ -26,7 +26,7 @@ docker run --rm --entrypoint=/bin/sh --mount "type=volume,src=$volume,dst=/data"
 # The previous service is a controlled dependency. Docker, Ansible, migration, and the new service are real.
 source_container="$(docker run --detach --network=none \
   --entrypoint='sh' \
-  --label com.docker.compose.project=mprlab-nginx-gateway \
+  --label com.docker.compose.project=mprlab-tauth-runtime \
   --label com.docker.compose.service=tauth-api \
   --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$test_root/source.yaml,dst=/config/config.yml,readonly" \
