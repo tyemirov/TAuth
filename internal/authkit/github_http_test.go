@@ -41,7 +41,7 @@ func TestGitHubHTTPStart(t *testing.T) {
 	users := web.NewInMemoryUsers()
 	refresh := NewMemoryRefreshTokenStore()
 	nonces := NewMemoryNonceStore(time.Minute)
-	MountAuthRoutes(router, registry, users, refresh, nonces)
+	MountAuthRoutes(router, registry, users, refresh, nonces, NewMemoryPasswordCredentialStore())
 	login, err := NewGitHubLogin(NewOAuthBrowserSessions(registry, users, refresh, nonces, NewMemoryPasswordCredentialStore()), NewMemoryGitHubTransactionStore(), NewGitHubProvider(http.DefaultTransport), nil)
 	if err != nil {
 		t.Fatal(err)

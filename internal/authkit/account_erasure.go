@@ -108,8 +108,8 @@ func erasureRepresentation(job databaseAccountErasure) gin.H {
 	return gin.H{"operation_id": job.OperationID, "state": job.State, "reason": job.Reason, "created_at": time.Unix(job.CreatedUnix, 0).UTC(), "updated_at": time.Unix(job.UpdatedUnix, 0).UTC(), "expires_at": expires}
 }
 
-func mountAccountErasureRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, credentials PasswordCredentialStore, refresh RefreshTokenStore, oauth OAuthGrantRevoker) {
-	accounts, _ := credentials.(*DatabaseUserStore)
+func mountAccountErasureRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, accountStore AccountManagementStore, refresh RefreshTokenStore, oauth OAuthGrantRevoker) {
+	accounts, _ := accountStore.(*DatabaseUserStore)
 	provider, _ := oauth.(AccountProviderRevoker)
 	coordinator, coordinatorErr := NewAccountErasureCoordinator(accounts, users, refresh, oauth, provider)
 	tenant := func(request *gin.Context) (string, bool) {

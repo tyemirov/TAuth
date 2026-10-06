@@ -102,6 +102,13 @@ func (store *MemoryPasswordCredentialStore) UpsertPasswordCredential(ctx context
 	if previous, exists := store.tenants[tenantID][normalizedCredential.userEmail]; exists {
 		normalizedCredential.accountID = previous.accountID
 	}
+	key := identityKey(accountProviderPassword, normalizedCredential.userEmail)
+	if identity, exists := store.identities[tenantID][key]; exists {
+		if normalizedCredential.accountID != "" && normalizedCredential.accountID != identity.accountID {
+			return ErrAccountExists
+		}
+		normalizedCredential.accountID = identity.accountID
+	}
 	if normalizedCredential.accountID == "" {
 		id, err := store.newOpaqueAccountIDLocked(tenantID)
 		if err != nil {
@@ -117,10 +124,10 @@ func (store *MemoryPasswordCredentialStore) UpsertPasswordCredential(ctx context
 	if account.state != accountStateActive {
 		return ErrAccountNotActive
 	}
-	key := identityKey(accountProviderPassword, normalizedCredential.userEmail)
-	if previous, exists := store.identities[tenantID][key]; exists && previous.accountID != normalizedCredential.accountID {
-		return ErrAccountExists
+	if !account.displayNameOverride {
+		account.displayName = normalizedCredential.displayName
 	}
+	account.avatarURL = normalizedCredential.avatarURL
 	store.identities[tenantID][key] = accountIdentityRecord{accountID: normalizedCredential.accountID, provider: accountProviderPassword, providerID: normalizedCredential.userEmail}
 	store.tenants[tenantID][normalizedCredential.userEmail] = normalizedCredential
 	return nil

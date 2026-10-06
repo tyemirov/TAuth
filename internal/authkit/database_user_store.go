@@ -279,8 +279,8 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 		LastUpdatedUnix: now.Unix(),
 	}
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Reserve the writer before resolving the current credential binding.
-		if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id IN (SELECT account_id FROM password_credentials WHERE tenant_id = ? AND user_email = ?)", tenantID, tenantID, record.UserEmail).Update("last_updated_unix", gorm.Expr("last_updated_unix")).Error; err != nil {
+		// Reserve the writer before resolving credential and provider bindings.
+		if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id IN (SELECT account_id FROM password_credentials WHERE tenant_id = ? AND user_email = ? UNION SELECT account_id FROM account_identities WHERE tenant_id = ? AND provider = ? AND provider_id = ?)", tenantID, tenantID, record.UserEmail, tenantID, accountProviderPassword, record.UserEmail).Update("last_updated_unix", gorm.Expr("last_updated_unix")).Error; err != nil {
 			return err
 		}
 		var previous passwordCredentialRecord
@@ -289,10 +289,18 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 			return lookupErr
 		}
 		if lookupErr == nil && previous.AccountID != "" {
-			if err := lockActiveAccount(ctx, tx, tenantID, previous.AccountID); err != nil {
-				return err
-			}
 			record.AccountID = previous.AccountID
+		}
+		var retained databaseAccountIdentityRecord
+		identityErr := tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, accountProviderPassword, record.UserEmail).Take(&retained).Error
+		if identityErr != nil && !errors.Is(identityErr, gorm.ErrRecordNotFound) {
+			return identityErr
+		}
+		if identityErr == nil {
+			if record.AccountID != "" && record.AccountID != retained.AccountID {
+				return ErrAccountExists
+			}
+			record.AccountID = retained.AccountID
 		}
 		if record.AccountID == "" {
 			id, err := store.newUniqueOpaqueAccountID(ctx, tx, tenantID)
@@ -304,8 +312,17 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 			if err = tx.Create(&account).Error; err != nil {
 				return err
 			}
-		} else if err := validateOpaqueAccountID(record.AccountID); err != nil {
-			return err
+		} else {
+			if err := validateOpaqueAccountID(record.AccountID); err != nil {
+				return err
+			}
+			if err := lockActiveAccount(ctx, tx, tenantID, record.AccountID); err != nil {
+				return err
+			}
+			if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ?", tenantID, record.AccountID).
+				Updates(map[string]any{"user_display_name": gorm.Expr("COALESCE(display_name_override, ?)", record.UserDisplayName), "user_avatar_url": record.UserAvatarURL, "last_updated_unix": now.Unix()}).Error; err != nil {
+				return err
+			}
 		}
 		account, err := store.accountProfileWithTx(ctx, tx, tenantID, record.AccountID)
 		if err != nil {

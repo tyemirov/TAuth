@@ -297,20 +297,24 @@ type OAuthGrantRevoker interface {
 	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
 }
 
-// MountAuthRoutes registers /auth endpoints and session helpers.
-func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
-	MountAuthRoutesWithPassword(router, registry, users, refreshTokens, nonces, NewMemoryPasswordCredentialStore(), nil, nil)
+// MountAuthRoutes registers /auth endpoints with explicit canonical account storage.
+func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore) {
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, nil, nil, nil)
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
 func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
+	accountStore, _ := passwordCredentials.(AccountManagementStore)
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, emailChallengeSender, oauthGrants)
+}
+
+func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
 	router = router.Group("", boundedAuthBody)
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
 	}
-	accountStore, _ := passwordCredentials.(AccountManagementStore)
-	mountAccountErasureRoutes(router, registry, users, passwordCredentials, refreshTokens, oauthGrants)
+	mountAccountErasureRoutes(router, registry, users, accountStore, refreshTokens, oauthGrants)
 	if nonces == nil {
 		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
 			return registry.Config(tenantID).NonceTTL
