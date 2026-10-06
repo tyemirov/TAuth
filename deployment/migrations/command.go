@@ -199,5 +199,6 @@ func NewCommand() *cobra.Command {
 	command.AddCommand(contribution)
 	command.AddCommand(newCutoverCommand())
 	command.AddCommand(newConsoleGoogleClientCommand())
+	command.AddCommand(newApplicationSubjectsCommand())
 	return command
 }

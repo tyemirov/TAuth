@@ -23,6 +23,8 @@ func init() {
 	case "mprlab-gateway":
 		if os.Args[1] == "version" {
 			fmt.Println(`{"version":"fixture","source_commit":"fixture","platform":"fixture","lifecycle_contract":4}`)
+		} else {
+			fmt.Println("fixture gateway:", strings.Join(os.Args[1:], " "))
 		}
 	case "ansible-playbook":
 		if os.Getenv("TAUTH_ROLLOUT_ALL_PHASES") == "1" {
@@ -69,6 +71,9 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = writeFile(filepath.Join(filepath.Dir(planPath), "20261005-console-google-client.json"), []byte(`{"expected_client_id":"fixture-old","client_id":"fixture-new.apps.googleusercontent.com","console_origin":"https://console.example.com"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err = writeFile(filepath.Join(filepath.Dir(planPath), "20261006-application-subjects.json"), []byte(`{"id":"20261006-application-subjects","schema":"application-subjects"}`)); err != nil {
 		t.Fatal(err)
 	}
 	imagePath := filepath.Join(releaseRoot, "image.oci.tar")
@@ -118,7 +123,9 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	}
 	oldPhase := strings.Index(string(output), "/deployment/rollout/cutover.yml")
 	newPhase := strings.Index(string(output), "/deployment/rollout/console-google-client.yml")
-	if oldPhase < 0 || newPhase <= oldPhase {
+	subjectPhase := strings.Index(string(output), "/deployment/rollout/application-subjects.yml")
+	deployPhase := strings.Index(string(output), "fixture gateway: app-deploy")
+	if oldPhase < 0 || newPhase <= oldPhase || subjectPhase <= newPhase || deployPhase <= subjectPhase {
 		t.Fatalf("independent migration phase absent or out of order: %s", output)
 	}
 

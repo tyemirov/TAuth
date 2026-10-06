@@ -1,0 +1,132 @@
+---
+- name: Apply the public application subject migration
+  hosts: gateway
+  gather_facts: false
+  any_errors_fatal: true
+  become_flags: -H -S -n -k
+  environment:
+    DOCKER_CONTEXT: "{{ mprlab_docker_context }}"
+  vars:
+    tauth_cutover_root: "{{ mprlab_runtime_root }}/application-migrations/tauth/{{ tauth_cutover_id }}"
+    tauth_cutover_mount: "type=bind,src={{ tauth_cutover_root }},dst=/cutover,readonly"
+  pre_tasks:
+    - name: Require one selected migration destination
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - tauth_cutover_id == "20261006-application-subjects"
+        quiet: true
+    - name: Verify fresh host operation authority
+      ansible.builtin.command:
+        argv: [id, -u]
+      changed_when: false
+    - name: Inspect the exact migration artifact cache
+      ansible.builtin.command:
+        argv: ["{{ mprlab_docker_cli }}", image, ls, --quiet, --no-trunc, "{{ tauth_cutover_image }}"]
+      register: tauth_cutover_cached_image
+      changed_when: false
+    - name: Pull the absent published migration artifact
+      when: tauth_cutover_cached_image.stdout_lines | length == 0
+      ansible.builtin.command:
+        argv: ["{{ mprlab_docker_cli }}", pull, "{{ tauth_cutover_image }}"]
+      changed_when: false
+    - name: Prepare the application migration directory
+      ansible.builtin.file:
+        path: "{{ tauth_cutover_root }}"
+        state: directory
+    - name: Stage the public sealed migration plan
+      ansible.builtin.copy:
+        src: "{{ tauth_cutover_plan }}"
+        dest: "{{ tauth_cutover_root }}/plan.json"
+    - name: Stage the persistent service encryption key
+      no_log: true
+      ansible.builtin.copy:
+        src: "{{ tauth_cutover_key }}"
+        dest: "{{ tauth_cutover_root }}/key"
+        force: false
+    - name: Read the persistent encryption key reference
+      no_log: true
+      ansible.builtin.slurp:
+        src: "{{ tauth_cutover_root }}/key"
+      register: tauth_cutover_persistent_key
+    - name: Reject a different persistent encryption key
+      no_log: true
+      ansible.builtin.assert:
+        that: (tauth_cutover_persistent_key.content | b64decode) == lookup('ansible.builtin.file', tauth_cutover_key)
+        quiet: true
+    - name: Inspect the durable migration receipt
+      ansible.builtin.command:
+        argv:
+          - "{{ mprlab_docker_cli }}"
+          - run
+          - --rm
+          - --network=none
+          - --entrypoint=/usr/local/bin/tauth-migrate
+          - --mount
+          - "type=volume,src={{ tauth_cutover_volume }},dst=/data,readonly"
+          - --mount
+          - "{{ tauth_cutover_mount }}"
+          - "{{ tauth_cutover_image }}"
+          - application-subjects
+          - --database=sqlite:///data/tauth.db
+          - --key-file=/cutover/key
+          - --plan=/cutover/plan.json
+          - --status
+      register: tauth_cutover_status
+      changed_when: false
+  tasks:
+    - name: Execute the pending timestamped migration
+      when: not (tauth_cutover_status.stdout | from_json).completed
+      block:
+        - name: Locate active TAuth database writers
+          ansible.builtin.command:
+            argv:
+              - "{{ mprlab_docker_cli }}"
+              - container
+              - ls
+              - --quiet
+              - "--filter=volume={{ tauth_cutover_volume }}"
+              - --filter=label=com.docker.compose.service=tauth-api
+          register: tauth_cutover_tauth_writers
+          changed_when: false
+        - name: Locate all current database writers
+          ansible.builtin.command:
+            argv: ["{{ mprlab_docker_cli }}", container, ls, --quiet, "--filter=volume={{ tauth_cutover_volume }}"]
+          register: tauth_cutover_writers
+          changed_when: false
+        - name: Reject an unrelated active database writer
+          ansible.builtin.assert:
+            that: tauth_cutover_writers.stdout_lines | difference(tauth_cutover_tauth_writers.stdout_lines) | length == 0
+            quiet: true
+        - name: Stop existing TAuth database writers
+          ansible.builtin.command:
+            argv: ["{{ mprlab_docker_cli }}", stop, "{{ item }}"]
+          loop: "{{ tauth_cutover_tauth_writers.stdout_lines }}"
+        - name: Inspect the stopped database volume
+          ansible.builtin.command:
+            argv: ["{{ mprlab_docker_cli }}", container, ls, --quiet, "--filter=volume={{ tauth_cutover_volume }}"]
+          register: tauth_cutover_remaining_writers
+          changed_when: false
+        - name: Require no active database writers
+          ansible.builtin.assert:
+            that: tauth_cutover_remaining_writers.stdout_lines | length == 0
+            quiet: true
+        - name: Back up and migrate the stopped database
+          ansible.builtin.command:
+            argv:
+              - "{{ mprlab_docker_cli }}"
+              - run
+              - --rm
+              - --network=none
+              - --entrypoint=/usr/local/bin/tauth-migrate
+              - --mount
+              - "type=volume,src={{ tauth_cutover_volume }},dst=/data"
+              - --mount
+              - "{{ tauth_cutover_mount }}"
+              - "{{ tauth_cutover_image }}"
+              - application-subjects
+              - --database=sqlite:///data/tauth.db
+              - --key-file=/cutover/key
+              - --plan=/cutover/plan.json
+          register: tauth_cutover_result
+          changed_when: tauth_cutover_result.rc == 0

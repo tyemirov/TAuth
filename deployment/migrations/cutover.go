@@ -400,7 +400,12 @@ func applyCutover(ctx context.Context, databaseURL string, plan CutoverPlan, key
 	accountID := base64.RawURLEncoding.EncodeToString(accountBytes)
 	now := time.Now().UTC()
 	err = stageDB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Table("accounts").Create(map[string]any{"tenant_id": controlplane.ConsoleTenantID, "account_id": accountID, "user_email": ownerIdentity.UserEmail, "user_display_name": ownerIdentity.UserDisplayName, "user_avatar_url": "", "account_state": "active", "user_roles": "[]", "created_at_unix": now.Unix(), "last_updated_unix": now.Unix()}).Error; err != nil {
+		account := map[string]any{"tenant_id": controlplane.ConsoleTenantID, "account_id": accountID, "user_email": ownerIdentity.UserEmail, "user_display_name": ownerIdentity.UserDisplayName, "user_avatar_url": "", "account_state": "active", "user_roles": "[]", "created_at_unix": now.Unix(), "last_updated_unix": now.Unix()}
+		// This timestamped import can precede the application subject migration on an existing database.
+		if tx.Migrator().HasColumn("accounts", "user_id") {
+			account["user_id"] = accountID
+		}
+		if err := tx.Table("accounts").Create(account).Error; err != nil {
 			return err
 		}
 		return tx.Table("account_identities").Create(map[string]any{"tenant_id": controlplane.ConsoleTenantID, "provider": "google", "provider_id": ownerIdentity.ProviderID, "account_id": accountID, "created_at_unix": now.Unix(), "last_updated_unix": now.Unix()}).Error
