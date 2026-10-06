@@ -5,6 +5,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B130] (P2) Run the local frontend on the native Docker platform.
+  Goal:
+  Use the native container architecture for the local ghttp frontend.
+  Evidence:
+  The local lifecycle started an AMD64 frontend on an ARM64 Docker daemon and showed a platform mismatch warning.
+  The published ghttp image includes both architectures, but the local Compose service did not select a platform.
+  Requirements:
+  - Select the frontend platform from the Docker daemon.
+  - Keep the local stack usable on ARM64 and AMD64 hosts.
+  Validation:
+  - Verify the actual frontend architecture through the local lifecycle command.
+  - Run `make test-local-lifecycle` and `make ci`.
+  Deliverables:
+  The local launcher supplies the Docker daemon platform to the frontend Compose service.
+  The lifecycle test compares the selected container manifest with the Docker daemon platform.
+  A controlled AMD64 container reproduced the mismatch and verified rejection by the corrected architecture assertion.
+  The focused lifecycle test and final CI verified `linux/arm64` without a platform warning.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `local/compose.yml`, `local/stack.sh`, `tests/local-lifecycle.sh`.
+
 - [x] [B129] (P1) Include the application-subject plan in release inputs.
   Goal:
   Supply each necessary migration plan from source control to the release.
