@@ -47,7 +47,7 @@ are public integration surfaces.
 | POST   | `/auth/password/verify-email` | Verify a signup challenge, activate the account, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/password/reset/start` | Start a password reset with a timing-masked accepted response | `202` JSON challenge metadata |
 | POST   | `/auth/password/reset/complete` | Complete reset, rotate password, revoke account refresh sessions, issue cookies | `200` JSON `{ user_id, user_email, ... }` |
-| POST   | `/auth/account/password/change` | Authenticated password rotation for opaque account sessions | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/account/password/change` | Authenticated password rotation through the stored account relation | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/password/link/start` | Start linking a password identity to the current account | `202` JSON challenge metadata |
 | POST   | `/auth/account/password/link/verify` | Complete password identity linking | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/google/link` | Link a verified Google identity to the current account | `200` JSON `{ user_id, user_email, ... }` |
@@ -132,16 +132,20 @@ Apple login is tenant-enabled with `apple_oauth.enabled: true`. It uses a provid
 4. TAuth signs an ES256 Apple client-secret JWT using the configured Team ID, Key ID, Services ID, and PKCS8 ECDSA private key, then exchanges the authorization code at Apple’s token endpoint.
 5. The returned Apple ID token is validated against Apple JWKS, issuer `https://appleid.apple.com`, tenant `client_id` audience, expiration, verified email, and the nonce stored at `/auth/apple/start`.
 6. `allowed_users` applies to the Apple email the same way it applies to Google and password login.
-7. Without account management, the session subject is `apple:<sub>` and the application user profile is upserted through `UserStore.UpsertProviderUser`. With account management, `apple:<sub>` resolves through the generic provider-identity store and first login creates an active account.
+7. Resolve the verified Apple subject through its stored provider binding to the persistent account.
+   Keep the same public user ID in either account-management state.
 8. Session JWT and refresh cookie issuance then uses the same finalizer as other login methods.
 
 TAuth does not expose Apple access tokens to JavaScript and does not store Apple API refresh tokens.
 
 ### 3.6 Email/password accounts
 
-Password authentication is tenant-enabled with `password_auth.enabled: true`. Account management is separately gated by `account_management.enabled`; when enabled, TAuth uses a persisted tenant-scoped opaque 128-bit base64url value as the session subject and stores provider identities separately.
+Password authentication is tenant-enabled with `password_auth.enabled: true`.
+Each account has one immutable public user ID and one internal opaque account ID.
+`account_management.enabled` controls account operations. It does not change the public session subject.
+See the [stable application user ID contract](docs/application-subjects.md).
 
-1. Seeded password users continue to authenticate through `POST /auth/password/login`. Without account management, the session subject remains `email:<normalized-email>`. With account management, verified credentials return their linked bare opaque account ID.
+1. Authenticate seeded password users through `POST /auth/password/login` and return their immutable public user IDs.
 2. Public signup is gated by `account_management.password_signup.enabled`.
 3. `POST /auth/password/signup` creates a pending account and a single-use email verification challenge. TAuth stores the password hash and challenge hash.
 4. TAuth sends the public verification link to Pinguin. Pinguin queues the email for the configured tenant.
@@ -149,8 +153,8 @@ Password authentication is tenant-enabled with `password_auth.enabled: true`. Ac
 6. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard cookies.
 7. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified accounts receive a reset challenge.
 8. `POST /auth/password/reset/complete` consumes the reset challenge, changes the password hash, revokes account sessions, and issues fresh cookies.
-9. Authenticated `/auth/account/*` endpoints require a bare opaque account-ID session. They support password and identity management.
-10. Google and Apple login also use account management. A linked provider identity resolves to its account.
+9. Resolve the authenticated public subject to its internal opaque account ID before a permitted account operation.
+10. Resolve each verified provider identity through its stored account binding.
 
 ### 3.7 Browser helper handshake
 
@@ -311,7 +315,8 @@ type AccountManagementStore interface {
 
 - Swap `UserStore` for a production datastore (e.g., Postgres) while keeping the auth kit isolated from application models.
 - `PasswordCredentialStore` stores bcrypt hashes separately from refresh tokens while returning profiles that flow into the same session finalizer.
-- `AccountManagementStore` owns persisted opaque account IDs, linked identities, single-use challenges, account state, and account-level operations while preserving the existing cookie/JWT session model. Provider identities use explicit `provider` plus `provider_id` pairs such as `google:<sub>` and `apple:<sub>`.
+- `AccountManagementStore` owns the public user ID, internal opaque account ID, provider bindings, challenges, account state, and account operations.
+  Each provider binding stores its provider name and verified subject separately.
 - Implement a custom `RefreshTokenStore` (e.g., Redis, DynamoDB) by reusing the hashing helpers to maintain compatibility.
 - Downstream services can read `auth_claims` and rely on `JwtCustomClaims` to authorize domain-specific operations.
 
@@ -454,7 +459,8 @@ Validation rules baked into the loader:
 - Enabled Apple providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and HTTPS callback URI.
 - Optional endpoint overrides support local provider tests. These overrides must be absolute HTTP(S) URLs. Production overrides must use HTTPS.
 - `password_auth.enabled` gates `/auth/password/login`. Each configured user requires a normalized email and a bcrypt hash.
-- `account_management.enabled` gates persisted account IDs and account routes. Public signup also requires `password_signup.enabled`.
+- `account_management.enabled` gates account operations. Persistent identity does not depend on this setting.
+  Public signup also requires `password_signup.enabled`.
 - Production account management requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
 - Account management requires email delivery. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments. HTTP responses contain no challenge tokens. Tests use an injected email sender.
 - Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
@@ -514,12 +520,16 @@ CREATE TABLE IF NOT EXISTS password_credentials (
 );
 ```
 
-When account management is enabled, account state and identity links live in separate tables. `accounts.account_id` is generated once as a 128-bit base64url value and is never derived from tenant, email, provider, provider subject material, or a `user_id` prefix.
+Account state and identity links use persistent tables in either account-management state.
+`accounts.account_id` is an internal opaque 128-bit base64url value.
+`accounts.user_id` is the immutable public subject, unique within its tenant.
+New accounts receive opaque public subjects. The deployment migration preserves existing public subjects.
 
 ```sql
 CREATE TABLE IF NOT EXISTS accounts (
     tenant_id TEXT NOT NULL,
     account_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
     user_email TEXT NOT NULL,
     user_display_name TEXT NOT NULL,
     user_avatar_url TEXT NOT NULL,
@@ -527,7 +537,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     user_roles TEXT NOT NULL,
     created_at_unix BIGINT NOT NULL,
     last_updated_unix BIGINT NOT NULL,
-    PRIMARY KEY (tenant_id, account_id)
+    PRIMARY KEY (tenant_id, account_id),
+    UNIQUE (tenant_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS account_identities (
@@ -573,7 +584,14 @@ The server checks required provider identities before this operation.
 The same completion contract applies when the user has existing consent.
 A successful completion consumes the request once. A repeated submission cannot issue another authorization code.
 
-`DatabaseRefreshTokenStore` and `DatabaseUserStore` parse the database URL to select a GORM dialector (`postgres` or the CGO-free `github.com/glebarez/sqlite`), silence default logging, auto-migrate their schemas, and tag errors with context (`refresh_store.*` / `user_store.*`) for observability. For SQLite, only triple-slash absolute paths (`sqlite:///data/tauth.db`) or opaque memory URLs (`sqlite://file::memory:?cache=shared`) are accepted; host-prefixed forms such as `sqlite://file:/data/tauth.db` are rejected. Shared helpers ensure memory and persistent stores derive token IDs and hashes identically.
+`DatabaseRefreshTokenStore` and `DatabaseUserStore` select the GORM dialector from the database URL.
+They use `postgres` or the CGO-free `github.com/glebarez/sqlite` and include operation context in errors.
+The user store creates the current schema for a fresh database.
+An existing unmigrated or inconsistent application-subject relation prevents startup.
+The timestamped deployment migration owns the conversion of existing identity data.
+SQLite accepts absolute paths such as `sqlite:///data/tauth.db` and memory URLs such as `sqlite://file::memory:?cache=shared`.
+It rejects host-prefixed forms such as `sqlite://file:/data/tauth.db`.
+Shared helpers keep token ID and hash derivation consistent across stores.
 
 ## 7. Security Considerations
 
