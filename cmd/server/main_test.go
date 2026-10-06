@@ -859,7 +859,14 @@ func TestSeedPasswordUsersLoadsConfiguredCredentials(testingHandle *testing.T) {
 	if profile.UserEmail != "user@example.com" || profile.DisplayName != "Password User" {
 		testingHandle.Fatalf("unexpected password profile: %#v", profile)
 	}
-	email, display, avatarURL, roles, profileErr := userStore.GetUserProfile(context.Background(), "alpha", "email:user@example.com")
+	account, accountErr := passwordStore.EnsurePasswordAccount(context.Background(), "alpha", "user@example.com")
+	if accountErr != nil {
+		testingHandle.Fatalf("expected seeded password account: %v", accountErr)
+	}
+	if account.UserID == "" || profile.AccountID != account.AccountID {
+		testingHandle.Fatalf("password credential account differs from seeded account: credential=%#v account=%#v", profile, account)
+	}
+	email, display, avatarURL, roles, profileErr := userStore.GetUserProfile(context.Background(), "alpha", account.UserID)
 	if profileErr != nil {
 		testingHandle.Fatalf("expected seeded user profile: %v", profileErr)
 	}

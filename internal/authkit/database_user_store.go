@@ -122,7 +122,8 @@ func (passwordCredentialRecord) TableName() string {
 }
 
 type databaseAccountRecord struct {
-	TenantID            string   `gorm:"column:tenant_id;primaryKey"`
+	UserID              string   `gorm:"column:user_id;not null;uniqueIndex:idx_account_public_subject"`
+	TenantID            string   `gorm:"column:tenant_id;primaryKey;uniqueIndex:idx_account_public_subject"`
 	AccountID           string   `gorm:"column:account_id;primaryKey"`
 	UserEmail           string   `gorm:"column:user_email;not null"`
 	UserDisplayName     string   `gorm:"column:user_display_name;not null"`
@@ -171,6 +172,9 @@ func (databaseAccountChallengeRecord) TableName() string {
 
 // NewDatabaseUserStore constructs a DatabaseUserStore backed by the provided database URL.
 func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUserStore, error) {
+	if err := guardApplicationSubjectSchema(ctx, databaseURL); err != nil {
+		return nil, err
+	}
 	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
 	if openErr != nil {
 		return nil, openErr
@@ -185,36 +189,10 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 		now:                  time.Now,
 		passwordHashComparer: bcrypt.CompareHashAndPassword,
 	}
-	if migrationErr := store.ensureOpaqueAccountIDMigration(ctx); migrationErr != nil {
-		return nil, migrationErr
+	if mappingErr := store.validateApplicationSubjects(ctx); mappingErr != nil {
+		return nil, mappingErr
 	}
 	return store, nil
-}
-
-// UpsertGoogleUser inserts or updates a Google-authenticated user profile.
-func (store *DatabaseUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	return store.UpsertProviderUser(ctx, tenantID, "google", googleSub, userEmail, userDisplayName, userAvatarURL)
-}
-
-// UpsertProviderUser inserts or updates an external-provider user profile.
-func (store *DatabaseUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
-	normalizedProviderID := strings.TrimSpace(providerID)
-	if normalizedProvider == "" || normalizedProviderID == "" {
-		return "", nil, fmt.Errorf("%s.upsert_provider.%s: invalid_provider_identity", userStoreErrorPrefix, store.driverLabel)
-	}
-	applicationUserID := normalizedProvider + ":" + normalizedProviderID
-	return store.upsertUserProfile(ctx, tenantID, applicationUserID, userEmail, userDisplayName, userAvatarURL)
-}
-
-// UpsertPasswordUser inserts or updates an email/password-authenticated user profile.
-func (store *DatabaseUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	normalizedEmail, emailErr := normalizePasswordEmail(userEmail)
-	if emailErr != nil {
-		return "", nil, fmt.Errorf("%s.upsert_password.%s: %w", userStoreErrorPrefix, store.driverLabel, emailErr)
-	}
-	applicationUserID := passwordUserIDPrefix + normalizedEmail
-	return store.upsertUserProfile(ctx, tenantID, applicationUserID, normalizedEmail, userDisplayName, userAvatarURL)
 }
 
 // UpsertAccountUser inserts or updates a canonical account profile.
@@ -223,10 +201,14 @@ func (store *DatabaseUserStore) UpsertAccountUser(ctx context.Context, tenantID 
 	if emailErr != nil {
 		return "", nil, fmt.Errorf("%s.upsert_account.%s: %w", userStoreErrorPrefix, store.driverLabel, emailErr)
 	}
-	if strings.TrimSpace(accountID) == "" {
+	if validateOpaqueAccountID(accountID) != nil {
 		return "", nil, fmt.Errorf("%s.upsert_account.%s: empty_account_id", userStoreErrorPrefix, store.driverLabel)
 	}
-	return store.upsertUserProfile(ctx, tenantID, accountID, normalizedEmail, userDisplayName, userAvatarURL)
+	profile, err := store.ResolveAccountProfile(ctx, tenantID, accountID)
+	if err != nil {
+		return "", nil, err
+	}
+	return store.upsertUserProfile(ctx, tenantID, profile.UserID, normalizedEmail, userDisplayName, userAvatarURL)
 }
 
 func (store *DatabaseUserStore) upsertUserProfile(ctx context.Context, tenantID string, applicationUserID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
@@ -246,8 +228,8 @@ func (store *DatabaseUserStore) upsertUserProfile(ctx context.Context, tenantID 
 		if err := RequireActiveAccountWrite(ctx, tx, tenantID, applicationUserID); err != nil {
 			return err
 		}
-		if isAccountSessionID(applicationUserID) {
-			profile, err := store.accountProfileWithTx(ctx, tx, tenantID, applicationUserID)
+		{
+			profile, err := store.accountProfileForUserWithTx(ctx, tx, tenantID, applicationUserID)
 			if err != nil {
 				return err
 			}
@@ -287,7 +269,6 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 	record := passwordCredentialRecord{
 		TenantID:        tenantID,
 		UserEmail:       normalizedCredential.userEmail,
-		UserID:          passwordUserIDPrefix + normalizedCredential.userEmail,
 		AccountID:       normalizedCredential.accountID,
 		UserDisplayName: normalizedCredential.displayName,
 		UserAvatarURL:   normalizedCredential.avatarURL,
@@ -298,8 +279,8 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 		LastUpdatedUnix: now.Unix(),
 	}
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Reserve the writer before resolving the current credential binding.
-		if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id IN (SELECT account_id FROM password_credentials WHERE tenant_id = ? AND user_email = ?)", tenantID, tenantID, record.UserEmail).Update("last_updated_unix", gorm.Expr("last_updated_unix")).Error; err != nil {
+		// Reserve the writer before resolving credential and provider bindings.
+		if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id IN (SELECT account_id FROM password_credentials WHERE tenant_id = ? AND user_email = ? UNION SELECT account_id FROM account_identities WHERE tenant_id = ? AND provider = ? AND provider_id = ?)", tenantID, tenantID, record.UserEmail, tenantID, accountProviderPassword, record.UserEmail).Update("last_updated_unix", gorm.Expr("last_updated_unix")).Error; err != nil {
 			return err
 		}
 		var previous passwordCredentialRecord
@@ -308,10 +289,56 @@ func (store *DatabaseUserStore) UpsertPasswordCredential(ctx context.Context, te
 			return lookupErr
 		}
 		if lookupErr == nil && previous.AccountID != "" {
-			if err := lockActiveAccount(ctx, tx, tenantID, previous.AccountID); err != nil {
+			record.AccountID = previous.AccountID
+		}
+		var retained databaseAccountIdentityRecord
+		identityErr := tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, accountProviderPassword, record.UserEmail).Take(&retained).Error
+		if identityErr != nil && !errors.Is(identityErr, gorm.ErrRecordNotFound) {
+			return identityErr
+		}
+		if identityErr == nil {
+			if record.AccountID != "" && record.AccountID != retained.AccountID {
+				return ErrAccountExists
+			}
+			record.AccountID = retained.AccountID
+		}
+		if record.AccountID == "" {
+			id, err := store.newUniqueOpaqueAccountID(ctx, tx, tenantID)
+			if err != nil {
 				return err
 			}
-			record.AccountID = previous.AccountID
+			record.AccountID = id
+			account := databaseAccountRecord{TenantID: tenantID, AccountID: id, UserID: id, UserEmail: record.UserEmail, UserDisplayName: record.UserDisplayName, UserAvatarURL: record.UserAvatarURL, AccountState: accountStateActive, UserRoles: roleList{defaultUserRole}, CreatedAtUnix: now.Unix(), LastUpdatedUnix: now.Unix()}
+			if err = tx.Create(&account).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := validateOpaqueAccountID(record.AccountID); err != nil {
+				return err
+			}
+			if err := lockActiveAccount(ctx, tx, tenantID, record.AccountID); err != nil {
+				return err
+			}
+			if err := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ?", tenantID, record.AccountID).
+				Updates(map[string]any{"user_display_name": gorm.Expr("COALESCE(display_name_override, ?)", record.UserDisplayName), "user_avatar_url": record.UserAvatarURL, "last_updated_unix": now.Unix()}).Error; err != nil {
+				return err
+			}
+		}
+		account, err := store.accountProfileWithTx(ctx, tx, tenantID, record.AccountID)
+		if err != nil {
+			return err
+		}
+		record.UserID = account.UserID
+		identity := databaseAccountIdentityRecord{TenantID: tenantID, Provider: accountProviderPassword, ProviderID: record.UserEmail, AccountID: record.AccountID, CreatedAtUnix: now.Unix(), LastUpdatedUnix: now.Unix()}
+		if err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&identity).Error; err != nil {
+			return err
+		}
+		var bound databaseAccountIdentityRecord
+		if err = tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, accountProviderPassword, record.UserEmail).Take(&bound).Error; err != nil {
+			return err
+		}
+		if bound.AccountID != record.AccountID {
+			return ErrAccountExists
 		}
 		return tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{
@@ -457,6 +484,7 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 		account := databaseAccountRecord{
 			TenantID:        tenantID,
 			AccountID:       accountID,
+			UserID:          accountID,
 			UserEmail:       credential.userEmail,
 			UserDisplayName: credential.displayName,
 			UserAvatarURL:   credential.avatarURL,
@@ -471,7 +499,7 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 		passwordRecord := passwordCredentialRecord{
 			TenantID:        tenantID,
 			UserEmail:       credential.userEmail,
-			UserID:          passwordUserIDPrefix + credential.userEmail,
+			UserID:          accountID,
 			AccountID:       accountID,
 			UserDisplayName: credential.displayName,
 			UserAvatarURL:   credential.avatarURL,
@@ -748,101 +776,29 @@ func (store *DatabaseUserStore) ChangePassword(ctx context.Context, tenantID str
 	return accountProfile, nil
 }
 
-// EnsurePasswordAccount links a verified seeded password credential to an account.
-func (store *DatabaseUserStore) EnsurePasswordAccount(ctx context.Context, tenantID string, userEmail string) (AccountProfile, error) {
-	normalizedEmail, emailErr := normalizePasswordEmail(userEmail)
-	if emailErr != nil {
+// EnsurePasswordAccount resolves the verified credential's canonical account.
+func (store *DatabaseUserStore) EnsurePasswordAccount(ctx context.Context, tenantID, userEmail string) (AccountProfile, error) {
+	email, err := normalizePasswordEmail(userEmail)
+	if err != nil {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
-	var profile AccountProfile
-	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var record passwordCredentialRecord
-		queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND user_email = ? AND email_verified = ?", tenantID, normalizedEmail, true).Take(&record).Error
-		if queryErr != nil {
-			if errors.Is(queryErr, gorm.ErrRecordNotFound) {
-				return ErrPasswordCredentialInvalid
-			}
-			return queryErr
-		}
-		accountID := strings.TrimSpace(record.AccountID)
-		if accountID == "" {
-			generatedAccountID, accountIDErr := store.newUniqueOpaqueAccountID(ctx, tx, tenantID)
-			if accountIDErr != nil {
-				return accountIDErr
-			}
-			accountID = generatedAccountID
-		} else if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
-			return validateErr
-		}
-		if strings.TrimSpace(record.AccountID) != "" {
-			if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
-				return err
-			}
-		}
-		now := store.now().UTC().Unix()
-		var existingAccount databaseAccountRecord
-		existingErr := tx.WithContext(ctx).Where("tenant_id = ? AND account_id = ?", tenantID, accountID).Take(&existingAccount).Error
-		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
-			return existingErr
-		}
-		if existingErr == nil {
-			if existingAccount.AccountState == accountStateDisabled {
-				return ErrAccountDisabled
-			}
-			if existingAccount.AccountState != accountStateActive {
-				return ErrAccountNotActive
-			}
-		}
-		account := databaseAccountRecord{
-			TenantID:        tenantID,
-			AccountID:       accountID,
-			UserEmail:       record.UserEmail,
-			UserDisplayName: record.UserDisplayName,
-			UserAvatarURL:   record.UserAvatarURL,
-			AccountState:    accountStateActive,
-			UserRoles:       roleList([]string{defaultUserRole}),
-			CreatedAtUnix:   now,
-			LastUpdatedUnix: now,
-		}
-		if createErr := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "account_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"user_email",
-				"user_display_name",
-				"user_avatar_url",
-				"last_updated_unix",
-			}),
-		}).Create(&account).Error; createErr != nil {
-			return createErr
-		}
-		identity := databaseAccountIdentityRecord{
-			TenantID:        tenantID,
-			Provider:        accountProviderPassword,
-			ProviderID:      normalizedEmail,
-			AccountID:       accountID,
-			CreatedAtUnix:   now,
-			LastUpdatedUnix: now,
-		}
-		if createErr := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "provider"}, {Name: "provider_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"account_id", "last_updated_unix"}),
-		}).Create(&identity).Error; createErr != nil {
-			return createErr
-		}
-		if updateErr := tx.Model(&passwordCredentialRecord{}).
-			Where("tenant_id = ? AND user_email = ?", tenantID, normalizedEmail).
-			Updates(map[string]interface{}{"account_id": accountID, "last_updated_unix": now}).Error; updateErr != nil {
-			return updateErr
-		}
-		accountProfile, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID)
-		if profileErr != nil {
-			return profileErr
-		}
-		profile = accountProfile
-		return nil
-	})
+	var credential passwordCredentialRecord
+	err = store.db.WithContext(ctx).Where("tenant_id = ? AND user_email = ? AND email_verified = ?", tenantID, email, true).Take(&credential).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return AccountProfile{}, ErrPasswordCredentialInvalid
+	}
 	if err != nil {
-		return AccountProfile{}, fmt.Errorf("%s.account_password_ensure.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
+		return AccountProfile{}, fmt.Errorf("account.password_lookup: %w", err)
+	}
+	profile, err := store.ResolveAccountProfile(ctx, tenantID, credential.AccountID)
+	if err != nil {
+		return AccountProfile{}, err
+	}
+	if profile.State == accountStateDisabled {
+		return AccountProfile{}, ErrAccountDisabled
+	}
+	if profile.State != accountStateActive {
+		return AccountProfile{}, ErrAccountNotActive
 	}
 	return profile, nil
 }
@@ -917,10 +873,14 @@ func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID
 		if createErr := tx.Create(&identity).Error; createErr != nil {
 			return createErr
 		}
+		accountProfile, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID)
+		if profileErr != nil {
+			return profileErr
+		}
 		credential := passwordCredentialRecord{
 			TenantID:        tenantID,
 			UserEmail:       challenge.UserEmail,
-			UserID:          passwordUserIDPrefix + challenge.UserEmail,
+			UserID:          accountProfile.UserID,
 			AccountID:       accountID,
 			UserDisplayName: challenge.UserDisplayName,
 			UserAvatarURL:   challenge.UserAvatarURL,
@@ -932,10 +892,6 @@ func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID
 		}
 		if createErr := tx.Select("*").Create(&credential).Error; createErr != nil {
 			return createErr
-		}
-		accountProfile, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID)
-		if profileErr != nil {
-			return profileErr
 		}
 		profile = accountProfile
 		return nil
@@ -1004,7 +960,7 @@ func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenan
 			return result.Error
 		}
 		if result.RowsAffected == 1 {
-			account := databaseAccountRecord{TenantID: tenantID, AccountID: candidateID, UserEmail: normalized.UserEmail, UserDisplayName: normalized.DisplayName, UserAvatarURL: normalized.AvatarURL, AccountState: accountStateActive, UserRoles: roleList{defaultUserRole}, CreatedAtUnix: now, LastUpdatedUnix: now}
+			account := databaseAccountRecord{TenantID: tenantID, AccountID: candidateID, UserID: candidateID, UserEmail: normalized.UserEmail, UserDisplayName: normalized.DisplayName, UserAvatarURL: normalized.AvatarURL, AccountState: accountStateActive, UserRoles: roleList{defaultUserRole}, CreatedAtUnix: now, LastUpdatedUnix: now}
 			return tx.Create(&account).Error
 		}
 		if err := tx.Where("tenant_id = ? AND provider = ? AND provider_id = ?", tenantID, normalized.Provider, normalized.Subject).Take(&record).Error; err != nil {
@@ -1012,7 +968,7 @@ func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenan
 		}
 		accountID = record.AccountID
 		result = tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStateActive).
-			Updates(map[string]interface{}{"user_email": normalized.UserEmail, "user_display_name": gorm.Expr("COALESCE(display_name_override, ?)", normalized.DisplayName), "user_avatar_url": normalized.AvatarURL, "last_updated_unix": now})
+			Updates(map[string]interface{}{"user_email": normalized.UserEmail, "user_display_name": gorm.Expr("COALESCE(display_name_override, CASE WHEN ? = '' THEN user_display_name ELSE ? END)", strings.TrimSpace(identity.DisplayName), normalized.DisplayName), "user_avatar_url": normalized.AvatarURL, "last_updated_unix": now})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -1187,6 +1143,7 @@ func (store *DatabaseUserStore) accountProfileWithTx(ctx context.Context, tx *go
 	}
 	return AccountProfile{
 		AccountID:   account.AccountID,
+		UserID:      account.UserID,
 		UserEmail:   account.UserEmail,
 		DisplayName: account.UserDisplayName,
 		AvatarURL:   account.UserAvatarURL,
@@ -1225,92 +1182,6 @@ func (store *DatabaseUserStore) updateAccountState(ctx context.Context, tenantID
 	}
 	if result.RowsAffected == 0 {
 		return ErrAccountNotActive
-	}
-	return nil
-}
-
-func (store *DatabaseUserStore) ensureOpaqueAccountIDMigration(ctx context.Context) error {
-	var migrationRecord schemaMigrationRecord
-	queryErr := store.db.WithContext(ctx).
-		Where(schemaMigrationLookupByName, accountIDMigrationRecordName).
-		Take(&migrationRecord).Error
-	if queryErr == nil && migrationRecord.Version == accountIDMigrationVersion {
-		return nil
-	}
-	if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("%s.account_id_migration_lookup.%s: %w", userStoreErrorPrefix, store.driverLabel, queryErr)
-	}
-	migrationErr := store.db.WithContext(ctx).Transaction(func(transactionHandle *gorm.DB) error {
-		if migrateErr := store.migrateOpaqueAccountIDs(ctx, transactionHandle); migrateErr != nil {
-			return migrateErr
-		}
-		record := schemaMigrationRecord{
-			StoreName: accountIDMigrationRecordName,
-			Version:   accountIDMigrationVersion,
-		}
-		return transactionHandle.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: schemaMigrationNameColumn}},
-			DoUpdates: clause.AssignmentColumns([]string{schemaMigrationVersionColumn}),
-		}).Create(&record).Error
-	})
-	if migrationErr != nil {
-		return fmt.Errorf("%s.account_id_migration.%s: %w", userStoreErrorPrefix, store.driverLabel, migrationErr)
-	}
-	return nil
-}
-
-func (store *DatabaseUserStore) migrateOpaqueAccountIDs(ctx context.Context, transactionHandle *gorm.DB) error {
-	var accounts []databaseAccountRecord
-	if findErr := transactionHandle.WithContext(ctx).Order("tenant_id, account_id").Find(&accounts).Error; findErr != nil {
-		return findErr
-	}
-	for _, account := range accounts {
-		nextAccountID, accountIDErr := store.newUniqueOpaqueAccountID(ctx, transactionHandle, account.TenantID)
-		if accountIDErr != nil {
-			return accountIDErr
-		}
-		if updateErr := store.updateAccountIDReferences(ctx, transactionHandle, account.TenantID, account.AccountID, nextAccountID); updateErr != nil {
-			return updateErr
-		}
-	}
-	return nil
-}
-
-func (store *DatabaseUserStore) updateAccountIDReferences(ctx context.Context, transactionHandle *gorm.DB, tenantID string, previousAccountID string, nextAccountID string) error {
-	if validateErr := validateOpaqueAccountID(nextAccountID); validateErr != nil {
-		return validateErr
-	}
-	if updateErr := transactionHandle.WithContext(ctx).Model(&databaseAccountRecord{}).
-		Where("tenant_id = ? AND account_id = ?", tenantID, previousAccountID).
-		Update("account_id", nextAccountID).Error; updateErr != nil {
-		return updateErr
-	}
-	if updateErr := transactionHandle.WithContext(ctx).Model(&databaseAccountIdentityRecord{}).
-		Where("tenant_id = ? AND account_id = ?", tenantID, previousAccountID).
-		Update("account_id", nextAccountID).Error; updateErr != nil {
-		return updateErr
-	}
-	if updateErr := transactionHandle.WithContext(ctx).Model(&passwordCredentialRecord{}).
-		Where("tenant_id = ? AND account_id = ?", tenantID, previousAccountID).
-		Update("account_id", nextAccountID).Error; updateErr != nil {
-		return updateErr
-	}
-	if updateErr := transactionHandle.WithContext(ctx).Model(&databaseAccountChallengeRecord{}).
-		Where("tenant_id = ? AND account_id = ?", tenantID, previousAccountID).
-		Update("account_id", nextAccountID).Error; updateErr != nil {
-		return updateErr
-	}
-	if updateErr := transactionHandle.WithContext(ctx).Model(&userProfileRecord{}).
-		Where("tenant_id = ? AND user_id = ?", tenantID, previousAccountID).
-		Update("user_id", nextAccountID).Error; updateErr != nil {
-		return updateErr
-	}
-	if transactionHandle.Migrator().HasTable(&refreshTokenRecord{}) {
-		if updateErr := transactionHandle.WithContext(ctx).Model(&refreshTokenRecord{}).
-			Where("tenant_id = ? AND user_id = ?", tenantID, previousAccountID).
-			Update("revoked_at_unix", store.now().UTC().Unix()).Error; updateErr != nil {
-			return updateErr
-		}
 	}
 	return nil
 }

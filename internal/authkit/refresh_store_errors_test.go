@@ -45,6 +45,9 @@ func TestRefreshTokenStoresShareSentinelErrors(t *testing.T) {
 				t.Fatalf("expected ErrRefreshTokenNotFound, got %v", err)
 			}
 
+			if persistent, ok := store.(*DatabaseRefreshTokenStore); ok {
+				seedApplicationSubject(t, persistent.db, "tenant-a", "user")
+			}
 			tokenID, opaque, issueErr := store.Issue(context.Background(), "tenant-a", "user", time.Now().Add(time.Minute).Unix(), "")
 			if issueErr != nil {
 				t.Fatalf("issue failed: %v", issueErr)

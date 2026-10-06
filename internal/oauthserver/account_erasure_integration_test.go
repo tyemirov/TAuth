@@ -17,6 +17,16 @@ import (
 )
 
 func TestAccountErasureHTTPOAuthActualPurge(t *testing.T) {
+	for _, migrated := range []bool{false, true} {
+		name := "new-account"
+		if migrated {
+			name = "retained-public-subject"
+		}
+		t.Run(name, func(t *testing.T) { testAccountErasureHTTPOAuthActualPurge(t, migrated) })
+	}
+}
+
+func testAccountErasureHTTPOAuthActualPurge(t *testing.T, migrated bool) {
 	ctx := context.Background()
 	databaseURL := "sqlite://" + filepath.Join(t.TempDir(), "erasure.db")
 	accounts, err := authkit.NewDatabaseUserStore(ctx, databaseURL)
@@ -49,7 +59,39 @@ func TestAccountErasureHTTPOAuthActualPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, user := range []string{profile.AccountID, "google:other-parent"} {
+	if migrated {
+		// The canonical fixture represents an account with a retained, previously issued application subject.
+		db, err := authkit.OpenControlDatabase(ctx, databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := db.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicID := "email:parent@example.com"
+		if err = db.Table("accounts").Where("tenant_id = ? AND account_id = ?", config.TenantID, profile.AccountID).Update("user_id", publicID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err = db.Table("password_credentials").Where("tenant_id = ? AND account_id = ?", config.TenantID, profile.AccountID).Update("user_id", publicID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err = raw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		profile, err = accounts.ResolveAccountProfile(ctx, config.TenantID, profile.AccountID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if profile.UserID != publicID || profile.UserID == profile.AccountID {
+			t.Fatal("public and internal identities were not separated", profile)
+		}
+	}
+	other, err := accounts.UpsertProviderAccount(ctx, config.TenantID, authkit.AccountProviderIdentity{Provider: "google", Subject: "other-parent", UserEmail: "other@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []string{profile.UserID, other.UserID} {
 		consent, err := oauth.SaveConsent(ctx, Consent{ConsentKey: ConsentKey{TenantID: config.TenantID, UserID: user, ClientID: testOAuthClient, Resource: testOAuthResource, Scope: testOAuthScope}, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
 		if err != nil {
 			t.Fatal(err)
@@ -96,14 +138,14 @@ func TestAccountErasureHTTPOAuthActualPurge(t *testing.T) {
 	}
 	for _, record := range []any{&databaseConsent{}, &databaseAuthorizationCode{}, &databaseOAuthRefreshToken{}} {
 		var count int64
-		if err := oauth.db.Model(record).Where("tenant_id = ? AND user_id = ?", config.TenantID, profile.AccountID).Count(&count).Error; err != nil || count != 0 {
+		if err := oauth.db.Model(record).Where("tenant_id = ? AND user_id = ?", config.TenantID, profile.UserID).Count(&count).Error; err != nil || count != 0 {
 			t.Fatalf("owned OAuth data retained: %d %v", count, err)
 		}
-		if err := oauth.db.Model(record).Where("tenant_id = ? AND user_id = ?", config.TenantID, "google:other-parent").Count(&count).Error; err != nil || count != 1 {
+		if err := oauth.db.Model(record).Where("tenant_id = ? AND user_id = ?", config.TenantID, other.UserID).Count(&count).Error; err != nil || count != 1 {
 			t.Fatalf("unrelated OAuth data changed: %d %v", count, err)
 		}
 	}
-	if _, err := oauth.SaveConsent(ctx, Consent{ConsentKey: ConsentKey{TenantID: config.TenantID, UserID: profile.AccountID}}); err == nil {
+	if _, err := oauth.SaveConsent(ctx, Consent{ConsentKey: ConsentKey{TenantID: config.TenantID, UserID: profile.UserID}}); err == nil {
 		t.Fatal("erased account consent recreated")
 	}
 }

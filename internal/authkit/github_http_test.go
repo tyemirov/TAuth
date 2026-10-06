@@ -41,7 +41,7 @@ func TestGitHubHTTPStart(t *testing.T) {
 	users := web.NewInMemoryUsers()
 	refresh := NewMemoryRefreshTokenStore()
 	nonces := NewMemoryNonceStore(time.Minute)
-	MountAuthRoutes(router, registry, users, refresh, nonces)
+	MountAuthRoutes(router, registry, users, refresh, nonces, NewMemoryPasswordCredentialStore())
 	login, err := NewGitHubLogin(NewOAuthBrowserSessions(registry, users, refresh, nonces, NewMemoryPasswordCredentialStore()), NewMemoryGitHubTransactionStore(), NewGitHubProvider(http.DefaultTransport), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -221,8 +221,16 @@ func TestGitHubHTTPPrivateEmailAndStableAccount(t *testing.T) {
 					if validateOpaqueAccountID(subject) != nil {
 						t.Fatal("noncanonical account subject")
 					}
-				} else if subject != "github:9007199254740993" {
+				} else if validateOpaqueAccountID(subject) != nil {
 					t.Fatalf("GitHub ID lost precision: %s", subject)
+				}
+				account, err := fixture.accounts.ResolveAccountForUser(context.Background(), "github", subject)
+				if err != nil {
+					t.Fatal(err)
+				}
+				identities, err := fixture.accounts.AccountIdentities(context.Background(), "github", account.AccountID)
+				if err != nil || len(identities) != 1 || identities[0].ProviderID != "9007199254740993" {
+					t.Fatalf("provider ID changed precision: %+v %v", identities, err)
 				}
 				fixture.provider.UserJSON = `{"id":9007199254740993,"login":"new-login","name":"New Name"}`
 				fixture.provider.EmailsJSON = `[{"email":"changed@example.com","primary":true,"verified":true}]`

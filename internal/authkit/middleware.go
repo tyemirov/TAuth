@@ -75,10 +75,6 @@ func RequireActiveAccountSession(registry TenantRegistry, accountStore AccountMa
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		if !isAccountSessionID(claims.GetUserID()) {
-			contextGin.Next()
-			return
-		}
 		if _, activeErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID()); activeErr != nil {
 			if isInactiveAccountSessionError(activeErr) {
 				clearCookie(contextGin, config, config.SessionCookieName, "/")

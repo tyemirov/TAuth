@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
-	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/pkg/oauthvalidator"
 )
 
@@ -79,26 +77,21 @@ func (sessions *OAuthBrowserSessions) ProviderIdentities(ctx context.Context, te
 	if !isAllowedUser(email, config.AllowedUsers) {
 		return nil, ErrRequiredIdentityMissing
 	}
-	var identities []AccountIdentity
-	if config.AccountManagementEnabled {
-		if sessions.accountStore == nil {
-			return nil, fmt.Errorf("oauth.identity.account_store_missing")
-		}
-		var err error
-		identities, err = sessions.accountStore.AccountIdentities(ctx, tenantID, userID)
-		if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrAccountNotActive) {
-			return nil, ErrRequiredIdentityMissing
-		}
-		if err != nil {
-			return nil, fmt.Errorf("oauth.identity.lookup: %w", err)
-		}
-	} else {
-		provider, providerID, found := strings.Cut(userID, ":")
-		if !found || provider != tenants.GitHubProvider {
-			return nil, ErrRequiredIdentityMissing
-		}
-		identities = []AccountIdentity{{provider, providerID}}
+	if sessions.accountStore == nil {
+		return nil, fmt.Errorf("oauth.identity.account_store_missing")
 	}
+	account, err := sessions.accountStore.ResolveAccountForUser(ctx, tenantID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("oauth.identity.account_subject: %w", err)
+	}
+	identities, err := sessions.accountStore.AccountIdentities(ctx, tenantID, account.AccountID)
+	if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrAccountNotActive) {
+		return nil, ErrRequiredIdentityMissing
+	}
+	if err != nil {
+		return nil, fmt.Errorf("oauth.identity.lookup: %w", err)
+	}
+
 	result := make(oauthvalidator.ProviderIdentities, 0)
 	for _, provider := range required {
 		found := false

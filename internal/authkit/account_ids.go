@@ -9,11 +9,9 @@ import (
 )
 
 const (
-	accountIDOpaqueByteLength    = 16
-	accountIDOpaqueStringLength  = 22
-	accountIDGenerationAttempts  = 8
-	accountIDMigrationRecordName = "user_store.opaque_account_ids"
-	accountIDMigrationVersion    = 2
+	accountIDOpaqueByteLength   = 16
+	accountIDOpaqueStringLength = 22
+	accountIDGenerationAttempts = 8
 )
 
 var (

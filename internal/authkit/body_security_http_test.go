@@ -11,7 +11,7 @@ import (
 
 func TestSecurityAuthBodyLimits(t *testing.T) {
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(newTestServerConfig()), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(newTestServerConfig()), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := httptest.NewServer(router)
 	defer server.Close()
 	for _, path := range []string{"/auth/google", "/auth/google/native", "/auth/apple/callback", "/auth/password/login"} {

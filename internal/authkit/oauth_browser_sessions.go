@@ -98,9 +98,6 @@ func (sessions *OAuthBrowserSessions) ActiveUser(ctx context.Context, tenantID s
 	if !exists {
 		return false, nil
 	}
-	if !config.AccountManagementEnabled && !isAccountSessionID(userID) {
-		return true, nil
-	}
 	_, profileErr := activeAccountProfileForSession(ctx, config, sessions.accountStore, tenantID, userID)
 	if isInactiveAccountSessionError(profileErr) {
 		return false, nil
@@ -202,7 +199,7 @@ func (sessions *OAuthBrowserSessions) LoginGoogle(
 }
 
 func (sessions *OAuthBrowserSessions) googleApplicationProfile(ctx context.Context, config ServerConfig, tenantID string, identity googleIdentity) (authenticatedSessionProfile, error) {
-	if config.AccountManagementEnabled {
+	{
 		if sessions.accountStore == nil {
 			return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_account_store")
 		}
@@ -210,15 +207,9 @@ func (sessions *OAuthBrowserSessions) googleApplicationProfile(ctx context.Conte
 			Provider: accountProviderGoogle, Subject: identity.Sub, UserEmail: identity.Email,
 			DisplayName: identity.DisplayName, AvatarURL: identity.AvatarURL,
 		}
-		account, found, accountErr := sessions.accountStore.AuthenticateProviderAccount(ctx, tenantID, providerIdentity)
+		account, accountErr := sessions.accountStore.UpsertProviderAccount(ctx, tenantID, providerIdentity)
 		if accountErr != nil {
 			return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_account_store: %w", accountErr)
-		}
-		if !found {
-			account, accountErr = sessions.accountStore.UpsertProviderAccount(ctx, tenantID, providerIdentity)
-			if accountErr != nil {
-				return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_account_store: %w", accountErr)
-			}
 		}
 		if account.State != accountStateActive {
 			return authenticatedSessionProfile{}, ErrOAuthBrowserLoginInvalid
@@ -232,16 +223,6 @@ func (sessions *OAuthBrowserSessions) googleApplicationProfile(ctx context.Conte
 			userDisplayName: account.DisplayName, userAvatarURL: account.AvatarURL, userRoles: roles,
 		}, nil
 	}
-	applicationUserID, roles, upsertErr := sessions.users.UpsertProviderUser(
-		ctx, tenantID, accountProviderGoogle, identity.Sub, identity.Email, identity.DisplayName, identity.AvatarURL,
-	)
-	if upsertErr != nil || strings.TrimSpace(applicationUserID) == "" {
-		return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_user_store")
-	}
-	return authenticatedSessionProfile{
-		applicationUserID: applicationUserID, userEmail: identity.Email,
-		userDisplayName: identity.DisplayName, userAvatarURL: identity.AvatarURL, userRoles: roles,
-	}, nil
 }
 
 func (sessions *OAuthBrowserSessions) writeBrowserSession(ctx context.Context, response http.ResponseWriter, config ServerConfig, tenantID string, profile authenticatedSessionProfile) error {
@@ -276,7 +257,7 @@ func (sessions *OAuthBrowserSessions) applicationProfile(
 	tenantID string,
 	credential PasswordCredentialProfile,
 ) (authenticatedSessionProfile, error) {
-	if config.AccountManagementEnabled {
+	{
 		if sessions.accountStore == nil {
 			return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_account_store")
 		}
@@ -293,14 +274,6 @@ func (sessions *OAuthBrowserSessions) applicationProfile(
 			userDisplayName: account.DisplayName, userAvatarURL: account.AvatarURL, userRoles: roles,
 		}, nil
 	}
-	applicationUserID, roles, upsertErr := sessions.users.UpsertPasswordUser(ctx, tenantID, credential.UserEmail, credential.DisplayName, credential.AvatarURL)
-	if upsertErr != nil || strings.TrimSpace(applicationUserID) == "" {
-		return authenticatedSessionProfile{}, fmt.Errorf("oauth.browser_login_user_store")
-	}
-	return authenticatedSessionProfile{
-		applicationUserID: applicationUserID, userEmail: credential.UserEmail,
-		userDisplayName: credential.DisplayName, userAvatarURL: credential.AvatarURL, userRoles: roles,
-	}, nil
 }
 
 func writeOAuthBrowserCookie(response http.ResponseWriter, config ServerConfig, name string, value string, path string, expiresAt time.Time) {

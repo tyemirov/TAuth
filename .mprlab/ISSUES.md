@@ -5,6 +5,99 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B126] (P2) Keep account IDs when configured password users are added again.
+  Goal:
+  Keep the public user ID when an operator removes a configured password user and adds that user again.
+  Requirements:
+  - Use the existing password provider identity before creation of another account.
+  - Reject conflicting identity relations and writes to accounts that are not active.
+  Validation:
+  - Verify removal and addition through password login with database and memory stores.
+  - Verify the same public user ID and rejection of accounts that are not active.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  The next credential write produced `account.exists` after removal and prevented server startup.
+  Deliverables:
+  The credential writer uses the retained password identity and keeps both account IDs.
+  Public HTTP tests verify database and memory stores, removed credentials, and accounts that are not active.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/database_user_store.go`, `internal/authkit/password_credentials.go`, `internal/authkit/password_seed_http_test.go`, `docs/application-subjects.md`.
+
+- [x] [B127] (P2) Write configured password profile changes to the account.
+  Goal:
+  Keep the current configured display name and avatar in the account after a password profile change.
+  Requirements:
+  - Write the configured profile to the canonical account during the password credential write.
+  - Keep explicit display overrides, roles, account state, and public user IDs.
+  Validation:
+  - Verify changed profile fields through password login and session restoration.
+  - Verify explicit display overrides with database and memory stores.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  Password login supplied the previous display name and avatar after a config update.
+  Deliverables:
+  The credential writer writes configured profile fields to the account and keeps explicit display overrides.
+  Public HTTP tests verify login and current session profiles with database and memory stores.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/database_user_store.go`, `internal/authkit/password_credentials.go`, `internal/authkit/password_seed_http_test.go`, `docs/application-subjects.md`.
+
+- [x] [B128] (P2) Use an explicit account store for provider routes.
+  Goal:
+  Complete provider login with the same account store and user store.
+  Requirements:
+  - Require an explicit account store when routes have no password store.
+  - Keep database account records and public user IDs after restart.
+  Validation:
+  - Verify provider login, refresh, and session restoration through database-backed routes.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  `MountAuthRoutes` created a separate memory account store and database Google login returned HTTP 500.
+  Deliverables:
+  `MountAuthRoutes` uses an explicit account store. Repository callers use the current signature.
+  Account erasure uses the same account store without a password dependency.
+  Public HTTP tests verify login, refresh, database restart, and erasure.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/routes.go`, `internal/authkit/account_erasure.go`, `internal/authkit/mounted_database_http_test.go`, `internal/authkit/routes_http_test.go`, `internal/authkit/routes_integration_test.go`, `internal/authkit/body_security_http_test.go`, `internal/authkit/github_http_test.go`, `ARCHITECTURE.md`, `docs/application-subjects.md`.
+
+- [x] [B125] (P1) Preserve application user IDs across account-management changes.
+  Goal:
+  Keep each application's user ID unchanged when account management is enabled or disabled.
+  Evidence:
+  Before B125, provider login returned `provider:<subject>` with account management disabled.
+  The same login returned a separate opaque account ID with account management enabled.
+  Kamu derives its RevenueCat customer key from this application user ID.
+  The initial source inspection found no public transition that preserved these customer keys.
+  Requirements:
+  - Store one immutable public user ID for each tenant account.
+  - Keep the internal account ID opaque and separate from the public user ID.
+  - Allocate persistent identity independently of account-management capabilities.
+  - Preserve existing public user IDs through an automatic timestamped deployment migration.
+  - Resolve each session subject through one exact tenant-scoped stored relation.
+  - Reject conflicting identity mappings before migration commits.
+  - Keep email addresses separate from identity association.
+  - Preserve account disablement, erasure, provider associations, roles, and refresh ownership.
+  - Keep account-management operations subject to their configured capability policy.
+  Validation:
+  - Reproduce the identity change through public HTTP and a persistent database.
+  - Verify unchanged public IDs across feature changes, restart, refresh, and provider entry paths.
+  - Verify strict internal account IDs, tenant isolation, conflicting mappings, and migration repeat.
+  - Verify that disabled or erasing accounts cannot regain access through a feature change.
+  - Run focused public tests and final `make ci`.
+  - Obtain independent review of the implementation, migration, and remaining limits.
+  Deliverables:
+  The canonical public subject remains fixed across account-management changes.
+  The automatic `20261006-application-subjects` migration preserves existing subjects and rejects conflicting ownership before publication.
+  Runtime conversion and obsolete provider-prefix allocation paths are removed.
+  Final public authentication, OAuth, and migration regressions pass.
+  Final `make ci` passes all 13 targets. The separate deployment migration target also passes.
+  Independent final review accepts the source repair and local validation without blocking findings.
+  The final command removes its owned temporary caches and disposable Docker builder.
+  Evidence is retained in Kamu under `.local/i013-evidence/tauth-continuity-fix/`.
+  The source contract and deployment limits are in `docs/application-subjects.md`.
+  Scope:
+  Preserve the stable application key. Grant no new billing entitlement and introduce no application fallback.
+  Production activation remains an operator action.
+
 - [ ] [B118] (P2) Use the request context for account database operations.
   Goal: Account database operations use a context that remains valid after the HTTP handler returns.
   Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.

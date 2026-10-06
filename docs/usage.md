@@ -60,7 +60,8 @@ Key notes:
 - **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
 - **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
 - **Apple OAuth**: Set `apple_oauth.enabled: true` to expose the browser Apple endpoints. Add native iOS App IDs under `native_client_ids` to expose the native Apple endpoints. Enabled providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and registered HTTPS callback URI.
-- **Account management**: Set `account_management.enabled: true` to use persisted account IDs and account routes.
+- **Account management**: Set `account_management.enabled: true` to permit account operations.
+  Persistent identity remains independent of this setting. See the [stable application user ID contract](application-subjects.md).
 - **Challenge delivery**: Account management requires `email_delivery`. Challenge tokens are sent only through the configured email channel.
 - **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
 - **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google, GitHub, or password authentication for the TAuth login page.
@@ -428,7 +429,9 @@ Apple returns `credential.fullName` only during the first authorization. Send al
 
 ### 5.5 Email/password accounts
 
-Operators enable password authentication per tenant. Seeded credentials continue to work for operator-managed accounts, while `account_management.enabled` adds public signup, verification, reset, account-level session subjects, and identity linking:
+Operators enable password authentication per tenant.
+Seeded credentials use the same persistent identity contract as provider credentials.
+`account_management.enabled` permits account operations. Public signup also requires its separate signup setting:
 
 ```yaml
 password_auth:
@@ -823,7 +826,8 @@ Consumes a signup verification challenge, activates the account, mints cookies, 
   { "token": "<verification_token>" }
   ```
 
-- **Response**: `200 OK` with the same profile payload as `POST /auth/google`; `user_id` is the persisted bare opaque account ID.
+- **Response**: `200 OK` with the same profile payload as `POST /auth/google`.
+  `user_id` is the immutable public user ID from the stored account relation.
 - **Errors**: `401` with `error: "invalid_challenge"` for missing, expired, reused, or wrong-tenant tokens.
 
 ### 6.2h `POST /auth/password/reset/start`
@@ -856,7 +860,8 @@ Consumes a reset challenge, rotates the password hash, revokes existing account 
 
 ### 6.2j Authenticated account endpoints
 
-All `/auth/account/*` endpoints require the current `app_session` cookie and only accept persisted bare opaque account-ID session subjects.
+All `/auth/account/*` endpoints require the current `app_session` cookie and the configured account-management capability.
+The server resolves the public session subject through its tenant-scoped stored relation to the internal opaque account ID.
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |

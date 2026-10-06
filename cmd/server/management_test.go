@@ -152,12 +152,20 @@ func TestConsoleTenantManagement(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				now := time.Now().UTC().Unix()
-				consent, err := grants.SaveConsent(context.Background(), oauthserver.Consent{ConsentKey: oauthserver.ConsentKey{TenantID: tenantID, UserID: "oauth-user", ClientID: "client", Resource: "https://resource.example", Scope: "read"}, CreatedAtUnix: now, ExpiresAtUnix: now + 3600})
+				accounts, err := authkit.NewDatabaseUserStore(context.Background(), config.Server.DatabaseURL)
 				if err != nil {
 					t.Fatal(err)
 				}
-				token, err := grants.IssueRefreshToken(context.Background(), oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: tenantID, UserID: "oauth-user", ClientID: "client", Resource: "https://resource.example", Scope: "read", ExpiresAtUnix: now + 3600})
+				oauthParent, err := accounts.UpsertProviderAccount(context.Background(), tenantID, authkit.AccountProviderIdentity{Provider: "google", Subject: "oauth-user", UserEmail: "oauth@example.com"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				now := time.Now().UTC().Unix()
+				consent, err := grants.SaveConsent(context.Background(), oauthserver.Consent{ConsentKey: oauthserver.ConsentKey{TenantID: tenantID, UserID: oauthParent.UserID, ClientID: "client", Resource: "https://resource.example", Scope: "read"}, CreatedAtUnix: now, ExpiresAtUnix: now + 3600})
+				if err != nil {
+					t.Fatal(err)
+				}
+				token, err := grants.IssueRefreshToken(context.Background(), oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: tenantID, UserID: oauthParent.UserID, ClientID: "client", Resource: "https://resource.example", Scope: "read", ExpiresAtUnix: now + 3600})
 				if err != nil {
 					t.Fatal(err)
 				}

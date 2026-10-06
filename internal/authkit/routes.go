@@ -45,7 +45,6 @@ var validatorCache struct {
 
 var errMissingTenantContext = errors.New("auth.tenant.missing_context")
 var errInvalidGoogleIssuer = errors.New("auth.login.invalid_issuer")
-var errGoogleLoginUserStore = errors.New("auth.login.user_store")
 var errGoogleLoginMintJWT = errors.New("auth.login.mint_jwt")
 var errGoogleLoginIssueRefresh = errors.New("auth.login.issue_refresh")
 
@@ -298,20 +297,24 @@ type OAuthGrantRevoker interface {
 	RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error
 }
 
-// MountAuthRoutes registers /auth endpoints and session helpers.
-func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore) {
-	MountAuthRoutesWithPassword(router, registry, users, refreshTokens, nonces, nil, nil, nil)
+// MountAuthRoutes registers /auth endpoints with explicit canonical account storage.
+func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore) {
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, nil, nil, nil)
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
 func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
+	accountStore, _ := passwordCredentials.(AccountManagementStore)
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, emailChallengeSender, oauthGrants)
+}
+
+func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
 	router = router.Group("", boundedAuthBody)
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
 	}
-	accountStore, _ := passwordCredentials.(AccountManagementStore)
-	mountAccountErasureRoutes(router, registry, users, passwordCredentials, refreshTokens, oauthGrants)
+	mountAccountErasureRoutes(router, registry, users, accountStore, refreshTokens, oauthGrants)
 	if nonces == nil {
 		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
 			return registry.Config(tenantID).NonceTTL
@@ -636,7 +639,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
-		if config.AccountManagementEnabled {
+		{
 			if accountStore == nil {
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.apple.account_store_missing", nil)
@@ -649,19 +652,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				UserEmail:   identity.Email,
 				DisplayName: identity.DisplayName,
 			}
-			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
-			}
-			if !found {
-				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
-				if accountErr != nil {
-					recordMetric(metricAuthLoginFailure)
-					writeAccountError(contextGin, accountErr)
-					return
-				}
 			}
 			responsePayload, finalizeErr := finalizeAccountLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProfile)
 			if finalizeErr != nil {
@@ -674,15 +669,6 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			recordMetric(metricAuthLoginSuccess)
 			return
 		}
-		responsePayload, finalizeErr := finalizeProviderLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProviderApple, identity.Subject, identity.Email, identity.DisplayName, "")
-		if finalizeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.apple.finalize", finalizeErr)
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		writeAppleCallbackSuccess(contextGin, statePayload, responsePayload)
-		recordMetric(metricAuthLoginSuccess)
 	}
 	router.GET(AppleCallbackPath, handleAppleCallback)
 	router.POST(AppleCallbackPath, handleAppleCallback)
@@ -759,18 +745,8 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 		identity.DisplayName = inbound.FullName.displayName()
-		if !config.AccountManagementEnabled && strings.TrimSpace(identity.DisplayName) == "" {
-			applicationUserID := accountProviderApple + ":" + identity.Subject
-			_, storedDisplayName, _, _, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
-			if profileErr != nil && !errors.Is(profileErr, web.ErrUserNotFound) {
-				recordMetric(metricAuthLoginFailure)
-				logAuthError("auth.login.apple.native.profile", profileErr)
-				contextGin.AbortWithStatus(http.StatusInternalServerError)
-				return
-			}
-			identity.DisplayName = storedDisplayName
-		}
-		if config.AccountManagementEnabled {
+
+		{
 			if accountStore == nil {
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.apple.native.account_store_missing", nil)
@@ -783,19 +759,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				UserEmail:   identity.Email,
 				DisplayName: identity.DisplayName,
 			}
-			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
-			}
-			if !found {
-				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
-				if accountErr != nil {
-					recordMetric(metricAuthLoginFailure)
-					writeAccountError(contextGin, accountErr)
-					return
-				}
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
 				recordMetric(metricAuthLoginFailure)
@@ -806,13 +774,6 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			recordMetric(metricAuthLoginSuccess)
 			return
 		}
-		if finalizeErr := finalizeProviderLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProviderApple, identity.Subject, identity.Email, identity.DisplayName, ""); finalizeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.apple.native.finalize", finalizeErr)
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		recordMetric(metricAuthLoginSuccess)
 	})
 
 	router.POST("/auth/password/login", func(contextGin *gin.Context) {
@@ -888,10 +849,10 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		if config.AccountManagementEnabled {
-			store, ok := requireAccountManagementStore(contextGin, config, accountStore)
-			if !ok {
-				recordMetric(metricAuthLoginFailure)
+		{
+			store := accountStore
+			if store == nil {
+				contextGin.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
 			accountProfile, ensureErr := store.EnsurePasswordAccount(contextGin, tenantID, profile.UserEmail)
@@ -909,13 +870,6 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			recordMetric(metricAuthLoginSuccess)
 			return
 		}
-		if finalizeErr := finalizePasswordLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			logAuthError("auth.login.password.finalize", finalizeErr)
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		recordMetric(metricAuthLoginSuccess)
 	})
 
 	router.POST("/auth/password/signup", func(contextGin *gin.Context) {
@@ -1089,7 +1043,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.reset_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -1174,7 +1128,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		if config.AccountManagementEnabled {
+		{
 			if accountStore == nil {
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.account_store_missing", nil)
@@ -1188,19 +1142,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				DisplayName: identity.DisplayName,
 				AvatarURL:   identity.AvatarURL,
 			}
-			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
-			}
-			if !found {
-				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
-				if accountErr != nil {
-					recordMetric(metricAuthLoginFailure)
-					writeAccountError(contextGin, accountErr)
-					return
-				}
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
 				recordMetric(metricAuthLoginFailure)
@@ -1212,22 +1158,6 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			return
 		}
 
-		if finalizeErr := finalizeGoogleLogin(contextGin, users, refreshTokens, clock, config, tenantID, identity); finalizeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			switch {
-			case errors.Is(finalizeErr, errGoogleLoginUserStore):
-				logAuthError("auth.login.user_store", finalizeErr)
-			case errors.Is(finalizeErr, errGoogleLoginMintJWT):
-				logAuthError("auth.login.mint_jwt", finalizeErr)
-			case errors.Is(finalizeErr, errGoogleLoginIssueRefresh):
-				logAuthError("auth.login.issue_refresh", finalizeErr)
-			default:
-				logAuthError("auth.login.finalize", finalizeErr)
-			}
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		recordMetric(metricAuthLoginSuccess)
 	})
 
 	router.POST("/auth/google/native", func(contextGin *gin.Context) {
@@ -1324,7 +1254,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
-		if config.AccountManagementEnabled {
+		{
 			if accountStore == nil {
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.native.account_store_missing", nil)
@@ -1338,19 +1268,11 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 				DisplayName: identity.DisplayName,
 				AvatarURL:   identity.AvatarURL,
 			}
-			accountProfile, found, accountErr := accountStore.AuthenticateProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
-			}
-			if !found {
-				accountProfile, accountErr = accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
-				if accountErr != nil {
-					recordMetric(metricAuthLoginFailure)
-					writeAccountError(contextGin, accountErr)
-					return
-				}
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
 				recordMetric(metricAuthLoginFailure)
@@ -1361,22 +1283,6 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			recordMetric(metricAuthLoginSuccess)
 			return
 		}
-		if finalizeErr := finalizeGoogleLogin(contextGin, users, refreshTokens, clock, config, tenantID, identity); finalizeErr != nil {
-			recordMetric(metricAuthLoginFailure)
-			switch {
-			case errors.Is(finalizeErr, errGoogleLoginUserStore):
-				logAuthError("auth.login.native.user_store", finalizeErr)
-			case errors.Is(finalizeErr, errGoogleLoginMintJWT):
-				logAuthError("auth.login.native.mint_jwt", finalizeErr)
-			case errors.Is(finalizeErr, errGoogleLoginIssueRefresh):
-				logAuthError("auth.login.native.issue_refresh", finalizeErr)
-			default:
-				logAuthError("auth.login.native.finalize", finalizeErr)
-			}
-			contextGin.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		recordMetric(metricAuthLoginSuccess)
 	})
 
 	router.POST("/auth/refresh", func(contextGin *gin.Context) {
@@ -1518,7 +1424,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, changeErr)
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.change_password_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -1654,7 +1560,7 @@ func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, us
 			writeAccountError(contextGin, unlinkErr)
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.AccountID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.unlink_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -2020,7 +1926,7 @@ func sessionProfilePayload(userID string, userEmail string, userDisplayName stri
 
 func accountProfilePayload(profile AccountProfile) gin.H {
 	return gin.H{
-		"user_id":    profile.AccountID,
+		"user_id":    profile.UserID,
 		"user_email": profile.UserEmail,
 		"display":    profile.DisplayName,
 		"avatar_url": profile.AvatarURL,
@@ -2082,63 +1988,28 @@ func requireAccountManagementStore(contextGin *gin.Context, config ServerConfig,
 }
 
 func activeSessionPayloadForClaims(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, claims *JwtCustomClaims) (gin.H, error) {
-	if isAccountSessionID(claims.GetUserID()) {
-		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID())
-		if profileErr != nil {
-			return nil, profileErr
-		}
-		return sessionProfilePayload(profile.AccountID, profile.UserEmail, profile.DisplayName, profile.AvatarURL, profile.Roles, claims.GetExpiresAt()), nil
+	profile, err := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID())
+	if err != nil {
+		return nil, err
 	}
-	return sessionProfilePayload(
-		claims.GetUserID(),
-		claims.GetUserEmail(),
-		claims.GetUserDisplayName(),
-		claims.GetUserAvatarURL(),
-		claims.GetUserRoles(),
-		claims.GetExpiresAt(),
-	), nil
+	return sessionProfilePayload(profile.UserID, profile.UserEmail, profile.DisplayName, profile.AvatarURL, profile.Roles, claims.GetExpiresAt()), nil
 }
 
-func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, config ServerConfig, accountStore AccountManagementStore, tenantID string, applicationUserID string) (authenticatedSessionProfile, error) {
-	if isAccountSessionID(applicationUserID) {
-		profile, profileErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, applicationUserID)
-		if profileErr != nil {
-			return authenticatedSessionProfile{}, profileErr
-		}
-		return authenticatedSessionProfile{
-			applicationUserID: profile.AccountID,
-			userEmail:         profile.UserEmail,
-			userDisplayName:   profile.DisplayName,
-			userAvatarURL:     profile.AvatarURL,
-			userRoles:         profile.Roles,
-		}, nil
+func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, config ServerConfig, accountStore AccountManagementStore, tenantID, userID string) (authenticatedSessionProfile, error) {
+	profile, err := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, userID)
+	if err != nil {
+		return authenticatedSessionProfile{}, err
 	}
-	userEmail, userDisplayName, userAvatarURL, userRoles, profileErr := users.GetUserProfile(contextGin, tenantID, applicationUserID)
-	if profileErr != nil {
-		return authenticatedSessionProfile{}, profileErr
-	}
-	return authenticatedSessionProfile{
-		applicationUserID: applicationUserID,
-		userEmail:         userEmail,
-		userDisplayName:   userDisplayName,
-		userAvatarURL:     userAvatarURL,
-		userRoles:         userRoles,
-	}, nil
+	return authenticatedSessionProfile{applicationUserID: profile.UserID, userEmail: profile.UserEmail, userDisplayName: profile.DisplayName, userAvatarURL: profile.AvatarURL, userRoles: profile.Roles}, nil
 }
 
-func activeAccountProfileForSession(ctx context.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, accountID string) (AccountProfile, error) {
-	if !config.AccountManagementEnabled {
-		return AccountProfile{}, ErrAccountNotActive
-	}
-	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
-		return AccountProfile{}, validateErr
-	}
+func activeAccountProfileForSession(ctx context.Context, config ServerConfig, accountStore AccountManagementStore, tenantID, userID string) (AccountProfile, error) {
 	if accountStore == nil {
 		return AccountProfile{}, fmt.Errorf("auth.account.store_missing")
 	}
-	profile, profileErr := accountStore.ResolveAccountProfile(ctx, tenantID, accountID)
-	if profileErr != nil {
-		return AccountProfile{}, profileErr
+	profile, err := accountStore.ResolveAccountForUser(ctx, tenantID, userID)
+	if err != nil {
+		return AccountProfile{}, err
 	}
 	if profile.State == accountStateDisabled {
 		return AccountProfile{}, ErrAccountDisabled
@@ -2147,10 +2018,6 @@ func activeAccountProfileForSession(ctx context.Context, config ServerConfig, ac
 		return AccountProfile{}, ErrAccountNotActive
 	}
 	return profile, nil
-}
-
-func isAccountSessionID(applicationUserID string) bool {
-	return validateOpaqueAccountID(applicationUserID) == nil
 }
 
 func isInactiveAccountSessionError(err error) bool {
@@ -2178,12 +2045,7 @@ func currentAccountProfile(contextGin *gin.Context, registry TenantRegistry, acc
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
 		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
-	accountID := claims.GetUserID()
-	if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
-		contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorAccountNotActive})
-		return "", ServerConfig{}, AccountProfile{}, nil, false
-	}
-	profile, profileErr := store.ResolveAccountProfile(contextGin, tenantID, accountID)
+	profile, profileErr := store.ResolveAccountForUser(contextGin, tenantID, claims.GetUserID())
 	if profileErr != nil {
 		writeAccountError(contextGin, profileErr)
 		return "", ServerConfig{}, AccountProfile{}, nil, false
@@ -2271,117 +2133,6 @@ func consumeBrowserNonce(contextGin *gin.Context, nonces NonceStore, tenantID st
 	return nonces.Consume(contextGin, tenantID, issuedNonceToken)
 }
 
-func finalizeGoogleLogin(
-	contextGin *gin.Context,
-	users UserStore,
-	refreshTokens RefreshTokenStore,
-	clock Clock,
-	config ServerConfig,
-	tenantID string,
-	identity googleIdentity,
-) error {
-	return finalizeProviderLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProviderGoogle, identity.Sub, identity.Email, identity.DisplayName, identity.AvatarURL)
-}
-
-func finalizeProviderLogin(
-	contextGin *gin.Context,
-	users UserStore,
-	refreshTokens RefreshTokenStore,
-	clock Clock,
-	config ServerConfig,
-	tenantID string,
-	provider string,
-	providerID string,
-	userEmail string,
-	userDisplayName string,
-	userAvatarURL string,
-) error {
-	responsePayload, finalizeErr := finalizeProviderLoginPayload(contextGin, users, refreshTokens, clock, config, tenantID, provider, providerID, userEmail, userDisplayName, userAvatarURL)
-	if finalizeErr != nil {
-		return finalizeErr
-	}
-	writeAuthenticatedProfile(contextGin, responsePayload)
-	return nil
-}
-
-func finalizeProviderLoginPayload(
-	contextGin *gin.Context,
-	users UserStore,
-	refreshTokens RefreshTokenStore,
-	clock Clock,
-	config ServerConfig,
-	tenantID string,
-	provider string,
-	providerID string,
-	userEmail string,
-	userDisplayName string,
-	userAvatarURL string,
-) (gin.H, error) {
-	applicationUserID, userRoles, upsertErr := users.UpsertProviderUser(
-		contextGin,
-		tenantID,
-		provider,
-		providerID,
-		userEmail,
-		userDisplayName,
-		userAvatarURL,
-	)
-	if upsertErr != nil || applicationUserID == "" {
-		if upsertErr != nil {
-			return nil, fmt.Errorf("%w: %w", errGoogleLoginUserStore, upsertErr)
-		}
-		return nil, fmt.Errorf("%w: empty_user_id", errGoogleLoginUserStore)
-	}
-	return finalizeAuthenticatedSessionPayload(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
-		applicationUserID: applicationUserID,
-		userEmail:         userEmail,
-		userDisplayName:   userDisplayName,
-		userAvatarURL:     userAvatarURL,
-		userRoles:         userRoles,
-	})
-}
-
-func finalizePasswordLogin(
-	contextGin *gin.Context,
-	users UserStore,
-	refreshTokens RefreshTokenStore,
-	clock Clock,
-	config ServerConfig,
-	tenantID string,
-	profile PasswordCredentialProfile,
-) error {
-	if strings.TrimSpace(profile.AccountID) != "" {
-		return finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, AccountProfile{
-			AccountID:   profile.AccountID,
-			UserEmail:   profile.UserEmail,
-			DisplayName: profile.DisplayName,
-			AvatarURL:   profile.AvatarURL,
-			Roles:       []string{defaultUserRole},
-			State:       accountStateActive,
-		})
-	}
-	applicationUserID, userRoles, upsertErr := users.UpsertPasswordUser(
-		contextGin,
-		tenantID,
-		profile.UserEmail,
-		profile.DisplayName,
-		profile.AvatarURL,
-	)
-	if upsertErr != nil || applicationUserID == "" {
-		if upsertErr != nil {
-			return fmt.Errorf("auth.login.password.user_store: %w", upsertErr)
-		}
-		return fmt.Errorf("auth.login.password.user_store: empty_user_id")
-	}
-	return finalizeAuthenticatedSession(contextGin, refreshTokens, clock, config, tenantID, authenticatedSessionProfile{
-		applicationUserID: applicationUserID,
-		userEmail:         profile.UserEmail,
-		userDisplayName:   profile.DisplayName,
-		userAvatarURL:     profile.AvatarURL,
-		userRoles:         userRoles,
-	})
-}
-
 func finalizeAccountLogin(
 	contextGin *gin.Context,
 	users UserStore,
@@ -2438,22 +2189,6 @@ func finalizeAccountLoginPayload(
 		userAvatarURL:     profile.AvatarURL,
 		userRoles:         userRoles,
 	})
-}
-
-func finalizeAuthenticatedSession(
-	contextGin *gin.Context,
-	refreshTokens RefreshTokenStore,
-	clock Clock,
-	config ServerConfig,
-	tenantID string,
-	profile authenticatedSessionProfile,
-) error {
-	responsePayload, finalizeErr := finalizeAuthenticatedSessionPayload(contextGin, refreshTokens, clock, config, tenantID, profile)
-	if finalizeErr != nil {
-		return finalizeErr
-	}
-	writeAuthenticatedProfile(contextGin, responsePayload)
-	return nil
 }
 
 func finalizeAuthenticatedSessionPayload(

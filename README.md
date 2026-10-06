@@ -368,7 +368,12 @@ The GitHub Pages artifact publishes the documentation site and the single helper
 
 For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control. The control calls `startAppleLogin()` or opens the `getAppleLoginUrl()` value. The helper builds `/auth/apple/start` and includes the tenant ID when necessary. It also adds the current page as `return_to`. The callback can then return to the product after TAuth sets cookies. `startAppleLogin()` records the restore hint before it leaves the page. The returned app uses `/auth/session` to restore the session. A native iOS app first reads `/auth/apple/native/config` and obtains a TAuth nonce. It then posts the Apple ID token and nonce to `/auth/apple/native`. TAuth validates the token and nonce. It then sets the same cookies and profile data as the other providers.
 
-For tenants with `password_auth.enabled: true`, call `exchangePasswordCredential({ email, password })` from the same helper or POST directly to `/auth/password/login` with `credentials: "include"`. When `account_management.enabled` is also true, verified provider and password identities resolve to persisted opaque 128-bit base64url subjects. The helper also exposes signup, email verification, reset, password change, identity linking/unlinking, and disable-account methods for the full account lifecycle.
+For tenants with `password_auth.enabled: true`, use `exchangePasswordCredential({ email, password })` through the helper.
+The direct API is `/auth/password/login` with `credentials: "include"`.
+Provider and password identities resolve to one immutable public user ID in either account-management state.
+New accounts receive opaque public IDs. The deployment migration preserves existing public IDs.
+`account_management.enabled` controls account operations, including signup, verification, reset, password changes, identity links, and disablement.
+See the [stable application user ID contract](docs/application-subjects.md).
 
 ### Configure Google Identity Services (popup flow)
 

@@ -26,12 +26,16 @@ func ResumeAccountDisablements(ctx context.Context, accounts AccountManagementSt
 }
 
 func completeAccountDisablement(ctx context.Context, accounts AccountManagementStore, refreshTokens RefreshTokenStore, oauthGrants OAuthGrantRevoker, account AccountReference, nowUnix int64) error {
+	profile, err := accounts.ResolveAccountProfile(ctx, account.TenantID, account.AccountID)
+	if err != nil {
+		return fmt.Errorf("auth.account.disable_subject: %w", err)
+	}
 	if oauthGrants != nil {
-		if err := oauthGrants.RevokeUser(ctx, account.TenantID, account.AccountID, nowUnix); err != nil {
+		if err := oauthGrants.RevokeUser(ctx, account.TenantID, profile.UserID, nowUnix); err != nil {
 			return fmt.Errorf("auth.account.disable_oauth_revoke tenant=%s account=%s: %w", account.TenantID, account.AccountID, err)
 		}
 	}
-	if err := refreshTokens.RevokeUser(ctx, account.TenantID, account.AccountID); err != nil {
+	if err := refreshTokens.RevokeUser(ctx, account.TenantID, profile.UserID); err != nil {
 		return fmt.Errorf("auth.account.disable_refresh_revoke tenant=%s account=%s: %w", account.TenantID, account.AccountID, err)
 	}
 	if _, err := accounts.CompleteAccountDisable(ctx, account.TenantID, account.AccountID); err != nil {

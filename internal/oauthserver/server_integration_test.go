@@ -196,7 +196,11 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	if validateErr != nil {
 		t.Fatalf("validate access token: %v", validateErr)
 	}
-	if claims.Subject != "email:user@example.com" || claims.Audience[0] != testOAuthResource || claims.ClientID != testOAuthClient || claims.TenantID != "demo" || claims.Scope != testOAuthScope {
+	account, accountErr := passwords.EnsurePasswordAccount(context.Background(), "demo", "user@example.com")
+	if accountErr != nil {
+		t.Fatal(accountErr)
+	}
+	if claims.Subject != account.UserID || claims.Audience[0] != testOAuthResource || claims.ClientID != testOAuthClient || claims.TenantID != "demo" || claims.Scope != testOAuthScope {
 		t.Fatalf("unexpected access claims: %#v", claims)
 	}
 	repeatAuthorize := doRequest(t, client, http.MethodGet, authorizationURL(issuer, challenge, "state-repeat", testOAuthRedirect, testOAuthResource, testOAuthScope, testOAuthClient), nil)
@@ -360,7 +364,11 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	assertStatus(t, googleTokenResponse, http.StatusOK)
 	googleTokens := decodeTokenResponse(t, googleTokenResponse)
 	googleClaims, googleValidateErr := validator.ValidateToken(context.Background(), googleTokens.AccessToken)
-	if googleValidateErr != nil || googleClaims.Subject != "google:google-user" || googleClaims.TenantID != "demo" {
+	googleAccount, err := passwords.UpsertGoogleAccount(context.Background(), "demo", authkit.GoogleAccountIdentity{Subject: "google-user", UserEmail: "google@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if googleValidateErr != nil || googleClaims.Subject != googleAccount.UserID || googleClaims.TenantID != "demo" {
 		t.Fatalf("validate Google-authorized token: claims=%#v err=%v", googleClaims, googleValidateErr)
 	}
 

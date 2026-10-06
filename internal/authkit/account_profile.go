@@ -119,7 +119,7 @@ func (store *DatabaseUserStore) CorrectAccountDisplayName(ctx context.Context, t
 		if err != nil {
 			return err
 		}
-		userProfile := userProfileRecord{TenantID: tenantID, UserID: accountID, UserEmail: profile.UserEmail, UserDisplayName: profile.DisplayName, UserAvatarURL: profile.AvatarURL, UserRoles: roleList(profile.Roles), CreatedAtUnix: now, LastUpdatedUnix: now}
+		userProfile := userProfileRecord{TenantID: tenantID, UserID: profile.UserID, UserEmail: profile.UserEmail, UserDisplayName: profile.DisplayName, UserAvatarURL: profile.AvatarURL, UserRoles: roleList(profile.Roles), CreatedAtUnix: now, LastUpdatedUnix: now}
 		err = tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "user_id"}}, DoUpdates: clause.AssignmentColumns([]string{"user_display_name", "last_updated_unix"})}).Create(&userProfile).Error
 
 		return err

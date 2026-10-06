@@ -324,10 +324,11 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = users.UpsertGoogleAccount(context.Background(), "product", authkit.GoogleAccountIdentity{Subject: "verified-google-subject", UserEmail: "owner@example.com", DisplayName: "Owner"}); err != nil {
+	account, err := users.UpsertGoogleAccount(context.Background(), "product", authkit.GoogleAccountIdentity{Subject: "verified-google-subject", UserEmail: "owner@example.com", DisplayName: "Owner"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	user, roles, err := users.UpsertGoogleUser(context.Background(), "product", "verified-google-subject", "owner@example.com", "Owner", "")
+	user, roles, err := users.UpsertAccountUser(context.Background(), "product", account.AccountID, "owner@example.com", "Owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +349,11 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	user, roles, err = users.UpsertGoogleUser(context.Background(), "rsvp-production", "rsvp-user", "guest@example.com", "Guest", "")
+	account, err = users.UpsertGoogleAccount(context.Background(), "rsvp-production", authkit.GoogleAccountIdentity{Subject: "rsvp-user", UserEmail: "guest@example.com", DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, roles, err = users.UpsertAccountUser(context.Background(), "rsvp-production", account.AccountID, "guest@example.com", "Guest", "")
 	if err != nil {
 		t.Fatal(err)
 	}

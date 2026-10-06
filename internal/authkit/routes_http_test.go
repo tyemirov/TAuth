@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -190,27 +191,6 @@ func newMutableUserStore() *mutableUserStore {
 	return &mutableUserStore{inner: newTestUserStore()}
 }
 
-func (store *mutableUserStore) UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	if store.upsertErr != nil {
-		return "", nil, store.upsertErr
-	}
-	return store.inner.UpsertGoogleUser(ctx, tenantID, googleSub, userEmail, userDisplayName, userAvatarURL)
-}
-
-func (store *mutableUserStore) UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	if store.upsertErr != nil {
-		return "", nil, store.upsertErr
-	}
-	return store.inner.UpsertProviderUser(ctx, tenantID, provider, providerID, userEmail, userDisplayName, userAvatarURL)
-}
-
-func (store *mutableUserStore) UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
-	if store.upsertErr != nil {
-		return "", nil, store.upsertErr
-	}
-	return store.inner.UpsertPasswordUser(ctx, tenantID, userEmail, userDisplayName, userAvatarURL)
-}
-
 func (store *mutableUserStore) UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (string, []string, error) {
 	if store.upsertErr != nil {
 		return "", nil, store.upsertErr
@@ -223,6 +203,28 @@ func (store *mutableUserStore) GetUserProfile(ctx context.Context, tenantID stri
 		return "", "", "", nil, store.profileErr
 	}
 	return store.inner.GetUserProfile(ctx, tenantID, applicationUserID)
+}
+
+func fixtureSessionSubject(t *testing.T, value string, config ServerConfig) string {
+	t.Helper()
+	claims := &JwtCustomClaims{}
+	token, err := jwt.ParseWithClaims(value, claims, func(*jwt.Token) (interface{}, error) { return config.AppJWTSigningKey, nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(config.AppJWTIssuer))
+	if err != nil || !token.Valid || validateOpaqueAccountID(claims.GetUserID()) != nil {
+		t.Fatalf("invalid fresh session subject: claims=%+v err=%v", claims, err)
+	}
+	return claims.GetUserID()
+}
+
+type fixtureAccountLookupFailure struct {
+	*MemoryPasswordCredentialStore
+	err error
+}
+
+func (store *fixtureAccountLookupFailure) ResolveAccountForUser(ctx context.Context, tenantID, userID string) (AccountProfile, error) {
+	if store.err != nil {
+		return AccountProfile{}, store.err
+	}
+	return store.MemoryPasswordCredentialStore.ResolveAccountForUser(ctx, tenantID, userID)
 }
 
 type controlledNonceStore struct {
@@ -376,7 +378,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -412,7 +414,7 @@ func TestHTTPAuthLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("failed to decode /me payload: %v", decodeErr)
 	}
 	_ = meResp.Body.Close()
-	if profile["user_id"] != "google:sub-http" {
+	if profile["user_id"] != fixtureSessionSubject(t, state.session, config) {
 		t.Fatalf("unexpected user_id: %v", profile["user_id"])
 	}
 
@@ -536,7 +538,7 @@ func TestHTTPSessionStatusReturnsProfileOrNoContentWithoutUnauthorizedNoise(t *t
 	registry := NewSingleTenantRegistry(config)
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -582,7 +584,7 @@ func TestHTTPSessionStatusReturnsProfileOrNoContentWithoutUnauthorizedNoise(t *t
 		t.Fatalf("decode session profile: %v", decodeErr)
 	}
 	_ = sessionResponse.Body.Close()
-	if sessionProfile["user_id"] != "google:sub-session-status" || sessionProfile["user_email"] != "session@example.com" {
+	if sessionProfile["user_id"] != fixtureSessionSubject(t, state.session, config) || sessionProfile["user_email"] != "session@example.com" {
 		t.Fatalf("unexpected session profile: %#v", sessionProfile)
 	}
 
@@ -605,7 +607,7 @@ func TestHTTPSessionStatusReturnsProfileOrNoContentWithoutUnauthorizedNoise(t *t
 		t.Fatalf("decode restored profile: %v", decodeErr)
 	}
 	_ = restoredResponse.Body.Close()
-	if restoredProfile["user_id"] != "google:sub-session-status" {
+	if restoredProfile["user_id"] != sessionProfile["user_id"] {
 		t.Fatalf("unexpected restored profile: %#v", restoredProfile)
 	}
 	if state.session == "" || state.session == "tampered-session" {
@@ -663,7 +665,7 @@ func TestHTTPSessionStatusRevokeFailureReturnsInternalServerError(t *testing.T) 
 		revokeErr: errors.New("refresh_store.revoke.injected"),
 	}
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -793,7 +795,7 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("tenant-a.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -843,8 +845,8 @@ func TestHTTPAuthTenantHeaderOverride(t *testing.T) {
 		}
 	}
 
-	assertProfile(stateA, "tenant-a", "google:sub-tenant-a")
-	assertProfile(stateB, "tenant-b", "google:sub-tenant-b")
+	assertProfile(stateA, "tenant-a", fixtureSessionSubject(t, stateA.session, registry.Config("tenant-a")))
+	assertProfile(stateB, "tenant-b", fixtureSessionSubject(t, stateB.session, registry.Config("tenant-b")))
 
 	crossRequest, err := http.NewRequest(http.MethodGet, server.URL+"/me", nil)
 	if err != nil {
@@ -932,7 +934,7 @@ func TestHTTPAuthOriginsResolveSharedHostTenants(t *testing.T) {
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("shared.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{})
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{}, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, false)
 	defer server.Close()
@@ -1057,7 +1059,7 @@ func TestHTTPAuthAllowsMultipleTenantSessionsFromSingleClient(t *testing.T) {
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("shared.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1204,7 +1206,7 @@ func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("shared.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1271,8 +1273,8 @@ func TestHTTPAuthOriginLifecycleWithoutTenantHeader(t *testing.T) {
 		}
 	}
 
-	assertProfile(notesState, "http://localhost:8000", "notes", "google:sub-notes")
-	assertProfile(mprState, "http://localhost:4173", "mpr-sites", "google:sub-mpr")
+	assertProfile(notesState, "http://localhost:8000", "notes", fixtureSessionSubject(t, notesState.session, registry.Config("notes")))
+	assertProfile(mprState, "http://localhost:4173", "mpr-sites", fixtureSessionSubject(t, mprState.session, registry.Config("mpr-sites")))
 	assertRefresh(notesState, "http://localhost:8000", "notes")
 	assertRefresh(mprState, "http://localhost:4173", "mpr-sites")
 
@@ -1329,7 +1331,7 @@ func TestHTTPAuthRefreshFailureScenarios(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1406,7 +1408,7 @@ func TestHTTPAuthRefreshUsesValidCookieAmongDuplicates(testContext *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1503,7 +1505,7 @@ func TestHTTPAuthRefreshValidateInternalErrorReturns500(t *testing.T) {
 	}
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1567,7 +1569,7 @@ func TestHTTPAuthRefreshRevokedDoesNotClearCookies(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1641,7 +1643,8 @@ func TestHTTPAuthRefreshProfileStoreError(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, store, refreshStore, nil)
+	accounts := &fixtureAccountLookupFailure{MemoryPasswordCredentialStore: NewMemoryPasswordCredentialStore()}
+	MountAuthRoutesWithPassword(router, registry, store, refreshStore, nil, accounts, nil, nil)
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1654,13 +1657,7 @@ func TestHTTPAuthRefreshProfileStoreError(t *testing.T) {
 	state := captureAuthCookies(authCookieState{}, loginResp.Cookies(), config)
 	_ = loginResp.Body.Close()
 
-	store.inner.setProfile(config.TenantID, "google:sub-profile", testUserProfile{
-		email:   "user@example.com",
-		display: "Profile User",
-		avatar:  "https://example.com/avatar.png",
-		roles:   []string{"user"},
-	})
-	store.profileErr = errors.New("profile failure")
+	accounts.err = errors.New("profile failure")
 
 	refreshReq, err := http.NewRequest(http.MethodPost, server.URL+"/auth/refresh", nil)
 	if err != nil {
@@ -1689,7 +1686,7 @@ func TestHTTPAuthMultiTenantRequiresTenantMiddleware(t *testing.T) {
 	})
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1865,7 +1862,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("shared.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -1884,7 +1881,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			tenantID:        "ps",
 			origin:          "http://ps.localhost",
 			loginToken:      "token-ps",
-			expectedUserID:  "google:sub-ps",
 			refreshAttempts: 20,
 		},
 		{
@@ -1892,7 +1888,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			tenantID:        "loopaware",
 			origin:          "http://loopaware.localhost",
 			loginToken:      "token-loopaware",
-			expectedUserID:  "google:sub-loopaware",
 			refreshAttempts: 20,
 		},
 		{
@@ -1900,7 +1895,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 			tenantID:        "gravity",
 			origin:          "http://gravity.localhost",
 			loginToken:      "token-gravity",
-			expectedUserID:  "google:sub-gravity",
 			refreshAttempts: 20,
 		},
 	}
@@ -1911,7 +1905,8 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 	}
 
 	stateByTenant := make(map[string]tenantState, len(testCases))
-	for _, testCase := range testCases {
+	for caseIndex := range testCases {
+		testCase := testCases[caseIndex]
 		headers := map[string]string{
 			testHostHeader: "shared.localhost",
 			"Origin":       testCase.origin,
@@ -1926,6 +1921,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenants(t *testing.T) {
 		if state.refresh == "" || state.session == "" {
 			t.Fatalf("expected session+refresh cookies for %s", testCase.tenantID)
 		}
+		testCases[caseIndex].expectedUserID = fixtureSessionSubject(t, state.session, config)
 		stateByTenant[testCase.tenantID] = tenantState{config: config, state: state}
 	}
 
@@ -2179,7 +2175,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 	router.Use(gin.Recovery())
 	router.Use(testHostOverrideMiddleware("shared.localhost"))
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, refreshStore, nonceStore)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nonceStore, userStore, nil, nil)
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2198,7 +2194,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			tenantID:        "ps",
 			origin:          "http://ps.localhost",
 			loginToken:      "token-ps",
-			expectedUserID:  "google:sub-ps",
 			refreshAttempts: 10,
 		},
 		{
@@ -2206,7 +2201,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			tenantID:        "loopaware",
 			origin:          "http://loopaware.localhost",
 			loginToken:      "token-loopaware",
-			expectedUserID:  "google:sub-loopaware",
 			refreshAttempts: 10,
 		},
 		{
@@ -2214,7 +2208,6 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 			tenantID:        "gravity",
 			origin:          "http://gravity.localhost",
 			loginToken:      "token-gravity",
-			expectedUserID:  "google:sub-gravity",
 			refreshAttempts: 10,
 		},
 	}
@@ -2225,7 +2218,8 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 	}
 
 	stateByTenant := make(map[string]tenantState, len(testCases))
-	for _, testCase := range testCases {
+	for caseIndex := range testCases {
+		testCase := testCases[caseIndex]
 		headers := map[string]string{
 			testHostHeader: "shared.localhost",
 			"Origin":       testCase.origin,
@@ -2240,6 +2234,7 @@ func TestHTTPAuthConcurrentRefreshAcrossTenantsWithPersistentStores(testContext 
 		if state.refresh == "" || state.session == "" {
 			testContext.Fatalf("expected session+refresh cookies for %s", testCase.tenantID)
 		}
+		testCases[caseIndex].expectedUserID = fixtureSessionSubject(testContext, state.session, config)
 		stateByTenant[testCase.tenantID] = tenantState{config: config, state: state}
 	}
 
@@ -2329,7 +2324,7 @@ func TestHTTPAuthNonceIssueFailure(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{issueErr: errors.New("nonce issue failure")})
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), &controlledNonceStore{issueErr: errors.New("nonce issue failure")}, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2381,7 +2376,7 @@ func TestHTTPAuthLoginNonceConsumeFailure(t *testing.T) {
 	nonceStore := &controlledNonceStore{consumeErr: ErrNonceNotFound}
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2431,7 +2426,7 @@ func TestHTTPAuthLoginMissingNonce(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2518,7 +2513,7 @@ func TestHTTPNativeGoogleConfigEndpointUsesTenantHeaderOverride(t *testing.T) {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2602,7 +2597,7 @@ tenants:
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2723,7 +2718,7 @@ func TestHTTPNativeMobileGoogleLoginLifecycleAndSessionCompatibility(t *testing.
 			defer ProvideLogger(nil)
 
 			router := gin.New()
-			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 			server := newInProcessServer(router, true)
 			defer server.Close()
@@ -2854,7 +2849,7 @@ func TestHTTPNativeMobileGoogleLoginRejectsWrongPlatformAudience(t *testing.T) {
 	defer ProvideGoogleTokenValidator(nil)
 
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -2898,7 +2893,7 @@ func TestHTTPNativeMobileGoogleLoginRejectsInvalidRedirectURI(t *testing.T) {
 
 	config := newMobileNativeTestServerConfig()
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3108,7 +3103,7 @@ func TestHTTPNativeGoogleLoginValidationMatrix(t *testing.T) {
 			}
 			registry := NewSingleTenantRegistry(config)
 			router := gin.New()
-			MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+			MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 			server := newInProcessServer(router, true)
 			defer server.Close()
@@ -3179,7 +3174,7 @@ func TestHTTPAuthLoginNonceMismatch(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3245,7 +3240,7 @@ func TestHTTPAuthLoginRejectsPreviousNonceClaim(t *testing.T) {
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	nonceStore := NewMemoryNonceStore(5 * time.Minute)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nonceStore, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3312,7 +3307,7 @@ func TestHTTPAuthLoginRejectsEmptyGoogleNonce(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3378,7 +3373,7 @@ func TestHTTPAuthLoginUserStoreError(t *testing.T) {
 	registry := NewSingleTenantRegistry(config)
 	store := &failingUserStore{upsertErr: errors.New("user store error")}
 	router := gin.New()
-	MountAuthRoutes(router, registry, store, NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, store, NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3446,7 +3441,7 @@ func TestHTTPAuthLoginHonorsForwardedProto(t *testing.T) {
 	config.AllowInsecureHTTP = false
 	registry := NewSingleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, false)
 	defer server.Close()
@@ -3524,7 +3519,7 @@ func TestHTTPAuthLoginUsesDefaultValidatorFactory(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3598,7 +3593,7 @@ func TestHTTPAuthLoginRefreshIssueFailure(t *testing.T) {
 	}
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3664,11 +3659,12 @@ func TestHTTPAuthRefreshIssueFailure(t *testing.T) {
 
 	config := newTestServerConfig()
 	registry := NewSingleTenantRegistry(config)
-	var issuedOpaque string
+	var issuedOpaque, issuedUserID string
 	refreshStore := &stubRefreshStore{
 		issueFunc: func(ctx context.Context, tenantID string, applicationUserID string, expiresUnix int64, previousTokenID string) (string, string, error) {
 			if issuedOpaque == "" {
 				issuedOpaque = "opaque-initial"
+				issuedUserID = applicationUserID
 				return "token-initial", issuedOpaque, nil
 			}
 			return "", "", errors.New("second issue failure")
@@ -3677,7 +3673,7 @@ func TestHTTPAuthRefreshIssueFailure(t *testing.T) {
 			if tokenOpaque != issuedOpaque {
 				return "", "", 0, errors.New("unexpected token")
 			}
-			return "google:sub-refresh", "token-initial", time.Now().Add(time.Minute).Unix(), nil
+			return issuedUserID, "token-initial", time.Now().Add(time.Minute).Unix(), nil
 		},
 		revokeFunc: func(ctx context.Context, tenantID string, tokenID string) error {
 			return nil
@@ -3686,7 +3682,7 @@ func TestHTTPAuthRefreshIssueFailure(t *testing.T) {
 
 	router := gin.New()
 	store := newMutableUserStore()
-	MountAuthRoutes(router, registry, store, refreshStore, nil)
+	MountAuthRoutes(router, registry, store, refreshStore, nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3749,7 +3745,7 @@ func TestHTTPAuthLoginRejectsInvalidJSON(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3810,7 +3806,7 @@ func TestHTTPAuthLoginRequiresHTTPS(t *testing.T) {
 	config.AllowInsecureHTTP = false
 	registry := NewSingleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, false)
 	defer server.Close()
@@ -3885,7 +3881,7 @@ func TestHTTPAuthLoginUnverifiedIdentity(t *testing.T) {
 
 	registry := NewSingleTenantRegistry(newTestServerConfig())
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -3961,7 +3957,7 @@ func TestHTTPAuthLoginRejectsDisallowedUser(testingHandle *testing.T) {
 	config.AllowedUsers = map[string]struct{}{"allowed@example.com": {}}
 	registry := NewSingleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -4037,7 +4033,7 @@ func TestHTTPAuthLoginRejectsEmptyAllowlist(testingHandle *testing.T) {
 	config.AllowedUsers = map[string]struct{}{}
 	registry := NewSingleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -4113,7 +4109,7 @@ func TestHTTPAuthLoginAllowsListedUser(testingHandle *testing.T) {
 	config.AllowedUsers = map[string]struct{}{"allowed@example.com": {}}
 	registry := NewSingleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 
 	server := newInProcessServer(router, true)
 	defer server.Close()
@@ -4210,7 +4206,7 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 	defer ProvideClock(nil)
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil)
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	client := server.Client()
@@ -4305,7 +4301,7 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 	if decodeErr := json.NewDecoder(callbackResponse.Body).Decode(&profile); decodeErr != nil {
 		testingHandle.Fatalf("decode Apple callback profile: %v", decodeErr)
 	}
-	if profile["user_id"] != "apple:apple-subject" || profile["user_email"] != "apple@example.com" {
+	if validateOpaqueAccountID(fmt.Sprint(profile["user_id"])) != nil || profile["user_email"] != "apple@example.com" {
 		testingHandle.Fatalf("unexpected Apple profile: %#v", profile)
 	}
 	cleared := false
@@ -4411,7 +4407,7 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 		testingHandle.Fatalf("create native Apple user store: %v", userStoreErr)
 	}
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, userStore, nil, nil)
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4479,7 +4475,7 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	if decodeErr := json.NewDecoder(loginResponse.Body).Decode(&profile); decodeErr != nil {
 		testingHandle.Fatalf("decode native Apple profile: %v", decodeErr)
 	}
-	if profile["user_id"] != "apple:native-apple-subject" || profile["user_email"] != "native@example.com" || profile["display"] != "Dr. Native Apple User Jr." {
+	if validateOpaqueAccountID(fmt.Sprint(profile["user_id"])) != nil || profile["user_email"] != "native@example.com" || profile["display"] != "Dr. Native Apple User Jr." {
 		testingHandle.Fatalf("unexpected native Apple profile: %#v", profile)
 	}
 	cookies := captureAuthCookies(authCookieState{}, loginResponse.Cookies(), config)
@@ -4539,7 +4535,7 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	if secondProfile["display"] != "Dr. Native Apple User Jr." {
 		testingHandle.Fatalf("expected later native Apple login to keep the full name, got %#v", secondProfile)
 	}
-	_, storedDisplayName, _, _, storedProfileErr := userStore.GetUserProfile(context.Background(), config.TenantID, "apple:native-apple-subject")
+	_, storedDisplayName, _, _, storedProfileErr := userStore.GetUserProfile(context.Background(), config.TenantID, fmt.Sprint(profile["user_id"]))
 	if storedProfileErr != nil || storedDisplayName != "Dr. Native Apple User Jr." {
 		testingHandle.Fatalf("expected persisted native Apple full name, display=%q err=%v", storedDisplayName, storedProfileErr)
 	}
@@ -4565,7 +4561,7 @@ func TestHTTPNativeAppleLoginCancelsJWKSRequest(testingHandle *testing.T) {
 		JWKSURL:         "https://appleid.example.test/auth/keys",
 	}
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := newInProcessServer(router, true)
 	defer server.Close()
 
@@ -4628,7 +4624,7 @@ func TestHTTPNativeAppleRoutesRejectMissingConfigAndInput(testingHandle *testing
 	config := newTestServerConfig()
 	config.AppleOAuth = AppleOAuthConfig{Enabled: true, ClientID: "com.example.web"}
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4654,7 +4650,7 @@ func TestHTTPNativeAppleRoutesRejectMissingConfigAndInput(testingHandle *testing
 
 	config.AppleOAuth.NativeClientIDs = []string{"com.example.ios"}
 	configuredRouter := gin.New()
-	MountAuthRoutes(configuredRouter, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(configuredRouter, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	configuredServer := newInProcessServer(configuredRouter, true)
 	defer configuredServer.Close()
 
@@ -4717,7 +4713,7 @@ func TestHTTPNativeAppleLoginRejectsInvalidClaims(testingHandle *testing.T) {
 		JWKSURL:         appleServer.URL + "/auth/keys",
 	}
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -4870,7 +4866,7 @@ func TestHTTPNativeAppleLoginEnforcesTransportAndUserPolicy(testingHandle *testi
 				JWKSURL:         appleServer.URL + "/auth/keys",
 			}
 			router := gin.New()
-			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 			server := newInProcessServer(router, testCase.secure)
 			defer server.Close()
 
@@ -5331,7 +5327,7 @@ tenants:
 	userStore := newTestUserStore()
 	router := gin.New()
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, registry, userStore, NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -5398,10 +5394,11 @@ tenants:
 	if tenantAResponse.StatusCode != http.StatusOK {
 		testingHandle.Fatalf("expected tenant A native Apple login status 200, got %d", tenantAResponse.StatusCode)
 	}
-	if _, exists := userStore.profiles["tenant-a"]["apple:tenant-a-subject"]; !exists {
+	firstUserID := fixtureSessionSubject(testingHandle, collectCookies(tenantAResponse.Cookies())[registry.Config("tenant-a").SessionCookieName].Value, registry.Config("tenant-a"))
+	if _, exists := userStore.profiles["tenant-a"][firstUserID]; !exists {
 		testingHandle.Fatalf("expected tenant A Apple profile in tenant A store")
 	}
-	if _, exists := userStore.profiles["tenant-b"]["apple:tenant-a-subject"]; exists {
+	if _, exists := userStore.profiles["tenant-b"][firstUserID]; exists {
 		testingHandle.Fatalf("tenant A Apple profile leaked into tenant B store")
 	}
 }
@@ -5425,7 +5422,7 @@ func TestHTTPAppleOAuthStartRejectsUnregisteredReturnTo(testingHandle *testing.T
 	}
 
 	router := gin.New()
-	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil)
+	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
 	server := newInProcessServer(router, true)
 	defer server.Close()
 
