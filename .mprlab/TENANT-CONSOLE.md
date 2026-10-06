@@ -1,7 +1,10 @@
 # TAuth tenant console proposal
 
-Status: P002 planning completed. F008 tracks implementation through six dedicated issues.
+Status: P002 planning and F008 implementation are completed.
 Source review date: September 26, 2026.
+
+This document records the initial proposal. F017 added Apps between owner accounts and tenants.
+The [operations guide](../docs/tenant-console-operations.md) defines the ownership, workspace, and deployment contracts.
 
 ## Outcome
 

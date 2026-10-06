@@ -1,5 +1,2038 @@
 # Resolved issues
 
+These entries record completed work. Some entries describe contracts that later issues replaced.
+The product contracts are in [README](../README.md) and [ARCHITECTURE](../ARCHITECTURE.md).
+The issue IDs and evidence stay unchanged.
+
+## BugFixes
+
+- [x] [B124] (P0) Use the authorized Google client for the production console.
+  Goal: Permit Google sign-in at the production console origin.
+  Evidence: The completed tenant migration copied the demo client into the console. Google rejects the console origin for that client.
+  The existing TAuth client already authorizes the production console origin.
+  Requirements:
+  - Keep the completed tenant migration and its receipt unchanged.
+  - Apply a separate timestamped migration through the standard deployment command.
+  - Back up the stopped database and change only the console Google client.
+  - Publish the corrected candidate and its completion receipt together.
+  - Preserve tenant settings, keys, accounts, and owner bindings.
+  - Reject an unexpected current client or a conflicting receipt.
+  - Keep completed retries independent of active service state.
+  Validation: CLI and real Docker/Ansible checks passed for preservation, conflicts, candidate failure, retry, and active-service retry.
+  Independent review and `make ci` passed on October 5, 2026.
+  Resolution: The automatic migration publishes the corrected console client and its receipt together.
+  Production Google sign-in remains a separate acceptance step.
+  Changed files: migration command, public plan, rollout, tests, deployment runbook, `README.md`, and `.gitignore`.
+
+- [x] [B123] (P0) Accept the disabled challenge-token constraint in deployment contributions.
+  Goal: Current Gateway contributions can provision tenants without challenge-token disclosure.
+  Evidence: The published renderer rejected `return_challenge_tokens:false` in 19 retained tenant contributions.
+  Requirements: Accept only false or an omitted field. Reject true, null, and incorrect types.
+  Keep the field outside native configuration, stored tenant configuration, and runtime behavior.
+  Keep unknown-field rejection and use the same constraint for rendering and management provisioning.
+  Validation: Use the renderer CLI and management HTTP API with synthetic contributions for both tenant resource kinds.
+  Resolved: The shared decoder accepts false or omission and rejects all other values before configuration changes.
+  The CLI and HTTP regression tests passed after the expected failures. The challenge-response security test and `make ci` passed.
+  Independent review found no actionable issues. The runbook also describes the B122 migration without a source container.
+
+- [x] [B121] (P1) Preserve the complete source during the tenant cutover.
+  Goal: Migration preserves all tenant configurations without requiring an exact application inventory.
+  Evidence: The source has 21 tenants. The plan has 20 and rejects `rsvp-production` before data changes.
+  Requirements: Import every source tenant. Skip absent planned tenants. Give unassigned tenants separate Apps without Gateway credentials.
+  Keep each planned credential limited to its present assigned tenants and preserve existing accounts and sessions.
+  Validation: CLI migration, source configuration equality, account retention, existing HTTP sessions, and credential isolation passed.
+  Resolution: The source defines the inventory. Separate Apps retain unassigned tenants. Empty App names use the tenant ID.
+  Absent planned tenants receive no App or credential. Planned credentials cover only present assigned tenants.
+  The 21-tenant configuration passed a local rehearsal with an earlier database copy. Independent review and `make ci` passed.
+  Files: `deployment/migrations/cutover.go`, `deployment/migrations/cutover_test.go`, `tests/automatic-deployment.sh`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
+- [x] [B122] (P1) Use durable configuration inputs for the cutover.
+  Goal: Migration can run without an existing source container.
+  Requirements: Read the materialized host configuration. Stop existing TAuth database writers and reject unrelated writers.
+  Keep receipt retries independent of source files and preserve the original database on failure.
+  Validation: Real Docker and Ansible passed without a source container. Unrelated writer rejection preserved the original database.
+  Resolution: The cutover reads one durable host configuration. It stops present TAuth writers and requires no active database writers.
+  A completed retry needs no source file and keeps the service active. Independent review and `make ci` passed.
+  Production TAuth remains stopped at the operator's request.
+  Files: `deployment/rollout/cutover.yml`, `tests/automatic-deployment.sh`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
+- [x] [B120] (P1) Select the cutover source by its database volume.
+  Goal: The timestamped migration selects the existing TAuth configuration source.
+  Evidence: The deployed source uses project `mprlab-tauth-runtime`. The cutover filter uses `mprlab-nginx-gateway` and returns zero containers.
+  Requirements: Select one source by the expected volume and service label. Verify its configuration and reject unrelated database writers.
+  Resolution: Replaced the project filter with the expected volume filter. Kept the service label and source checks.
+  Validation: The Docker and Ansible fixture reproduced the assertion failure. The repaired fixture and repeat passed.
+  The corrected read-only host query selected one source. Independent review, `make ci`, and whitespace checks passed.
+  Production deployment did not run during this repair.
+  Files: `deployment/rollout/cutover.yml`, `tests/automatic-deployment.sh`, and `.mprlab/ISSUES.md`.
+
+- [x] [B119] (P1) Read the current Gateway record before the deployment cutover.
+  Goal: Deployment uses the sealed image and migration input from the current release.
+  Evidence: Gateway v5.0.4 sealed and published v2.2.7. The cutover command failed because it read the obsolete `selected-release.json` file.
+  Requirements: Read the embedded release in `current-release.json`. Remove obsolete receipt reads.
+  Resolution: Read the version and artifacts from the embedded current release. Removed both obsolete receipt reads.
+  Validation: The CLI test reproduced the missing-file error before the repair and reached input preflight after the repair.
+  Focused deployment tests, independent review, `make ci`, and whitespace checks passed. Production deployment did not run.
+  Files: `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, and `.mprlab/ISSUES.md`.
+
+- [x] [B117] (P1) Return the erasure receipt after a concurrent account purge.
+  Goal: Concurrent deletion requests return the same operation after the account is absent.
+  Requirements: Read the current receipt within the database transaction. Keep tenant isolation and receipt expiry.
+  Deliverables: Transaction repair, a controlled HTTP race test, and CI for stacked pull requests.
+  Resolution: Read the receipt by tenant and capability within the transaction after the account is absent. Keep receipt expiry.
+  Removed the PR target branch filters so CI runs for stacked pull requests.
+  Validation: The controlled HTTP test reproduced the CI error before the repair. All erasure HTTP tests passed five times after the repair.
+  Independent review, `make ci`, and whitespace checks passed. Separate race detector failures are recorded in B118.
+  Files: `internal/authkit/database_account_erasure.go`, `internal/authkit/account_erasure_http_test.go`, both test workflows, and `.mprlab/ISSUES.md`.
+
+- [x] [B116] (P1) Verify the current manifest execution policy.
+  Goal: The repository test accepts the current manifest contract and rejects invalid execution policy.
+  Requirements: Verify the CI command, positive timeouts, and finite polling.
+  Deliverables: Manifest contract test repair.
+  Resolution: Updated the exact root fields. Verified the CI command, timeout values, operation fields, and finite polling.
+  Validation: The original manifest test failed. The repaired test, independent review, and `make ci` passed.
+  Files: `tests/repository_neutrality_contract_test.go` and `.mprlab/ISSUES.md`.
+
+- [x] [B115] (P1) Declare the current Gateway execution policy.
+  Goal: The installed Gateway accepts the application manifest before release.
+  Requirements: Declare enabled CI, positive timeouts, and finite provider observations in the selected manifest.
+  Resolution: Added the execution policy required by B607. Kept the application resources and release scheme.
+  Validation: Gateway v5.0.4 completed the release plan through native Ansible in a local fixture.
+  The plan reported zero changes and zero failures. The Governor check retained six existing managed-file differences.
+  Changed prose and whitespace checks passed. Production release, publication, and deployment did not run.
+  Files: `.mprlab/deploy/resources.yml`, `.mprlab/POLICY.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B113] (P1) Start the server with inactive configured accounts.
+  Goal: An inactive configured password account must not prevent server startup.
+  Requirements: Keep the account inactive. Complete pending account disablement before the server accepts traffic.
+  Deliverables: Startup repair and HTTP tests for disabled and disabling accounts.
+  Resolution: Startup leaves inactive credentials and profiles unchanged. It continues with other configured users and pending account disablement.
+  Validation: Both startup scenarios failed before the repair. The repaired HTTP tests, independent review, and `make ci` passed.
+  Files: `cmd/server/main.go`, `cmd/server/account_lifecycle_restart_test.go`, `README.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B114] (P1) Permit the account erasure status header through CORS.
+  Goal: A browser client from a permitted origin can read account erasure status.
+  Requirements: Permit `Authorization` in the CORS response. Keep origin restrictions.
+  Deliverables: CORS repair and HTTP tests through the production server.
+  Resolution: CORS permits `Authorization` for configured origins. Missing keys, unknown keys, and unknown origins remain rejected.
+  Validation: The preflight test failed before the repair. The repaired HTTP tests, independent review, and `make ci` passed.
+  Files: `internal/web/cors.go`, `cmd/server/account_erasure_cors_test.go`, and `.mprlab/ISSUES.md`.
+
+- [x] [B112] (P2) {F018} Allow generated Gateway credentials to suspend removed tenants.
+  Goal:
+  Let Gateway suspend a migrated tenant when its application removes the tenant contribution.
+  Current behavior:
+  The timestamped migration omits `suspend` from generated credential grants.
+  Gateway sends `PATCH /api/management/tenants/{id}` with `state=suspended` during contribution removal.
+  TAuth returns `403 management.operation_denied` and keeps the tenant active.
+  Requirements:
+  - Add `suspend` to generated Gateway credential grants.
+  - Keep the credential scoped to its assigned App and tenants.
+  - Verify suspension and denied authentication through the real migrated HTTP service.
+  Validation:
+  Run `make test-automatic-deployment` and `make ci`.
+  Initial result:
+  The HTTP regression returned `403 management.operation_denied` before the grant correction.
+  Resolution:
+  Added the `suspend` grant. The credential keeps its assigned App and tenant scope.
+  Validation:
+  The Ansible/Docker regression and `make ci` passed.
+  The generated credential suspended its tenant. The existing session then returned `404`.
+  The console tenant remained outside the credential scope.
+  Document checks found no new findings. Governor retained the existing managed-file differences.
+  Files:
+  `deployment/migrations/cutover.go`, `tests/automatic-deployment.sh`, `.mprlab/ISSUES.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
+- [x] [B111] (P2) Use one recovery lock for equivalent base URLs.
+  Goal: Keep browser tabs authenticated after session expiry.
+  Expected result: Base URLs with and without a last slash use the same recovery lock.
+  Actual result: Equivalent base URLs use different locks. Requests at the same time use one refresh token twice and revoke its family.
+  Requirements: Remove the last slash from the base URL before the client makes the lock scope.
+  Validation: Use the Chromium browser test with memory and SQLite stores. Use `make ci`.
+  Initial result: Both stores returned an unauthenticated state for the next session restore.
+  Resolution: The client removes the last slash from the base URL in the recovery lock scope.
+  Validation: Chromium confirmed that both tabs and a later session restore stayed authenticated with memory and SQLite stores.
+  Validation: `make ci` passed. The changed prose has no language-checker findings.
+  Repository result: Governor reported six existing managed-file differences. The issue tracker retains existing language-checker findings.
+  Files: `web/tauth.js`, `tests/auth-refresh.browser.cjs`, `.mprlab/ISSUES.md`.
+
+- [x] [B110] (P1) Install browser dependencies for Go CI.
+  Goal: Run the complete Go test suite in GitHub Actions.
+  Actual result: PR 181 failed because `TestSecurityBrowserRefresh` could not load Puppeteer in the Go test job.
+  Requirements: Set up Node and install the locked npm dependencies before Go tests.
+  Requirements: Include the workflow and browser test inputs in its path filters.
+  Validation: Run the browser refresh test with memory and SQLite stores. Run `make ci`.
+  Resolution: The Go workflow sets up Node and runs `npm ci` before the test suite.
+  Resolution: Path filters include the workflow, npm lockfile, and browser regression inputs.
+  Validation: The browser refresh test passed for both stores. Final `make ci` passed.
+  Files: `.github/workflows/go-tests.yml`.
+
+- [x] [B109] (P1) Limit password reset email delivery.
+  Goal:
+  Repeated reset requests cannot send unlimited email or retain unlimited reset challenges.
+  Requirements:
+  - Enforce an atomic account cooldown plus source and global request budgets.
+  - Keep reset state bounded in memory and persistent stores.
+  - Return the same public response when a request is throttled.
+  Validation:
+  - Compare known, unknown, and throttled HTTP responses.
+  - Verify one delivery per cooldown and recovery after expiry.
+  Actual result before the change:
+  Four consecutive reset requests sent four emails for one account.
+  Resolution:
+  Reset requests now have account, source, and global budgets before challenge creation and email delivery.
+  Each account has one outstanding reset challenge. Expired reset records are removed during creation.
+  Tests verify one email during the cooldown, recovery after expiry, and rejection of the replaced challenge.
+  Focused memory and SQLite tests passed. `make ci` passed after the final code change.
+
+- [x] [B108] (P1) Remove public account challenge secrets.
+  Goal: Deliver account challenges only through the configured email channel.
+  Actual result: An optional configuration field returns usable challenge tokens in public responses.
+  Requirements: Remove the configuration field and response path. Use the test email sender for lifecycle tests.
+  Validation: Verify that signup, reset, and link responses contain no challenge token. Verify completion through email.
+  Resolution:
+  The public challenge-token option and all HTTP token-return paths were removed.
+  Account management requires email delivery. Tests obtain secrets from the injected sender.
+  Tests cover signup, reset, link completion, and rejection of the removed YAML field.
+  Focused tests passed. `make ci` passed after the final code change.
+
+- [x] [B107] (P1) Limit owner credential mutations.
+  Goal: Apply the owner mutation limit to credential creation and revocation.
+  Actual result: Credential requests bypass the shared limit and retain rows after revocation.
+  Requirements: Count credential mutations. Bound retained credentials and receipts. Preserve owner isolation and idempotent retries.
+  Validation: Exercise repeated creation and revocation through HTTP. Run `make ci` after the security changes.
+  Resolution:
+  Credential creation and revocation now use the shared transactional owner mutation limit and audit log.
+  Idempotent requests retain their existing responses without another mutation count.
+  Retained credentials have a per-owner capacity. Creation removes old revoked credentials and their receipts.
+  Focused HTTP tests passed. `make ci` passed after the final code change.
+
+- [x] [B106] (P1) Qualify Gateway provisioning with App-scoped credentials.
+  Requirements: Select the credential for each App and its current or removed tenant contributions.
+  Requirements: Preserve App isolation and repeat the full production contribution operation through the installed Gateway.
+  Prior failure: Gateway v4.7.1 used one credential across Apps. The source correction required qualification through an installed release.
+  Validation: I222 reproduced `management.creation_denied` with the installed client and 20 captured production contributions.
+  Validation: Separate operations with the correct App credentials passed for all 20 tenants.
+  Resolution: Gateway B595 selects credentials by contribution owner and resource ID under the existing P005 cutover preparation.
+  Validation: The corrected shared Ansible handler provisioned all 20 production-copy Apps and repeated the operation without changes.
+  Validation: Real-service acceptance now verifies two Apps, separate credentials, and HTTPS activation without DNS proofs.
+  Validation: Final `make ci` passed in both repositories after the source correction.
+  Evidence: `docs/production-app-rehearsal-2026-09-28.md`.
+  Resolution: Installed Gateway v5.0.0 and the sealed TAuth v2.2.6 container passed the isolated production-copy rehearsal on 2026-09-30.
+  Validation: All 20 Apps retained their effective settings. Repeated operations retained the same revisions.
+  Validation: Cross-App requests returned HTTP 403. A removed contribution suspended its tenant. The other 19 tenants stayed active.
+  Validation: Import retries, backup restoration, 30 session profiles, and all 13 original database tables passed comparison.
+  Validation: `make test-console` passed with the private rehearsal overlay. Production operations remain separate.
+  Validation: Final `make ci` passed. Changed prose passed the scoped language review and `git diff --check`.
+  Evidence: `docs/production-release-qualification-2026-09-30.md`.
+
+- [x] [B104] Migrate credential owners without tenants.
+  Observed: App ownership requires a tenant, so an owner with only provisioning credentials cannot migrate.
+  Requirements: Permit explicitly owned empty Apps. Validate tenant and credential ownership before database changes.
+  Resolution: Added `owner_account_id` to the migration map. Empty Apps require an existing owner. Tenant and credential assignments must match.
+  Validation: Tests preserve active and revoked credentials without creating tenants. Invalid owners and cross-owner assignments fail without schema changes.
+  Validation: Repeated migration, `make test-deployment-migration`, and `make ci` passed.
+  Files: `deployment/migrations/apps.go`, `deployment/migrations/apps_test.go`, `docs/tenant-console-operations.md`.
+
+- [x] [B105] Preserve bookmarked destinations before login.
+  Observed: Anonymous authentication bootstrap removes the requested App or tenant fragment.
+  Requirements: Preserve the initial destination through login. Clear it when an established session signs out.
+  Resolution: Fragment removal now requires an established session.
+  Validation: Browser tests verify signed-out App and tenant bookmarks, section selection, and explicit sign-out. `make ci` passed.
+  Validation: `make up` updated the local console. Its workspace code matches the source.
+  Files: `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B103] (P1) Include complete deployment definitions in the local tenant import.
+  Expected: Import each complete, distinct tenant definition under its App.
+  Actual: The earlier scan omitted deployment manifests, including the production Download Your Data tenant.
+  Deliverables: Use the canonical contribution resolver in the separate migration tool. Import complete missing definitions under existing Apps.
+  Validation: CLI tests and `make ci` passed. Six definitions passed canonical validation, rehearsal, actual import, and repeated invocation.
+  Resolution: Imported Download Your Data, Ledger, MPR UI, Investors, Gallery, and iRoom production definitions into existing Apps.
+  Local result: 28 active tenants in 19 Apps. Existing rows across 36 tables stayed unchanged. All 28 live nonce requests passed.
+  Excluded: MailGoblin has no complete authentication settings. ISSUES.md lacks two declared credential keys.
+  Files: `deployment/migrations/command.go`, `freeze_test.go`, `docs/tenant-console-operations.md`, and `docs/local-tenant-migration-2026-09-28.md`.
+
+- [x] [B099] (P2) Persist explicit configuration edits without overwriting untouched fields.
+  Requirements:
+  Use the latest accepted edit for each changed field. Preserve concurrent changes to other fields.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Tracked changed fields by edit version and merged only those fields into the latest configuration. Removed manual conflict resolution.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B100] (P2) Preserve untouched metadata while the rename dialog stays open.
+  Requirements:
+  Track changes from the displayed dialog values. Send only metadata fields that the user changed.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Tracked metadata changes from displayed dialog values. Sent only changed fields in each PATCH and preserved concurrent environment changes.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B101] (P2) Keep newer edits pending after an obsolete validation failure.
+  Requirements:
+  Apply validation errors only to their edit version. Retry newer configuration and metadata input automatically.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Applied validation failures only to the current edit version. Retried newer configuration and metadata after obsolete errors.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B102] (P2) Retry rate-limited automatic persistence.
+  Requirements:
+  Treat HTTP 429 as temporary. Retain and retry pending configuration and metadata changes.
+  Validation:
+  Exercise the browser against the real management service with controlled concurrent changes and responses.
+  Resolution:
+  Classified rate limits as temporary and retained pending edits. Verified automatic retries for configuration and metadata.
+  Passed the real-service browser scenarios and final `make ci`.
+  Updated the local stack and verified the served autosave source.
+  Changed files:
+  `web/app/workspace.js`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [B098] (P1) Repair the inactive local tenant import.
+  Requirements:
+  - Repair the selected import through a separate, explicit-owner GORM migration.
+  - Resolve cookie conflicts and bind requests for shared origins to explicit tenant IDs.
+  - Preserve keys, providers, origins, owner data, and unrelated database records.
+  - Validate the combined runtime before the transaction commits active revisions.
+  - Reject inactive output from future imports.
+  - Back up the database, rehearse the repair, and verify authentication through public interfaces.
+  Validation:
+  Exercise repair rollback, repeatability, tenant isolation, and the local service after restart.
+  Resolution:
+  - Applied the bounded GORM repair to all 22 imported local tenants and activated revision 2.
+  - Assigned distinct cookies to Hecate and NameSignal and required tenant headers for 15 tenants with shared origins.
+  - Preserved keys, providers, origins, ownership, original revisions, and 29 unrelated database tables.
+  - Removed inactive output from the importer and added transactional repair receipts and preconditions.
+  - Configured the local OAuth issuer with a persistent signing key for the imported authorization-server tenant.
+  - Passed migration, HTTP isolation, and final `make ci` checks.
+  - Verified the backup, rehearsal, actual database comparison, and identical receipt on repeated execution.
+  - Restarted the local stack and verified nonce creation for all 22 tenants through HTTP.
+  - Verified rejection of unauthenticated profiles, missing tenant headers, and unregistered origins.
+  - Recorded the local result in `docs/local-tenant-migration-2026-09-28.md`.
+  Changed files:
+  - `deployment/migrations/repair.go`, `deployment/migrations/repair_test.go`, `deployment/migrations/command.go`, `deployment/migrations/tenants.go`.
+  - `cmd/server/tenant_import_repair_test.go`, `cmd/server/console_browser_test.go`.
+  - `local/service.yaml`, `local/compose.yml`, `local/stack.sh`, `tests/local-lifecycle.sh`.
+  - `README.md`, `docs/tenant-console-operations.md`, `docs/local-tenant-migration-2026-09-28.md`.
+
+- [x] [B097] (P1) Correct workspace load feedback and authentication status.
+  Requirements:
+  - Clear routine success notifications after tenant data loads.
+  - Show authentication status as text instead of a control.
+  - Explain when a tenant has no active configuration without claiming that required inputs are missing.
+  - Distinguish suspended authentication from an active configuration revision.
+  Validation:
+  Verify the rendered states and quiet successful loads through Chromium against the real service.
+  Resolution:
+  - Cleared the load notification and hid its empty region after tenant selection.
+  - Replaced the status pill with plain authentication status and an explanation for each state.
+  - Removed the incorrect claim that an inactive configuration has missing inputs.
+  - Verified inactive imports, active creation, and suspended authentication through the browser.
+  - Passed `make test-console-browser` and `make ci` after the changes.
+  - Updated the local stack with `make up` and verified the served workspace files.
+  - Reviewed changed prose with no new mechanical language findings. Preserved unrelated findings.
+  Changed files:
+  - `web/app/workspace.js`, `web/app/client.js`, `web/app/index.html`, `web/app/workspace.css`.
+  - `tests/console-workspace.browser.cjs`, `cmd/server/console_browser_test.go`, `docs/tenant-console-operations.md`.
+
+- [x] [B095] (P1) Open administration from the avatar menu.
+  Requirements:
+  - Put Admin in the authenticated administrator's avatar menu.
+  - Open the dedicated modal and return focus to the avatar after dismissal.
+  - Remove the separate workspace Admin button.
+  - Keep the menu item absent for ordinary accounts and after logout.
+  Validation:
+  Drive the real menu and modal in Chromium, then run `make ci`.
+  Resolution:
+  - Used the pinned MPR user-menu contract to open the administrator modal from the avatar.
+  - Removed the workspace button and retained the account control through header updates.
+  - Verified desktop and mobile menu access, keyboard dismissal, focus return, and ordinary-account isolation in Chromium.
+  - Focused browser checks and `make ci` passed.
+  Changed files:
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `docs/tenant-console-operations.md` and this tracker.
+
+- [x] [B096] (P1) Render one consistent tenant label.
+  Observed:
+  Named tenants have two labels, while unnamed imported tenants have only an ID.
+  Requirements:
+  - Show one label per tenant in the navigation list and mobile selector.
+  - Use the display name when present and the tenant ID when the display name is empty.
+  - Keep the tenant ID available in the detail view.
+  Validation:
+  Exercise named and unnamed imported tenants through the real browser and API.
+  Resolution:
+  - Applied one tenant label rule to desktop navigation, mobile selection, and detail headings.
+  - Preserved stored display names and kept tenant IDs in the detail view.
+  - Added a real unnamed imported tenant to the browser fixture.
+  - Verified both label cases and tenant selection in Chromium.
+  - Focused browser checks and `make ci` passed.
+  Changed files:
+  - `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `cmd/server/console_browser_test.go`, the operations runbook, and this tracker.
+
+- [x] [B094] (P1) Accept explicitly empty optional migration inputs.
+  Observed:
+  The migration rejects a configured empty cookie domain as a missing environment input.
+  An empty domain is valid and preserves host-only cookies.
+  Requirements:
+  - Reject absent environment inputs.
+  - Preserve present empty values and let the field validator enforce required content.
+  Validation:
+  Verify the source-freeze CLI with an empty cookie domain and a signing key that contains a literal dollar sign.
+  Resolution:
+  - Distinguished undefined environment inputs from defined empty optional values.
+  - Verified empty cookie domains, literal dollar signs, and rejection of incomplete migration definitions.
+  - Focused migration and console checks passed. `make ci` passed.
+  Changed files:
+  - `internal/tenants/config.go`, `cmd/server/console_test.go`, and deployment migration tests.
+
+- [x] [B093] (P1) Permit every verified console user to create an owner account.
+  Goal:
+  Remove the first-owner restriction that denied the operator's verified Google account.
+  Requirements:
+  - Bind owners to the stable console subject, independent of email aliases or login order.
+  - Keep every workspace scoped to its owner.
+  - Remove migration operations from the application. Use a separate deployment routine.
+  - Remove the persisted first-owner field without loss of other database values.
+  Validation:
+  Verify enrollment before any administrator, separate subjects, owner isolation, and restart through HTTP and CLI tests.
+  Resolution:
+  Removed email-based and first-owner enrollment rules. Each verified console subject owns a separate workspace.
+  Existing bindings retain their owner ID. Email matches do not merge different subjects.
+  Removed the obsolete local schema field through the separate deployment GORM routine.
+  Compared all 33 local database tables before and after the schema change. All remaining values matched.
+  The local source build is active at ports 8081 and 8082 with the existing Google client and database.
+  Validation: `make test-console`, `make test-console-browser`, and `make ci` passed.
+  Changed files: `internal/controlplane/store.go`, `internal/controlplane/http.go`, `cmd/server/console_test.go`,
+  `README.md`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, and `.mprlab/TENANT-CONSOLE.md`.
+
+- [x] [B092] (P1) Preserve imported tenant policies during initial Gateway convergence.
+  Observed:
+  The production-copy rehearsal imported all 20 tenants with unchanged settings.
+  Gateway then changed `mpr-ui-demo` settings `allow_insecure_http` and `require_tenant_header` from `false` to `true`.
+  The provisioning handler derives these settings from a loopback origin in the contribution.
+  An unauthenticated `GET /me` without the tenant header returned `401` before convergence and `403` afterward.
+  Expected:
+  Preserve the imported transport and tenant-header policies during the initial Gateway configuration write.
+  Validation:
+  Reproduce the change through the management HTTP API and actual Gateway client.
+  Require stable effective settings after the first and repeated convergence.
+  The September 26 production-copy rehearsal failed its final settings assertion.
+  The import, data preservation, backup restoration, doctor, and preflight checks passed.
+  Evidence: `docs/tenant-migration-rehearsal-2026-09-26.md`.
+  Resolution:
+  Gateway configuration writes now keep both policies from the active tenant configuration.
+  New tenants still use the loopback defaults.
+  HTTP tests reproduced the defect before correction, including requests from the actual Gateway client.
+  All four policy combinations stayed the same through initial writes, retries, and later generations after correction.
+  The second production-copy rehearsal kept all 20 effective tenant configurations unchanged.
+  The `mpr-ui-demo` request without a tenant header returned `401` after both Gateway runs.
+  `make test-console`, `make test-gateway-provisioning`, and `make ci` completed without errors.
+  The CI run selected the actual Gateway client through `TAUTH_GATEWAY_ROOT`.
+  The changed prose completed its scoped language review. Governor reported the same six pre-existing managed-file differences.
+  Release, publication, and deployment were not run.
+  Changed files: `internal/controlplane/provisioning.go`, `cmd/server/console_test.go`, `cmd/server/provisioning_test.go`, and `Makefile`.
+  Updated documents: `docs/tenant-console-operations.md`, `docs/tenant-migration-rehearsal-2026-09-26.md`, and this issue record.
+
+- [x] [B088] (P1) Include the console runtime configuration in clean Pages artifacts.
+  Review finding:
+  The ignored runtime JSON file is absent from a clean checkout. The console cannot initialize.
+  Validation:
+  Build the Pages artifact from tracked and publishable source files without ignored local inputs.
+  Resolution:
+  Included the public runtime JSON in version control and excluded ignored files from the artifact test context.
+  The clean source build failed before the fix and passed after the fix.
+  Changed files: `.gitignore`, `web/app/runtime.json`, and `tests/console-pages.sh`.
+
+- [x] [B089] (P1) Reject machine activation after owner suspension.
+  Review finding:
+  A provisioning credential can activate a suspended tenant after revocation completes.
+  Validation:
+  Verify machine rejection and owner recovery through real HTTP requests.
+  Resolution:
+  Rejected provisioning activation while the tenant is suspended. Owner recovery remains available.
+  The HTTP test reproduced unauthorized recovery before the fix and passed with `make test-console` after the fix.
+  Changed files: `internal/controlplane/activation.go`, `cmd/server/provisioning_test.go`, and `docs/openapi.yaml`.
+
+- [x] [B090] (P1) Keep tenant CORS changes consistent across restart.
+  Review finding:
+  A successful tenant mutation can leave an explicit service origin without an active tenant. Startup then fails.
+  Validation:
+  Verify origin replacement and suspension against startup and runtime CORS checks.
+  Resolution:
+  Applied startup CORS validation to every candidate runtime before commit and publication.
+  Rejected incompatible mutations with `422` and retained the active configuration.
+  HTTP tests covered origin replacement, suspension, restart, and successful retry after correction of the explicit service allowlist.
+  `make test-console` passed. The operator guide gives the required correction sequence.
+  Changed files: `cmd/server/runtime.go`, `cmd/server/cors_management_test.go`, and `docs/tenant-console-operations.md`.
+
+- [x] [B091] (P2) Require the provisioning shape for machine configuration writes.
+  Review finding:
+  A machine can submit the console shape and bypass contribution and revision ownership checks.
+  Validation:
+  Reject ordinary and null provisioning shapes before changes to tenant configuration.
+  Resolution:
+  Required the provisioning object for every machine configuration write.
+  HTTP tests rejected the console shape for draft, active, edited, and suspended tenants.
+  Null provisioning values also failed. Owner edits and valid provisioning requests retained their documented behavior.
+  The initial regression returned `200` before the fix. It returned `422` after the fix.
+  Final `make ci`, console race checks, clean Pages artifact checks, and actual Gateway client acceptance passed for B088 through B091.
+  The Governor check retains six existing managed-file differences. The changed prose passed its scoped language review.
+  Changed files: `internal/controlplane/resources.go`, `cmd/server/provisioning_test.go`, OpenAPI, and the console operations guide.
+
+- [x] [B087] (P1) Limit Gateway suspension grants to suspension changes.
+  Observed:
+  A provisioning credential with the suspension operation can rename a tenant through metadata PATCH.
+  Expected:
+  Reject name and environment changes from provisioning credentials.
+  Validation:
+  The HTTP acceptance test returned 200 for an expected 403 before the correction.
+  Resolution:
+  Provisioning metadata PATCH rejects name and environment changes with 403.
+  Focused HTTP acceptance and final `make ci` pass.
+  Changed files: `internal/controlplane/resources.go` and `cmd/server/provisioning_test.go`.
+
+- [x] [B086] (P0) Keep management database contexts outside the Gin request pool.
+  F010 acceptance with `GOFLAGS=-race make test-console` found a data race during owner provision.
+  The SQL cleanup goroutine reads a pooled Gin context after the HTTP handler returns.
+  Pass the HTTP request context to database operations and runtime construction.
+  Validate the console HTTP tests with the race detector and final CI.
+
+  Resolved 2026-09-26: Management handlers now pass the HTTP request context to database and runtime operations.
+  The focused race check and final `make ci` passed.
+  Changed files: `internal/controlplane/http.go`, `internal/controlplane/management_http.go`, `internal/controlplane/resources.go`, and `internal/controlplane/activation.go`.
+
+- [x] [B084] (P2) {F007} Validate GitHub disclosure for resource credentials.
+  Goal: Credential delivery includes the approved GitHub identity.
+  Requirements: Validate resource configuration and requested scopes before authorization.
+  Resolution: Configuration validation enforces GitHub disclosure. Authorization requests without disclosure fail with `invalid_scope`.
+  Validation: Regression tests reproduced both failures. `make test-github-oauth` and final `make ci` passed.
+
+- [x] [B085] (P2) {F007} Validate credential ownership across linked GitHub identities.
+  Goal: Permit credential delivery when an account has multiple GitHub identities.
+  Requirements: Verify credential ownership against account identities and token identities.
+  Resolution: Account and token identity checks accept the linked credential owner at any position.
+  Validation: Memory and SQLite tests reproduced the redirect failure. Focused tests and final `make ci` passed.
+
+- [x] [B083] (P0) Validate the GitHub issuer in login responses.
+  Goal:
+  Restore GitHub login for the ISSUES.md MCP client.
+  Evidence:
+  GitHub returned `iss=https://github.com/login/oauth` in the production callback.
+  TAuth rejected that field and returned HTTP 400 before the token exchange.
+  Requirements:
+  - Require the exact GitHub issuer before the transaction claim and token exchange.
+  - Reject missing, empty, duplicate, and different issuer values.
+  - Include the issuer in the local GitHub provider responses.
+  - Preserve browser binding, single-use transactions, and PKCE validation.
+  Validation:
+  - Run `make test-github-http test-github-oauth test-github-browser` and `make ci`.
+  - Deploy TAuth and repeat live MCP authentication.
+  Resolution: Required the exact GitHub issuer before the transaction claim.
+  HTTP, OAuth, browser, and full `make ci` validation passed. Live deployment validation is pending.
+
+- [x] [B082] (P0) Accept the Apple form callback before tenant CORS checks.
+  The public Apple callback returns HTTP 403 when the request contains `Origin: https://appleid.apple.com`.
+  The same request without that origin reaches the callback handler.
+  Exclude the callback route from CORS. Preserve signed state, nonce, provider token, and tenant checks.
+  Verify the real server through HTTP with Apple, unknown, and tenant origins.
+  Verify that ordinary API routes still reject unknown origins.
+  Resolved: The callback route uses one shared constant and excludes CORS. The real server integration test and `make ci` passed.
+
+- [x] [B081] (P1) {B079} Allow the approved callback origin after password login.
+  Goal:
+  Complete fresh password login with an existing consent grant when the callback uses another origin.
+  Evidence:
+  Chromium blocks the callback because the login page uses `form-action 'self'`.
+  The existing browser fixture uses the issuer origin for its callback.
+  Requirements:
+  - Allow only the validated callback origin and the issuer origin in the login form policy.
+  - Use the same policy after rejected password login.
+  - Preserve consent, request binding, and PKCE behavior.
+  Validation:
+  - Reproduce the failure through Chromium before the production change.
+  - Verify both callback origins, fresh password login, and authorization code exchange.
+  - Run `make test-oauth-login`, `make test-oauth-consent`, and `make ci`.
+  Resolution (2026-09-09):
+  The login page now adds the validated callback origin to its form policy.
+  The same policy applies after rejected password login.
+  Chromium first reproduced the blocked callback with another origin.
+  Both callback variants now pass with consent reuse, password retry, and PKCE code exchange.
+  The focused targets, `make verify-js`, and `make ci` passed. All 52 JavaScript and browser tests passed without skips.
+
+- [x] [B080] (P1) Remove the stale login controls after Google account selection.
+  Goal:
+  Show login progress after Google returns the selected account.
+  Evidence:
+  The user reported that the login dialog appeared again after account selection.
+  The current Google callback leaves the login heading and controls visible until navigation completes.
+  The user confirmed that the dialog appeared briefly and then continued without another login.
+  Requirements:
+  - Replace the login controls with progress while TAuth processes the Google credential.
+  - Prevent duplicate credential submissions while the request is active.
+  - Replace the login history entry when the accepted login continues.
+  - Restore the login controls with a visible error when TAuth rejects the credential.
+  Validation:
+  - Hold the Google login response in the browser integration test.
+  - Verify progress, one submission, error recovery, and navigation without the stale login entry.
+  Resolution: 2026-09-09 — The Google callback now shows progress and hides the login controls until completion.
+  An accepted login replaces the history entry. A rejected login restores the controls and shows the error.
+  The initial browser assertion returned `Log in` instead of `Signing in…`.
+  The corrected browser test verifies progress, duplicate callback rejection, error recovery, and history replacement.
+  `make ci` passed. Production deployment and live browser acceptance remain operator steps.
+
+- [x] [B079] (P1) Use an existing consent grant after a fresh login.
+  Goal:
+  Require one approval for each valid consent grant.
+  Evidence:
+  The user completed fresh LLM Proxy login and reported a redundant consent prompt.
+  Authorization checks stored consent before login. The consent page does not check stored consent after login.
+  Requirements:
+  - Examine the exact consent grant for the authenticated account before the consent page appears.
+  - If the grant is valid, complete the request with the existing atomic operation.
+  - Require new approval for another account, an expired grant, or different permissions.
+  - Preserve denial, request expiry, PKCE, and code replay rejection.
+  Validation:
+  - Reproduce the extra prompt through the public HTTP and browser interfaces.
+  - Verify fresh login, grant isolation, and code exchange.
+  - Run the focused OAuth tests and `make ci`.
+  Resolution: 2026-09-09 — Authorization and the consent page now use the same exact-grant lookup.
+  Fresh login uses the existing atomic completion operation when the selected account has a valid grant.
+  The initial HTTP test returned `200` instead of `303`. The browser stopped at consent instead of the client callback.
+  HTTP tests pass with memory and SQLite stores. Other accounts, expired grants, and revoked grants still require approval.
+  Browser tests verify a fresh session and a new authorization code without another consent prompt.
+  `make ci` passed. Production deployment and live browser acceptance remain operator steps.
+
+- [x] [B077] (P1) Return the Google login continuation for an existing session.
+  Goal:
+  A user with a valid TAuth session can complete Google login from an open OAuth login page.
+  The page must open consent for the same pending request.
+
+  Evidence:
+  - On 2026-09-08, live LLM Proxy MCP acceptance reached the Google account chooser after the issuer origin was registered.
+  - The TAuth page then showed `Google authentication was not accepted.`
+  - A later authorization request reached consent with an existing TAuth session.
+  - After approval, Codex reported `Successfully logged in to MCP server 'llm-proxy'.`
+  - The original failing POST was not captured. The exact trigger for that attempt is unconfirmed.
+  - Local HTTP and browser tests reproduce a response defect that produces the same page error.
+
+  Reproduction:
+  1. Open two OAuth login pages in one browser profile before login.
+  2. Complete login in the first tab to establish a shared TAuth session.
+  3. Complete the Google callback in the second tab.
+  4. Observe `POST /oauth/login` with `provider=google` and `Accept: application/json`.
+  5. TAuth returns HTTP `303`, and fetch follows the redirect to the HTML consent page.
+  6. The callback cannot parse that HTML as JSON and displays the authentication error.
+
+  Cause:
+  The existing-session branch in `handleLogin` returns a redirect before the Google JSON response branch.
+  A newly accepted Google login returns HTTP `200` with a JSON `next` URL.
+  The page requires that same response when its POST includes an existing session.
+
+  Requirements:
+  - Use one successful-login response helper for new and existing sessions.
+  - Return HTTP `200`, JSON `next`, and `Cache-Control: no-store` for the Google JSON request.
+  - Keep the pending request in the consent URL.
+  - Keep the existing session and its user identity.
+  - Keep password login and login-page GET redirects unchanged.
+  - Cover the response through real HTTP and a browser with two login tabs.
+
+  Validation:
+  - Before the fix, `make test-oauth-login-go` failed with `expected status 200, got 303`.
+  - Before the fix, `make test-oauth-login-browser` failed with `303 !== 200` at the Google response assertion.
+  - An initial browser run timed out because the test entered credentials in a background tab.
+  - The test now selects each tab before interaction. The response assertion then reproduces the defect.
+  - Live Google and MCP tool acceptance remain separate from local test results.
+
+  Resolution: 2026-09-08 — Both accepted-login branches now use the same response helper.
+  HTTP and browser regressions pass with the original session and pending consent request.
+  Validation passed: `make test-oauth-login`, `make ci`, `make verify-js`, and the Governor check.
+  The updated API documentation states the response contract for an existing session.
+  Production deployment and a new live browser acceptance run remain operator steps.
+
+- [x] [B076] (P1) Accept native client callback ports from Client ID Metadata Documents.
+  Goal:
+  An existing LLM Proxy user can connect Codex through the normal browser login and consent flow.
+  TAuth accepts the local callback port that the native client selects for each login.
+  The user authenticates through the same identity provider and account used by the LLM Proxy website.
+  Related work: TAuth F001 and LLM Proxy F021.
+  This issue records a defect in the existing OAuth contract.
+  The requested action on 2026-09-08 was to file this issue only.
+
+  User impact:
+  Codex starts OAuth authorization, but TAuth returns an error before the login screen appears.
+  The user cannot enter credentials, select an existing account, or approve the requested access.
+  The failure prevents authenticated MCP initialization, tenant discovery, and generation through Codex.
+  A successful public metadata response does not prove that a user can connect.
+
+  Environment and evidence:
+  - Observed on 2026-09-08 from macOS during live LLM Proxy acceptance in the Codex desktop task.
+  - The login command used `codex-cli 0.153.4`.
+  - MCP endpoint: `https://llm-proxy-api.mprlab.com/mcp`.
+  - TAuth issuer: `https://tauth-api.mprlab.com`.
+  - OAuth resource and audience: `https://llm-proxy-api.mprlab.com`.
+  - Required scope: `llm-proxy:use`.
+  - Codex client ID: `https://chatgpt.com/oauth/codex/client.json`.
+  - Inspected TAuth source: commit `4884231e7e65ae3c1113b41e1d3a771fe7543355` on the local `master` checkout.
+  - The deployed TAuth revision was not established during this check.
+  - Protected-resource discovery returned HTTP `200` with the expected issuer, resource, and scope.
+  - An unauthenticated `POST /mcp` returned HTTP `401` with the expected Bearer challenge and metadata URL.
+  - TAuth discovery declared `client_id_metadata_document_supported: true` and `token_endpoint_auth_methods_supported: ["none"]`.
+  - TAuth also declared PKCE `S256`, resource parameters, and issuer identification in authorization responses.
+  - The public Codex document returned HTTP `200` and declared `application_type: "native"`.
+  - Its redirect URIs were `http://127.0.0.1/callback` and `http://localhost/callback`.
+  - The document declared authorization-code and refresh-token grants, response type `code`, and authentication method `none`.
+
+  Reproduction:
+  1. Configure the Streamable HTTP server in Codex with the MCP endpoint above.
+  2. Use `codex mcp login llm-proxy` to start a fresh login.
+  3. Inspect the generated authorization URL before any credential entry.
+  4. Confirm that the URL contains exactly one `resource` parameter.
+  5. Keep the native callback port in `redirect_uri` when the browser opens the URL.
+  6. Observe HTTP `400` with `{"error":"invalid_request"}` before any login or consent page.
+  The observed callback was `http://127.0.0.1:51196/callback`.
+  A later login can select another port and must remain valid.
+
+  Diagnostic comparison:
+  The following Python command makes two authorization requests without cookies or credentials.
+  It prints the status, error, and destination path without recording the pending login token.
+  It does not follow redirects or exchange authorization codes.
+  Use the second request only to compare redirect validation, not to complete a Codex login.
+  ```python
+  import base64
+  import hashlib
+  import secrets
+  import urllib.error
+  import urllib.parse
+  import urllib.request
+
+  class NoRedirect(urllib.request.HTTPRedirectHandler):
+      def redirect_request(self, *args, **kwargs):
+          return None
+
+  verifier = secrets.token_urlsafe(32)
+  challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+  parameters = {
+      "response_type": "code",
+      "client_id": "https://chatgpt.com/oauth/codex/client.json",
+      "resource": "https://llm-proxy-api.mprlab.com",
+      "scope": "llm-proxy:use",
+      "state": secrets.token_urlsafe(16),
+      "code_challenge": challenge,
+      "code_challenge_method": "S256",
+  }
+  opener = urllib.request.build_opener(NoRedirect)
+  for callback in ("http://127.0.0.1:51196/callback", "http://127.0.0.1/callback"):
+      query = urllib.parse.urlencode(dict(parameters, redirect_uri=callback))
+      try:
+          response = opener.open("https://tauth-api.mprlab.com/oauth/authorize?" + query, timeout=20)
+      except urllib.error.HTTPError as error:
+          response = error
+      with response:
+          destination = urllib.parse.urlsplit(response.headers.get("Location", "")).path
+          body = response.read().decode() if response.code == 400 else ""
+          print(callback, response.code, destination, body)
+  ```
+  Confirmed results during diagnosis:
+  - With port `51196`: HTTP `400`, `{"error":"invalid_request"}`, and no login redirect.
+  - Without the port: HTTP `303` with destination path `/oauth/login`.
+  The second result proves that TAuth can route the same client and resource to its login endpoint.
+  It does not prove browser rendering, credential acceptance, consent, token exchange, or MCP access.
+
+  Source cause:
+  `internal/oauthserver/server.go`, `handleAuthorize`, calls `redirectMatches` after resource and client resolution.
+  A false result produces HTTP `400 invalid_request` before the server creates a pending login request.
+  `internal/oauthserver/registry.go`, `redirectMatches`, permits port variation only in the `clientSourceRegistered` branch.
+  That branch uses `loopbackRedirectMatches` when an explicit native client has a configured port range.
+  The `clientSourceMetadata` branch accepts only complete string equality with a declared redirect URI.
+  `internal/oauthserver/client_metadata.go`, `parseClientMetadataDocument`, retains the native application type and the document's redirect URIs.
+  It marks the client as `clientSourceMetadata`.
+  Thus, the portless Codex declaration cannot match the callback URL that contains its selected listener port.
+  This source defect explains the repeated live `invalid_request` result.
+
+  Contract references:
+  - [RFC 8252, section 7.3](https://www.rfc-editor.org/rfc/rfc8252.html#section-7.3) requires acceptance of request-selected ports for loopback IP callbacks.
+  - [RFC 8252, section 8.4](https://www.rfc-editor.org/rfc/rfc8252.html#section-8.4) retains exact redirect matching except for the loopback port.
+  - [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) describes portless metadata declarations and a selected local port during login.
+  - TAuth F001 already requires native clients, Client ID Metadata Documents, browser authentication, and OAuth consent.
+
+  Requirements:
+  - Apply the native loopback-port rule to validated Client ID Metadata Documents.
+  - Require `application_type: "native"` for the port exception.
+  - Require the HTTP scheme and a loopback IP literal for the RFC 8252 port exception.
+  - Match the declared host, path, and query exactly while permitting a valid selected port.
+  - Keep IPv4 and IPv6 callback hosts distinct.
+  - Keep exact-match behavior for web clients and non-loopback callbacks.
+  - Keep the current exact-match treatment of `localhost` outside the IP-literal port exception.
+  - Reject user information, fragments, malformed ports, non-loopback hosts, and undeclared destinations.
+  - Keep the existing configured port limits for explicitly registered clients.
+  - Bind the accepted callback, including its actual port, to the pending request and authorization code.
+  - Preserve PKCE, state, issuer identification, resource audiences, scopes, account identity, and consent checks.
+  - Implement one generic native-client rule without Codex-specific hosts, client IDs, fixed ports, or configuration exceptions.
+  - Keep client registration and redirect validation in TAuth.
+  - Keep MCP tools, tenant ownership, and generation policy in LLM Proxy.
+
+  Existing test gap:
+  `TestClientMetadataDocumentContract` declares and requests the same fixed callback port in `internal/oauthserver/client_metadata_test.go`.
+  `fixtureMetadataResolver` also returns a callback with a fixed port in `internal/oauthserver/server_integration_test.go`.
+  `TestAuthorizationServerBrowserPKCERefreshAndRevocation` uses that same callback for its metadata-client flow.
+  These checks prove exact matching but do not exercise a portless declaration with a request-selected port.
+
+  Deliverables:
+  - Add a failing integration test through the real authorization endpoint before the production change.
+  - Use a controlled metadata document with the current Codex native-client shape.
+  - Add the generic redirect correction and focused URI tests where necessary.
+  - Update `docs/usage.md` and the applicable API documentation with the native metadata-client port rule.
+  - Record local validation separately from production deployment and live Codex acceptance.
+
+  Validation:
+  - Run deterministic local tests with a controlled metadata provider and the real TAuth HTTP handlers.
+  - Verify that a portless IPv4 declaration accepts at least two different valid callback ports.
+  - Verify the same behavior for a separately declared IPv6 loopback callback.
+  - Verify rejection of changed hosts, paths, queries, schemes, fragments, user information, and invalid ports.
+  - Verify that an undeclared IP family and a loopback port change for a web client remain rejected.
+  - Verify unchanged exact matching for non-loopback callbacks and configured limits for explicitly registered clients.
+  - Verify that a user without a session reaches a rendered login page.
+  - Verify login to an existing account through an enabled identity provider.
+  - Verify that the OAuth subject is the same existing account subject after authentication.
+  - Verify that a valid existing session proceeds to consent without another credential request when policy permits.
+  - Verify approval and denial through the browser consent page.
+  - Verify that approval returns to the selected local port with the correct state and issuer.
+  - Verify code exchange with the original verifier and rejection of incorrect PKCE or replayed codes.
+  - Verify that concurrent requests with different ports retain their own callback destinations.
+  - Verify refresh and revocation under the existing OAuth contract.
+  - Use repository Make targets for focused checks and the applicable final `make ci` checkpoint.
+  - After operator deployment, repeat `codex mcp login llm-proxy` with a fresh native callback port.
+  - Verify the visible login, existing account, consent, successful Codex connection, and `llm_proxy.list_tenants` result.
+  - Verify the user's owned tenants through that authenticated connection before generation acceptance.
+
+  Evidence limits and separate observations:
+  An early diagnostic configuration added an explicit `oauth_resource` value to Codex.
+  Codex then sent two identical resource parameters, which TAuth rejected.
+  The configuration override was removed, and the single-resource request still returned `invalid_request`.
+  One later request returned `unauthorized_client` before the portless comparison succeeded.
+  Its cause remains unverified and must be investigated separately if it recurs.
+  The browser automation also reported `net::ERR_BLOCKED_BY_CLIENT` on its first navigation.
+  Direct HTTP requests independently reproduced the TAuth callback rejection.
+  The check issued no access token and completed no authenticated MCP call.
+  Production activation remains an operator action after the TAuth correction is validated and released.
+
+  Resolution: 2026-09-08 — Completed the repository correction after the operator selected B076 for implementation.
+  Native metadata clients can select HTTP loopback IP callback ports from 1 through 65535.
+  All URI text except the port must stay the same.
+  IPv4 and IPv6 callbacks each need their own declaration.
+  Registered client port limits and exact matching for other callbacks are unchanged.
+  Metadata validation also rejects empty ports, ports outside the valid range, and empty fragments.
+
+  Review correction:
+  The callback matcher now keeps the original scheme text from the metadata declaration.
+  HTTP regressions first failed for uppercase and mixed-case schemes with a changed port.
+  The focused suite now accepts these callbacks for IPv4 and IPv6.
+  Requests that change the scheme text still fail.
+  The focused suite and final `make ci` passed after this correction.
+
+  Local validation:
+  - The new HTTP tests first returned `400 invalid_request` for valid selected callback ports.
+  - `make test-oauth-metadata` passed with the race detector.
+  - The tests cover IPv4, IPv6, two selected ports, URI rejection, and registered client port limits.
+  - Memory and SQLite tests cover existing GitHub account login, consent approval, and consent denial.
+  - Two open login transactions keep their own callback ports, states, and PKCE challenges.
+  - Token validation confirms the existing account subject, client, tenant, resource, and scope.
+  - Incorrect PKCE and code replay fail. Refresh rotation and revocation pass.
+  - `make ci` passed after correction of an obsolete port-only rejection test.
+  - The Governor check reports no differences or warnings.
+  - Changed prose passed the mechanical language check and the scoped source review.
+  - Unchanged documents still contain language findings outside this correction.
+
+  Evidence limits:
+  The tests use controlled metadata documents, a local GitHub provider, and real TAuth HTTP handlers.
+  Release, publication, deployment, and live Codex acceptance were not run.
+  After deployment, the operator must complete the Codex and tenant-discovery checks above.
+
+  Changed files:
+  `internal/oauthserver/registry.go`, `internal/oauthserver/client_metadata.go`,
+  `internal/oauthserver/metadata_redirect_integration_test.go`, `internal/oauthserver/server_integration_test.go`,
+  `Makefile`, `README.md`, `docs/usage.md`, `docs/openapi.yaml`, and the active issue tracker.
+
+- [x] [B072] (P1) Require new consent when identity disclosure changes.
+  Evidence:
+  An existing scope gained `identity_providers: [github]` after the user gave consent.
+  Refresh disclosed the GitHub ID without a new consent page.
+  Requirements:
+  Bind each grant to the disclosure policy that the user approved.
+  Reject old codes and refresh tokens when that policy changes.
+  Require new consent for the new policy.
+  Validation:
+  HTTP regressions failed before the fix and passed after the fix.
+  The tests cover memory, SQLite, pending requests, code exchange, refresh, repeat authorization, and the v1 schema migration.
+  `make test-github-oauth` and final `make ci` passed.
+  Resolution:
+  Added a disclosure policy digest to pending requests, consent keys, codes, and refresh tokens.
+  The v2 OAuth schema adds an empty policy to existing rows. Existing rows cannot approve identity disclosure.
+  Changed files:
+  - `internal/oauthserver/model.go`, `database_store.go`, `provider_login.go`, and `server.go`.
+  - `internal/oauthserver/github_integration_test.go` and `github_disclosure_integration_test.go`.
+  - `internal/authkit/database_helpers.go`.
+
+- [x] [B073] (P1) Complete GitHub OAuth login with Strict session cookies.
+  Evidence:
+  A cross-site GitHub callback returned directly to OAuth consent.
+  Chromium omitted the Strict session cookie and returned to login.
+  Requirements:
+  Return a TAuth document before the browser continues to consent.
+  Keep the current session cookie attributes.
+  Validation:
+  Chromium completes cross-site GitHub login, OAuth consent, and code exchange with CORS and insecure HTTP disabled.
+  The regression failed before the fix and passed after the fix.
+  The browser verifies that session and refresh cookies keep Strict, Secure, and HttpOnly attributes.
+  `make test-github-browser`, `make test-github-oauth`, and final `make ci` passed.
+  Resolution:
+  Returned an HTTP 200 TAuth completion document before navigation to consent.
+  Changed files:
+  - `internal/authkit/github_login.go`.
+  - `internal/oauthserver/github_browser_fixture_test.go`, `github_integration_test.go`, and `server_integration_test.go`.
+  - `internal/oauthserver/github_disclosure_integration_test.go` and `tests/github-oauth.browser.test.js`.
+  - `Makefile`, `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, `docs/openapi.yaml`, and `CHANGELOG.md`.
+
+- [x] [B075] (P1) Correct the OAuth consent form policy for the approved client return.
+  Evidence:
+  The B073 browser flow reached consent with Strict cookies.
+  The consent form policy listed only the TAuth origin and blocked the external client return.
+  Requirements:
+  Add only the validated client origin to the consent form policy.
+  Validation:
+  Chromium reported a `form-action` violation before the fix.
+  The browser now completes consent and public code exchange for the external client.
+  The test verifies the approved origin in the form policy and rejects wildcard policy values.
+  `make test-github-browser` and final `make ci` passed.
+  Resolution:
+  Added only the validated client return origin to the consent form policy.
+  Changed files:
+  - `internal/oauthserver/server.go` and `tests/github-oauth.browser.test.js`.
+  - `ARCHITECTURE.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B074] (P2) Reject a popup return URL on another origin.
+  Evidence:
+  A popup return URL used another approved tenant origin.
+  The browser rejected completion and reported a closed popup after session creation.
+  Requirements:
+  Reject this input before the helper opens a popup or starts authentication.
+  Validation:
+  The browser regression failed before the fix and passed after the fix.
+  It verifies an error before window creation and an absent authenticated session.
+  It also verifies direct helper validation and full-page return URLs on another approved origin.
+  `make test-github-browser`, `make verify-js`, and final `make ci` passed.
+  Resolution:
+  Both GitHub helpers reject popup origin mismatches with `tauth.github_invalid_popup_origin`.
+  Changed files:
+  - `web/tauth.js`, `internal/authkit/github_browser_fixture_test.go`, and `tests/github-login.browser.test.js`.
+  - `README.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B071] (P1) Preserve account ownership during concurrent provider login.
+  Evidence:
+  F005 HTTP tests started two first-login callbacks for one provider identity.
+  Both callbacks must resolve one active account without a store error.
+  The existing memory user store had a data race. The existing SQLite account transaction returned a lock error.
+  Implementation:
+  Added locking to the memory user store.
+  Claimed the unique provider tuple before the SQLite account read and write.
+  Removed recursive conflict retries. Kept identity ownership fixed during explicit account linking.
+  Rejected inactive accounts in provider updates and links.
+  Verification:
+  Resolved on 2026-09-07.
+  `make test-github-http` passed with the race detector for memory and SQLite.
+  Final `make ci` passed as part of F005 qualification.
+  Changed files:
+  - `internal/web/users.go`.
+  - `internal/authkit/account_management.go`.
+  - `internal/authkit/database_user_store.go`.
+  - `internal/authkit/github_http_test.go`.
+  - `CHANGELOG.md`.
+
+- [x] [B070] (P2) Select account email delivery for each tenant.
+  Goal:
+  Tenants that return challenge tokens work beside tenants that use email delivery.
+  The shared sender currently sends challenges for tenants without email delivery config.
+  Requirements:
+  - Select delivery from the resolved tenant config for signup, password reset, and password linking.
+  - Preserve token responses for tenants without email delivery.
+  - Keep email delivery active when a configured tenant also returns tokens.
+  Validation:
+  - Complete all three account flows through HTTP in a mixed-tenant server.
+  - Run `make test-go` and `make ci`.
+  Resolution 2026-09-04:
+  - The tenant registry carries the native email delivery setting into each route config.
+  - Signup, reset, and password linking use that tenant setting before email delivery.
+  - Nine HTTP cases cover email-only, token-only, and combined modes, including challenge completion.
+  - All three token-only cases failed before the fix. `make test-go` and `make ci` passed after the fix.
+
+- [x] [B069] (P2) Validate disabled account settings during config conversion.
+  Goal:
+  The renderer cannot silently remove requested password signup.
+  Requirements:
+  - Preserve supplied account settings for native validation.
+  - Reject password signup when account management is disabled.
+  - Reject invalid TTL values in disabled account settings.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer preserves supplied account settings for native validation.
+  - CLI tests cover contradictory signup, invalid TTLs, valid disabled settings, and absent settings.
+  - The renderer target and `make ci` passed.
+
+- [x] [B068] (P2) Require the contributions array in each render request.
+  Goal:
+  An incomplete render request cannot remove the tenant config.
+  Requirements:
+  - Reject a missing or null contributions array.
+  - Accept an explicit empty array for bootstrap.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The request decoder rejects missing and null contributions.
+  - CLI tests confirm rejection without config output and acceptance of an explicit empty array.
+  - The renderer target and `make ci` passed.
+
+- [x] [B067] (P1) Enable tenant selection for shared browser origins.
+  Goal:
+  The deployment config renderer supports browser tenants that share an origin.
+  Requirements:
+  - Enable tenant header overrides when multiple tenants own one origin.
+  - Use the native origin rules.
+  - Keep the override disabled for distinct browser origins.
+  Validation:
+  - Run the renderer CLI tests and `make ci`.
+  Resolution 2026-09-04:
+  - The renderer uses native origin ownership to enable tenant header overrides.
+  - CLI tests cover shared origins, hostname case, distinct origins, and the Google CORS exception.
+  - The renderer target and `make ci` passed.
+
+- [x] [B066] (P1) Track each published TAuth page with its production site identity.
+  Goal:
+  Each published TAuth page sends visits to the current LoopAware site.
+  The Pages artifact does not load the LoopAware pixel.
+  Requirements:
+  - Load the LoopAware pixel one time on each published HTML page.
+  - Use the production TAuth site identity.
+  Deliverables:
+  - Update the landing page and the usage page.
+  - Add artifact contract coverage for the current site identity.
+  Validation:
+  - Run the focused Pages artifact test.
+  - Run `make ci`.
+  Resolution 2026-08-28:
+  - Added the current production site identity to both published pages.
+  - Added contract coverage for one exact pixel on each page.
+  - The focused test, assembled Pages image check, and `make ci` passed.
+
+- [x] [B055] (P1) Stop OAuth access for disabled accounts.
+  Goal:
+  A disabled account cannot get a new OAuth authorization code, access token, or refresh token.
+  The OAuth browser session resolver accepts a pre-disable session, and account disablement does not revoke OAuth grants.
+  Codex Security assigns medium severity, high confidence, and CWE-862.
+  This issue tracks finding `csf_61243b622b8fa29760a82c4a`.
+  The source fingerprint is `codex-security/v1:sha256:4a463921a15bc6bab15fd3ed109bc759b84bedd832f83ca93df7d45eb98184d5`.
+  The root control is `internal/authkit/oauth_browser_sessions.go:71-82`.
+  Requirements:
+  - Require active account state before each OAuth authorization, code exchange, and refresh exchange.
+  - Revoke all OAuth consent and refresh token families during account disablement.
+  - Add one tenant and user revocation operation to each OAuth store.
+  - Keep one current revocation contract without a fallback.
+  Deliverables:
+  - Active-account checks in the OAuth browser session and token paths.
+  - User-wide OAuth revocation in the memory store and the database store.
+  - Public contract tests for browser sessions and OAuth refresh tokens.
+  Validation:
+  - Disable an account with two browser sessions.
+  - Verify that the second session cannot authorize a client.
+  - Verify that an existing OAuth refresh token cannot rotate.
+  - Run `make ci`.
+  Resolution:
+  - OAuth browser sessions now require an active account for account-managed tenants.
+  - Authorization-code and refresh-token exchanges now verify the current account state before TAuth returns tokens.
+  - The account disable endpoint revokes all consent grants and refresh-token families for the tenant and account.
+  - Both OAuth stores also remove the account's outstanding authorization codes.
+  - Account reactivation does not restore these grants.
+  - Account lookup failures return `server_error`. Revocation failures do not return success.
+  - Added HTTP tests with memory and SQLite stores, two browser sessions, and account reactivation.
+  - Added tests for store failures, multiple clients and families, repeated revocation, and tenant and user isolation.
+  - All 14 disabled-account scenarios failed before the repair.
+  - Three browser scenarios also reproduced incorrect account lookup error responses before the correction.
+  - Baseline and final `make ci`, focused `make test-go`, and `git diff --check` passed.
+  - Changed files: `cmd/server/main.go`, `internal/authkit/oauth_browser_sessions.go`, and `internal/authkit/routes.go`.
+  - Changed files: `internal/oauthserver/model.go`, `internal/oauthserver/server.go`, `internal/oauthserver/memory_store.go`, and `internal/oauthserver/database_store.go`.
+  - Changed files: `internal/oauthserver/account_disablement_integration_test.go` and `internal/oauthserver/store_contract_test.go`.
+  - Changed files: `internal/authkit/routes_http_test.go`, `internal/authkit/routes_integration_test.go`, and `internal/authkit/mixed_tenant_delivery_http_test.go`.
+  - Changed files: `README.md` and `.mprlab/ISSUES.md`.
+
+  Review repair:
+  - Four HTTP scenarios reproduced credential loss after an account lookup failure.
+  - Eight HTTP scenarios reproduced failed disable retries and unsafe account reactivation.
+  - Both OAuth stores now verify account access before they consume a code or rotate a refresh token.
+  - Account lookup failures leave these credentials available for a subsequent request.
+  - Account disablement now records `disabling` state before credential revocation.
+  - This state blocks account access and reactivation until OAuth and application refresh revocation both succeed.
+  - Authenticated disable requests can resume incomplete revocation.
+  - Server startup also resumes persisted disablements before the server accepts traffic.
+  - Startup opens the persisted OAuth store even when the OAuth issuer is disabled.
+  - Added tests for OAuth revocation, application refresh revocation, and final state update failures.
+  - Added a server startup test with persisted pending revocation and a real HTTP health request.
+  - Baseline and final `make ci`, focused `make test-go`, and `make test-go GOFLAGS=-race` passed.
+  - Changed files: `cmd/server/main.go`, `cmd/server/account_disablement_test.go`, and `internal/authkit/account_disablement.go`.
+  - Changed files: `internal/authkit/account_management.go`, `internal/authkit/database_user_store.go`, and `internal/authkit/database_user_store_test.go`.
+  - Changed files: `internal/authkit/routes.go` and `internal/authkit/stores.go`.
+  - Changed files: `internal/oauthserver/model.go`, `internal/oauthserver/server.go`, `internal/oauthserver/memory_store.go`, and `internal/oauthserver/database_store.go`.
+  - Changed files: `internal/oauthserver/account_disablement_integration_test.go` and `internal/oauthserver/store_contract_test.go`.
+  - Changed files: `README.md`, `docs/usage.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B056] (P1) Make application refresh token rotation atomic.
+  Goal:
+  One application refresh token creates at most one active successor.
+  The session and refresh routes issue a new token before they revoke the old token.
+  Concurrent requests can create multiple active successors.
+  Codex Security assigns medium severity, high confidence, and CWE-367.
+  This issue tracks finding `csf_71f227920624a974608811e6`.
+  The source fingerprint is `codex-security/v1:sha256:1f311fdff73d248a386a557c0b157c77c3a9641da7fdbbae62c0643c9ac9cbed`.
+  The root control is `internal/authkit/routes.go:1314-1411`.
+  Requirements:
+  - Replace the separate validate, issue, and revoke operations with one atomic rotation operation.
+  - Consume the old token and create the new token in one store transaction.
+  - Revoke the token family after reuse of an old token.
+  - Use the same rotation contract for `GET /auth/session` and `POST /auth/refresh`.
+  Deliverables:
+  - One narrow rotation operation in the refresh token store interface.
+  - Atomic memory and database implementations.
+  - Concurrent public route tests for both rotation paths.
+  Validation:
+  - Race one token through `POST /auth/refresh`.
+  - Race one token through `GET /auth/session`.
+  - Verify that exactly one request succeeds for each store.
+  - Run `make ci`.
+  Resolution:
+  Atomic rotation and family revocation now use the same store boundary for both public refresh routes.
+  Chromium tests verify concurrent tab restoration and later refreshes with memory and SQLite stores.
+  The client uses Web Locks shared with the console recovery client.
+  Focused HTTP and browser tests passed. `make ci` passed after the final code change.
+
+- [x] [B058] (P1) Bind Apple OAuth state to the first browser.
+  Goal:
+  Only the browser that starts Apple login can complete that login.
+  The signed Apple state has no secret that identifies the first browser.
+  Codex Security assigns medium severity, high confidence, and CWE-352.
+  This issue tracks finding `csf_50cabd4e6537d3cce9337670`.
+  The source fingerprint is `codex-security/v1:sha256:04d87320a65d88f30a09c77353c4a57e656fc922bf9ebd7c76b8b5d08c2640db`.
+  The root control is `internal/authkit/apple_oauth.go:110-129`.
+  Requirements:
+  - Set a short-lived browser correlation cookie at Apple login start.
+  - Set `Secure`, `HttpOnly`, and the correct `SameSite` value on the cookie.
+  - Bind the correlation value to the signed state.
+  - Require and clear the cookie before the callback token exchange.
+  - Reject a callback from a different browser.
+  Deliverables:
+  - One browser-bound Apple state contract.
+  - Cookie and callback integration tests.
+  Validation:
+  - Start Apple login in browser A.
+  - Submit its callback in browser B and verify rejection.
+  - Submit its callback in browser A and verify success.
+  - Verify that TAuth clears the correlation cookie.
+  - Run `make ci`.
+  Resolution:
+  Signed Apple state now contains the hash of a per-transaction browser cookie.
+  The callback requires the secure cookie before the provider exchange and then clears it.
+  Tests reject missing and incorrect cookies and accept the valid form callback.
+  Focused tests passed. `make ci` passed after the final code change.
+
+- [x] [B061] (P1) Bound public authentication request bodies.
+  Goal:
+  Each public authentication request has a finite body size and read time.
+  The authentication parsers have no body size limit, and the HTTP server has no body read time limit.
+  Codex Security assigns medium severity, high confidence, and CWE-400.
+  This issue tracks finding `csf_573c8eeaeb08df5704dce67a`.
+  The source fingerprint is `codex-security/v1:sha256:7fde80bd99ff48058f93b94711e3cec484bb7b1f5dc5783e07303c55bfe41eb4`.
+  The root controls are `internal/authkit/routes.go:1605-1718` and `cmd/server/main.go:318-322`.
+  Requirements:
+  - Apply a small route-specific body limit before each parser.
+  - Return HTTP 413 before the parser accepts an oversized body.
+  - Configure finite read, write, and idle time limits on the HTTP server.
+  - Keep the existing OAuth form body limit.
+  Deliverables:
+  - Shared authentication body limit controls.
+  - Complete HTTP server time limits.
+  - Public route tests for large and slow bodies.
+  Validation:
+  - Verify that oversized JSON returns HTTP 413.
+  - Verify that slow bodies stop at the configured time limit.
+  - Verify that normal provider and password bodies succeed.
+  - Run `make ci`.
+  Resolution:
+  Authentication bodies now have a 32 KiB limit before parsing.
+  The server has finite read, write, and idle limits. OAuth forms retain their existing limit.
+  HTTP tests cover fixed-length, chunked, and slow request bodies.
+  Focused tests passed. `make ci` passed after the final code change.
+
+- [x] [B054] (P0) Remove ambiguous Docker ignore rules.
+  Goal:
+  Each Docker context excludes the private deployment input with one clear rule.
+  Actual result:
+  - The shared Docker ignore file contains two negated documentation rules.
+  - Deployment cannot prove that the private input stays excluded.
+  - The deployment stops before production convergence.
+  Requirements:
+  - Keep the documentation source in the shared context without negation.
+  - Keep the exact private input exclusion.
+  - Reject every Docker ignore negation in the repository contract test.
+  Validation:
+  - Build the application image and the Pages image.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed the documentation exclusion and its two negated rules.
+  - The documentation source remains available to the Pages image.
+  - The repository contract test now rejects every negated rule.
+  - Both image builds, `make test-go`, and `make ci` passed.
+  - Changed files: `.dockerignore`, `tests/repository_neutrality_contract_test.go`,
+    and `CHANGELOG.md`.
+
+- [x] [B053] (P0) Remove the application-owned Pages marker.
+  Goal:
+  The gateway owns each GitHub Pages metadata file in the release artifact.
+  Actual result:
+  - The TAuth Pages image contains `.nojekyll`.
+  - The current gateway rejects this reserved path during release assembly.
+  - A new TAuth release cannot complete.
+  Requirements:
+  - Remove `.nojekyll` from the TAuth Pages image source.
+  - Remove the obsolete tracked marker file.
+  - Keep gateway marker generation as the only active contract.
+  Validation:
+  - Verify that the repository rejects an application-owned `.nojekyll`.
+  - Build the Pages image.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed `.nojekyll` from the Pages image and the TAuth repository.
+  - The repository contract test now rejects the gateway-owned marker.
+  - The Pages target image build passed.
+  - `make test-go` and `make ci` passed.
+  - Changed files: `docker/pages/Dockerfile`, `web/.nojekyll`,
+    `tests/repository_neutrality_contract_test.go`, and `CHANGELOG.md`.
+
+- [x] [B051] (P1) Allow OAuth provider-first deployment.
+  Goal:
+  TAuth accepts a configured authorization server before an active tenant enables OAuth.
+  Actual result:
+  - The doctor, preflight, and server reject a configured authorization server without an OAuth tenant.
+  - An OAuth tenant deployment also fails until the authorization server is active.
+  Requirements:
+  - Accept the authorization server when no tenant enables OAuth.
+  - Reject an OAuth tenant when the authorization server is absent.
+  - Keep one current configuration contract without a fallback or legacy mode.
+  Validation:
+  - Verify the real doctor command with the authorization server and `tenants: []`.
+  - Verify the real server starts and serves OAuth metadata in this state.
+  - Verify the preflight report accepts this state.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - A configured authorization server now starts before a tenant enables OAuth.
+  - An OAuth tenant still requires the configured authorization server.
+  - The preflight report accepts the provider-first state.
+  - The real doctor, server, health, and OAuth metadata checks passed.
+  - `make ci` passed.
+  - Changed files: `internal/appconfig/oauth_activation.go`, `internal/doctor/doctor.go`,
+    `internal/preflight/report.go`, `internal/preflight/report_test.go`, and `cmd/server/main.go`.
+  - Changed files: `tests/oauth-provider-bootstrap-runtime.sh` and `Makefile`.
+
+- [x] [B052] (P1) Preserve Docker build context exclusions.
+  Goal:
+  Each Docker build context excludes private and unnecessary repository data.
+  Actual result:
+  - Each Dockerfile-specific ignore file replaces the complete root ignore contract.
+  - The root and Pages contexts can include private operator data and unrelated repository files.
+  Requirements:
+  - Use the complete root ignore contract for both Dockerfiles.
+  - Keep private deployment values, Git data, tests, tools, and CI files outside each context.
+  Validation:
+  - Verify no Dockerfile-specific ignore file replaces the root contract.
+  - Verify the root ignore file contains each required exclusion.
+  - Run `make ci`.
+  Resolution 2026-08-15:
+  - Removed both Dockerfile-specific ignore files.
+  - The root contract now excludes the private deployment input and `node_modules`.
+  - The repository test requires each private and unnecessary data exclusion.
+  - The application image and Pages target builds passed with the root contract.
+  - `make ci` passed.
+  - Changed files: `.dockerignore`, `Dockerfile.dockerignore`,
+    `docker/pages/Dockerfile.dockerignore`, and `tests/repository_neutrality_contract_test.go`.
+
+- [x] [B048] (P1) Bound and cancel Apple provider requests.
+  Goal:
+  A canceled TAuth request cancels its Apple provider request.
+  The production Apple HTTP client has a finite request time limit.
+  Actual result:
+  - The native Apple route passes a Gin context to the JWKS request.
+  - The production Apple HTTP client uses `http.DefaultClient` without a request time limit.
+  Requirements:
+  - Pass the inbound HTTP request context to each Apple provider request.
+  - Use one bounded production Apple HTTP client.
+  - Keep test HTTP client injection for public contract tests.
+  Validation:
+  - Cancel a native Apple login request during its JWKS request.
+  - Verify that the downstream request receives the cancellation.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The Apple routes now pass the inbound HTTP request context to provider requests.
+  - One shared production Apple HTTP client now has a five-second request time limit.
+  - The public route test verifies JWKS request cancellation.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/apple_oauth.go`, `internal/authkit/routes.go`, and `internal/authkit/routes_http_test.go`.
+
+- [x] [B049] (P2) Preserve the first native Apple full name.
+  Goal:
+  TAuth stores the full name that Apple returns during the first native authorization.
+  Actual result:
+  - The native exchange body contains only the Apple ID token and nonce.
+  - Apple does not put the native credential full name in the ID token.
+  Requirements:
+  - Add the native Apple full name to the exchange payload.
+  - Validate and compose the name at the HTTP boundary.
+  - Store the name in the canonical user or account profile.
+  - Keep the stored name when a later Apple authorization omits it.
+  Validation:
+  - Verify the first native login stores and returns the supplied full name.
+  - Verify a later login keeps the stored name.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The native exchange now accepts all Apple credential name components in `full_name`.
+  - TAuth now stores the composed display name in standard and account profiles.
+  - Later native Apple login requests now keep the stored name.
+  - Public HTTP tests cover both profile models and Apple tokens without a `name` claim.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/routes.go`, `internal/authkit/routes_http_test.go`, and `internal/authkit/routes_integration_test.go`.
+  - Changed files: `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B050] (P2) Prevent caches from storing native Apple config.
+  Goal:
+  A shared cache cannot return one tenant's native Apple config to another tenant.
+  Actual result:
+  - The native Apple config response depends on tenant request headers.
+  - The response does not define cache behavior or header variance.
+  Requirements:
+  - Set `Cache-Control: no-store` on each successful native Apple config response.
+  Validation:
+  - Verify the public config response includes `Cache-Control: no-store`.
+  - Run `make ci`.
+  Resolution 2026-08-13:
+  - The successful native Apple config response now sets `Cache-Control: no-store`.
+  - The public HTTP test now verifies the response header.
+  - The API usage document now defines the cache behavior.
+  - `make ci` passed.
+  - Changed files: `internal/authkit/routes.go`, `internal/authkit/routes_http_test.go`, `docs/usage.md`, and `CHANGELOG.md`.
+
+- [x] [B047] (P0) Start the OAuth browser test after the Go build.
+  Goal:
+  The OAuth browser test must start after the test server is ready.
+
+  Requirements:
+  - Build the test server before the 60-second browser test timeout starts.
+  - Set up the repository Go version and the Go cache in the frontend workflow.
+  - Keep the browser test timeout at 60 seconds.
+  - Limit the complete frontend job to 10 minutes.
+  - Terminate the test server and the browser after success, failure, or timeout.
+
+  Validation:
+  - Run the OAuth browser test with a prebuilt server.
+  - Run the complete JavaScript test target.
+  - Run `make ci`.
+
+  Resolved 2026-08-12:
+  - GitHub Actions now installs the Go version from `go.mod`, uses the Go cache, and builds the test server before `npm test` starts.
+  - The frontend job stops after 10 minutes if a tool or child process does not exit.
+  - The test uses `TAUTH_BROWSER_TEST_SERVER` for a prebuilt server. A local test build runs before the 60-second browser test starts.
+  - The cleanup step starts the server cleanup and the browser cleanup at the same time. The cleanup step first sends `SIGTERM` to the server. It sends `SIGKILL` to a server or Chromium process that does not exit in the time limit.
+  - The prebuilt-server test and all 44 JavaScript tests passed. `make ci` passed.
+
+- [x] [B046] (P0) Allow the active TAuth aggregate configuration to start before applications declare tenants.
+  After a forward-only production reset, TAuth is deployed before Pinguin and the
+  other applications contribute their tenant resources. The canonical aggregate
+  configuration therefore contains `tenants: []`. TAuth must accept that active
+  zero-tenant state: `tauth doctor` must validate it, the server must expose
+  `GET /health`, and all tenant-authenticated routes must remain inactive until
+  a subsequent application deployment supplies a tenant. Do not add a legacy
+  mode, fallback configuration, or migration path. Cover the contract through
+  the real CLI and HTTP server entrypoints.
+  Resolved 2026-08-05: removed the obsolete at-least-one-tenant rejection and
+  made the validated empty aggregate an initialized registry/resolver state.
+  The image-level acceptance run builds the real Docker image, validates
+  `tenants: []` through `tauth doctor`, starts the server, observes `GET
+  /health` as 200, and observes an auth route reject with 403. `make ci` passed.
+
+- [x] [B045] (P0) Serve tauth.js from one canonical GitHub Pages origin.
+  Goal:
+  Make `https://tauth.mprlab.com/tauth.js` the only served TAuth browser-helper artifact while keeping `tauth-api.mprlab.com` API-only.
+
+  Requirements:
+  - Return 404 from backend `GET /tauth.js`; do not embed or serve a second copy.
+  - Expose a dedicated backend health endpoint that does not depend on the browser-helper artifact.
+  - Remove the `tauth.mprlab.com` Caddy route and declare its immutable GitHub Pages resource.
+  - Keep `tauth-api.mprlab.com` as the only backend Caddy hostname.
+
+  Validation:
+  - Prove the 404 and health behavior through the real HTTP router.
+  - Prove the schema-v3 manifest contains one Pages resource and no static-host Caddy route.
+  - Pass `make ci` and selected-manifest sibling-gateway validation without production mutation.
+
+  Resolved 2026-08-03:
+  - The Go backend no longer embeds or registers `tauth.js`; its real router returns 404 for that path and exposes unauthenticated `GET /health` for runtime readiness.
+  - The schema-v3 manifest now declares one container-built `github_pages/browser-helper` artifact for `tauth.mprlab.com`. It assembles the complete `docs/` site, the single tracked `web/tauth.js`, and an empty `.nojekyll`, removes the static-host Caddy route, and keeps only `tauth-api.mprlab.com` as a backend route.
+  - The exported Pages filesystem contained all seven expected files, preserved the docs and helper byte-for-byte, and included the empty Jekyll-disable marker. Focused Go tests, all 43 JavaScript tests, and complete `make ci` passed. The clean-checkout gateway isolation rerun remains pending because the exact sibling gateway contains unrelated active B398 changes and the verifier accepts committed clean inputs only; production was not contacted.
+  - Changed tracked files: `.dockerignore`, `.mprlab/deploy/resources.yml`, `Dockerfile`, `docker/pages/Dockerfile`, `web/.nojekyll`, `cmd/server/main.go`, `cmd/server/main_test.go`, `internal/web/cors.go`, `internal/web/health.go`, `internal/web/web_test.go`, `web/embed.go`, `tests/repository_neutrality_contract_test.go`, public documentation, `.mprlab/ISSUES.md`, and `CHANGELOG.md`.
+
+- [x] [TA-450] Restore the vanilla app deployment discovery manifest.
+  The released `make deploy` dispatcher reaches the configured operator target, but the gateway preflight fails on `tutosh` because TAuth no longer exposes the canonical `.mprlab/deploy/resources.yml` manifest for dispatch target `tauth`. Restore only the vendor-neutral repository identity and `make_workflow` lifecycle resource required for discovery. Do not restore any operator image, registry, hostname, route, health URL, credential, tenant, gateway path, or other concrete production binding. Add repository-contract coverage and verify the gateway loader and targeted preflight without contacting production.
+  Resolved 2026-07-17: restored the canonical `.mprlab/deploy/resources.yml` discovery manifest with only the TAuth repository identity and generic release/publish/deploy `make_workflow`. Added a strict repository contract that rejects additional deployment resource fields or types and includes the manifest in vendor-neutrality scanning. Validation passed with the initially failing `make test-go`, the repaired `make test-go`, `make deploy-dry-run`, `make ci`, gateway `MPRLAB_APP_DISPATCH_TARGET=tauth make plan-app-resources`, and the targeted gateway `preflight-contract-local` on `tutosh` with `failed=0`. The gateway worktree remained clean and production was not contacted. Changed tracked files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`, `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
+
+- [x] [TA-449] Restore the vanilla repository deployment lifecycle with operator-specific local configuration.
+  The TA-448 neutrality change removed `make deploy` together with tracked MPRLab production data, but those are separate ownership boundaries. Restore generic `make deploy` and `make deploy-dry-run` entrypoints backed by one ignored local `.env.deploy` configuration. Tracked deployment files must remain vendor-neutral and contain no operator directory, target, tenant, domain, route, credential, or gateway identity; the local configuration is the sole source of the concrete operator Make directory and target. Add black-box coverage for missing/invalid configuration, non-executing dry-run validation, and local fixture deployment dispatch.
+  Resolved 2026-07-17: restored vendor-neutral `make deploy` and `make deploy-dry-run` entrypoints through `scripts/deploy.sh`, added a neutral `.env.deploy.example`, and kept the concrete operator directory and target only in this checkout's ignored `.env.deploy`. The dry run validates the configured Make target with non-executing question mode, while black-box fixture coverage proves missing and invalid configuration fail closed, dry run executes no recipe, and deploy dispatches only the configured target. Validation passed with `make test-go`, `make deploy-dry-run`, and `make ci`; production was not contacted. Changed tracked files: `.env.deploy.example`, `.gitignore`, `.mprlab/ISSUES.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, `Makefile`, `README.md`, `docs/usage.md`, `scripts/deploy.sh`, and `tests/repository_neutrality_contract_test.go`.
+
+- [x] [TA-448] Remove MPRLab deployment knowledge from the generic TAuth product.
+  TAuth is a vendor-neutral authentication service and must not own MPRLab tenant identities, domains, credentials, operator environment files, gateway routes, or deployment orchestration. Delete the MPRLab production registry and app deployment entrypoint, retain only generic configuration behavior and neutral examples, and make repository neutrality an executable contract. MPRLab applications will declare their own tenant requirements and `mprlab-gateway` will assemble and deploy the shared runtime configuration.
+  Resolved 2026-07-16: removed the operator tenant registry, environment sample, deployment manifest, gateway-coupled deploy entrypoint, MPR UI demo dependency, and operator-specific release metadata. Added a black-box repository-neutrality contract, replaced product surfaces with neutral examples and self-contained demo UI, and kept release/publish as generic product operations. Validation passed with `make ci`.
+
+- [x] [TA-445] (P0) Generate opaque persisted account IDs for account-management sessions.
+  Account management currently creates deterministic account subjects from tenant/provider/email identity material even though the public contract is an opaque account user id. Replace deterministic account ID construction with persisted 128-bit base64url values for password signup, seeded password account enablement, and provider-created accounts. Remove the deterministic helpers and reject non-opaque account subjects at runtime; do not keep backward-compatible account-id fallbacks. Account-management session `user_id` must be the persisted bare opaque account ID across login, refresh, `/auth/session`, and `/me`.
+  Resolved 2026-06-23: account management now generates persisted bare opaque 128-bit base64url account IDs, reuses stored IDs through password/provider identity records, migrates existing database account references once, revokes refresh tokens tied to old account subjects, and rejects malformed account session subjects at account-route boundaries. Updated README, ARCHITECTURE, docs/usage, and CHANGELOG. Tests: focused `go test ./internal/authkit`; `make ci`.
+
+- [x] [TA-444] (P0) Require browser Google ID tokens to carry the issued nonce claim.
+  Summary: The current browser `/auth/google` path accepts an issued `nonce_token` even when Google omits the ID-token `nonce` claim. That protects replay of the same TAuth exchange body, but it does not cryptographically bind the Google ID token to the nonce-bearing sign-in attempt. Shared browser UI now needs TAuth to reject missing or mismatched Google nonce claims so downstream apps cannot rely on a weaker no-GIS-nonce contract.
+  Expected: `/auth/google` accepts only ID tokens whose `nonce` claim equals the submitted TAuth nonce or its opaque hash; missing or mismatched nonce claims return `401 {"error":"invalid_nonce"}` without finalizing login.
+  Resolved 2026-06-07: browser nonce consumption now requires the Google ID-token `nonce` claim to equal the submitted TAuth nonce or its opaque hash before the issued nonce is consumed. Missing, empty, stale, or mismatched nonce claims return invalid nonce responses without finalizing login. Replaced permissive tests with strict missing/empty/stale nonce rejection coverage. Tests: focused `go test ./internal/authkit ...`; `make ci`.
+
+- [x] [TA-443] Console-clean background session restore for stale browser hints.
+  Public apps that embed TAuth through shared UI can keep a prior-session restore hint after cookies expire. Current restore flows probe `/me` and `/auth/refresh`, producing browser-visible 401 resource errors for an expected anonymous state before the client can classify it. Add a non-error session status endpoint that returns profile JSON for valid/restored sessions and `204 No Content` for anonymous or expired sessions, so UI bootstrap does not use protected-endpoint failures as control flow.
+  Resolved: added `GET /auth/session` for profile-or-204 session status, including refresh-cookie restoration without browser-visible expected 401s; updated `tauth.js` hinted restore to call that endpoint and clear stale hints from 204 responses. Added HTTP and browser-client regressions for anonymous, authenticated, refresh-backed, and expired hinted sessions. Validation passed with `make ci`.
+
+- [x] [TA-442] Avoid logged-out bootstrap 401 noise in `tauth.js`.
+  Public shared-header loads currently call `/me` and then `/auth/refresh` immediately, so anonymous visitors produce browser console 401s even though logged-out state is expected. Change the browser helper to restore only when a non-secret prior-session hint exists, preserve an eager compatibility mode, and keep protected endpoint 401s meaningful for real authorization boundaries.
+  Resolved: `tauth.js` now defaults to restore-if-hinted bootstrap, stores a non-secret restore hint after successful auth/refresh, skips `/me` and `/auth/refresh` on fresh anonymous loads, exposes `getAuthState()` and `onAuthError`, preserves `bootstrapMode: "eager"`/`"passive"`, and keeps `apiFetch` refresh-on-401 for protected app calls. Validation passed with `npm run verify`, `npm test -- auth-client.test.js`, and `make ci`.
+
+- [x] [TA-441] Deploy image verification rejects valid GitHub release workflow images when tag aliases differ.
+  `make deploy` compares `ghcr.io/tyemirov/tauth:latest` to the literal `v*` release tag, but the GitHub release workflow publishes SemVer aliases such as `1.1.1` and `latest`. A local `v1.1.1` image can therefore differ from the workflow-published `1.1.1`/`latest` image even though the gateway will pull the correct `latest` image for the release.
+  Resolved: deploy verification now accepts `latest` when it matches a release alias for the current tag, preferring the normalized SemVer alias (`1.1.1`) for `v*` releases; local publish and the GitHub release workflow now tag both `vX.Y.Z` and `X.Y.Z` so future release images keep both aliases aligned. Validation passed with `timeout -k 120s -s SIGKILL 120s bash scripts/deploy.sh --tag v1.1.1 --skip-ci --skip-backend`, `timeout -k 350s -s SIGKILL 350s make ci`, and the sibling gateway `timeout -k 1200s -s SIGKILL 1200s make verify-app-workflows`.
+
+- [x] [TA-253] Demo bootstrap now waits for tauth.js readiness before wiring GIS; docs no longer describe a `/demo` endpoint.
+  Added an auth client readiness handle for the tauth demo, refreshed config tests, and removed `/demo` endpoint references from usage/architecture docs.
+
+- [x] [TA-332] Ensure the cancellat context is propagated.
+  Currently Ctrl-C in the docker container leaves the app in non-exited state and requires a second ctrl-C
+  Server now shares a signal-aware context across validator and database initialization, runs shutdown with a single 10s timeout path, and exits cleanly on first context cancellation (covered by `TestRunServerHonorsContextCancellation`).
+
+- [x] [TA-333] Fix ineffective logout for refresh cookies.
+  The `clearCookie` helper uses path `/` for all cookies, but the refresh cookie is scoped to `/auth`. Logout must clear the refresh cookie using the correct path.
+  Updated `clearCookie` to accept a path argument and ensured `/auth/logout` clears the refresh cookie with `Path=/auth`.
+
+- [x] [TA-334] Fix `demo/config.js` using default tenant config.
+  The demo configuration endpoint currently serves the default tenant's Google Client ID regardless of the resolved tenant, breaking the demo on multi-tenant setups. It must use `tenants.TenantFromContext`.
+  Updated `/demo/config.js` handler to resolve tenant from context and serve the correct Google Client ID.
+
+- [x] [TA-335] `apiFetch` leaks `X-TAuth-Tenant` to every downstream API.
+  The helper is supposed to keep tenant overrides scoped to TAuth endpoints only, but the current `apiFetch` implementation injects the header on arbitrary requests and breaks tests/users expecting isolation. Strip the header from generic API calls and keep it for `/auth/*` refresh flows.
+  Updated `web/auth-client.js` to only apply the tenant header for auth endpoints, refreshed tests (`tests/auth-client.test.js`) to ensure generic API calls stay header-free, and reran `npm test -- auth-client.test.js`.
+
+- [x] [TA-336] `setAuthTenantId` and script `data-tenant-id` never propagate to outbound requests.
+  The runtime only reads `runtime.options.tenantId`, so calling `setAuthTenantId("tenant-a")` (or configuring the script tag) does nothing until `initAuthClient` reruns with the same value. Ensure the runtime stores the detected tenant ID and uses it for headers even when options are omitted, and update tests.
+  Synced the runtime + options tenant ID handling, taught `setAuthTenantId` to update future requests, and added regression coverage for detected/script + setter flows.
+
+- [x] [TA-337] IPv6 tenant hosts cannot be resolved.
+  `internal/tenants/resolver.go` strips ports by splitting on the first colon, which truncates IPv6 literals (`[2001:db8::1]` becomes `[2001`). Update `extractHost` to handle bracketed IPv6 hosts (with or without ports) and add coverage.
+  Normalized IPv6 literals properly in the resolver/config, added a dedicated test (`TestResolverSupportsIPv6Hosts`), and verified `go test ./internal/tenants`.
+
+- [x] [TA-338] Docs/flags still reference `tenants.json` after the YAML migration.
+  CLI help and README/ARCHITECTURE bullets instruct operators to point at a JSON file, contradicting TA-212 and causing config errors. Update user-facing strings (and sample tests) to reference `tenants.yaml`.
+  Updated CLI flag help, README, ARCHITECTURE, and sample tenant fixtures/tests to consistently point at `tenants.yaml`.
+
+- [x] [TA-339] Expand environment variables inside tenants YAML.
+  Local orchestration needs `${VAR}` placeholders (e.g., cookie domains, client IDs) to hydrate from env without templating. Loader currently treats values literally, so `${HOST}` appears verbatim. Update the loader to expand env vars (supporting `${VAR}`/`$VAR`), document the behavior, and add tests ensuring missing vars stay empty rather than causing crashes.
+  Added a document-level env expander so every tenant loader path (YAML or embedded configs) supports `${VAR}`/`$VAR`, covered both env and missing-var scenarios in `internal/tenants` tests, and updated README/CHANGELOG to call out the behavior.
+
+- [x] [TA-341] Multi-tenant sessions evict each other when the UI relies on origin-only routing; `/me` and `/auth/*` lack `X-TAuth-Tenant` hints so ambiguous hosts fall back to the wrong tenant.
+  Allow the resolver to treat header overrides as either tenant IDs or frontend origins and teach `auth-client.js` to fall back to `window.location.origin` when no explicit `tenantId` is configured. Added JS/Go regression tests and refreshed docs to explain the new behavior.
+
+- [x] [TA-342] Legacy frontends (e.g., Gravity) still expect `app_session` / `app_refresh` cookie names, so the new per-tenant cookie names broke existing integrations.
+  Add optional `session_cookie_name` / `refresh_cookie_name` overrides to the tenant schema, propagate them through the registry, document the fields, and update the multi-tenant example so Gravity keeps its original cookie names without reintroducing cross-tenant collisions.
+
+- [x] [TA-343] Refresh token churn and nonce mismatches log users out under multi-tenant load.
+  Persist user + nonce stores when database storage is enabled, stop clearing cookies on refresh failures, switch `/me` to claim-backed responses, add auth-client broadcast sync, and expand integration coverage for concurrent multi-tenant refresh.
+
+- [x] [TA-344] Refresh could fail when duplicate refresh cookies exist; validate all matching cookies and log candidate count; add regression test.
+  `/auth/refresh` now validates all matching cookies and logs candidate counts, with regression coverage and refreshed staticcheck tool.
+
+- [x] [TA-345] Enforce unique cookie names across overlapping tenant cookie scopes (shared hosts or cookie domains) to prevent refresh/session collisions.
+  Added cookie scope validation in tenant config loading and regression tests for shared host, domain-domain, and domain-host overlaps.
+
+- [x] [TA-346] Duplicate refresh cookies can mask valid tokens and overlapping cookie scopes allow collisions across tenants.
+  Try all refresh cookie candidates and reject overlapping cookie-name reuse during tenant config validation; add regression tests for both scenarios.
+
+- [x] [TA-347] Cross-type cookie name collisions (session vs refresh) on overlapping scopes can overwrite cookies.
+  Reject cross-type cookie-name reuse during tenant config validation and add regression coverage.
+
+- [x] [TA-348] Static auth-client.js requests on shared hosts fail when Origin is missing, blocking Safari/WebKit auth flows.
+  Relaxed static host gating to allow missing Origin for allowed hosts and refreshed server tests.
+
+- [x] [TA-349] auth-client.js should require an explicit API base URL instead of inferring it from the script origin; update tests and documentation.
+  Removed script-origin fallback, enforced explicit base URL hints, updated docs/changelog, and refreshed Node tests.
+
+- [x] [TA-351] Remove host-based tenant resolution and enforce origin-only routing.
+  The tenant resolver should use only `Origin` (or `X-TAuth-Tenant`) and require schemeful origins in `allowed_hosts`; docs/examples/tests must match the origin-only contract.
+  Removed host-based matching, required schemeful origins, updated middleware/docs/examples/tests, and refreshed resolver coverage.
+
+- [x] [TA-352] Normalize auth-client helper errors and align demo/tests with latest mpr-ui custom elements.
+  Added nonce JSON parse normalization, refreshed helper/docs coverage, and moved the demo/browser tests to mpr-ui@3.1.0 custom elements with updated CDN harnesses.
+
+- [x] [TA-353] Serve only the API endpoints and `/tauth.js` from TAuth; remove demo assets and site catalog helpers.
+  Dropped `/mpr-sites.js`, removed `web/demo.html`, moved demo browser tests to the `examples/tauth-demo` page, and documented that demos are hosted separately.
+
+- [x] [TA-355] Remove UI-specific markers from tauth.js.
+  Dropped the `X-Client` header and any mpr-ui identifiers so the helper stays UI-agnostic.
+
+- [x] [TA-356] Demo header failed to render when GIS/tauth.js scripts were blocked.
+  Added a default demo Google client ID and removed the forced `crossorigin` attribute so mpr-ui and GIS load without CORS errors.
+
+- [x] [TA-357] Demo CORS allowlist excluded the ghttp port used by the Docker Compose demo.
+  Aligned the demo tenant `allowed_hosts` and CORS env origins to port 8080, and added regression coverage for the demo config files.
+
+- [x] [TA-358] Demo base styling did not apply, leaving default margins and serif fonts.
+  Added a local demo stylesheet using mpr-ui tokens to set the page baseline (font, margin, background) and styled the status panel using semantic selectors.
+
+- [x] [TA-359] mpr-ui logout left stale session state in tauth.js.
+  Removed the cached-profile fallback so `initAuthClient` clears stale sessions after logout, and added regression coverage for the refresh-fail bootstrap path.
+
+- [x] [TA-360] Demo cached an outdated tauth.js bundle, preventing logout state updates.
+  Added a cache-busting query string for local demo tauth.js loads and regression coverage for the demo loader script.
+
+- [x] [B044] Parse the ignored local deployment binding as data.
+  Goal:
+  Keep TAuth vendor-neutral while preventing its operator-owned `.env.deploy` file from executing shell syntax.
+
+  Requirements:
+  - Accept exactly one absolute `DEPLOY_DIRECTORY` and one valid `DEPLOY_MAKE_TARGET` assignment.
+  - Reject executable syntax, unknown or duplicate keys, incomplete documents, symlinks, and permissions other than `0600`.
+  - Keep all concrete operator values ignored and outside tracked repository files.
+
+  Deliverables:
+  - A data-only vendor-neutral deployment dispatcher.
+  - Black-box coverage through the real Make lifecycle entrypoints.
+  - Operator documentation for installing the ignored file with the required permissions.
+
+  Validation:
+  - `make deploy-dry-run` validates the real ignored local binding without executing its target.
+  - `make ci` passes without contacting or changing production.
+
+  Resolved 2026-07-18: replaced shell sourcing with an exact data-only parser, enforced a regular non-symlink mode-`0600` binding, rejected unknown, duplicate, incomplete, and executable input, and documented permission-safe installation. Black-box tests cover every rejection boundary and fixture-only dispatch. Validation passed with `make deploy-dry-run`, `make test-go`, and `make ci`; production was not contacted. Changed tracked files: `.env.deploy.example`, `.mprlab/ISSUES.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, `README.md`, `docs/usage.md`, `scripts/deploy.sh`, and `tests/repository_neutrality_contract_test.go`.
+
+- [x] [B043] Release lifecycle depended on sibling agentSkills/gitrelease; vendor the canonical container bundle, route release wrappers and Make targets locally, and validate the observable lifecycle contract.
+  Resolved: aligned the deployment no-op contract test with the canonical deploy CLI after removal of the obsolete `--skip-ci` option. Validation passed with `timeout -k 350s -s SIGKILL 350s make ci`.
+
+## Improvements
+
+- [x] [I222] Rehearse production tenant migration with App ownership.
+  Requirements: Use isolated copies of the gathered production data and the current source.
+  Requirements: Verify App grouping, owner isolation, credentials, unchanged authentication data, retry, restart, and backup restoration.
+  Requirements: Record executed evidence and distinguish migration readiness from production deployment.
+  Resolution: Imported 20 captured production tenants into 20 Apps and verified sessions for 30 existing profiles.
+  Resolution: Verified import retries, backup restoration, owner isolation, and unchanged authentication data.
+  Resolution: Reproduced the installed Gateway credential mismatch and recorded B106 as a deployment blocker.
+  Validation: The production-copy console suite, deployment migration suite, and `make ci` passed.
+  Evidence: `docs/production-app-rehearsal-2026-09-28.md` and `deployment/migrations/production-apps-20260928.json`.
+
+- [x] [I221] Edit App and tenant names inline.
+  Requirements: Replace rename dialogs with inline name inputs. Remove the environment label field.
+  Requirements: Save valid edits automatically without success announcements. Show errors beside the affected input.
+  Resolution: Pencil controls now edit names in the heading. Removed environment input, extra name labels, and automatic-save messages.
+  Validation: Browser tests cover inline edits, keyboard completion, focus departure, validation, retries, and concurrent changes. `make ci` passed.
+  Validation: `make up` updated the local console. The served HTML, JavaScript, and CSS match the source files.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I220] Put workspace actions beside their content.
+  Requirements: Move Documentation to the footer. Put pause and resume in the authentication status control.
+  Requirements: Use pencil icons to edit App and tenant names. Show one App-to-tenant heading.
+  Requirements: Keep automatic persistence and suspension confirmation.
+  Resolution: Added the footer link, status action, and name controls. Moved the tenant ID into Integration.
+  Resolution: App rename uses automatic persistence, including Apps with no tenants. Failed requests retain newer edits.
+  Validation: Desktop and mobile Chromium workflows and `make ci` passed. The local console serves the updated HTML, JavaScript, and CSS.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I219] Reduce tenant navigation to Configuration and Integration.
+  Requirements: Combine application addresses, Google sign-in, and tenant settings. Collapse session settings by default.
+  Requirements: Keep automatic persistence, validation feedback, and integration controls.
+  Resolution: Removed Overview and combined the configuration controls. Session validation errors expand and focus the affected field.
+  Validation: The initial browser test rejected five sections. Desktop and mobile browser tests and `make ci` passed.
+  Validation: `make up` updated the local console. The served page contains the two sections.
+  Files: `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+
+- [x] [I218] Add a plus sign to the App creation button.
+  Requirements: Show `+ Create App` in the App list header.
+  Validation: `make ci` passed. The local console serves the updated label after `make up`.
+  Files: `web/app/index.html`.
+
+- [x] [I217] (P1) Present Apps and tenants in a compact workspace.
+  Goal: Show all Apps with tenant counts. Expand the selected App to show its tenants.
+  Requirements: Use the Smith MPR styling rules. Keep automatic persistence and account isolation.
+  Validation: Desktop and mobile Chromium workflows and `make ci` passed. The retained local console serves the compact App list.
+  Resolution: Replaced dropdown navigation with App rows, tenant counts, and nested tenant selection. Applied the Smith MPR styling tokens.
+  Files: `web/app/index.html`, `workspace.js`, `workspace.css`, `cmd/server/console_browser_test.go`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`.
+  Discovery: B103 records complete deployment definitions omitted by the earlier tenant import.
+
+- [x] [I216] (P1) Require complete Google tenant input at creation.
+  Requirements:
+  - Require a name, application origin, and Google OAuth client ID before tenant creation.
+  - Validate the inputs in the browser and management API.
+  - Generate the tenant ID, signing key, cookie names, and standard session lifetimes.
+  - Create the complete tenant atomically without a separate owner activation action.
+  - Reject invalid input without a partial tenant record.
+  Validation:
+  Exercise HTTP rejection, atomic creation, browser field requirements, and the active runtime.
+  Resolution:
+  - Required all three inputs and created active tenants in one transaction without DNS ownership verification.
+  - Applied valid configuration edits automatically and kept explicit resume for suspended tenants.
+  - Removed the draft revision display, activation action, and DNS controls from the browser workspace.
+  - Verified missing and malformed inputs, origin conflicts, immediate authentication, and rollback through HTTP.
+  - Passed `make test-console`, `make test-console-browser`, and final `make ci`.
+  - Updated the local stack with `make up` and compared served assets with source files.
+  - Preserved the configured console Google client ID. Production deployment remains separate.
+  - Reviewed changed prose and found no new mechanical language findings. Preserved 156 findings in unchanged text.
+  Changed files:
+  - `internal/controlplane/resources.go`, `internal/controlplane/activation.go`.
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, `web/app/client.js`, `web/app/integration.js`.
+  - `cmd/server/tenant_creation_test.go`, `cmd/server/management_test.go`, `cmd/server/cors_management_test.go`.
+  - `cmd/server/integration_test.go`, `cmd/server/key_replace_test.go`, `cmd/server/provisioning_test.go`, `cmd/server/setup_integration_test.go`.
+  - `tests/console-workspace.browser.cjs`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, `README.md`.
+
+- [x] [I215] (P1) Migrate the existing local tenants to the operator account.
+  Requirements:
+  - Discover effective tenant configuration in the local Development repositories.
+  - Preserve tenant IDs, keys, provider settings, and existing destination account data.
+  - Assign migrated tenants to the verified local owner through the separate GORM migration.
+  - Back up the destination, rehearse against a copy, and record the final comparison.
+  - Keep migration inputs and operations outside the application runtime.
+  Validation:
+  Compare the effective source and destination settings, owner ID, receipt, and persistent rows after restart.
+  Resolution:
+  - Imported 22 complete definitions as inactive drafts through the external GORM migration.
+  - Preferred application-local definitions and excluded incomplete sources.
+  - Preserved every selected configuration value and all rows in 28 unrelated tables.
+  - Verified the backup, rehearsal, repeated receipt, live import, and retained state after `make up`.
+  - Recorded tenant IDs, selected sources, and exclusions in `docs/local-tenant-migration-2026-09-28.md`.
+  - `make ci` passed. Production was not changed.
+  Changed files:
+  - `deployment/migrations/command.go`, `deployment/migrations/tenants.go`, and deployment migration tests.
+  - `README.md`, `docs/tenant-console-operations.md`, and the local migration record.
+
+- [x] [I214] (P1) Use an administrator modal and automatic workspace persistence.
+  Requirements:
+  - Load current data automatically without refresh or reload controls.
+  - Persist valid edits automatically without save controls.
+  - Preserve pending edits and show validation, network, and conflict status.
+  Validation:
+  Verify the generated governance contract and applicable browser behavior.
+  Resolution:
+  - Moved the account directory into a separate administrator modal, following the PoodleScanner interaction pattern.
+  - Removed manual save, refresh, reload, and workspace retry controls.
+  - Added automatic updates, serialized persistence, transient retries, and visible conflict states.
+  - Verified preservation of newer edits during saves, rename-dialog closure, and delayed conflict checks.
+  - Verified administrator visibility, owner isolation, keyboard dismissal, and restored focus in Chromium.
+  - `make ci` passed. `make up` serves the updated local interface.
+  - Changed prose passed the mechanical check and producer review against ASD-STE100 Part 1 and Part 2.
+  - Preserved six existing Governor differences and 156 findings in unchanged prose.
+  Changed files:
+  - `web/app/index.html`, `web/app/workspace.js`, `web/app/workspace.css`, and `tests/console-workspace.browser.cjs`.
+  - `.mprlab/POLICY.md`, `.mprlab/AGENTS.FRONTEND.md`, `.mprlab/TERMINOLOGY.md`, and the operations runbook.
+
+- [x] [I213] (P1) {B093} Move tenant migration outside the application.
+  Goal:
+  Provide a separate one-off deployment GORM routine for the production ownership transfer.
+  Requirements:
+  - Select an explicit verified owner ID without personal account rules in the app.
+  - Remove the application import command and migration receipt schema setup.
+  - Preserve tenant settings, users, identities, and sessions.
+  - Commit tenant writes and the completion receipt in one transaction.
+  - Remove the obsolete first-owner schema with GORM.
+  - Record production execution separately from local test results.
+  Validation:
+  Test the deployment entry point, rollback, receipt retries, changed-input rejection, and schema cleanup.
+  Resolution:
+  Moved the migration into `deployment/migrations` with a separate executable at `deployment/tenantownership`.
+  Removed the import command and migration receipt setup from the application.
+  The routine requires an explicit owner ID and uses a GORM transaction for tenant records and the completion receipt.
+  GORM schema cleanup removes the obsolete first-owner foreign key and column. An identical retry succeeds.
+  Added Make targets for the separate executable, build, and focused migration acceptance.
+  Validation: deployment CLI, schema cleanup, rollback, repeat, changed-source, and existing-session tests passed. `make ci` passed.
+  Local schema cleanup completed against a backup-protected database without changes to other stored values.
+  Production transfer remains pending in the deployment runbook. The routine is not a service startup action or an automatic Gateway hook.
+  Changed files: `deployment/migrations/command.go`, `deployment/migrations/tenants.go`, `deployment/migrations/tenants_test.go`,
+  `deployment/tenantownership/main.go`, `Makefile`, `cmd/server/main.go`, `cmd/server/tenant_import.go` (removed),
+  `internal/controlplane/import.go` (removed), `internal/controlplane/configurations.go`, `internal/controlplane/schema.go`,
+  `internal/controlplane/store_integration_test.go`, `internal/testconfig/database.go`, `README.md`, `ARCHITECTURE.md`,
+  `docs/usage.md`, `docs/tenant-console-operations.md`, and `docs/tenant-migration-rehearsal-2026-09-26.md`.
+
+- [x] [I212] (P1) {F009} Migrate tenant configuration into the owner database.
+  Goal:
+  Replace environment-backed tenant YAML with one persistent runtime source while preserving current authentication behavior.
+  Requirements:
+  - Read the effective tenant configuration through the canonical loader, including literal values and environment substitutions.
+  - Inventory the source without printing secrets or copying them into repository artifacts.
+  - Require the verified initial owner binding from F009 before importing any application tenant.
+  - Assign every imported application tenant to that owner's account in one database transaction.
+  - Preserve tenant IDs, provider configuration, keys, origins, cookie settings, account policies, and session lifetimes.
+  - Preserve application users, provider identities, password hashes, refresh sessions, encrypted provider credentials, and OAuth grants.
+  - Record a secret-safe source digest and import receipt for an identical retry.
+  - Reject incomplete input, duplicate identifiers, conflicting ownership, and changed-source retries before writes.
+  - Keep the bounded importer separate from normal service startup.
+  - Load all runtime tenant configuration from the database after the cutover.
+  - Reject obsolete tenant YAML and tenant environment configuration in the normal runtime.
+  - Keep service database and encryption-key settings in service configuration.
+  Deliverables:
+  - Add the bounded import command, redacted inspection output, transaction, receipts, and database loader.
+  - Update server startup, tenant resolution, account seeding, doctor, and preflight for the database contract.
+  - Update all repository-owned runtime fixtures and examples to the new tenant configuration contract.
+  - Add a runbook for backup, configuration freeze, import, verification, and coordinated Gateway cutover through F011.
+  - Record removal of the temporary importer after verified production migration as an operational cleanup step.
+  Validation:
+  - Start with a failing CLI integration test against representative current configuration and populated account storage.
+  - Verify every source tenant occurs once under the intended owner, with identical effective authentication settings.
+  - Verify identical retries, conflicts, interrupted imports, and transaction rollback without partial data.
+  - Verify existing login, refresh, provider credentials, and OAuth behavior through real public endpoints.
+  - Verify restart uses database configuration with tenant environment inputs removed.
+  - Verify missing database configuration fails explicitly instead of loading YAML.
+  - Run the applicable Make targets and final `make ci`.
+  Production migration waits for F011's matching Gateway client. This issue closes on implementation and software acceptance.
+
+  Resolved 2026-09-26: Added the bounded import command, redacted inventory, encrypted configuration revisions, and atomic retry receipts.
+  Runtime, doctor, and preflight now read tenant configuration from the database.
+  The import preserves existing tenant keys, users, and sessions. Runtime configuration rejects tenant YAML.
+  Updated service fixtures, examples, renderer checks, and the migration runbook.
+  Validation: CLI and HTTP integration tests, browser flows, container checks, and `make ci` passed.
+  The Governor check retains the six existing differences recorded by P002.
+  Production import and Gateway cutover remain separate operations after F011.
+  Changed files: `internal/controlplane`, `internal/runtimeconfig`, `internal/testconfig`, `internal/appconfig`, `internal/tenants`, `internal/doctor`, `internal/preflight`, `internal/deploymentconfig`, `cmd/server`, `pkg/sessionvalidator`, `tests`, `examples`, `Makefile`, `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, and `docs/tenant-console-operations.md`.
+
+- [x] [I210] (P1) Show progress during the OAuth consent submission.
+  Goal:
+  Show a clear response when the user selects Approve or Deny.
+  Evidence:
+  The user reported that both buttons seemed unresponsive. The form has no visible submission state.
+  Requirements:
+  - Show progress immediately after either decision.
+  - Prevent another submission while the first request is active.
+  - Preserve the selected decision in the form request.
+  - Keep explicit approval for each new consent grant.
+  Validation:
+  - Inspect the real form state before browser navigation.
+  - Verify visible progress, disabled controls, one submission, and the correct callback for both decisions.
+  Resolution: 2026-09-09 — Both buttons now show progress and prevent another submission.
+  The form preserves the selected decision before it disables the buttons.
+  The initial browser assertion returned an empty status instead of `Connecting…`.
+  Delayed navigation initially caused a `30000 ms` test timeout. The test now observes form state before navigation.
+  Browser tests verify both decisions, exact form values, and one submission.
+  The consent page permits only its nonce-bound script. `make ci` passed, including both container runtime checks.
+  Production deployment and live browser acceptance remain operator steps.
+
+- [x] [I209] (P2) Update four managed governance documents.
+  Goal:
+  The TAuth guidance matches the current Governor templates and retains repository-owned rules.
+  The Governor check identified four managed documents with different content during the B076 report.
+  Requirements:
+  - Update the policy, container guide, issue syntax guide, and main governance block.
+  - Preserve the issue classification and archive rules in the main agent guide.
+  - Preserve B076 and all other existing issue entries.
+  Resolution: 2026-09-08 — Updated the four documents through the Governor normalizer.
+  The policy now includes the versionless manifest contract and current environment-file and validation rules.
+  The container guide now states the versionless manifest requirements and local orchestration boundary.
+  The issue syntax guide now contains the current identifier, reference, and body syntax.
+  The main guide retains the classification and archive rules outside its managed block.
+  Its managed block now requires references by issue ID.
+  Validation:
+  - The Governor check reports no differences or warnings.
+  - The changed prose has no mechanical language findings.
+  - `git diff --check` passed.
+  - All prior tracker content remains unchanged.
+
+- [x] [I208] (P1) Own the deployment config renderer.
+  Goal:
+  TAuth converts selected resource contributions into its native config.
+
+  Requirements:
+  - Add one versioned render request contract.
+  - Read the render request from standard input.
+  - Resolve each declared TAuth output inside TAuth.
+  - Validate the complete native config before output.
+  - Keep private values out of errors and normal logs.
+
+  Deliverables:
+  - Add the provider render command.
+  - Add public CLI integration coverage.
+  - Document the provider-owned deployment boundary.
+
+  Validation:
+  - Render one complete browser demo config.
+  - Reject an unknown request field.
+  - Reject a missing private output.
+  - `make ci` passed after the last source change.
+
+  Completion evidence:
+  - The README documents the exact schema-v1 request envelope.
+  - The architecture assigns native config assembly and validation to TAuth.
+  - The gateway remains the owner of the `resources.yml` schema.
+
+- [x] [I207] (P0) Use the permanent versionless selected application manifest.
+  Goal:
+  Use one selected application manifest contract without a schema number.
+
+  Requirements:
+  - Remove `schema_version` from `.mprlab/deploy/resources.yml`.
+  - Require only `owner`, `release`, and `resources` at the manifest root.
+  - Reject each numbered selected application manifest form.
+  - Preserve independent schema contracts.
+
+  Validation:
+  - Run `make ci` after the last repository change.
+  - Plan release through gateway commit `753c727` without production contact.
+
+  Resolution:
+  - The manifest preserves the SemVer release scheme without a schema number.
+  - The compiled repository contract rejects a `schema_version` field.
+  - `make test-go`, all 44 JavaScript tests, and the final `make ci` passed.
+
+- [x] [I204] Adopt the app-owned resource contract and sibling-gateway lifecycle.
+  Goal:
+  Make TAuth independently releasable, publishable, and deployable without an
+  installed controller, local operator binding, or app-owned production
+  lifecycle engine.
+
+  Requirements:
+  - Keep `.mprlab/deploy/resources.yml` as the only tracked deployment file.
+  - Declare the TAuth image, retained data, gateway-managed tenant config,
+    runtime capabilities, public routes, and public health in schema v3.
+  - Expose only zero-argument `make release`, `make publish`, and `make deploy`
+    wrappers to the exact sibling `../mprlab-gateway`.
+  - Keep operator values, Ansible, Compose, Caddy, receipts, publication, and
+    convergence in the gateway.
+
+  Validation:
+  - The repository lifecycle contract test passes.
+  - `make ci` passes.
+  - The sibling gateway accepts an exact sealed TAuth release plan without
+    release, publication, production contact, or deployment mutation.
+
+  Resolved 2026-07-30 and migrated forward 2026-08-03: replaced the obsolete
+  workflow dispatcher with the complete schema-v3 TAuth runtime, removed the local operator binding and
+  app-owned production lifecycle implementation, and reduced the public
+  lifecycle to the exact sibling-gateway `release`, `publish`, and `deploy`
+  wrappers. The repository contract tests and full `make ci` suite passed.
+  Gateway commit `76e2e3f` accepted the committed TAuth source as a sealed,
+  deterministic release plan without publication, production contact, or
+  deployment.
+
+  Post-review correction 2026-07-31: declared the exact bounded retirement of
+  the legacy `mprlab-nginx-gateway/tauth-api` Compose service so the first
+  schema-v3 convergence removes only the obsolete container while preserving
+  the retained `mprlab-nginx-gateway_tauth-data` volume. Extended the
+  repository lifecycle contract test to require that exact declaration.
+  Validation passed with `make ci`.
+
+  Schema-v3 migration 2026-08-03: moved placement to the `tauth-api` service,
+  removed obsolete dependency, profile, and environment-file fields, and kept
+  the exact runtime, retirement, retained data, capabilities, routes, and health
+  graph. `make ci` passed, and sibling gateway commit `251e3c0` accepted the
+  clean committed snapshot as an isolated deploy plan without release,
+  publication, production contact, or deployment.
+
+- [x] [I205] (P0) Move the release policy into the resource manifest.
+  Goal:
+  Use one tracked application file for release and deployment configuration.
+  Requirements:
+  - Set the manifest schema version to 4.
+  - Add `release.scheme: semver` to the manifest.
+  - Delete `.mprlab/release.yml`.
+  - Keep the resource graph and lifecycle commands unchanged.
+  Validation:
+  - Pass the repository lifecycle contract test.
+  - Pass the sibling gateway manifest plan.
+  - Pass `make ci`.
+  Resolution 2026-08-12:
+  - Moved the SemVer policy into the schema-4 resource manifest.
+  - Deleted the obsolete `.mprlab/release.yml` file.
+  - Kept the resource graph and lifecycle commands unchanged.
+  - The repository contract failed against schema 3 and passed against schema 4.
+  - The final `make ci` run passed.
+  - The sibling plan remains pending until the gateway checkout is clean.
+  - Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/ISSUES.md`,
+    `CHANGELOG.md`, and `tests/repository_neutrality_contract_test.go`.
+
+- [x] [I206] (P2) Normalize the managed policy content.
+  Goal:
+  The repository policy matches the current MPR Lab Governor contract.
+  Requirements:
+  - Update only the managed content in `.mprlab/POLICY.md`.
+  - Preserve repository-owned policy content and all application changes.
+  Validation:
+  - Run the Governor check.
+  - Run `git diff --check`.
+  Resolution 2026-08-13:
+  - The Governor normalizer updated only `.mprlab/POLICY.md`.
+  - The final Governor check and `git diff --check` passed.
+  - Changed files: `.mprlab/POLICY.md` and `.mprlab/ISSUES.md`.
+
+- [x] [TA-447] Add the MediaOps static-frontend tenant to the TAuth-owned production registry.
+  MediaOps serves its browser UI from `https://mediaops.mprlab.com` and proxies TAuth through `https://mediaops-api.mprlab.com`. Add a dedicated tenant with unique session/refresh cookies, the shared Google web client, `.mprlab.com` cookie scope, and the Pages origin in the production CORS allowlist.
+  Resolved 2026-07-15: added the `mediaops` tenant, dedicated `app_session_mediaops`/`app_refresh_mediaops` cookies, Pages origin CORS, and production doctor/preflight coverage. Validation passed with `make ci`.
+
+- [x] [TA-112] Remove the palette suggestions section from the landing page.
+  Removed the palette section and navigation link from `docs/index.html`.
+
+- [x] [TA-212] Switch tenant configuration format from JSON to YAML.
+  Update loader to parse YAML, validation remains the same. Update all docs, tests, and examples to use YAML.
+  Switched loader to `gopkg.in/yaml.v3`, updated tests/examples/docs to use YAML format and `tenants.yaml`.
+
+- [x] [TA-213] Expose nonce issuance and Google credential exchange helpers in `tauth.js` so consuming apps can delegate the `/auth/nonce` and `/auth/google` flows.
+  Added helper functions + tests for nonce and credential exchange with tenant headers.
+
+- [x] [TA-340] Collapse CLI/env configuration into a single YAML file.
+  Replaced the Viper-based flag/env matrix with `config.yaml`, added a dedicated loader (`--config` / `TAUTH_CONFIG_FILE`), updated Compose examples, docs, and tests to consume the unified file, and exposed `tenants.LoadConfigFromDocument` for embedding.
+
+- [x] [TA-354] Style demos exclusively with mpr-ui components loaded from the CDN.
+  Rebuilt `examples/tauth-demo/index.html` with semantic markup + mpr-ui elements, adjusted demo scripts to load the bundle after `tauth.js`, and updated demo tests to match the new component structure.
+
+- [x] [TA-419] Document CORS origin exceptions and align example configs with the enforced allowlist rules.
+  Added `cors_allowed_origin_exceptions` guidance (including GIS), updated demo/multi-tenant configs, and added regression checks in the JS test suite.
+
+- [x] [TA-446] Make TAuth the canonical owner of shared production configuration and prepare the PoodleScanner tenant for the static frontend/API split.
+  Resolved 2026-07-10: TAuth now owns the complete shared tenant registry and environment contract, the `ps` tenant resolves `https://poodlescanner.com` and scopes its cookies to `api.poodlescanner.com`, and the production CORS allowlist includes its declared Google exception. The app-owned deploy manifest moved to the current `.mprlab/deploy/resources.yml` discovery path, and the deploy no-op no longer requires a gateway checkout. Validation passed with the production config black-box test, deployment no-op test, the real TAuth doctor/preflight commands, and `make ci`.
+
+- [x] [I211] Use the installed Gateway runtime.
+  Goal: Run the application lifecycle through the installed `mprlab-gateway` command.
+  Requirements:
+  - Keep `make release`, `make publish`, and `make deploy` as the public commands.
+  - Pass the application Git root through `--app-root`.
+  - Use `MPRLAB_GATEWAY_EXECUTABLE` for an explicit installed command path.
+  - Keep inventory and private config under `MPRLAB_GATEWAY_OPERATOR_ROOT`.
+  Validation:
+  - The public Make integration test reproduced the required sibling-checkout failure.
+  - The installed Gateway v4.0.2 accepted the committed application release plan.
+  - `make test-installed-gateway` and `make ci` passed.
+  - Governor reported existing managed-content drift in `.mprlab/POLICY.md` and `.mprlab/AGENTS.DOCKER.md`.
+  - Release, publication, and deployment were not run.
+
+## Maintenance
+
+- [x] [TA-440] Add the deployed-app release/publish/deploy contract for TAuth.
+  `make release && make publish` currently fails at `make release` because TAuth has no repo-local deployment workflow targets. Add the shared MPR deployment surface (`make release`, `make publish`, `make deploy`) so TAuth can publish its GHCR image and hand backend deployment to `mprlab-gateway`, and register the app with the gateway verifier.
+  Resolved: added `make release`, `make publish`, and `make deploy` wrappers backed by `scripts/release.sh`, `scripts/publish.sh`, and `scripts/deploy.sh`; `publish` builds/pushes only the TAuth GHCR image, and `deploy` verifies the release/latest image before handing off to `mprlab-gateway` with `TARGET=tauth`. Validation passed with `timeout -k 350s -s SIGKILL 350s make ci` and the sibling gateway `timeout -k 1200s -s SIGKILL 1200s make verify-app-workflows`.
+
+- [x] [TA-113] Mount the `web/` folder as a separate Docker volume in the image.
+  Added `/web` as a Docker volume and copied the web assets into the image.
+
+- [x] [TA-400] Update the documentation @README.md and focus on the usefullness to the user.
+  Move the technical details to ARCHITECTURE.md.
+  README now surfaces the hosted + local deployments, points custom flows at ARCHITECTURE.md, and the detailed GIS/nonce handshake (with sample code) was moved under `ARCHITECTURE.md#google-sign-in-exchange`.
+
+- [x] [TA-410] Increase test coverage to 95%.
+  Analyze coverage gaps in `pkg/sessionvalidator`, `internal/web`, `internal/tenants`, `cmd/server`, and `internal/authkit`. Add unit and integration tests to cover edge cases and error paths.
+  Added unit/integration coverage for sandbox-safe HTTP flows (no listener sockets), raised total coverage to 95%+, and verified with `go fmt ./... && go vet ./... && go test ./...`.
+
+- [x] [TA-411] Move the preflight package from `pkg/preflight` to `tools/utils/preflight` and update references.
+  Relocated the preflight module into the shared utils repo, rewired imports, and updated documentation references.
+
+- [x] [TA-412] Replace local utils replaces with remote module usage so only `github.com/tyemirov/utils/preflight` is required.
+  Removed the local replace, pinned the utils module version, and updated documentation references.
+
+- [x] [TA-413] Update the demo TAuth base URL to prefer `https://tauth.mprlab.com` on hosted domains, dynamically load `auth-client.js`, and remove the hardcoded localhost script tag so hosted deployments stay aligned.
+
+- [x] [TA-414] CRUCIAL: Constrain `X-TAuth-Tenant` overrides so they cannot bypass origin routing.
+  Require overrides to match the resolved origin tenant (when Origin is present) and require an explicit override when Origin is missing.
+  Matched overrides to origin owners, required header when Origin is missing, added resolver regression tests, and ran go test ./..., go vet, staticcheck, ineffassign.
+
+- [x] [TA-415] CRUCIAL: Tighten origin gating for non-browser clients.
+  Missing Origin should be rejected unless a validated override is supplied; update docs/tests to make the requirement explicit.
+  Required valid `X-TAuth-Tenant` override when Origin is missing, added origin gate regression coverage, and noted the change in CHANGELOG.
+
+- [x] [TA-416] CRUCIAL: Align CORS allowlist with tenant origins (or explicit exception list) to avoid credentialed CORS for non-tenant origins; enforce via validation and document the policy.
+  Added CORS allowlist validation against tenant origins/exception list, introduced exception config field, expanded server/preflight tests, and noted the policy in CHANGELOG.
+
+- [x] [TA-417] Add frontend to CI.
+  add a trigger for the frontend changes to github workflow. run npm tests and linters when fronted files change
+  Added a frontend test workflow that runs `npm run verify` and `npm test` on frontend path changes.
+
+- [x] [TA-418] Add a browser integration test to cover demo sign-out.
+  Extended the demo test server with stateful auth responses and added a Puppeteer flow that signs in via tauth.js, clicks sign out, and asserts the header returns to unauthenticated state.
+
+- [x] [TA-420] Clarify tenant origin validation failures with expected format and specific reasons.
+  Enriched `tenant.invalid_origin` errors with a concise expectation string and reason details (missing scheme, missing host, invalid scheme, or path/query/fragment).
+
+- [x] [TA-421] Restore tauth demo bootstrap assets and align demo origins with documented ports.
+  Reintroduced `demo-config.js`/`tauth-config.js`, wired the demo HTML to load them, and realigned demo config/env/compose origins with `http://localhost:8080` to satisfy the JS test suite.
+
+- [x] [TA-422] Correction: decouple demo-related tests from repo assets by using fixture copies for docs, multi-tenant configs, and `tauth.js`.
+  Added fixture assets and repointed tests/servers to them so demo and docs changes no longer affect test scaffolding.
+
+- [x] [TA-423] Restore demo header auth attributes so the Google sign-in button renders.
+  Replaced the stale `tauth-*` attributes with the mpr-ui `base-url`/`site-id`/auth path attributes in the demo header.
+
+- [x] [TA-424] Surface demo auth/header errors and rename the demo entrypoint to app.js.
+  Switched the demo script to `app.js` and added error handling for `mpr-ui:auth:error`/`mpr-ui:header:error` plus header attribute checks.
+
+- [x] [TA-425] Serve the demo frontend over HTTPS using the computercat TLS certificates.
+  Mounted the host certs into the ghttp container and updated the demo to reference the HTTPS frontend origin.
+
+- [x] [TA-426] Pin demo mpr-ui assets to v3.3.0 and surface Google sign-in errors so google-site-id attributes are honored.
+
+- [x] [TA-427] Track the demo env fixture so tests can validate CORS origins.
+  Added the missing `.env.tauth.example` fixture under `tests/fixtures/tauth-demo` and unignored it for git so CI can read it.
+
+- [x] [TA-428] Correction: Rename tenant configuration `allowed_hosts` to `tenant_origins` and align preflight output and flags.
+  Updated tenant config schema, preflight report fields/flag, tests, examples, and documentation to use `tenant_origins` and `tenant_origin_hashes`.
+
+- [x] [TA-429] Default session validator issuer to `tauth` when omitted.
+  Updated `pkg/sessionvalidator` to fall back to the shared default issuer and refreshed validator tests.
+
+- [x] [TA-430] Add per-tenant allowed_users login allowlist.
+  Added allowed_users config parsing + enforcement in auth login, updated docs/examples, and added tests.
+
+- [x] [TA-431] Enforce empty allowed_users as deny-all.
+  Treated explicit empty allowlists as deny-all, added tests, and documented the 403 user_not_allowed behavior.
+
+- [x] [TA-432] Production CORS preflight 405 error.
+  Root cause: Gravity frontend was calling `tauth.mprlab.com` but the Caddyfile only had `tauth-api.mprlab.com`. DNS for `tauth.mprlab.com` pointed to the Caddy server, but Caddy had no site block for it, causing requests to fail before reaching TAuth (hence no backend logs). Fix: Updated Gravity's `authBaseUrl` to `tauth-api.mprlab.com` and consolidated production config to JSON-only (Gravity PR #181).
+
+- [x] [TA-435] Avoid destructive schema resets during `tauth doctor --check-database`.
+  Switched doctor to a non-migrating connectivity probe and added coverage ensuring legacy refresh tokens are preserved.
+
+- [x] [TA-436] Align demo fixture `tauth.js` with shipped tenant-header behavior.
+  Updated fixture assets to match the current auth client so demo/browser tests no longer send `X-TAuth-Tenant` when no tenant is configured.
+
+- [x] [TA-437] Avoid dropping user store tables when schema migrations are missing.
+  Non-destructive migrations now register missing user/nonce store schema versions without dropping tables, with regression coverage for legacy user profiles.
+
+- [x] [TA-438] (P1) Add Google OAuth scope support (YouTube channel access) to TAuth.
+  Request: TAuth currently verifies Google ID tokens only (GIS) and cannot obtain OAuth access/refresh tokens needed for YouTube Data API calls such as `channels.list(mine=true)`. Implement a Google OAuth2 Authorization Code (offline) flow, store per-tenant/per-user Google refresh tokens server-side, and expose a session-protected endpoint that returns authenticated YouTube channel metadata without putting Google tokens in browser storage. Feasibility analysis captured in `docs/youtube-scopes-feasibility.md`.
+  Resolved (2026-02-10): Declined. TAuth remains authentication-only and will not implement third-party authorization/token custody (YouTube/Drive/etc).
+
+- [x] [TA-439] (P0) Finalize and implement native mobile Google sign-in support for Expo iOS and Android clients.
+  PromptDew Mobile needs `Mine` and future create/edit flows to authenticate through a system-browser OAuth flow without a WebView. The existing native installed-app endpoints (`GET /auth/google/native/config` and `POST /auth/google/native`) are enabled for desktop PromptDew and production returns a single `google_native_client_id`, but the mobile contract is not yet explicit for Expo AuthSession redirects, platform-specific Google client IDs, or credential persistence across `tauth-api.mprlab.com` and downstream API hosts. Define the mobile contract and implement the required TAuth changes: support custom-scheme and/or app-link redirects suitable for iOS and Android, model platform-specific accepted Google audiences or an explicit native client audience list in tenant config, keep nonce + PKCE validation semantics, and document whether mobile clients should reuse TAuth cookies or receive a mobile-safe session/refresh credential for API calls. Add black-box tests using mocked Google authorization/token validation paths for iOS and Android redirect/audience cases, missing/invalid nonce, wrong audience, missing Origin with tenant override, refresh/logout behavior, and downstream session validation compatibility. Update README, ARCHITECTURE, and usage docs with a concrete Expo client recipe.
+  Added platform-specific `google_native_clients` with redirect URI metadata, expanded native config/login responses for Expo iOS/Android, kept cookie-based mobile sessions, and covered platform audiences, redirects, tenant override, refresh/logout, and downstream session validation. Verified with `make ci`.
+
 ## Features
 
 - [x] [F004] (P0) Deliver each password challenge email through Pinguin.
@@ -27,3 +2060,933 @@
   - Merged updated F003 into F004 with a forward-only merge.
   - Preserved password reset and password link config with the I208 renderer fixes.
   - The renderer target and `make ci` passed on the combined source.
+
+- [x] [F018] (P1) Run timestamped data migrations automatically within deployment.
+  Goal:
+  Keep `make release && make publish && make deploy` as the complete production application procedure.
+  Requirements:
+  - Package the separate migration executable and fixed timestamped input in the release.
+  - Prepare the initial server encryption key and App-scoped Gateway credentials automatically.
+  - Keep the server key across deployments and copy its existing remote reference.
+  - Stop database writers and back up the database before a cutover.
+  - Keep existing verified identities, client keys, tenant settings, users, and sessions.
+  - Commit data changes and the completion receipt together.
+  - Skip a completed migration during every later deployment.
+  - Keep application migration policy in TAuth and resource convergence in Gateway.
+  Validation:
+  Verify the migration CLI, production database copy, Make boundary, real Ansible, container startup, existing sessions, and deployment repeats.
+  Status:
+  Resolved 2026-09-30: `make ci` passed with the automatic deployment test.
+  The production-copy migration kept all original rows in 13 tables and all current settings for 20 tenants.
+  An interrupted migration kept the original database. Its retry kept later source writes.
+  The container test verified the existing client session, App-scoped credentials, and a repeat with zero changes.
+  Production release, publication, deployment, and live Google qualification have not run for this change.
+  Changed files:
+  `.gitignore`, `Dockerfile`, `Makefile`, `deployment/deploy.sh`, `deployment/migrations/command.go`, `deployment/migrations/cutover.go`, `deployment/migrations/cutover_test.go`, `deployment/migrations/20260930-tenant-console.json`, `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, `deployment/rollout/inputs.yml`, `deployment/rollout/cutover.yml`, `tests/installed-gateway.sh`, `tests/automatic-deployment.sh`, `README.md`, `ARCHITECTURE.md`, `.mprlab/POLICY.md`, `.mprlab/TERMINOLOGY.md`, `docs/tenant-console-operations.md`, `docs/production-release-qualification-2026-09-30.md`, and `docs/automatic-deployment-qualification-2026-09-30.md`.
+
+- [x] [F017] (P1) Add Apps between owner accounts and tenants.
+  Goal: Let each account own Apps, with each App containing its tenants.
+  Requirements: Keep tenant credentials and sessions isolated. Require an owned App for tenant creation.
+  Deliverables: App API, workspace navigation, explicit deployment migration, and public interface tests.
+  Validation: HTTP, browser, migration, actual Gateway client tests, and `make ci` passed.
+  Resolution: Added App creation, selection, metadata, required tenant membership, and App-scoped provisioning credentials.
+  Local result: Assigned 22 active tenants to 19 Apps. Existing data across 33 tables stayed unchanged. All live nonce requests passed.
+  Files: `.gitignore`, `.mprlab/TERMINOLOGY.md`, `README.md`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, `docs/local-tenant-migration-2026-09-28.md`.
+  Files: `internal/controlplane/apps.go`, `schema.go`, `configurations.go`, `credentials.go`, `management_http.go`, `resources.go`, `store_integration_test.go`.
+  Files: `deployment/migrations/apps.go`, `apps_test.go`, `command.go`, `tenants.go`, `repair_test.go`, `local-apps-20260928.json`.
+  Files: `internal/testconfig/database.go`, `cmd/server/apps_test.go`, and the console, provisioning, creation, import, integration, key, CORS, and setup test fixtures.
+  Files: `web/app/client.js`, `workspace.js`, `index.html`, `workspace.css`, and `tests/console-workspace.browser.cjs`.
+
+- [x] [F016] (P1) {B093} Let configured administrators view owner accounts.
+  Goal:
+  Use the PoodleScanner `admin.emails` contract for a separate account directory.
+  Requirements:
+  - Permit administrators to view other accounts.
+  - Keep tenant reads, writes, and secrets scoped to the authenticated owner.
+  - Configure both operator email spellings without automatic alias inference.
+  - Reject ordinary users and provisioning credentials at the account directory.
+  Validation:
+  Verify administrator and ordinary-user behavior through HTTP and Chromium.
+  Resolution:
+  Added configured administrator emails, a read-only account directory, and its browser view.
+  All tenant routes retain owner-scoped authorization, including routes used by administrators.
+  The local configuration includes both approved operator email spellings.
+  HTTP acceptance covers ordinary users, administrator role removal, pagination, tenant isolation, and denied provisioning credentials.
+  Chromium verifies the visible administrator view and its absence for an ordinary user.
+  Validation: `make test-console`, `make test-console-browser`, and `make ci` passed.
+  Changed files: `internal/appconfig/admin.go`, `internal/appconfig/config.go`, `internal/controlplane/http.go`, `cmd/server/runtime.go`,
+  `cmd/server/console_test.go`, `cmd/server/provisioning_test.go`, `cmd/server/console_browser_test.go`, `local/service.yaml`,
+  `web/app/client.js`, `web/app/workspace.js`, `web/app/index.html`, `tests/console-workspace.browser.cjs`, and `docs/openapi.yaml`.
+
+- [x] [F015] (P1) Replace the console Google client through an operator command.
+  Goal:
+  Correct a persisted console client ID without loss of owner accounts or application tenants.
+  Requirements:
+  - Require the expected current client ID and the replacement client ID.
+  - Change only the encrypted console client ID and its configuration digest.
+  - Reject stale input and keep bootstrap create-only.
+  - Preserve keys, owner bindings, application configuration, and sessions.
+  Validation:
+  The initial CLI test failed because the replacement command was absent.
+  `make test-console` passed with replacement, rejected inputs, bootstrap consistency, and HTTP login after restart.
+  Owner accounts, application tenants, and application sessions remained available.
+  The first `make ci` timed out in the cross-origin OAuth browser test.
+  The isolated browser target and the complete `make ci` retry passed without test changes.
+  Resolution:
+  Added `console-google-client-replace` with an expected client ID check and an encrypted database update.
+  Updated the local database and private bootstrap input to the operator's corrected Google client.
+  Compared all 33 database tables against the stopped-service backup. Other database values remained unchanged.
+  The API and Chromium used `212947889486-vr99ionvvoie1ke2ee8qelv34oglseoj.apps.googleusercontent.com` after the latest operator correction.
+  The operator subsequently confirmed successful live Google login with that client.
+  B093 resolves the separate owner enrollment denial that followed authentication.
+  Changed prose passed the scoped language review. Governor retained six existing managed-file differences.
+  Changed files: `cmd/server/console_client.go`, `cmd/server/main.go`, `cmd/server/console_test.go`,
+  `internal/controlplane/console_client.go`, `README.md`, and `docs/tenant-console-operations.md`.
+
+- [x] [F014] Add root commands for local orchestration.
+  Goal:
+  Start and stop the current TAuth service and tenant console through `make up` and `make down`.
+  Requirements:
+  - Build the current service source and initialize the reserved console tenant.
+  - Keep the database and local keys after shutdown.
+  - Bind local ports to the loopback address.
+  - Permit HTTP console API origins only for loopback hosts.
+  Validation:
+  The initial `make test-local-lifecycle` failed because the `up` target was absent.
+  `make test-local-lifecycle` passed with real Docker containers and Chromium.
+  Startup, browser initialization, repeated startup, restart, data retention, and repeated shutdown passed.
+  `make ci` passed. The normal local stack also passed startup at ports 8081 and 8082.
+  The browser test injected the Google script. Live Google login remains unverified.
+  Resolution:
+  Added root targets, Compose services, random persistent keys, console bootstrap, and loopback HTTP support.
+  Added isolated lifecycle tests and README instructions.
+  Changed files: `Makefile`, `local/compose.yml`, `local/stack.sh`, `local/service.yaml`, `local/console.yaml`,
+  `web/app/client.js`, `tests/local-lifecycle.sh`, `tests/local-console.browser.cjs`, and `README.md`.
+  Changed prose passed the scoped language review. Governor retained six existing managed-file differences.
+
+- [x] [F008] (P1) {F009,I212,F010,F011,F012,F013} Deliver the account-owned TAuth tenant console.
+  Goal:
+  Let a person sign in, manage owned tenants, and integrate an application through `tauth.js` and `sessionvalidator`.
+  Requirements:
+  - Use `.mprlab/TENANT-CONSOLE.md` as the implementation contract derived from P002.
+  - Assign all imported application tenants to the account for verified Google login `vtyemirov@gmail.com`.
+  - Use one database ownership model for imported tenants and newly created tenants.
+  - Complete the child issues sequentially in this order: F009, I212, F010, F011, F012, and F013.
+  - Preserve current provider behavior and application-user identities through the migration.
+  Deliverables:
+  - F009: Owner accounts, verified login bindings, database schema, and console bootstrap.
+  - I212: Bounded tenant import and database-only runtime configuration.
+  - F010: Owner-authorized management API and runtime activation.
+  - F011: Owner-scoped Gateway provisioning through the management contract.
+  - F012: Browser tenant workspace and configuration forms.
+  - F013: Integration setup, secret export, and end-to-end application acceptance.
+  Validation:
+  - Require all six child issues to pass their implementation acceptance criteria.
+  - Verify that the initial owner can see the complete imported tenant collection after login.
+  - Verify that another account can create and use an isolated tenant through the same UI.
+  - Complete a real browser login and protected application request through the published validator package.
+  - Record production import, publication, deployment, and live-provider qualification separately in the delivery runbook.
+  OAuth console configuration, team membership, and additional provider forms remain future scope.
+  Resolution:
+  Completed F009, I212, F010, F011, F012, and F013 in sequence.
+  Imported and new application tenants use one owner-authorized database contract and the same console workflow.
+  Gateway uses scoped management credentials. The runtime rejects tenant YAML.
+  The browser acceptance completed owner login, application login, and protected requests through the public session validator.
+  TAuth and Gateway CI passed. Console race checks and the Pages artifact check passed.
+  The production runbook records migration, release inputs, publication, deployment, and live-provider qualification separately.
+  These production operations were not executed during local implementation.
+  Changed files: ownership and runtime modules, management APIs, Gateway client, browser workspace, customer example, acceptance tests, and operational documentation.
+  Existing Governor differences remain in six TAuth files and five Gateway files.
+
+- [x] [F009] (P1) Build tenant ownership storage and verified console login.
+  Goal:
+  Establish the persistent owner account that contains each application tenant.
+  Requirements:
+  - Implement the database structure in P002's durable plan with domain constructors and explicit database constraints.
+  - Keep `owner_accounts` and `owner_login_bindings` separate from the existing tenant-scoped application `accounts`.
+  - Require exactly one `owner_account_id` for each application tenant.
+  - Create the reserved console tenant through an explicit operator bootstrap command.
+  - Authenticate the initial owner through Google and verify `vtyemirov@gmail.com` during controlled enrollment.
+  - Persist the verified issuer, console tenant, and subject as the owner login binding.
+  - Use that stable binding for later authorization, independently of profile email changes.
+  - Support later owner account creation through the same verified console login contract.
+  - Store tenant secrets with authenticated encryption and keep the encryption key in service secret configuration.
+  - Reject owner deletion while that account owns tenants.
+  Deliverables:
+  - Add owner persistence, tenant relationships, secret storage, and database initialization.
+  - Add console bootstrap, Google login, and idempotent owner provision through public entry points.
+  - Specify the reserved console tenant bootstrap order and its restricted administration in the runbook.
+  - Add owner resource schemas to the canonical OpenAPI document.
+  Validation:
+  - Start with failing HTTP and CLI integration tests for owner enrollment and provision.
+  - Verify repeat login returns the same owner account after restart.
+  - Reject wrong-audience, unverified-email, substituted-subject, and customer-tenant credentials during initial enrollment.
+  - Verify distinct console identities produce distinct owner accounts.
+  - Verify database constraints reject missing owners and cross-tenant secret references.
+  - Run the applicable Make targets and final `make ci`.
+  Resolution:
+  Added encrypted console bootstrap, stable owner bindings, and the owner HTTP resource.
+  Added database constraints for ownership, revisions, and tenant secret references.
+  Verified Google enrollment restrictions, separate owners, email changes, restart, CSRF, and customer-session rejection.
+  `make test-console` and `make ci` passed on September 26, 2026.
+  The new runbook and execution plan passed the mechanical language check.
+  The Governor check retains the six differences recorded by P002.
+  Production enrollment and live Google qualification remain separate operations.
+
+- [x] [F010] (P1) {I212} Add owner-authorized tenant management and runtime activation.
+  Goal:
+  Let an authenticated owner create, configure, activate, and suspend application tenants without a service restart.
+  Requirements:
+  - Implement the proposed management resources in `.mprlab/TENANT-CONSOLE.md`.
+  - Authorize every tenant resource through the current owner's stable account ID.
+  - Support paginated collections and explicit draft, active, and suspended tenant states.
+  - Require exact console Origin and CSRF protection for cookie-authenticated mutations.
+  - Use idempotency keys for creation and ETags with preconditions for configuration changes.
+  - Verify production hostname ownership through bounded DNS TXT challenges before new origin activation.
+  - Retain imported active origins and record their operator-approved import provenance.
+  - Reserve console origins and enforce tenant-bound localhost requests with distinct cookie names.
+  - Build one immutable runtime snapshot for each active revision across all authentication consumers.
+  - Validate a complete revision before committing its activation.
+  - Restore the committed active revision after restart and expose activation failures as typed resource states.
+  - Revoke refresh sessions and OAuth refresh grants when suspension completes.
+  - State the expiry limit for access tokens already accepted by offline validators.
+  Deliverables:
+  - Implement owner-scoped tenant creation, reads, updates, configuration, origin proofs, activations, and audit records.
+  - Update origin resolution, CORS, providers, cookies, account policy, email delivery, and OAuth registries together.
+  - Define the database commit and runtime publication sequence, including crash recovery and failed activation behavior.
+  - Update OpenAPI, repository clients, and public error contracts atomically.
+  Validation:
+  - Start with failing HTTP integration tests against the real server and database.
+  - Verify two owners cannot read, mutate, export, or activate each other's resources.
+  - Verify retry identity, conflicting payloads, stale ETags, pagination, origin conflicts, and suspension.
+  - Verify a failed activation preserves the previous active revision.
+  - Verify a request uses one revision while a concurrent activation completes.
+  - Verify immediate use of a new tenant and persistence after restart.
+  - Run the applicable Make targets and final `make ci`.
+
+  Resolved 2026-09-26: Added owner-scoped tenant resources, cursor pages, retry receipts, revision preconditions, DNS proofs, and audit records.
+  Activation commits and publishes one complete runtime snapshot. Existing requests retain their selected revision.
+  Suspension drains retired requests and revokes refresh sessions and OAuth grants. Restart completes pending suspension.
+  Added typed failed activation resources and updated OpenAPI and the operations document.
+  Validation: real HTTP and database tests cover isolation, retries, conflicts, DNS, restart, suspension, and concurrent activation.
+  Response schema checks, the focused race check, and final `make ci` passed. B086 records the corrected context race.
+  The Governor check retains the six existing differences recorded by P002.
+  Changed files: `internal/controlplane`, `cmd/server/main.go`, `cmd/server/runtime.go`, `cmd/server/console_test.go`, `cmd/server/management_test.go`, `cmd/server/management_contract_test.go`, `internal/tenants/config.go`, `internal/authkit/database_nonce_store.go`, `internal/authkit/database_refresh_store.go`, `internal/oauthserver/database_store.go`, `internal/web/cors.go`, `docs/openapi.yaml`, `docs/tenant-console-operations.md`, and `ARCHITECTURE.md`.
+
+- [x] [F011] (P1) {F010} Provision account-owned tenants through Gateway.
+  Goal:
+  Let Gateway manage its authorized tenant resources through the database management contract.
+  Requirements:
+  - Replace Gateway's runtime tenant YAML output with authenticated provisioning through F010's resources.
+  - Keep ownership with the account for `vtyemirov@gmail.com` for all imported application tenants.
+  - Issue revocable opaque provisioning credentials bound to an owner, permitted operations, and explicit tenant grants.
+  - Store provisioning credential digests and show each generated credential once.
+  - Permit tenant creation only through an explicit owner-scoped creation grant.
+  - Use the same configuration validation and activation service for Gateway and console writes.
+  - Require revision preconditions so Gateway cannot overwrite concurrent console changes.
+  - Persist contribution-to-tenant references and stable retry receipts for repeated deployment requests.
+  - Preserve the validator key and cookie outputs required by existing consuming applications.
+  - Keep service settings and encryption keys in deployment configuration.
+  Deliverables:
+  - Add provisioning credential administration and restricted authentication to the management API.
+  - Update TAuth's deployment renderer, resource integration, and provisioning contract tests.
+  - Implement the corresponding client change in the primary Gateway repository after reading its agent contracts.
+  - Record the required released Gateway version and ordered production cutover in the runbook.
+  Validation:
+  - Verify the actual Gateway client provisions a tenant through a real TAuth HTTP server and test database.
+  - Verify repeat provisioning preserves tenant IDs, ownership, credentials, and configuration revisions.
+  - Reject revoked credentials, unauthorized tenants, unauthorized creation, and stale configuration revisions.
+  - Verify downstream validator outputs retain their existing values for imported tenants.
+  - Run repository-native checks in each changed repository, including the installed Gateway integration lane.
+  Production cutover requires the matching Gateway release. Release and deployment remain separate operational steps.
+  Resolution:
+  Added opaque scoped credentials, persistent contribution bindings, and revision-safe provisioning through shared activation.
+  The renderer emits service settings only. Gateway F017 implements the actual Ansible management client and handler task.
+  Imported validator keys and cookie outputs retain their values. Revocation and concurrent console edits reject machine writes.
+  Validation:
+  TAuth and Gateway `make ci` passed. The actual Gateway client passed against the real TAuth service and database.
+  Gateway handler and installed-runtime targets passed. TAuth console race checks passed.
+  Gateway's lifecycle package took 801.788 seconds in aggregate CI. The separate installed lane took 117.283 seconds.
+  Existing Governor differences remain: six in TAuth and five in Gateway.
+  The runbooks require the exact released Gateway version before cutover. This source change allocates no release version.
+  Changed files: credential and provisioning modules, deployment renderer, server commands and tests, Makefile, fixtures, OpenAPI, service manifest, README, architecture, and operations guide.
+  Gateway files: Ansible client, provider handler tasks and descriptor, client acceptance playbook, Makefile, and provisioning guide.
+
+- [x] [F012] (P1) {F011} Build the authenticated tenant workspace.
+  Goal:
+  Let owners return to their tenant collection and configure tenants through a functional browser UI.
+  Requirements:
+  - Use the Ledger tenant rail and responsive selector with the shared MPR-UI account controls.
+  - Serve the static console at `/app/` through the existing GitHub Pages artifact.
+  - Use the reserved console tenant for Google authentication and the separate API hostname for management requests.
+  - Show imported tenants to their owner after login.
+  - Let another owner start with an empty collection and create named draft tenants.
+  - Implement Overview, Domains, Sign-in methods, Integration, and Settings sections from the durable plan.
+  - Support Google setup, domain proofs, activation, rename, and confirmed suspension through F010.
+  - Show current provider summaries for imported tenants and preserve configuration fields outside the editable forms.
+  - Validate backend payloads in client modules and keep components focused on visible state and user intent.
+  - Cancel old requests and reject late responses after account or tenant changes.
+  - Implement keyboard access, focus return, narrow layouts, field errors, and explicit request states.
+  Deliverables:
+  - Add semantic HTML, checked ES modules, styles, runtime public configuration, and the management backend client.
+  - Preserve documentation routes and the canonical `/tauth.js` artifact.
+  - Add a tenant URL state that survives page reloads on GitHub Pages.
+  Validation:
+  - Start with failing automated-browser tests against the real management service.
+  - Verify imported tenant selection, new-owner signup, draft creation, configuration, activation, and return login.
+  - Verify logout clears protected state and tenant switching rejects stale results.
+  - Verify keyboard and narrow-width flows, failed requests, and revision conflicts.
+  - Build the Pages artifact and verify its console, documentation, and helper files.
+  - Run the applicable Make targets and final `make ci`.
+  Resolution:
+  Added the Pages workspace with pinned MPR-UI controls, a typed management client, and tenant URL selection.
+  Owners can create drafts, configure Google and domains, publish proofs, activate, rename, and suspend tenants.
+  The UI preserves form values on errors and rejects late results after tenant or account changes.
+  Validation:
+  Chromium acceptance passed against the real TLS service and database, with controlled Google and DNS boundaries.
+  Coverage includes imported tenants, new owners, activation, return login, conflicts, field errors, keyboard focus, and narrow layouts.
+  The Pages artifact and checked JavaScript passed. Final `make ci` passed after the Pages contract test update.
+  The Governor check retains the six existing managed-file differences.
+  Changed files: `web/app/`, console bootstrap handler, browser fixture and test, Pages Dockerfile and test, Makefile, TypeScript configuration, OpenAPI, README, architecture, and operations guide.
+
+- [x] [F013] (P1) {F012} Complete tenant integration setup and application acceptance.
+  Goal:
+  Let an owner use a tenant in a real browser application and a protected backend.
+  Requirements:
+  - Generate public `tauth.js` settings and complete Google sign-in examples from the selected active tenant revision.
+  - Generate backend configuration for `sessionvalidator` with explicit expected-tenant authorization.
+  - Provide exact customer API proxy routes for auth endpoints and `/me` with host-only session cookies.
+  - Bind proxy requests to the correct tenant and preserve browser Origin validation.
+  - Require recent Google authentication within five minutes for a session key export.
+  - Bind the fresh authentication transaction to the current owner, tenant, and export operation.
+  - Return exported keys through no-store responses and record secret-free audit events.
+  - Clear displayed secrets after dismissal, tenant change, or logout.
+  - Record setup checks against the active configuration revision and show their evidence and time.
+  - Restrict server-side setup checks to verified destinations and fixed protocols.
+  - Document session key replacement, validator installation, session expiry, and provider configuration.
+  Deliverables:
+  - Complete the Integration screen, protected export resource, and setup-check resources.
+  - Add a runnable browser application and Go backend example with the published validator interface.
+  - Add an automated browser acceptance target with distinct frontend, customer API, and TAuth origins.
+  - Complete the production migration and publication runbook with required inputs and ordered verification steps.
+  Validation:
+  - Start with failing browser and HTTP tests for the complete integration flow.
+  - Import existing tenants and verify their owner can use the generated settings after login.
+  - Create a new tenant through the UI, authenticate an application user, and call a protected backend route.
+  - Verify refresh, logout, restart, wrong-tenant requests, denied origins, and expired sessions.
+  - Verify stale or substituted reauthentication cannot export a key.
+  - Verify public snippets, browser storage, logs, and URLs contain no secrets.
+  - Run the complete automated-browser acceptance target and final `make ci`.
+  Live-provider qualification, production import, publication, and deployment are separate runbook records.
+  Resolution:
+  Added active-revision snippets, Google-bound key exports, fixed HTTPS setup checks, and the complete Integration screen.
+  Added the runnable customer API with exact proxy routes, host-only cookies, and explicit validator tenant authorization.
+  Added an offline key replacement command with suspension and revision preconditions.
+  The operations guide defines provider inputs, key installation, expiry limits, and the ordered production delivery record.
+  Manual key replacement preserves a Gateway revision conflict. Automatic adoption of that operator change is outside this delivery.
+  Validation:
+  Final `make ci` passed, including the Pages artifact and complete Chromium application acceptance.
+  Console HTTP, database, and browser race checks passed.
+  Two owners created and used isolated applications. The initial owner used imported settings and exported the preserved key.
+  Acceptance covered refresh, restart, expiry, denied origins, wrong-tenant tokens, and protected backend requests.
+  Export tests rejected stale, expired, replayed, substituted, cross-owner, cross-tenant, and obsolete-revision authentication.
+  Browser tests verified dismissal, tenant-change, logout, and late-callback secret clearing.
+  Setup tests rejected private destinations, mixed DNS answers, redirects, oversized responses, and invalid tenant nonce binding.
+  The key replacement test rejected the old key after the suspended installation and restart sequence.
+  Changed files: `internal/controlplane/integration.go`, `setup.go`, `key_replace.go`, schema, management routes, and resource representations.
+  Server files: runtime wiring, integration and setup tests, browser fixture, and key replacement command and test.
+  Application files: `internal/customerapp/`, `examples/tenant-app/`, `web/app/`, browser acceptance, Pages asset check, Makefile, and module metadata.
+  Documents: README, architecture, OpenAPI, tenant operations guide, terminology, and this resolution.
+  The Governor check retains six pre-existing managed-file differences. Changed prose passed its scoped language review.
+
+- [x] [F007] (P0) Supply GitHub credentials to authenticated resource services.
+  Request:
+  ISSUES.md I052 replaces separate repository approvals with the user's current GitHub permissions after MCP sign-in.
+  Current GitHub login verifies identity but does not retain the repository credential needed by the resource service.
+  Requirements:
+  - Permit configured repository scopes for selected GitHub tenants.
+  - Retain their provider credentials in encrypted server storage after successful account authentication.
+  - Bind each credential to its tenant, user, and immutable GitHub identity.
+  - Require a resource service secret independently of the public client's OAuth token.
+  - Verify the resource audience, current consent, account state, and provider identity before credential delivery.
+  - Keep provider credentials outside public OAuth responses, access-token claims, browser storage, URLs, and logs.
+  - Require GitHub sign-in when a selected resource needs a missing provider credential.
+  - Reject cross-resource, cross-tenant, expired, revoked, or substituted credentials.
+  - Extend the resource config renderer and public integration tests.
+  - Preserve identity-only login for resources that do not request repository credentials.
+  Resolution:
+  Repository scopes, encrypted credential storage, private resource delivery, and deployment rendering are implemented.
+  The service endpoint checks the user token and current OAuth consent before it returns a credential.
+  Focused GitHub HTTP, configuration, OAuth, and renderer tests passed. Automatic `make ci` passed.
+  Contract: `POST /oauth/github-credentials`. See `docs/github-resource-credentials.md`.
+
+- [x] [F006] (P1) {F005} Accept GitHub tenant contributions in the deployment renderer.
+  Goal:
+  The consuming ISSUES.md F008 deployment can declare a GitHub tenant without Google configuration.
+  The gateway preserves the required Google field in its existing `tauth_tenant` manifest shape.
+  Requirements:
+  - Accept `tauth_github_tenant` as a distinct contribution kind in the current schema-v1 render request.
+  - Require matching envelope and desired-resource kinds.
+  - Require enabled GitHub configuration for the new kind.
+  - Use the current tenant renderer, private outputs, native validation, and OAuth identity disclosure policy.
+  - Preserve the existing `tauth_tenant` contribution contract.
+  - Keep resource schema ownership in the gateway and authentication mechanics in TAuth.
+  Validation:
+  - Run the real CLI with a GitHub tenant and no Google configuration.
+  - Verify GitHub login settings and per-scope identity disclosure in the rendered native config.
+  - Reject absent or disabled GitHub configuration, mismatched kinds, and missing private outputs.
+  - Verify empty output and private-value exclusion after rejection.
+  - Run `make test-deployment-config-renderer` and `make ci`.
+  Resolution (2026-09-08):
+  The renderer accepts `tauth_github_tenant` through the existing native tenant implementation.
+  It requires enabled GitHub configuration and matching envelope and desired-resource kinds.
+  The real CLI test verifies GitHub settings and identity disclosure without Google configuration.
+  It rejects invalid kinds, absent or disabled GitHub login, and missing private outputs without config or credential disclosure.
+  The focused renderer target and full `make ci` passed, including both runtime bootstrap checks.
+  No provider artifact was published or deployed.
+
+- [x] [F005] (P0) {F001,B055} Add GitHub login for browser sessions and OAuth resource clients.
+  Goal:
+  A user can authenticate with GitHub without a Google account, a password account, or manual token entry.
+  The same GitHub login can complete browser authentication and a pending OAuth authorization request.
+  Authorized resources can receive the verified GitHub identity without a separate manual account-link procedure.
+  This feature expands and replaces the unresolved TA-433 request under the current issue identifier contract.
+  `F008@https://github.com/MarcoPoloResearchLab/ISSUES.md` is the consuming MCP feature.
+  GitHub repository authorization remains the consuming application's responsibility.
+  Requirements:
+  - Use one GitHub provider implementation for ordinary browser login, account linking, and the OAuth login page.
+  - Preserve the current TAuth session cookies, refresh lifecycle, profile envelope, and account subject rules.
+  - Support GitHub-only tenants without Google or password configuration.
+  - Support mixed tenants through explicit provider controls on the login page.
+  - Complete repeat access through the existing TAuth session and OAuth refresh mechanisms.
+  - Keep GitHub approval and resource-client consent explicit when either approval is required.
+  - Do not require repeated GitHub authentication for each MCP tool call.
+  - Keep all provider routes in TAuth and all repository credentials in the consuming application.
+  - Keep TAuth free of ISSUES.md-specific hosts, scopes, repository IDs, or callback behavior.
+  Provider configuration:
+  - Add one optional per-tenant `github_oauth` block with an explicit disabled default.
+  - Require `enabled`, `client_id`, `client_secret`, and an exact HTTPS `redirect_uri` for an enabled provider.
+  - Use a dedicated GitHub OAuth App for identity authentication on GitHub.com.
+  - Require the closed identity scope set `read:user user:email`.
+  - Reject repository, organization, workflow, and `offline_access` scope requests in this provider contract.
+  - Require a verified primary email for the current email and `allowed_users` contracts.
+  - Preserve the current absent, empty, and explicit `allowed_users` semantics.
+  - Reject malformed configuration before the server accepts traffic.
+  - Add GitHub-only capability validation to native config, doctor, preflight, and the deployment config renderer.
+  - Keep provider endpoints fixed to GitHub.com in production configuration.
+  - Inject a local GitHub protocol implementation for tests without exposing caller-controlled provider URLs.
+  - Keep GitHub Enterprise and GitHub repository token custody outside this feature.
+  Login transaction:
+  - Add `GET /auth/github/start` and `GET /auth/github/callback` as provider protocol routes.
+  - Create an opaque state value and a PKCE `S256` verifier for each start request.
+  - Store the verifier only in the server-side login transaction.
+  - Bind the transaction to its initiating browser with a secure browser cookie and CSRF protection.
+  - Record tenant, provider client, redirect URI, creation time, expiry, operation, and approved completion destination.
+  - Use a closed operation type for session login, account linking, or OAuth authorization continuation.
+  - Set a five-minute transaction lifetime and atomically claim each callback once.
+  - Use the configured database for transactions when database persistence is enabled.
+  - Bound the lifetime and capacity of the in-memory transaction store.
+  - Resolve the callback tenant from the validated transaction, not the callback `Origin` header.
+  - Reject missing, expired, replayed, mismatched, or foreign-browser transactions before the GitHub token exchange.
+  - Exchange the code with the configured client secret, exact redirect URI, and original PKCE verifier.
+  - Reject an ambiguous token exchange without automatic code resubmission.
+  - Retrieve `/user` and `/user/emails` through the returned GitHub token.
+  - Validate each provider response at the HTTP boundary with bounded body sizes and request deadlines.
+  - Use the immutable numeric GitHub user ID as the provider subject, serialized as an exact decimal string.
+  - Require a positive user ID and one verified primary email from the email response.
+  - Treat GitHub login names, display names, avatars, and emails as mutable profile data.
+  - Reject a token response or identity response that cannot prove the requested login.
+  - Recheck provider enablement, tenant policy, and account state before session issuance.
+  - Complete the transaction before any successful browser redirect or popup notification.
+  Browser completion:
+  - Permit a `return_to` destination only within the resolved tenant's exact configured origins.
+  - Preserve full-page redirect login and explicit popup login as supported user experiences.
+  - Send popup completion only to the initiating window's exact origin with its transaction correlation value.
+  - Validate the message origin, source window, and correlation value in the browser helper.
+  - Return only completion status through popup messages, never credentials or authorization codes.
+  - Restore the current profile through the authenticated session endpoint after completion.
+  - Show a clear error when a popup is blocked or closed before completion.
+  - Add `getGitHubLoginUrl()` and `startGitHubLogin()` to the shipped browser helper.
+  - Keep both provider credentials and TAuth tokens out of JavaScript storage and browser messages.
+  Account identity:
+  - Add the canonical provider value `github` to the existing provider identity contract.
+  - Resolve identity with the exact tenant, provider, and immutable provider subject tuple.
+  - Reuse the current account stores for creation, lookup, explicit linking, unlinking, and account disablement.
+  - Keep the opaque account ID as the session and OAuth subject for account-managed tenants.
+  - Use the current UserStore contract when account management is disabled.
+  - Require an active authenticated account and fresh GitHub proof for explicit account linking.
+  - Bind linking intent to that account before the provider redirect.
+  - Never merge accounts because their emails or display names match.
+  - Reject linking when the GitHub identity already belongs to another account in the same tenant.
+  - Preserve the existing restriction against removal of the last login method.
+  - Preserve disabled-account rejection and credential revocation behavior from B055.
+  - Preserve account identity when GitHub login names or primary emails change.
+  OAuth continuation:
+  - Extend `OAuthBrowserSessions` and the OAuth login renderer with a typed provider capability contract.
+  - Replace the password/Google-only `LoginMethods` tuple with the complete current provider representation.
+  - Bind GitHub login to the existing pending OAuth authorization request.
+  - Preserve its client ID, resource, redirect URI, requested scopes, and client PKCE challenge across the GitHub redirect.
+  - Keep the GitHub PKCE verifier separate from the MCP client's PKCE verifier.
+  - Resume TAuth consent after GitHub authentication without another identity login or account-selection step.
+  - Reject expired, cancelled, mismatched, or consumed OAuth authorization requests before continuation.
+  - Keep client registration, metadata validation, resource audiences, consent, signing, and refresh ownership in the existing OAuth server.
+  - Never substitute the GitHub access token for a TAuth OAuth access token.
+  Verified identity disclosure:
+  - Add a resource-scope configuration field `identity_providers` with an empty default.
+  - Permit `github` as the provider value required by this feature.
+  - Disclose provider identities only when a granted scope explicitly requires them.
+  - Add a signed `provider_identities` claim containing records with exactly `provider` and `provider_id` fields.
+  - Use `github` and the verified decimal GitHub user ID for the GitHub record.
+  - Derive each record from the authenticated identity store, never from request fields or an email match.
+  - Bind identity disclosure to the existing resource audience, client grant, tenant, and consent policy.
+  - Describe identity disclosure on the resource consent page.
+  - Reject authorization when the requested identity cannot be proven for the current subject.
+  - Recompute identity claims during code exchange and refresh from current account and tenant state.
+  - Reject refresh when unlinking or account disablement invalidates a required identity.
+  - Extend `pkg/oauthvalidator` with typed identity claims and validation of their canonical shape.
+  - Verify that a consuming Go resource can read the GitHub identity only after normal token validation.
+  - Document the bounded validity of already issued identity claims until access-token expiry.
+  Credential and error boundaries:
+  - Keep the GitHub token in process memory only while the provider identity is retrieved.
+  - Do not retain or return GitHub access tokens or refresh tokens after login completion.
+  - Do not request repository access or execute repository operations during TAuth login.
+  - Keep codes, verifiers, secrets, tokens, and provider response bodies out of logs and error output.
+  - Redact callback code and state query values in application and configured access logs.
+  - Return stable errors for denied consent, invalid state, provider rejection, missing email, disallowed users, and store failure.
+  - Include safe operation context and a correlation ID in diagnostics.
+  - Do not issue a session or OAuth code when identity persistence or required policy validation fails.
+  - Preserve Google, Apple, password, session refresh, logout, and account-management behavior.
+  Deliverables:
+  - Add typed GitHub config and the provider adapter in the current tenant and authkit owners.
+  - Add atomic login transaction storage for the current database and memory implementations.
+  - Add browser provider routes, popup completion, helper methods, and OAuth continuation.
+  - Add account identity integration, resource-scope identity disclosure, and typed validator output.
+  - Update native config, deployment rendering, doctor, preflight, and startup validation together.
+  - Update `README.md`, `ARCHITECTURE.md`, `docs/usage.md`, `docs/openapi.yaml`, examples, and release notes.
+  - Document the GitHub OAuth App registration procedure and exact callback URL.
+  - Document the consuming application's separate repository authorization and credential responsibilities.
+  - Add focused Make targets for GitHub HTTP, browser, OAuth continuation, and provider config integration.
+  - Start implementation with failing public-entrypoint scenarios before production code changes.
+  Validation:
+  - Start real TAuth servers with a deterministic GitHub HTTP provider and both current persistence implementations.
+  - Complete GitHub-only full-page login and popup login through a real browser.
+  - Verify private-email login through `/user/emails` when `/user` contains no public email.
+  - Verify absent, unverified, duplicate-primary, and changed email responses against the declared policy.
+  - Verify changed GitHub names, concurrent first login, exact provider IDs, and stable account subjects.
+  - Verify state replay, cross-browser replay, concurrent callbacks, wrong tenant, invalid PKCE, and expired transactions.
+  - Verify malicious return destinations, forged popup messages, blocked popups, and callback requests without `Origin`.
+  - Verify provider denial, malformed responses, insufficient identity scope, rate limits, deadlines, and ambiguous token exchange.
+  - Verify explicit linking, identity collisions, unlinking restrictions, and disabled-account rejection.
+  - Verify database failures, transaction expiry, process restart, and session-write failures without success responses.
+  - Complete OAuth discovery, GitHub login, resource consent, code exchange, and token refresh through public endpoints.
+  - Verify no Google login, password entry, or manual token copying occurs in the GitHub-only flow.
+  - Verify isolation between the two PKCE exchanges and between simultaneous resource-client authorization requests.
+  - Verify signed identity claims at a real protected Go resource through `pkg/oauthvalidator`.
+  - Verify absent disclosure scopes, wrong audiences, stale identity links, revoked grants, and bounded access-token expiry.
+  - Verify client registration and Client ID Metadata Documents through the existing authorization server.
+  - Verify browser and MCP resource access resolve the same GitHub identity without manual account linking.
+  - Verify that GitHub identity claims do not authorize repository operations or disclose provider tokens.
+  - Verify GitHub-only config through doctor, preflight, deployment rendering, and real server startup.
+  - Run current provider regression targets and `make ci` after implementation.
+  Evidence:
+  `internal/authkit/oauth_browser_sessions.go` exposes only password and Google methods to the OAuth login page.
+  `internal/oauthserver/server.go` consumes that two-provider tuple for login and capability validation.
+  `internal/authkit/account_management.go` owns provider identity resolution and explicit account links.
+  `README.md` and `docs/usage.md` require Google or password configuration for current OAuth tenants.
+  The initial source review on 2026-09-07 identified the missing GitHub capability.
+  Cross-repository context:
+  - Consumer: `F008@https://github.com/MarcoPoloResearchLab/ISSUES.md`.
+  - Format reference: `F009@https://github.com/MarcoPoloResearchLab/ISSUES.md` defines qualified dependency references.
+  - These body references identify related work. They do not add prerequisites to F005.
+  - Keep F001 and B055 as the prerequisites. The consuming MCP implementation needs this GitHub identity capability.
+  - Use the [ISSUES.md MCP design](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/docs/design/mcp-issue-access.md) for the consuming resource contract.
+  Reuse assessment:
+  - Reviewed ISSUES.md revision `d07f3573d363ddcc9b98ee55157096df0b126e2b` on 2026-09-07.
+  - Adapt the provider protocol code into TAuth's existing `internal/authkit` owner. Do not import the ISSUES.md application or its internal packages.
+  - Reuse the query construction in `buildGitHubAuthorizeURL` and the SHA-256 PKCE calculation in `authorizationURL`.
+  - Adapt `exchangeCodeForToken` for the form request, exact redirect URI, original verifier, HTTP headers, and injected HTTP client.
+  - Adapt `fetchGitHubUser` for the authenticated `/user` request and typed numeric ID response.
+  - Use `createSession` and `consumeSession` as references for one-time state and expiry checks.
+  - Keep the new transaction store in TAuth. Add the required tenant binding, browser binding, capacity bound, and database persistence.
+  - ISSUES.md stores login transactions in memory with a ten-minute lifetime. F005 requires five minutes and restart support with database persistence.
+  - The ISSUES.md callback uses the session ID stored with state. It does not compare the callback browser cookie with that ID.
+  - Add an explicit callback browser check before token exchange. The existing callback is not evidence for the F005 browser-binding requirement.
+  Required adaptations:
+  - Replace the ISSUES.md `read:user repo` scope configuration with the F005 identity scope contract.
+  - Add `/user/emails` retrieval. The existing `/user` request does not establish a verified primary email.
+  - Require a positive GitHub user ID and exact decimal serialization. `githubauth.NewUser` currently requires only a nonempty login name.
+  - Validate the returned token type and granted identity scopes before identity retrieval.
+  - Bound provider response sizes. The existing token and user helpers use `io.ReadAll` without a size limit.
+  - Replace provider response bodies in errors with safe diagnostics. Both existing helpers include non-success response bodies in errors.
+  - Resolve configuration from the validated tenant transaction. Do not copy request-derived callback URLs or configurable production provider hosts.
+  - Replace `canonicalGitHubReturnTarget` with TAuth's approved tenant destinations. Its current contract accepts only ISSUES.md application routes.
+  - Keep `githubAuthStore` credential persistence, execution credential replacement, and repository selection in ISSUES.md.
+  - Keep TAuth session issuance, account identity, consent, signing, and refresh in their current TAuth owners.
+  TAuth integration owners:
+  - Extend `internal/authkit/oauth_browser_sessions.go` for GitHub session issuance and typed provider capabilities.
+  - Extend `internal/authkit/account_management.go` and `internal/authkit/database_user_store.go` for the GitHub provider identity.
+  - Extend `internal/oauthserver/server.go` for login continuation. Extend `internal/oauthserver/token.go` and `signer.go` for authorized identity disclosure.
+  - Extend `internal/tenants`, `internal/appconfig`, and `pkg/oauthvalidator` through their existing configuration and validation contracts.
+  - Implement popup completion, verified email retrieval, and identity disclosure as F005 work. The inspected ISSUES.md provider helpers do not implement them.
+  Reusable test scenarios:
+  - Adapt `TestGithubHandler_Callback_Success` and its local GitHub HTTP fixture for token exchange and user retrieval.
+  - Adapt `TestGithubHandler_Callback_ConsumedSession` and the expired-session scenarios for rejected state values.
+  - Adapt `TestGithubHandler_LoginRetainsOnlyCanonicalIssueReturnTargets` for approved tenant destinations and rejected external destinations.
+  - Adapt `TestGithubHandler_CallbackErrorBranches` for provider and persistence failures.
+  - Run the adapted scenarios through real TAuth HTTP listeners and browser clients. Existing handler tests alone do not satisfy F005 acceptance.
+  - Add the F005-specific email, tenant, browser, concurrent callback, database restart, account-link, and OAuth continuation scenarios listed above.
+  - This assessment records the source review before implementation.
+  References:
+  - [ISSUES.md GitHub handlers](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers.go).
+  - [ISSUES.md GitHub identity types](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/githubauth/githubauth.go).
+  - [ISSUES.md callback and redirect tests](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers_test.go).
+  - [ISSUES.md provider failure tests](https://github.com/MarcoPoloResearchLab/ISSUES.md/blob/d07f3573d363ddcc9b98ee55157096df0b126e2b/internal/editor/github_handlers_additional_test.go).
+  - [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+  - [GitHub authenticated user API](https://docs.github.com/en/rest/users/users#get-the-authenticated-user).
+  - [GitHub email API](https://docs.github.com/en/rest/users/emails#list-email-addresses-for-the-authenticated-user).
+
+  Resolution:
+  Completed and verified on 2026-09-07.
+  Implementation:
+  - Added GitHub-only login, explicit account links, and OAuth continuation through one provider adapter.
+  - Added five-minute transactions with browser binding, PKCE S256, atomic consumption, and configured database persistence.
+  - Added scope-controlled identity disclosure for resource scopes and typed claims in the Go validator.
+  - Added native config, doctor, preflight, deployment rendering, browser helpers, API docs, and operator examples.
+  - Preserved the provider tuple, opaque account subjects, tenant email policy, and existing session cookies.
+  - Rejected ambiguous provider responses. Removed callback queries and credential headers before recovery logs.
+  - Recorded the existing concurrent provider-store defects under B071.
+  - Completed the review corrections under B072, B073, B074, and B075.
+  - Final review validation passed: `make ci`, 51 browser/JavaScript tests, and `make verify-js`.
+  Verification:
+  - Baseline `make ci` passed before code changes.
+  - Initial public config, HTTP, OAuth, and validator scenarios failed because GitHub support was absent.
+  - Local tests cover memory and SQLite stores, private email, concurrent callbacks, account links, and required identity removal.
+  - Browser tests cover full-page login, popup login, blocked popups, closed popups, and forged messages.
+  - OAuth tests cover discovery, consent, both PKCE exchanges, refresh, metadata clients, and simultaneous authorization requests.
+  - Public resource tests verify signed identity claims and access-token expiry.
+  - Focused GitHub targets, `make verify-js`, and final `make ci` passed.
+  - Provider qualification uses a local GitHub protocol server. Live GitHub connectivity was not tested.
+  - The changed documentation received language review. Unchanged prose and managed-guide drift remain outside F005.
+  Changed files:
+  - `.mprlab/ISSUES.md`.
+  - `.mprlab/TERMINOLOGY.md`.
+  - `ARCHITECTURE.md`.
+  - `CHANGELOG.md`.
+  - `Makefile`.
+  - `README.md`.
+  - `cmd/server/github_test.go`.
+  - `cmd/server/main.go`.
+  - `docs/openapi.yaml`.
+  - `docs/usage.md`.
+  - `examples/github/config.yaml.example`.
+  - `internal/appconfig/oauth.go`.
+  - `internal/authkit/account_management.go`.
+  - `internal/authkit/config.go`.
+  - `internal/authkit/database_helpers.go`.
+  - `internal/authkit/database_user_store.go`.
+  - `internal/authkit/github_browser_fixture_test.go`.
+  - `internal/authkit/github_http_test.go`.
+  - `internal/authkit/github_login.go`.
+  - `internal/authkit/github_provider.go`.
+  - `internal/authkit/github_transactions.go`.
+  - `internal/authkit/oauth_browser_sessions.go`.
+  - `internal/authkit/provider_identities.go`.
+  - `internal/authkit/stores.go`.
+  - `internal/authkit/tenant_registry_builder.go`.
+  - `internal/deploymentconfig/github_test.go`.
+  - `internal/deploymentconfig/render.go`.
+  - `internal/doctor/doctor.go`.
+  - `internal/oauthserver/github_integration_test.go`.
+  - `internal/oauthserver/model.go`.
+  - `internal/oauthserver/provider_login.go`.
+  - `internal/oauthserver/registry.go`.
+  - `internal/oauthserver/server.go`.
+  - `internal/oauthserver/server_integration_test.go`.
+  - `internal/oauthserver/signer.go`.
+  - `internal/preflight/report.go`.
+  - `internal/tenants/config.go`.
+  - `internal/tenants/github.go`.
+  - `internal/tenants/github_config_test.go`.
+  - `internal/tenants/oauth.go`.
+  - `internal/testsupport/github.go`.
+  - `internal/web/users.go`.
+  - `pkg/oauthvalidator/github_test.go`.
+  - `pkg/oauthvalidator/identities.go`.
+  - `pkg/oauthvalidator/validator.go`.
+  - `tests/github-login.browser.test.js`.
+  - `web/tauth.js`.
+
+- [x] [F003] (P0) Deliver account challenge email through a notification service.
+  Goal:
+  TAuth delivers each email verification challenge without returning its token to the browser.
+  Requirements:
+  - Add one injected notification adapter for account challenge email.
+  - Configure the notification service address and the public verification URL.
+  - Deliver a verification link after TAuth creates a password account.
+  - Return an error when the notification service rejects the email.
+  - Keep challenge tokens out of production HTTP responses.
+  Deliverables:
+  - Add the notification adapter, config, server wiring, documentation, and black-box tests.
+  Validation:
+  - Verify that password signup sends one email with the correct verification link.
+  - Verify that the HTTP response does not contain the challenge token.
+  - Verify that notification errors do not return a successful signup response.
+  - Run `make ci`.
+
+  Resolution 2026-09-03:
+  - Added tenant-specific Pinguin configuration and an injected email sender.
+  - Added a public verification link to each queued signup email.
+  - Removed failed pending signups so the user can try again.
+  - Added HTTP, gRPC, config, server, and deployment-renderer tests.
+  - `make ci` passed.
+  - Changed files: auth routes, tenant config, server wiring, deployment config, tests, and public documentation.
+
+  Stack validation 2026-09-04:
+  - Merged I208 into F003 with a forward-only merge.
+  - Preserved optional account settings and email delivery fields in the renderer.
+  - The renderer target and `make ci` passed with both contracts.
+
+- [x] [F002] (P0) Add native Sign in with Apple authentication.
+  Goal:
+  TAuth accepts Apple ID tokens from iOS clients and issues the same tenant session as other identity providers.
+  This contract gives one Apple identity the same TAuth user ID in native and browser sessions.
+  Requirements:
+  - Add explicit native Apple client IDs to each enabled Apple provider.
+  - Reject a native client ID that another tenant owns.
+  - Add `GET /auth/apple/native/config` and `POST /auth/apple/native`.
+  - Validate Apple signature, issuer, audience, expiration, verified email, and nonce claims.
+  - Consume the TAuth nonce after successful token validation.
+  - Enforce HTTPS, tenant resolution, allowed users, and account state.
+  - Issue the canonical TAuth session cookies and profile payload.
+  - Keep the existing Apple browser flow on its Services ID.
+  - Keep Apple provider tokens inside TAuth.
+  Deliverables:
+  - Add config domain types, route handlers, API documentation, and tests.
+  - Add a public native client procedure for Expo iOS.
+  Validation:
+  - Verify success with the configured iOS bundle ID.
+  - Verify missing config, invalid input, wrong audience, wrong issuer, expired token, invalid nonce, and nonce replay.
+  - Verify tenant isolation, allowed-user policy, account management, cookies, and profile output.
+  - Pass focused tenant, HTTP, preflight, doctor, and gateway image tests.
+  - Run aggregate CI through the release lifecycle.
+
+  Resolution 2026-08-13:
+  - Added tenant-specific native Apple client IDs and public native endpoints.
+  - Added Apple claim, audience, nonce, replay, tenant, and account tests.
+  - Added the native Expo iOS procedure and provider association guidance.
+  - Focused tenant, HTTP, preflight, doctor, and static checks passed.
+  - The local image passed the gateway candidate test.
+  - ASD-STE100 checks found no errors in the changed text.
+  - The Governor check reports existing managed content drift in `.mprlab/POLICY.md`.
+
+- [x] [F001] (P1) Add an OAuth 2.1 authorization server for first-party resource clients.
+  Goal:
+  TAuth can authorize remote clients for first-party MPR resources after a user
+  authenticates through an existing TAuth identity provider.
+  TAuth issues resource-bound access tokens without exposing upstream provider
+  tokens or changing resource-server ownership.
+  Current contract:
+  - TAuth issues first-party session and refresh cookies after authentication.
+  - Native clients also receive cookies and do not receive OAuth bearer tokens.
+  - TAuth has no authorization-server metadata, public JWKS, resource scopes,
+    client metadata contract, consent grants, or OAuth token endpoint.
+  - LLM Proxy F021 requires this capability for authenticated remote MCP access.
+  Requirements:
+  - Implement the current OAuth 2.1 authorization code grant for public clients.
+  - Require PKCE with `S256` for every authorization request.
+  - Reject a missing verifier, a plain challenge, and a mismatched verifier.
+  - Serve RFC 8414 authorization-server metadata and a public JWKS endpoint.
+  - Add authorization, token, and revocation endpoints under one canonical
+    issuer.
+  - Read the issuer and public endpoint URLs from validated operator
+    configuration.
+  - Validate each redirect URI against the client's exact registered value.
+  - Permit bounded loopback-port variation only for a declared native client.
+  - Issue a short-lived, one-time authorization code.
+  - Bind each code to the client, user, redirect URI, resource, scope, and PKCE
+    challenge.
+  - Require an RFC 8707 resource indicator during authorization and token
+    exchange.
+  - Use the exact resource identifier as the access-token audience.
+  - Require each TAuth tenant to declare its permitted resource identifiers and
+    scopes.
+  - Reject each undeclared resource, scope, client, and redirect URI.
+  - Sign OAuth access tokens with asymmetric keys.
+  - Publish only the public verification keys through JWKS.
+  - Keep OAuth signing keys separate from the existing cookie-session signing
+    keys.
+  - Include `iss`, `sub`, `aud`, `exp`, `iat`, `client_id`, `scope`, and
+    `tenant_id` claims in each access token.
+  - Use the same stable account subject that the current TAuth session contains.
+  - Make the access-token lifetime explicit and bounded in tenant
+    configuration.
+  - Issue an opaque rotating refresh token for an approved client grant.
+  - Store only a refresh-token digest and the minimum grant metadata.
+  - Bind each refresh-token family to one client, user, resource, and scope set.
+  - Revoke the full family after reuse of a rotated refresh token.
+  - Revoke refresh-token families and consent grants through the OAuth
+    revocation endpoint.
+  - Bound remaining access after revocation with the short access-token
+    lifetime.
+  - Keep browser authentication and consent on TAuth-owned browser routes.
+  - Show the client identity, resource, and requested scopes before approval.
+  - Require an explicit approval or denial for each new consent grant.
+  - Support explicitly registered clients and MCP Client ID Metadata Documents.
+  - Validate metadata documents with strict HTTPS, size, redirect, cache, and
+    network-address rules.
+  - Do not implement Dynamic Client Registration.
+  - Publish a reusable Go validator for issuer, signature, audience, expiry,
+    and scope checks at a protected resource.
+  - Keep protected-resource metadata and domain authorization in each resource
+    server.
+  - Keep Google, Apple, GitHub, and other provider access tokens outside this
+    contract.
+  - Never place an OAuth access token or refresh token in browser storage, DOM,
+    logs, redirect queries, or TAuth session cookies.
+  - Return standard OAuth errors without account data, token data, code data,
+    or signing-key data.
+  - Keep the generic TAuth product free of a hard-coded LLM Proxy resource or
+    scope.
+  - Add the authorization-server capability to OpenAPI, documentation, and
+    runtime configuration.
+  Deliverables:
+  - Add validated OAuth resource, scope, client, key, token, and consent domain
+    types.
+  - Add the authorization-code, grant, refresh-token, and consent stores.
+  - Add metadata, JWKS, authorization, token, revocation, login, and consent
+    HTTP routes.
+  - Add the asymmetric access-token signer and the reusable Go validator.
+  - Add OpenAPI, configuration, security, and client-integration documentation.
+  - Add black-box HTTP and browser coverage through public entry points.
+  Validation:
+  - Run the real TAuth server with a fake protected resource and seeded users.
+  - Complete authorization code plus PKCE through the TAuth browser flow.
+  - Verify metadata, JWKS, consent approval, token claims, token refresh, and
+    revocation.
+  - Verify authorization-code replay, PKCE failure, redirect mismatch, and
+    consent denial.
+  - Verify unknown clients, resources, scopes, metadata documents, and signing
+    keys.
+  - Verify wrong-issuer, wrong-audience, wrong-scope, expired, and revoked access
+    tokens at the protected resource.
+  - Verify refresh rotation, family reuse detection, expiry, and cross-client
+    isolation.
+  - Verify user and TAuth-tenant isolation for codes, grants, tokens, and
+    consent.
+  - Verify explicitly registered clients and valid MCP metadata documents.
+  - Verify that browser content, logs, errors, and redirects contain no token,
+    code, signing key, or provider credential.
+  - Run existing cookie-session login, refresh, logout, and downstream validator
+    regression scenarios.
+  - Run the required baseline and final
+    `timeout -k 350s -s SIGKILL 350s make ci` pair.
+  Progress (2026-08-08):
+  - Added the validated issuer, tenant resource, scope, client, key, token,
+    consent, and metadata-document contracts.
+  - Added discovery, JWKS, authorization, login, consent, token, and revocation
+    routes. Added memory and database stores with atomic consumption and
+    refresh-family reuse revocation.
+  - Added ES256 access-token signing and the public `pkg/oauthvalidator`
+    protected-resource validator.
+  - Added TAuth-owned Google and password browser authentication. Google-only
+    OAuth tenants now use the existing Google identity provider without
+    exposing provider credentials to clients or logs.
+  - Aligned authorization-code exchange and client metadata with the current
+    OAuth 2.1 and MCP contracts. Revocation treats each token type value as a
+    hint, and token exchange reports an invalid resource as `invalid_target`.
+  - The token endpoint now validates each stored grant against the current
+    resource and client policy.
+  - The validator now limits JWKS requests for unknown key identifiers. It gives
+    `ErrInsufficientScope` for a valid access token with insufficient scope.
+  - Added public HTTP and package tests for policy changes, concurrent JWKS
+    requests, and insufficient scopes.
+  - Added HTTP, browser, store, isolation, key-rotation, security, and
+    regression coverage. Added OpenAPI, examples, operator documentation, and
+    the generic `tauth.oauth` runtime capability.
+  - Changed files: `.mprlab/TERMINOLOGY.md`,
+    `.mprlab/deploy/resources.yml`, `ARCHITECTURE.md`, `CHANGELOG.md`,
+    `README.md`, `docs/openapi.yaml`, `docs/usage.md`, and
+    `examples/oauth/config.yaml.example`.
+  - Changed files: `cmd/server/doctor_test.go`, `cmd/server/main.go`,
+    `cmd/server/main_test.go`, `internal/appconfig/config.go`,
+    `internal/appconfig/oauth.go`, `internal/appconfig/oauth_test.go`,
+    `internal/authkit/database_helpers.go`, and
+    `internal/authkit/oauth_browser_sessions.go`.
+  - Changed files: all files in `internal/oauthserver`,
+    `internal/tenants/config.go`, `internal/tenants/oauth.go`,
+    `internal/tenants/oauth_test.go`, all files in `pkg/oauthvalidator`,
+    `tests/oauth-authorization.browser.test.js`, and
+    `tests/repository_neutrality_contract_test.go`.
+  - Validation passed with the required baseline, post-implementation,
+    standards-audit, and post-review
+    `timeout -k 350s -s SIGKILL 350s make ci` runs.
+    Focused Go, browser, lint, OpenAPI YAML, and changed-line ASD-STE100 checks
+    also passed.
+  Resolved 2026-08-09: the implementation passed all development contract and
+  acceptance gates. mprlab-gateway F001 and LLM Proxy F021 track the dependent
+  feature work.
+  Deployment handoff 2026-08-15: the schema-v4 manifest now owns the typed
+  `tauth_authorization_server`, production issuer paths, metadata limits, and
+  one private-values signing-key reference from the validated gateway F001
+  contract.
+
+- [x] [TA-200] Add Apple Sign in as an additional identity provider while keeping TAuth session cookies/JWT model.
+  Add a per-tenant Apple provider block (client_id, team_id, key_id, private_key, redirect_uri, optional scopes, and optional mockable endpoint overrides). Implement `GET /auth/apple/start` to issue state + nonce and redirect to Apple, plus `GET`/`POST /auth/apple/callback` to validate state, exchange the authorization code with Apple using a client-secret JWT, verify the returned Apple ID token against Apple's JWKS, enforce nonce/email/allowed_users, and mint the same `app_session` + `app_refresh` cookies/profile JSON. Apple callback tenant resolution must use the signed state payload because provider callbacks may omit `Origin`. Add account-management support so Apple identities resolve/link as provider `apple`, add `tauth.js` helpers, document configuration and errors, and cover the flow with black-box tests using a mock Apple server.
+  Resolved: added tenant-level `apple_oauth` config validation, Apple start/callback routes with signed state, nonce checks, ES256 client-secret JWT generation, token exchange, JWKS ID-token validation, allowed-user enforcement, standard session finalization, provider-generic account identities, `tauth.js` Apple login helpers, Apple-only tenant support, one-line `private_key_base64` config support for env-file deployments, preflight redaction fields, docs, and mock-Apple black-box coverage. Validation passed with `npm run verify`, `npm test`, `go test ./...`, and `make ci`; the Apple-only/base64 follow-up also passed `make ci`.
+  Post-review fix (2026-06-09): Apple browser login now carries a validated `return_to` URL through signed state, redirects back to the caller with `303 See Other` after cookies are minted, and records the helper restore hint before leaving the product page. Added invalid-return and callback-redirect coverage plus helper/docs updates. Validation passed with focused Apple route coverage, focused browser-helper coverage, and `timeout -k 350s -s SIGKILL 350s make ci`.
+
+- [x] [TA-199] Add email/password authentication as an additional identity provider while keeping TAuth session cookies/JWT model.
+  Implement a scoped login-first password provider: tenant-level enablement, persistent password credential storage, password hash verification, `POST /auth/password/login`, `tauth.js` helper support, and docs/tests. The first slice does not include public self-service signup, email verification, reset-password, or account-linking UI.
+  Added tenant-scoped password auth config, memory/database credential stores, startup seeding with removed-user reconciliation, timing-masked credential misses, `/auth/password/login`, `exchangePasswordCredential`, docs, and black-box coverage; validated with `make ci`.
+
+- [x] [TA-100] Make TAuth multitenant.
+  Deliver implementation plan and document it as open issues in @ISSUES.md
+  Captured the roadmap (tenant config, resolver, storage isolation, routing changes, docs/tests) and opened TA-101 through TA-105 to track each implementation slice.
+
+- [x] [TA-101] Introduce tenant domain model and config loader so operators can declare multiple tenants (id, hostnames, Google client IDs, cookie domains, TTLs) in a single file.
+  Added `internal/tenants` with smart constructors + JSON loader, full validation (ids, unique hosts, TTL parsing), README/ARCHITECTURE docs, and tests defining the file contract.
+
+- [x] [TA-102] Implement tenant resolution middleware that maps inbound hosts (and optional `X-TAuth-Tenant` header for local/dev) to a resolved tenant, rejects unknown hosts early, and injects the tenant into the request context.
+  Added `tenants.NewResolver`, optional header override wiring, gin middleware/context helpers, README/ARCH updates, and resolver/middleware tests.
+
+- [x] [TA-103] Scope stateful stores by tenant: refresh tokens gain a `tenant_id` column + indexes in Postgres/SQLite, nonce stores and in-memory user stores are namespaced per tenant, and JWT claims add `tenant_id` so cookies cannot be replayed across tenants.
+  Refresh/db stores now require tenant IDs, nonce + user stores are namespaced, JWTs/middleware enforce `tenant_id`, and docs/tests cover the new contracts.
+
+- [x] [TA-104] Rework `cmd/server` + `authkit` routing to run per-tenant configs (per-tenant ServerConfig, cookie attributes, SameSite mode), keep backward compatibility for single-tenant flags, and unit-test the host-routing fallbacks.
+  Added `--tenants_file` support with tenant registry + Gin middleware, updated auth routes/middleware to consume per-tenant configs, and refreshed tests/docs to cover fallback routing.
+
+- [x] [TA-105] Update `web/auth-client.js`, README, ARCHITECTURE, and usage docs to explain how front-ends select a tenant (document host mapping, new `initAuthClient({ tenantId })` option for shared hosts), and add integration tests that exercise two tenants end-to-end.
+  Added the `tenantId` option (propagated to `X-TAuth-Tenant` headers), refreshed docs with shared-host guidance, and expanded Node tests to cover the override flow.
+
+- [x] [TA-106] Unify configuration by requiring a tenants JSON file for every deployment (single or multi-tenant), remove remaining legacy env/flag references, and update docs/tests so multi-tenancy is documented as the default operating mode rather than upcoming work.
+  CLI now requires `--tenants_file`, docs/examples were rewritten around the JSON schema (with Docker templates), and `cmd/server` tests cover the new loader and registry behaviour.
+
+- [x] [TA-107] Correction: remove endpoint-embedding packages, keep `/auth/*` + `/me` server-only, and expand `pkg/sessionvalidator` to load issuer/cookie names from `config.yaml`; docs now state the endpoint contract explicitly.
+
+- [x] [TA-108] Add preflight validation + redacted effective-config report so external validators can verify orchestrated services before launch.
+  Scope is pre-start only (no runtime endpoints). Required output includes: service metadata (version/build/config schema version), effective server settings (CORS + allowed origins, tenant header override), per-tenant effective settings (tenant id/display name, allowed_hosts optionally redacted, google_web_client_id, cookie_domain, session_cookie_name/refresh_cookie_name, session/refresh/nonce TTLs, allow_insecure_http, derived SameSite mode, jwt_issuer), and secret fingerprints only (jwt_signing_key_fingerprint, never raw keys). External validator responsibilities: compare issuer/cookie names/cookie domain expectations, verify JWT signing key match via fingerprint comparison, validate multi-tenant hygiene (no cookie collisions on shared hosts, ambiguity rules), and validate CORS origin requirements (notably accounts.google.com). Deliverable includes stable error codes + a versioned JSON schema for the report. — Added `tauth preflight` output/report builder with redacted host mode, dependency checks, and documentation.
+
+- [x] [TA-109] Build a presentational web site as a polished landing page for a platform service TAuth.
+  Style it visually and structurally.
+  Follow these principles:
+  • Hero section with bold product tagline, subheading, primary CTA, and screenshot/code example
+  • Value-props as three or four concise feature blocks with icons
+  • Clean documentation links or “Get Started” area
+  • Two or three deeper feature sections with side-by-side text + screenshots/code
+  • Dark theme with neon accent
+  • Monospace for headings and code snippets
+  • Strong visual hierarchy, wide spacing, minimal borders
+  • Footer with GitHub/Docs/Community links
+  Provide me with:
+  A rewritten layout structure
+  Restyled copy in the tone of top developer platforms
+  Matching CSS (no frameworks unless requested)
+  Light/dark palette suggestions
+  Keep everything production-grade and concise.
+  Use GitHub as a hosting solution (an index.html file under docs/) — Rebuilt docs landing layout, copy, and neon styling with palette suggestions, updated footer links, and added a Puppeteer regression test for the new sections.
+
+- [x] [TA-110] Add a GitHub Pages landing page under `docs/index.html` with a dark neon theme, hero CTA + code snippet, feature cards, deep-dive sections, docs links, and palette suggestions.
+  Added `docs/index.html` with the requested structure, copy, and palette guidance for GitHub Pages hosting.
+
+- [x] [TA-111] Integrate the mpr-ui footer component into the GitHub Pages landing page.
+  Replaced the static footer with `<mpr-footer>` and added the mpr-ui stylesheet/script.
