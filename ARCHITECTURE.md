@@ -241,7 +241,9 @@ outside this authorization-server contract.
 ### 4.2 `internal/authkit`
 
 - `ServerConfig`: cookie + session settings.
-- `MountAuthRoutesWithPassword`: installs `/auth/*` handlers and binds user, refresh, nonce, and optional password credential stores. `MountAuthRoutes` remains the compatibility wrapper for tests and embedding code that do not configure password auth.
+- `MountAuthRoutesWithPassword` installs `/auth/*` handlers with password credentials and their account store.
+- `MountAuthRoutes` requires an explicit `AccountManagementStore` for provider routes without password credentials.
+  Use the same database store for account records and user profiles.
 - JWT helpers: signing, validation, claims modeling.
 - Refresh token stores:
   - Memory implementation for tests/dev.
