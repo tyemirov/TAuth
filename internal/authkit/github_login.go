@@ -142,7 +142,12 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 			githubError(response, http.StatusUnauthorized, "authentication_required")
 			return
 		}
-		transaction.AccountID = accountID
+		profile, resolveErr := login.sessions.accountStore.ResolveAccountForUser(request.Context(), tenantID, accountID)
+		if resolveErr != nil {
+			githubError(response, http.StatusUnauthorized, "authentication_required")
+			return
+		}
+		transaction.AccountID = profile.AccountID
 	}
 	if query.Get("popup") != "" {
 		if query.Get("popup") != "true" || !githubOpaqueValid(query.Get("correlation")) {
@@ -224,12 +229,12 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		return
 	}
 	if transaction.Operation == githubAccountLink {
-		active, err := login.sessions.ActiveUser(request.Context(), transaction.TenantID, transaction.AccountID)
+		profile, err := login.sessions.accountStore.ResolveAccountProfile(request.Context(), transaction.TenantID, transaction.AccountID)
 		if err != nil {
 			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
 			return
 		}
-		if !active {
+		if profile.State != accountStateActive {
 			login.failure(response, request, transaction, http.StatusForbidden, errorAccountDisabled)
 			return
 		}
@@ -314,7 +319,7 @@ func (login *GitHubLogin) continuationValid(ctx context.Context, transaction git
 }
 
 func (sessions *OAuthBrowserSessions) githubApplicationProfile(ctx context.Context, config ServerConfig, transaction githubTransaction, identity AccountProviderIdentity) (authenticatedSessionProfile, error) {
-	if config.AccountManagementEnabled {
+	{
 		if sessions.accountStore == nil {
 			return authenticatedSessionProfile{}, errors.New("github_login.account_store_missing")
 		}
@@ -337,11 +342,6 @@ func (sessions *OAuthBrowserSessions) githubApplicationProfile(ctx context.Conte
 		}
 		return authenticatedSessionProfile{applicationUserID: userID, userEmail: account.UserEmail, userDisplayName: account.DisplayName, userAvatarURL: account.AvatarURL, userRoles: roles}, nil
 	}
-	userID, roles, err := sessions.users.UpsertProviderUser(ctx, transaction.TenantID, identity.Provider, identity.Subject, identity.UserEmail, identity.DisplayName, identity.AvatarURL)
-	if err != nil {
-		return authenticatedSessionProfile{}, err
-	}
-	return authenticatedSessionProfile{applicationUserID: userID, userEmail: identity.UserEmail, userDisplayName: identity.DisplayName, userAvatarURL: identity.AvatarURL, userRoles: roles}, nil
 }
 
 func (login *GitHubLogin) failure(response http.ResponseWriter, request *http.Request, transaction githubTransaction, status int, code string) {

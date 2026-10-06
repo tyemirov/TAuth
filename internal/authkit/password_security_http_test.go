@@ -110,7 +110,11 @@ func TestSecurityBudgetSchemaUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userID, _, err := store.UpsertGoogleUser(context.Background(), "tenant", "subject", "user@example.com", "User", "")
+	account, err := store.UpsertProviderAccount(context.Background(), "tenant", AccountProviderIdentity{Provider: "google", Subject: "subject", UserEmail: "user@example.com", DisplayName: "User"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _, err := store.UpsertAccountUser(context.Background(), "tenant", account.AccountID, account.UserEmail, account.DisplayName, account.AvatarURL)
 	if err != nil {
 		t.Fatal(err)
 	}

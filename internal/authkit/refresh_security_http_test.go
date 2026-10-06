@@ -27,18 +27,28 @@ func TestSecurityConcurrentRefreshConsumesOnce(t *testing.T) {
 	for _, backend := range []string{"memory", "database"} {
 		for _, path := range []string{"/auth/session", "/auth/refresh"} {
 			t.Run(backend+path, func(t *testing.T) {
+				databaseURL := sqliteDatabaseURL(t)
 				var store RefreshTokenStore = NewMemoryRefreshTokenStore()
+				var accounts AccountManagementStore = NewMemoryPasswordCredentialStore()
 				if backend == "database" {
-					persistent, err := NewDatabaseRefreshTokenStore(context.Background(), sqliteDatabaseURL(t))
+					persistent, err := NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
 					if err != nil {
 						t.Fatal(err)
 					}
 					store = persistent
+					accounts, err = NewDatabaseUserStore(context.Background(), databaseURL)
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				config := newTestServerConfig()
 				tenant := NewSingleTenantRegistry(config).DefaultTenantID()
 				users := newTestUserStore()
-				user, _, err := users.UpsertGoogleUser(context.Background(), tenant, "race", "race@example.com", "Race", "")
+				profile, err := accounts.UpsertProviderAccount(context.Background(), config.TenantID, AccountProviderIdentity{Provider: "google", Subject: "race", UserEmail: "race@example.com", DisplayName: "Race"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				user, _, err := users.UpsertAccountUser(context.Background(), config.TenantID, profile.UserID, profile.UserEmail, profile.DisplayName, profile.AvatarURL)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -49,7 +59,7 @@ func TestSecurityConcurrentRefreshConsumesOnce(t *testing.T) {
 				synchronized := &synchronizedRefreshValidation{RefreshTokenStore: store}
 				synchronized.ready.Add(2)
 				router := gin.New()
-				MountAuthRoutes(router, NewSingleTenantRegistry(config), users, synchronized, nil)
+				MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, synchronized, nil, accounts.(PasswordCredentialStore), nil, nil)
 				server := httptest.NewTLSServer(router)
 				defer server.Close()
 				responses := make(chan *http.Response, 2)

@@ -35,6 +35,13 @@ func (store *accountLookupStore) ResolveAccountProfile(ctx context.Context, tena
 	return store.accountCredentialStore.ResolveAccountProfile(ctx, tenantID, userID)
 }
 
+func (store *accountLookupStore) ResolveAccountForUser(ctx context.Context, tenantID, userID string) (authkit.AccountProfile, error) {
+	if store.lookupErr != nil {
+		return authkit.AccountProfile{}, store.lookupErr
+	}
+	return store.accountCredentialStore.ResolveAccountForUser(ctx, tenantID, userID)
+}
+
 func (store *accountLookupStore) CompleteAccountDisable(ctx context.Context, tenantID string, userID string) (authkit.AccountProfile, error) {
 	if store.completeErr != nil {
 		return authkit.AccountProfile{}, store.completeErr

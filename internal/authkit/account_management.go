@@ -48,6 +48,7 @@ type AccountChallenge struct {
 
 // AccountProfile is the trusted account profile used for session finalization.
 type AccountProfile struct {
+	UserID      string
 	AccountID   string
 	UserEmail   string
 	DisplayName string
@@ -74,6 +75,7 @@ type AccountProviderIdentity struct {
 }
 
 type accountRecord struct {
+	userID              string
 	accountID           string
 	userEmail           string
 	displayName         string
@@ -151,6 +153,7 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Con
 	}
 	store.accounts[tenantID][accountID] = &accountRecord{
 		accountID:   accountID,
+		userID:      accountID,
 		userEmail:   credential.userEmail,
 		displayName: credential.displayName,
 		avatarURL:   credential.avatarURL,
@@ -351,52 +354,28 @@ func (store *MemoryPasswordCredentialStore) ChangePassword(ctx context.Context, 
 	return profileFromAccount(account), nil
 }
 
-// EnsurePasswordAccount links a verified seeded password credential to an account.
-func (store *MemoryPasswordCredentialStore) EnsurePasswordAccount(ctx context.Context, tenantID string, userEmail string) (AccountProfile, error) {
-	normalizedEmail, emailErr := normalizePasswordEmail(userEmail)
-	if emailErr != nil {
+// EnsurePasswordAccount resolves the verified credential's canonical account.
+func (store *MemoryPasswordCredentialStore) EnsurePasswordAccount(ctx context.Context, tenantID, userEmail string) (AccountProfile, error) {
+	email, err := normalizePasswordEmail(userEmail)
+	if err != nil {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.ensureAccountMaps(tenantID)
-	credential, exists := store.tenants[tenantID][normalizedEmail]
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	credential, exists := store.tenants[tenantID][email]
 	if !exists || !credential.verified {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
-	accountID := credential.accountID
-	if accountID == "" {
-		generatedAccountID, accountIDErr := store.newOpaqueAccountIDLocked(tenantID)
-		if accountIDErr != nil {
-			return AccountProfile{}, accountIDErr
-		}
-		accountID = generatedAccountID
-	} else if validateErr := validateOpaqueAccountID(accountID); validateErr != nil {
-		return AccountProfile{}, validateErr
-	}
-	account := store.accounts[tenantID][accountID]
+	account := store.accounts[tenantID][credential.accountID]
 	if account == nil {
-		account = &accountRecord{
-			accountID:   accountID,
-			userEmail:   credential.userEmail,
-			displayName: credential.displayName,
-			avatarURL:   credential.avatarURL,
-			state:       accountStateActive,
-			roles:       []string{defaultUserRole},
-		}
-		store.accounts[tenantID][accountID] = account
-	} else if account.state == accountStateDisabled {
+		return AccountProfile{}, ErrAccountNotFound
+	}
+	if account.state == accountStateDisabled {
 		return AccountProfile{}, ErrAccountDisabled
-	} else if account.state != accountStateActive {
+	}
+	if account.state != accountStateActive {
 		return AccountProfile{}, ErrAccountNotActive
 	}
-	store.identities[tenantID][identityKey(accountProviderPassword, normalizedEmail)] = accountIdentityRecord{
-		accountID:  accountID,
-		provider:   accountProviderPassword,
-		providerID: normalizedEmail,
-	}
-	credential.accountID = accountID
-	store.tenants[tenantID][normalizedEmail] = credential
 	return profileFromAccount(account), nil
 }
 
@@ -518,7 +497,7 @@ func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Co
 			return AccountProfile{}, ErrAccountNotActive
 		}
 		account.userEmail = normalizedIdentity.UserEmail
-		if !account.displayNameOverride {
+		if !account.displayNameOverride && strings.TrimSpace(identity.DisplayName) != "" {
 			account.displayName = defaultDisplayName(normalizedIdentity.DisplayName, normalizedIdentity.UserEmail)
 		}
 		account.avatarURL = strings.TrimSpace(normalizedIdentity.AvatarURL)
@@ -530,6 +509,7 @@ func (store *MemoryPasswordCredentialStore) UpsertProviderAccount(ctx context.Co
 	}
 	account := &accountRecord{
 		accountID:   accountID,
+		userID:      accountID,
 		userEmail:   normalizedIdentity.UserEmail,
 		displayName: defaultDisplayName(normalizedIdentity.DisplayName, normalizedIdentity.UserEmail),
 		avatarURL:   strings.TrimSpace(normalizedIdentity.AvatarURL),
@@ -787,6 +767,7 @@ func profileFromAccount(account *accountRecord) AccountProfile {
 	}
 	return AccountProfile{
 		AccountID:   account.accountID,
+		UserID:      account.userID,
 		UserEmail:   account.userEmail,
 		DisplayName: account.displayName,
 		AvatarURL:   account.avatarURL,
@@ -805,4 +786,16 @@ func defaultDisplayName(displayName string, email string) string {
 		return trimmedDisplayName
 	}
 	return email
+}
+
+// ResolveAccountForUser resolves one exact application subject to its internal account.
+func (store *MemoryPasswordCredentialStore) ResolveAccountForUser(ctx context.Context, tenantID, userID string) (AccountProfile, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	for _, account := range store.accounts[tenantID] {
+		if account.userID == userID {
+			return profileFromAccount(account), nil
+		}
+	}
+	return AccountProfile{}, ErrAccountNotFound
 }

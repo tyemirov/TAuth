@@ -26,7 +26,11 @@ func TestDatabaseUserStoreLifecycle(testContext *testing.T) {
 		testContext.Fatalf("expected sqlite driver label, got %s", store.Driver())
 	}
 
-	applicationUserID, roles, upsertErr := store.UpsertGoogleUser(context.Background(), "tenant-a", "sub-123", "user@example.com", "Demo User", "https://example.com/avatar.png")
+	account, upsertErr := store.UpsertProviderAccount(context.Background(), "tenant-a", AccountProviderIdentity{Provider: "google", Subject: "sub-123", UserEmail: "user@example.com", DisplayName: "Demo User", AvatarURL: "https://example.com/avatar.png"})
+	if upsertErr != nil {
+		testContext.Fatal(upsertErr)
+	}
+	applicationUserID, roles, upsertErr := store.UpsertAccountUser(context.Background(), "tenant-a", account.AccountID, account.UserEmail, account.DisplayName, account.AvatarURL)
 	if upsertErr != nil {
 		testContext.Fatalf("upsert error: %v", upsertErr)
 	}
@@ -48,7 +52,10 @@ func TestDatabaseUserStoreLifecycle(testContext *testing.T) {
 		testContext.Fatalf("unexpected stored roles")
 	}
 
-	_, _, updateErr := store.UpsertGoogleUser(context.Background(), "tenant-a", "sub-123", "user2@example.com", "Updated User", "https://example.com/next.png")
+	account, updateErr := store.UpsertProviderAccount(context.Background(), "tenant-a", AccountProviderIdentity{Provider: "google", Subject: "sub-123", UserEmail: "user2@example.com", DisplayName: "Updated User", AvatarURL: "https://example.com/next.png"})
+	if updateErr == nil {
+		_, _, updateErr = store.UpsertAccountUser(context.Background(), "tenant-a", account.AccountID, account.UserEmail, account.DisplayName, account.AvatarURL)
+	}
 	if updateErr != nil {
 		testContext.Fatalf("update error: %v", updateErr)
 	}
@@ -80,16 +87,7 @@ func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
 	if hashErr != nil {
 		testContext.Fatalf("failed to hash password: %v", hashErr)
 	}
-	profileID, roles, profileErr := store.UpsertPasswordUser(context.Background(), "tenant-a", "User@Example.com", "Password User", "https://example.com/password.png")
-	if profileErr != nil {
-		testContext.Fatalf("failed to upsert password profile: %v", profileErr)
-	}
-	if profileID != "email:user@example.com" {
-		testContext.Fatalf("unexpected password user id: %s", profileID)
-	}
-	if len(roles) != 1 || roles[0] != defaultUserRole {
-		testContext.Fatalf("unexpected roles: %#v", roles)
-	}
+
 	credentialErr := store.UpsertPasswordCredential(context.Background(), "tenant-a", PasswordCredentialSeed{
 		UserEmail:    "User@Example.com",
 		DisplayName:  "Password User",
@@ -100,6 +98,20 @@ func TestDatabaseUserStorePasswordCredentialLifecycle(testContext *testing.T) {
 		testContext.Fatalf("failed to upsert password credential: %v", credentialErr)
 	}
 
+	account, profileErr := store.EnsurePasswordAccount(context.Background(), "tenant-a", "user@example.com")
+	if profileErr != nil {
+		testContext.Fatal(profileErr)
+	}
+	profileID, roles, profileErr := store.UpsertAccountUser(context.Background(), "tenant-a", account.AccountID, account.UserEmail, account.DisplayName, account.AvatarURL)
+	if profileErr != nil {
+		testContext.Fatalf("failed to upsert password profile: %v", profileErr)
+	}
+	if validateOpaqueAccountID(profileID) != nil {
+		testContext.Fatalf("unexpected password user id: %s", profileID)
+	}
+	if len(roles) != 1 || roles[0] != defaultUserRole {
+		testContext.Fatalf("unexpected roles: %#v", roles)
+	}
 	profile, authErr := store.AuthenticatePassword(context.Background(), "tenant-a", "user@example.com", "correct horse battery staple")
 	if authErr != nil {
 		testContext.Fatalf("expected password auth to pass: %v", authErr)
@@ -277,16 +289,14 @@ func TestDatabaseUserStoreEnsuresSeededPasswordAccount(testContext *testing.T) {
 	if legacyAuthErr != nil {
 		testContext.Fatalf("expected seeded credential to authenticate: %v", legacyAuthErr)
 	}
-	if legacyProfile.AccountID != "" {
-		testContext.Fatalf("expected seeded credential to remain legacy before account ensure, got %#v", legacyProfile)
-	}
+	assertOpaqueAccountID(testContext, legacyProfile.AccountID)
 
 	accountProfile, ensureErr := store.EnsurePasswordAccount(ctx, "tenant-a", "seeded@example.com")
 	if ensureErr != nil {
 		testContext.Fatalf("failed to ensure account: %v", ensureErr)
 	}
 	expectedAccountID := assertOpaqueAccountID(testContext, accountProfile.AccountID)
-	if accountProfile.AccountID != expectedAccountID || accountProfile.State != accountStateActive {
+	if accountProfile.AccountID != expectedAccountID || accountProfile.AccountID != legacyProfile.AccountID || accountProfile.State != accountStateActive {
 		testContext.Fatalf("unexpected ensured account profile: %#v", accountProfile)
 	}
 	accountPasswordProfile, accountPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "seeded@example.com", "correct horse battery staple")
@@ -488,7 +498,7 @@ func TestDatabaseUserStoreReconcilePreservesSignupCredentials(testContext *testi
 	}
 }
 
-func TestDatabaseUserStoreMigratesAccountIDsToOpaqueValues(testContext *testing.T) {
+func TestDatabaseUserStoreRejectsObsoleteAccountSchema(testContext *testing.T) {
 	databasePath := filepath.Join(testContext.TempDir(), "tauth.db")
 	databaseURL := fmt.Sprintf("sqlite:///%s", filepath.ToSlash(databasePath))
 	legacyDatabaseHandle, openErr := gorm.Open(sqliteDialector.Open(filepath.ToSlash(databasePath)), &gorm.Config{
@@ -528,7 +538,7 @@ func TestDatabaseUserStoreMigratesAccountIDsToOpaqueValues(testContext *testing.
 	if createErr := legacyDatabaseHandle.Create(&passwordCredentialRecord{
 		TenantID:        "tenant-a",
 		UserEmail:       "legacy@example.com",
-		UserID:          passwordUserIDPrefix + "legacy@example.com",
+		UserID:          "email:legacy@example.com",
 		AccountID:       oldAccountID,
 		UserDisplayName: "Legacy User",
 		UserAvatarURL:   "https://example.com/legacy.png",
@@ -585,70 +595,25 @@ func TestDatabaseUserStoreMigratesAccountIDsToOpaqueValues(testContext *testing.
 		testContext.Fatalf("failed to close legacy database: %v", closeErr)
 	}
 
-	store, storeErr := NewDatabaseUserStore(context.Background(), databaseURL)
-	if storeErr != nil {
-		testContext.Fatalf("failed to open user store: %v", storeErr)
+	if _, err := NewDatabaseUserStore(context.Background(), databaseURL); err == nil {
+		testContext.Fatal("startup accepted obsolete internal account ID")
 	}
+	db, err := OpenControlDatabase(context.Background(), databaseURL)
+	if err != nil {
+		testContext.Fatal(err)
+	}
+	defer func() { raw, _ := db.DB(); raw.Close() }()
 	var account databaseAccountRecord
-	if accountErr := store.db.WithContext(context.Background()).Where("tenant_id = ?", "tenant-a").Take(&account).Error; accountErr != nil {
-		testContext.Fatalf("failed to load migrated account: %v", accountErr)
+	if err = db.Where("tenant_id = ?", "tenant-a").Take(&account).Error; err != nil || account.AccountID != oldAccountID {
+		testContext.Fatalf("startup changed persisted internal ID: %+v %v", account, err)
 	}
-	newAccountID := assertOpaqueAccountID(testContext, account.AccountID)
-	if newAccountID == oldAccountID {
-		testContext.Fatalf("expected migrated account id to change")
+	var profile userProfileRecord
+	if err = db.Where("tenant_id = ? AND user_id = ?", "tenant-a", oldAccountID).Take(&profile).Error; err != nil {
+		testContext.Fatal(err)
 	}
-	var identity databaseAccountIdentityRecord
-	if identityErr := store.db.WithContext(context.Background()).Where("tenant_id = ? AND provider = ? AND provider_id = ?", "tenant-a", accountProviderPassword, "legacy@example.com").Take(&identity).Error; identityErr != nil {
-		testContext.Fatalf("failed to load migrated identity: %v", identityErr)
-	}
-	if identity.AccountID != newAccountID {
-		testContext.Fatalf("expected migrated identity account id %s, got %#v", newAccountID, identity)
-	}
-	var credential passwordCredentialRecord
-	if credentialErr := store.db.WithContext(context.Background()).Where("tenant_id = ? AND user_email = ?", "tenant-a", "legacy@example.com").Take(&credential).Error; credentialErr != nil {
-		testContext.Fatalf("failed to load migrated credential: %v", credentialErr)
-	}
-	if credential.AccountID != newAccountID {
-		testContext.Fatalf("expected migrated credential account id %s, got %#v", newAccountID, credential)
-	}
-	var challenge databaseAccountChallengeRecord
-	if challengeErr := store.db.WithContext(context.Background()).Where("tenant_id = ? AND token_hash = ?", "tenant-a", hashOpaque("legacy-token")).Take(&challenge).Error; challengeErr != nil {
-		testContext.Fatalf("failed to load migrated challenge: %v", challengeErr)
-	}
-	if challenge.AccountID != newAccountID {
-		testContext.Fatalf("expected migrated challenge account id %s, got %#v", newAccountID, challenge)
-	}
-	if _, _, _, _, profileErr := store.GetUserProfile(context.Background(), "tenant-a", oldAccountID); !errors.Is(profileErr, web.ErrUserNotFound) {
-		testContext.Fatalf("expected old user profile id to be removed, got %v", profileErr)
-	}
-	if _, _, _, _, profileErr := store.GetUserProfile(context.Background(), "tenant-a", newAccountID); profileErr != nil {
-		testContext.Fatalf("expected migrated user profile id to load: %v", profileErr)
-	}
-	var refreshToken refreshTokenRecord
-	if refreshErr := store.db.WithContext(context.Background()).Where("tenant_id = ? AND token_id = ?", "tenant-a", "legacy-refresh-token").Take(&refreshToken).Error; refreshErr != nil {
-		testContext.Fatalf("failed to load migrated refresh token: %v", refreshErr)
-	}
-	if refreshToken.UserID != oldAccountID || refreshToken.RevokedAtUnix == 0 {
-		testContext.Fatalf("expected legacy refresh token to stay tied to old id and be revoked, got %#v", refreshToken)
-	}
-	var marker schemaMigrationRecord
-	if markerErr := store.db.WithContext(context.Background()).Where(schemaMigrationLookupByName, accountIDMigrationRecordName).Take(&marker).Error; markerErr != nil {
-		testContext.Fatalf("failed to load account id migration marker: %v", markerErr)
-	}
-	if marker.Version != accountIDMigrationVersion {
-		testContext.Fatalf("unexpected account id migration marker: %#v", marker)
-	}
-
-	reopenedStore, reopenErr := NewDatabaseUserStore(context.Background(), databaseURL)
-	if reopenErr != nil {
-		testContext.Fatalf("failed to reopen migrated store: %v", reopenErr)
-	}
-	var reopenedAccount databaseAccountRecord
-	if accountErr := reopenedStore.db.WithContext(context.Background()).Where("tenant_id = ?", "tenant-a").Take(&reopenedAccount).Error; accountErr != nil {
-		testContext.Fatalf("failed to load reopened account: %v", accountErr)
-	}
-	if reopenedAccount.AccountID != newAccountID {
-		testContext.Fatalf("expected account id migration to run once, got %#v", reopenedAccount)
+	var refresh refreshTokenRecord
+	if err = db.Where("token_id = ?", "legacy-refresh-token").Take(&refresh).Error; err != nil || refresh.UserID != oldAccountID || refresh.RevokedAtUnix != 0 {
+		testContext.Fatalf("startup changed refresh data: %+v %v", refresh, err)
 	}
 }
 
@@ -690,42 +655,16 @@ func TestUserStorePreservesLegacySchemaWhenMigrationRecordMissing(testContext *t
 		testContext.Fatalf("failed to close legacy database: %v", closeErr)
 	}
 
-	store, storeErr := NewDatabaseUserStore(context.Background(), databaseURL)
-	if storeErr != nil {
-		testContext.Fatalf("failed to open user store: %v", storeErr)
+	if _, err := NewDatabaseUserStore(context.Background(), databaseURL); err == nil {
+		testContext.Fatal("startup accepted unmigrated provider subjects")
 	}
-	var userCount int64
-	if countErr := store.db.Model(&userProfileRecord{}).Count(&userCount).Error; countErr != nil {
-		testContext.Fatalf("failed to count user profiles: %v", countErr)
+	db, err := OpenControlDatabase(context.Background(), databaseURL)
+	if err != nil {
+		testContext.Fatal(err)
 	}
-	if userCount != 1 {
-		testContext.Fatalf("expected legacy user profiles to remain, got %d", userCount)
-	}
-	email, display, avatarURL, roles, fetchErr := store.GetUserProfile(context.Background(), legacyTenantID, legacyUserID)
-	if fetchErr != nil {
-		testContext.Fatalf("failed to fetch legacy profile: %v", fetchErr)
-	}
-	if email != legacyUserEmail || display != legacyDisplayName || avatarURL != legacyAvatarURL {
-		testContext.Fatalf("unexpected legacy profile data")
-	}
-	if len(roles) != 1 || roles[0] != defaultUserRole {
-		testContext.Fatalf("unexpected legacy roles")
-	}
-	var migrationRecord schemaMigrationRecord
-	migrationErr := store.db.WithContext(context.Background()).
-		Where(schemaMigrationLookupByName, userStoreErrorPrefix).
-		Take(&migrationRecord).Error
-	if migrationErr != nil {
-		testContext.Fatalf("failed to load migration record: %v", migrationErr)
-	}
-	if migrationRecord.Version != userStoreSchemaVersion {
-		testContext.Fatalf("expected user store schema version %d, got %d", userStoreSchemaVersion, migrationRecord.Version)
-	}
-	rawStoreHandle, rawStoreErr := store.db.DB()
-	if rawStoreErr != nil {
-		testContext.Fatalf("failed to access store sql handle: %v", rawStoreErr)
-	}
-	if closeErr := rawStoreHandle.Close(); closeErr != nil {
-		testContext.Fatalf("failed to close store database: %v", closeErr)
+	defer func() { raw, _ := db.DB(); raw.Close() }()
+	var profile userProfileRecord
+	if err = db.Where("tenant_id = ? AND user_id = ?", legacyTenantID, legacyUserID).Take(&profile).Error; err != nil || profile.UserEmail != legacyUserEmail || profile.UserDisplayName != legacyDisplayName {
+		testContext.Fatalf("startup changed persisted profile: %+v %v", profile, err)
 	}
 }

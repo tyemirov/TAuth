@@ -62,6 +62,7 @@ func TestNewDatabaseRefreshTokenStoreLifecycle(t *testing.T) {
 		t.Fatalf("expected sqlite driver label, got %s", store.Driver())
 	}
 
+	seedApplicationSubject(t, store.db, "tenant-a", "user-123")
 	expiry := time.Now().Add(10 * time.Minute).Unix()
 	tokenID, opaqueToken, issueErr := store.Issue(context.Background(), "tenant-a", "user-123", expiry, "")
 	if issueErr != nil {
@@ -163,6 +164,7 @@ func TestRefreshTokenStoreResetsSQLiteSchemaOnLegacyTable(testContext *testing.T
 		testContext.Fatalf("expected legacy refresh tokens to be dropped, got %d", tokenCount)
 	}
 
+	seedApplicationSubject(testContext, store.db, "tenant-a", "user-123")
 	expiryUnix := time.Now().Add(10 * time.Minute).Unix()
 	_, _, issueErr := store.Issue(context.Background(), "tenant-a", "user-123", expiryUnix, "")
 	if issueErr != nil {

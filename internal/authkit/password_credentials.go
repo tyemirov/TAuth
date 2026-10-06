@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	passwordUserIDPrefix         = "email:"
 	passwordBcryptCost           = bcrypt.DefaultCost
 	passwordMaxBytes             = 72
 	passwordCredentialTimingHash = "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
@@ -99,9 +98,30 @@ func (store *MemoryPasswordCredentialStore) UpsertPasswordCredential(ctx context
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, exists := store.tenants[tenantID]; !exists {
-		store.tenants[tenantID] = make(map[string]passwordCredential)
+	store.ensureAccountMaps(tenantID)
+	if previous, exists := store.tenants[tenantID][normalizedCredential.userEmail]; exists {
+		normalizedCredential.accountID = previous.accountID
 	}
+	if normalizedCredential.accountID == "" {
+		id, err := store.newOpaqueAccountIDLocked(tenantID)
+		if err != nil {
+			return err
+		}
+		normalizedCredential.accountID = id
+		store.accounts[tenantID][id] = &accountRecord{accountID: id, userID: id, userEmail: normalizedCredential.userEmail, displayName: normalizedCredential.displayName, avatarURL: normalizedCredential.avatarURL, state: accountStateActive, roles: []string{defaultUserRole}}
+	}
+	account := store.accounts[tenantID][normalizedCredential.accountID]
+	if account == nil {
+		return ErrAccountNotFound
+	}
+	if account.state != accountStateActive {
+		return ErrAccountNotActive
+	}
+	key := identityKey(accountProviderPassword, normalizedCredential.userEmail)
+	if previous, exists := store.identities[tenantID][key]; exists && previous.accountID != normalizedCredential.accountID {
+		return ErrAccountExists
+	}
+	store.identities[tenantID][key] = accountIdentityRecord{accountID: normalizedCredential.accountID, provider: accountProviderPassword, providerID: normalizedCredential.userEmail}
 	store.tenants[tenantID][normalizedCredential.userEmail] = normalizedCredential
 	return nil
 }

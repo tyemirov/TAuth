@@ -10,6 +10,7 @@ import (
 )
 
 type databaseAccountErasure struct {
+	UserID          *string
 	OperationID     string  `gorm:"primaryKey"`
 	TenantID        string  `gorm:"uniqueIndex:idx_erasure_account;uniqueIndex:idx_erasure_status"`
 	AccountID       *string `gorm:"uniqueIndex:idx_erasure_account"`
@@ -41,10 +42,7 @@ func (store *DatabaseUserStore) erasureByKey(ctx context.Context, tenantID, keyH
 	return job, nil
 }
 
-func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantID, accountID, keyHash string) (databaseAccountErasure, error) {
-	if err := validateOpaqueAccountID(accountID); err != nil {
-		return databaseAccountErasure{}, err
-	}
+func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantID, userID, keyHash string) (databaseAccountErasure, error) {
 	operationID, err := newOpaqueAccountID()
 	if err != nil {
 		return databaseAccountErasure{}, err
@@ -53,10 +51,32 @@ func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantI
 	var job databaseAccountErasure
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// The first write obtains the database reservation before the account reads.
-		changed := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND account_id = ? AND account_state IN ?", tenantID, accountID, []string{accountStateActive, accountStateDisabled, accountStateDisabling}).Update("account_state", accountStateErasing)
+		changed := tx.Model(&databaseAccountRecord{}).Where("tenant_id = ? AND user_id = ? AND account_state IN ?", tenantID, userID, []string{accountStateActive, accountStateDisabled, accountStateDisabling}).Update("account_state", accountStateErasing)
 		if changed.Error != nil {
 			return changed.Error
 		}
+		if changed.RowsAffected != 1 {
+			lookup := tx.Where("tenant_id = ? AND status_hash = ? AND (expires_unix = 0 OR expires_unix > ?)", tenantID, keyHash, now).Take(&job).Error
+			if lookup == nil {
+				return nil
+			}
+			if !errors.Is(lookup, gorm.ErrRecordNotFound) {
+				return lookup
+			}
+			lookup = tx.Where("tenant_id = ? AND user_id = ? AND account_id IS NOT NULL", tenantID, userID).Take(&job).Error
+			if lookup == nil {
+				return errErasureKeyConflict
+			}
+			if !errors.Is(lookup, gorm.ErrRecordNotFound) {
+				return lookup
+			}
+			return ErrAccountNotActive
+		}
+		profile, profileErr := store.accountProfileForUserWithTx(ctx, tx, tenantID, userID)
+		if profileErr != nil {
+			return profileErr
+		}
+		accountID := profile.AccountID
 		lookup := tx.Where("tenant_id = ? AND account_id = ?", tenantID, accountID).Take(&job).Error
 		if lookup == nil {
 			if job.StatusHash != keyHash {
@@ -67,19 +87,6 @@ func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantI
 		if !errors.Is(lookup, gorm.ErrRecordNotFound) {
 			return lookup
 		}
-		if changed.RowsAffected != 1 {
-			// A concurrent worker can complete the receipt and remove its account
-			// after the request's initial status lookup. Read that receipt under
-			// the database reservation before rejecting the absent account.
-			lookup = tx.Where("tenant_id = ? AND status_hash = ? AND (expires_unix = 0 OR expires_unix > ?)", tenantID, keyHash, now).Take(&job).Error
-			if lookup == nil {
-				return nil
-			}
-			if !errors.Is(lookup, gorm.ErrRecordNotFound) {
-				return lookup
-			}
-			return ErrAccountNotActive
-		}
 		var configured int64
 		if err := tx.Model(&passwordCredentialRecord{}).Where("tenant_id = ? AND managed_by_config = ? AND (account_id = ? OR user_email IN (SELECT provider_id FROM account_identities WHERE tenant_id = ? AND account_id = ? AND provider = ?))", tenantID, true, accountID, tenantID, accountID, accountProviderPassword).Count(&configured).Error; err != nil {
 			return err
@@ -87,7 +94,7 @@ func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantI
 		if configured != 0 {
 			return errErasureConfigured
 		}
-		job = databaseAccountErasure{OperationID: operationID, TenantID: tenantID, AccountID: &accountID, StatusHash: keyHash, State: erasurePending, Phase: erasureProviderPhase, CreatedUnix: now, UpdatedUnix: now}
+		job = databaseAccountErasure{UserID: &userID, OperationID: operationID, TenantID: tenantID, AccountID: &accountID, StatusHash: keyHash, State: erasurePending, Phase: erasureProviderPhase, CreatedUnix: now, UpdatedUnix: now}
 		return tx.Create(&job).Error
 	})
 	if err != nil {
@@ -129,7 +136,7 @@ func (store *DatabaseUserStore) requiredErasureProviders(ctx context.Context, jo
 		}
 	}
 	var githubCount int64
-	if err := store.db.WithContext(ctx).Model(&databaseGitHubCredential{}).Where("tenant_id = ? AND user_id = ?", job.TenantID, *job.AccountID).Count(&githubCount).Error; err != nil {
+	if err := store.db.WithContext(ctx).Model(&databaseGitHubCredential{}).Where("tenant_id = ? AND user_id = ?", job.TenantID, gorm.Expr("(SELECT user_id FROM accounts WHERE tenant_id = ? AND account_id = ?)", job.TenantID, *job.AccountID)).Count(&githubCount).Error; err != nil {
 		return nil, err
 	}
 	if githubCount != 0 {
@@ -184,6 +191,10 @@ func (store *DatabaseUserStore) completeAccountErasure(ctx context.Context, job 
 			return errErasureLeaseLost
 		}
 		accountID := *job.AccountID
+		profile, err := store.accountProfileWithTx(ctx, tx, job.TenantID, accountID)
+		if err != nil {
+			return err
+		}
 		models := []struct {
 			model   any
 			subject string
@@ -191,12 +202,16 @@ func (store *DatabaseUserStore) completeAccountErasure(ctx context.Context, job 
 			{&githubTransaction{}, "account_id"}, {&databaseAccountChallengeRecord{}, "account_id"}, {&passwordCredentialRecord{}, "account_id"}, {&databaseAccountIdentityRecord{}, "account_id"}, {&databaseGitHubCredential{}, "user_id"}, {&userProfileRecord{}, "user_id"}, {&databaseAccountRecord{}, "account_id"},
 		}
 		for _, model := range models {
-			if err := tx.Where("tenant_id = ? AND "+model.subject+" = ?", job.TenantID, accountID).Delete(model.model).Error; err != nil {
+			subject := accountID
+			if model.subject == "user_id" {
+				subject = profile.UserID
+			}
+			if err := tx.Where("tenant_id = ? AND "+model.subject+" = ?", job.TenantID, subject).Delete(model.model).Error; err != nil {
 				return fmt.Errorf("account.erasure.user_purge: %w", err)
 			}
 		}
 		return tx.Model(&databaseAccountErasure{}).Where("operation_id = ? AND lease_token = ?", job.OperationID, job.LeaseToken).
-			Updates(map[string]any{"state": erasureCompleted, "reason": "", "phase": "", "account_id": nil, "lease_token": "", "lease_until_unix": 0, "next_attempt_unix": 0, "attempt_count": 0, "updated_unix": now, "expires_unix": now + int64(erasureReceiptTTL/time.Second)}).Error
+			Updates(map[string]any{"state": erasureCompleted, "reason": "", "phase": "", "account_id": nil, "user_id": nil, "lease_token": "", "lease_until_unix": 0, "next_attempt_unix": 0, "attempt_count": 0, "updated_unix": now, "expires_unix": now + int64(erasureReceiptTTL/time.Second)}).Error
 	})
 }
 

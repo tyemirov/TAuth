@@ -227,7 +227,7 @@ func TestHandleWhoAmIInvalidClaimsType(t *testing.T) {
 func TestInMemoryUsers(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryUsers()
-	userID, roles, err := store.UpsertGoogleUser(context.TODO(), "tenant-a", "sub-1", "user@example.com", "User", "https://example.com/avatar.png")
+	userID, roles, err := store.UpsertAccountUser(context.TODO(), "tenant-a", "AAAAAAAAAAAAAAAAAAAAAA", "user@example.com", "User", "https://example.com/avatar.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

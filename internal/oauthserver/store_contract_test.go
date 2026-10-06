@@ -3,6 +3,7 @@ package oauthserver
 import (
 	"context"
 	"errors"
+	"github.com/tyemirov/tauth/internal/authkit"
 	"path/filepath"
 	"testing"
 )
@@ -11,9 +12,23 @@ func TestOAuthStoreContract(t *testing.T) {
 	constructors := map[string]func(*testing.T) Store{
 		"memory": func(testingHandle *testing.T) Store { return NewMemoryStore() },
 		"sqlite": func(testingHandle *testing.T) Store {
-			store, storeErr := NewDatabaseStore(context.Background(), "sqlite://"+filepath.Join(testingHandle.TempDir(), "oauth.db"))
+			databaseURL := "sqlite://" + filepath.Join(testingHandle.TempDir(), "oauth.db")
+			accounts, err := authkit.NewDatabaseUserStore(context.Background(), databaseURL)
+			if err != nil {
+				testingHandle.Fatal(err)
+			}
+			store, storeErr := NewDatabaseStore(context.Background(), databaseURL)
 			if storeErr != nil {
 				testingHandle.Fatalf("open database store: %v", storeErr)
+			}
+			for _, binding := range [][2]string{{"tenant-a", "user-a"}, {"tenant-a", "user-b"}, {"tenant-b", "user-a"}} {
+				profile, err := accounts.UpsertProviderAccount(context.Background(), binding[0], authkit.AccountProviderIdentity{Provider: "google", Subject: binding[1], UserEmail: "fixture@example.com"})
+				if err != nil {
+					testingHandle.Fatal(err)
+				}
+				if err = store.db.Exec("UPDATE accounts SET user_id = ? WHERE tenant_id = ? AND account_id = ?", binding[1], binding[0], profile.AccountID).Error; err != nil {
+					testingHandle.Fatal(err)
+				}
 			}
 			return store
 		},

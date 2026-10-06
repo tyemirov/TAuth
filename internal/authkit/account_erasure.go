@@ -235,6 +235,9 @@ func (coordinator *AccountErasureCoordinator) Process(ctx context.Context, opera
 	if err != nil || !claimed {
 		return err
 	}
+	if job.UserID == nil {
+		return errors.New("account.erasure.application_subject_missing")
+	}
 	for {
 		phaseCtx, cancel := context.WithTimeout(ctx, erasurePhaseTimeout)
 		reason := ""
@@ -258,13 +261,13 @@ func (coordinator *AccountErasureCoordinator) Process(ctx context.Context, opera
 			}
 		case erasureOAuthPhase:
 			if coordinator.oauth != nil {
-				err = coordinator.oauth.PurgeUser(phaseCtx, job.TenantID, *job.AccountID)
+				err = coordinator.oauth.PurgeUser(phaseCtx, job.TenantID, *job.UserID)
 			} else {
 				err = nil
 			}
 			reason = erasureOAuthFailed
 		case erasureRefreshPhase:
-			err = coordinator.refresh.PurgeUser(phaseCtx, job.TenantID, *job.AccountID)
+			err = coordinator.refresh.PurgeUser(phaseCtx, job.TenantID, *job.UserID)
 			reason = erasureRefreshFailed
 		case erasureUserPhase:
 			err = coordinator.accounts.completeAccountErasure(phaseCtx, job)
@@ -339,13 +342,16 @@ func lockActiveAccount(ctx context.Context, tx *gorm.DB, tenantID, accountID str
 	return nil
 }
 
-// RequireActiveAccountWrite locks an opaque account subject for an atomic dependent write.
-// Provider-scoped subjects do not refer to managed accounts.
+// RequireActiveAccountWrite reserves the canonical public subject for an atomic dependent write.
 func RequireActiveAccountWrite(ctx context.Context, tx *gorm.DB, tenantID, userID string) error {
-	if !isAccountSessionID(userID) {
-		return nil
+	result := tx.WithContext(ctx).Model(&databaseAccountRecord{}).Where("tenant_id = ? AND user_id = ? AND account_state = ?", tenantID, userID, accountStateActive).Update("last_updated_unix", gorm.Expr("last_updated_unix"))
+	if result.Error != nil {
+		return result.Error
 	}
-	return lockActiveAccount(ctx, tx, tenantID, userID)
+	if result.RowsAffected != 1 {
+		return ErrAccountNotActive
+	}
+	return nil
 }
 
 // ErasureDatabaseIdentity hashes the exact selected database URL for adapter ownership checks.

@@ -4,9 +4,6 @@ import "context"
 
 // UserStore persists and retrieves application users.
 type UserStore interface {
-	UpsertProviderUser(ctx context.Context, tenantID string, provider string, providerID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
-	UpsertGoogleUser(ctx context.Context, tenantID string, googleSub string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
-	UpsertPasswordUser(ctx context.Context, tenantID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
 	UpsertAccountUser(ctx context.Context, tenantID string, accountID string, userEmail string, userDisplayName string, userAvatarURL string) (applicationUserID string, userRoles []string, err error)
 	GetUserProfile(ctx context.Context, tenantID string, applicationUserID string) (userEmail string, userDisplayName string, userAvatarURL string, userRoles []string, err error)
 }
@@ -30,6 +27,7 @@ type PasswordCredentialStore interface {
 
 // AccountManagementStore manages first-party account lifecycle records.
 type AccountManagementStore interface {
+	ResolveAccountForUser(context.Context, string, string) (AccountProfile, error)
 	CorrectAccountDisplayName(context.Context, string, string, AccountDisplayName, UserStore) (AccountProfile, error)
 	SaveGitHubCredential(context.Context, string, string, []byte) error
 	LoadGitHubCredential(context.Context, string, string) ([]byte, error)
