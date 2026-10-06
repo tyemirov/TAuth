@@ -24,6 +24,7 @@ services:
 
   frontend:
     image: ghcr.io/tyemirov/ghttp:latest
+    platform: ${TAUTH_LOCAL_PLATFORM:-}
     depends_on:
       tauth:
         condition: service_healthy

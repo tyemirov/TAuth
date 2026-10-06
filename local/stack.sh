@@ -19,6 +19,8 @@ case "${1:?expected up or down}" in
 esac
 
 docker info >/dev/null
+TAUTH_LOCAL_PLATFORM="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+export TAUTH_LOCAL_PLATFORM
 mkdir -p "${runtime}"
 if [[ ! -f "${runtime}/runtime.env" ]]; then
   google_client_id="${TAUTH_LOCAL_GOOGLE_CLIENT_ID:-611549676198-d8800qv64voofseor1qod1euto5duivu.apps.googleusercontent.com}"
