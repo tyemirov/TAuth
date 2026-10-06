@@ -14,6 +14,7 @@ tools/
 !deployment/migrations/production-apps-20260928.json
 !deployment/migrations/20260930-tenant-console.json
 !deployment/migrations/20261005-console-google-client.json
+!deployment/migrations/20261006-application-subjects.json
 # Managed by gix gitignore workflow
 .env.*
 !examples/tauth-demo/.env.tauth.example
