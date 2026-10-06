@@ -52,7 +52,7 @@ are public integration surfaces.
 | POST   | `/auth/account/password/link/verify` | Complete password identity linking | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/google/link` | Link a verified Google identity to the current account | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/unlink` | Remove a linked identity unless it is the last login method | `200` JSON `{ user_id, user_email, ... }` |
-| POST   | `/auth/account/disable` | Disable the current account, revoke refresh sessions, clear cookies | `204 No Content` |
+| POST   | `/auth/account/disable` | Disable the account, revoke application refresh sessions and OAuth grants and codes, clear cookies | `204 No Content` |
 | GET    | `/auth/session` | Return current/restored session profile for browser bootstrap | `200` JSON or `204 No Content` when anonymous |
 | POST   | `/auth/refresh` | Rotate refresh token, mint new access cookie           | `204 No Content`                            |
 | POST   | `/auth/logout`  | Revoke refresh token, clear cookies                    | `204 No Content`                            |
@@ -67,6 +67,15 @@ are public integration surfaces.
 
 These endpoints are implemented only by the TAuth backend at `tauth-api.mprlab.com`. The backend registers no static asset routes, so `GET /tauth.js` returns `404 Not Found`.
 Consuming applications load the sole public helper from `https://tauth.mprlab.com/tauth.js`; demo pages live under `examples/` and are hosted separately for local development.
+
+Account disablement starts in `disabling` before credential revocation.
+This state blocks OAuth authorization, token exchanges, and reactivation.
+It revokes application refresh sessions, OAuth consent grants, and OAuth refresh-token families, and removes outstanding authorization codes.
+The account becomes `disabled` only after revocation completes.
+
+If revocation fails, the same authenticated disable request can continue it.
+Server startup continues disablement in `disabling` before it accepts traffic.
+Existing OAuth access tokens remain valid until expiry.
 
 ### 3.2 Cookies
 
@@ -694,7 +703,8 @@ Existing grants without a recorded disclosure policy require new consent before 
 
 ## Owner management and runtime revisions
 
-The control database stores owner bindings, application tenants, encrypted configuration revisions, origin proofs, and audit events.
+The control database stores owner bindings, Apps, application tenants, encrypted configuration revisions, origin proofs, and audit events.
+Each owner account owns Apps. Each application tenant belongs to one App with the same owner.
 The reserved console tenant supplies the authentication authority for management resources.
 Every tenant query includes the current owner account ID.
 Management writes require Origin, CSRF, retry identity, and revision preconditions as defined in `docs/openapi.yaml`.
@@ -717,10 +727,16 @@ The workspace rejects a console origin that differs from the page origin.
 MPR-UI supplies account controls, the header, footer, and theme controls.
 
 The management client validates response payloads and owns request headers, cursor traversal, and revision preconditions.
-The workspace holds one selected tenant and cancels requests when the account or tenant changes.
+The workspace selects an App and then one of its tenants.
+It cancels requests when the account, App, or tenant changes.
 An operation epoch rejects late responses, including a response already received before request cancellation.
-The URL fragment stores tenant and section selection for Pages reloads.
-Forms preserve their values after failed requests. A conflict requires an explicit configuration reload.
+The URL fragment stores App, tenant, and section selection for Pages reloads.
+
+Configuration edits that pass validation persist automatically and keep fields the owner did not change.
+The workspace reads the stored configuration revision before each write.
+It retries temporary failures and revision conflicts automatically and keeps newer edits.
+The workspace updates data on a timer, when the network connection returns, and when the page becomes visible.
+
 Browser acceptance uses the shipped UI, a real TLS service, and a persistent test database.
 Google token validation and DNS publication are controlled external boundaries in that lane.
 
