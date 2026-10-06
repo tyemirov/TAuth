@@ -46,7 +46,8 @@ Deployment performs these operations automatically:
    - Keep the existing verified Google identity, tenant settings, client keys, and application data.
    - Commit the candidate database and completion receipt together.
 8. Apply the pending console client correction described below.
-9. Reconcile the service and verify its health through Gateway.
+9. Apply the pending public user ID migration described below.
+10. Reconcile the service and verify its health through Gateway.
 
 The migration reads `state/tauth/config.tauth.yml` from the host runtime root.
 It can run when no TAuth container is present.
@@ -84,6 +85,29 @@ An interruption before candidate publication leaves the original database unchan
 The next deployment creates a fresh candidate from the database backup.
 A completed retry reads its receipt and leaves the running service active.
 Verify Google sign-in and the migrated tenant list after deployment completes.
+
+## Public user ID migration
+
+B125 adds the separate `20261006-application-subjects` migration.
+Deployment runs it after the tenant and console client migrations, before service convergence.
+Each migration retains its own completion receipt.
+
+The public user ID remains fixed when account-management capabilities change.
+The migration stores this ID separately from the internal opaque account ID.
+It preserves existing public IDs, account states, provider bindings, profile overrides, roles, and refresh ownership.
+Existing provider-derived profiles receive internal accounts through their exact provider bindings.
+Email alone does not establish an account association.
+
+A pending migration stops the authorized writers, backs up the database, and applies the change to a private candidate.
+The canonical data and completion receipt commit together before atomic database publication.
+Conflicting public IDs or provider mappings reject the candidate and leave the original database unchanged.
+A completed retry reads its receipt and leaves the running service active.
+The normal service refuses an existing database that requires this migration.
+
+The migration preserves current opaque internal account IDs.
+It rejects obsolete internal account IDs and ambiguous historical account associations.
+It cannot recover an earlier public ID that is absent from persisted data.
+See the [application subject contract](application-subjects.md) for the identity rules and validation scope.
 
 ## Service inputs
 
