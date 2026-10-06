@@ -23,6 +23,11 @@ It does not select the identity format or allocate a different identity.
 Account routes resolve the session subject to the internal opaque account ID before the account operation.
 Runtime identity resolution uses one stored relation. It does not parse provider prefixes or try alternative identifiers.
 
+`MountAuthRoutes` requires an explicit account store for provider routes without password credentials.
+Use the same database store for account records and user profiles.
+If an operator adds a removed password credential again, use its existing provider identity and keep both identifiers.
+Write configured profile changes during the credential write. Keep explicit display overrides.
+
 An application can continue to use its existing user ID as an external record key.
 For example, Kamu uses `tauth:<user-id>` as its RevenueCat customer key.
 The migration preserves that key. It grants no subscription or other application access.
