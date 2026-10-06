@@ -101,6 +101,10 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `public user ID`: The fixed tenant-scoped account identifier that TAuth supplies to applications and uses in session claims.
+- `internal account ID`: The opaque identifier that TAuth uses for its account resources.
+- `application subject`: The public user ID in a signed TAuth session or OAuth credential.
+
 - `timestamped migration`: A fixed deployment data change with a timestamp identifier and a durable completion receipt.
 - `one-off migration`: A timestamped migration that runs automatically once within `make deploy`.
 - `server encryption key`: The private TAuth key that protects stored tenant and console configuration.

@@ -5,6 +5,45 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B125] (P1) Preserve application user IDs across account-management changes.
+  Goal:
+  Keep each application's user ID unchanged when account management is enabled or disabled.
+  Evidence:
+  Before B125, provider login returned `provider:<subject>` with account management disabled.
+  The same login returned a separate opaque account ID with account management enabled.
+  Kamu derives its RevenueCat customer key from this application user ID.
+  The initial source inspection found no public transition that preserved these customer keys.
+  Requirements:
+  - Store one immutable public user ID for each tenant account.
+  - Keep the internal account ID opaque and separate from the public user ID.
+  - Allocate persistent identity independently of account-management capabilities.
+  - Preserve existing public user IDs through an automatic timestamped deployment migration.
+  - Resolve each session subject through one exact tenant-scoped stored relation.
+  - Reject conflicting identity mappings before migration commits.
+  - Keep email addresses separate from identity association.
+  - Preserve account disablement, erasure, provider associations, roles, and refresh ownership.
+  - Keep account-management operations subject to their configured capability policy.
+  Validation:
+  - Reproduce the identity change through public HTTP and a persistent database.
+  - Verify unchanged public IDs across feature changes, restart, refresh, and provider entry paths.
+  - Verify strict internal account IDs, tenant isolation, conflicting mappings, and migration repeat.
+  - Verify that disabled or erasing accounts cannot regain access through a feature change.
+  - Run focused public tests and final `make ci`.
+  - Obtain independent review of the implementation, migration, and remaining limits.
+  Deliverables:
+  The canonical public subject remains fixed across account-management changes.
+  The automatic `20261006-application-subjects` migration preserves existing subjects and rejects conflicting ownership before publication.
+  Runtime conversion and obsolete provider-prefix allocation paths are removed.
+  Final public authentication, OAuth, and migration regressions pass.
+  Final `make ci` passes all 13 targets. The separate deployment migration target also passes.
+  Independent final review accepts the source repair and local validation without blocking findings.
+  The final command removes its owned temporary caches and disposable Docker builder.
+  Evidence is retained in Kamu under `.local/i013-evidence/tauth-continuity-fix/`.
+  The source contract and deployment limits are in `docs/application-subjects.md`.
+  Scope:
+  Preserve the stable application key. Grant no new billing entitlement and introduce no application fallback.
+  Production activation remains an operator action.
+
 - [ ] [B118] (P2) Use the request context for account database operations.
   Goal: Account database operations use a context that remains valid after the HTTP handler returns.
   Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.
