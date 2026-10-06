@@ -5,6 +5,60 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B126] (P2) Keep account IDs when configured password users are added again.
+  Goal:
+  Keep the public user ID when an operator removes a configured password user and adds that user again.
+  Requirements:
+  - Use the existing password provider identity before creation of another account.
+  - Reject conflicting identity relations and writes to accounts that are not active.
+  Validation:
+  - Verify removal and addition through password login with database and memory stores.
+  - Verify the same public user ID and rejection of accounts that are not active.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  The next credential write produced `account.exists` after removal and prevented server startup.
+  Deliverables:
+  The credential writer uses the retained password identity and keeps both account IDs.
+  Public HTTP tests verify database and memory stores, removed credentials, and accounts that are not active.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/database_user_store.go`, `internal/authkit/password_credentials.go`, `internal/authkit/password_seed_http_test.go`, `docs/application-subjects.md`.
+
+- [x] [B127] (P2) Write configured password profile changes to the account.
+  Goal:
+  Keep the current configured display name and avatar in the account after a password profile change.
+  Requirements:
+  - Write the configured profile to the canonical account during the password credential write.
+  - Keep explicit display overrides, roles, account state, and public user IDs.
+  Validation:
+  - Verify changed profile fields through password login and session restoration.
+  - Verify explicit display overrides with database and memory stores.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  Password login supplied the previous display name and avatar after a config update.
+  Deliverables:
+  The credential writer writes configured profile fields to the account and keeps explicit display overrides.
+  Public HTTP tests verify login and current session profiles with database and memory stores.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/database_user_store.go`, `internal/authkit/password_credentials.go`, `internal/authkit/password_seed_http_test.go`, `docs/application-subjects.md`.
+
+- [x] [B128] (P2) Use an explicit account store for provider routes.
+  Goal:
+  Complete provider login with the same account store and user store.
+  Requirements:
+  - Require an explicit account store when routes have no password store.
+  - Keep database account records and public user IDs after restart.
+  Validation:
+  - Verify provider login, refresh, and session restoration through database-backed routes.
+  - Run `make ci` after all three review fixes.
+  Evidence:
+  `MountAuthRoutes` created a separate memory account store and database Google login returned HTTP 500.
+  Deliverables:
+  `MountAuthRoutes` uses an explicit account store. Repository callers use the current signature.
+  Account erasure uses the same account store without a password dependency.
+  Public HTTP tests verify login, refresh, database restart, and erasure.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Changed files: `internal/authkit/routes.go`, `internal/authkit/account_erasure.go`, `internal/authkit/mounted_database_http_test.go`, `internal/authkit/routes_http_test.go`, `internal/authkit/routes_integration_test.go`, `internal/authkit/body_security_http_test.go`, `internal/authkit/github_http_test.go`, `ARCHITECTURE.md`, `docs/application-subjects.md`.
+
 - [x] [B125] (P1) Preserve application user IDs across account-management changes.
   Goal:
   Keep each application's user ID unchanged when account management is enabled or disabled.
