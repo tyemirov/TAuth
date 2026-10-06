@@ -158,3 +158,16 @@ MIGRATION_OUTPUT ?= .cache/tenant-ownership
 .PHONY: build-deployment-migration
 build-deployment-migration:
 	CGO_ENABLED=0 $(GO) build -o "$(MIGRATION_OUTPUT)" ./deployment/tenantownership
+
+.PHONY: test-application-subject
+test-application-subject:
+	$(GO) test ./internal/authkit -run ApplicationSubject -count=1 -v
+
+.PHONY: test-authkit
+test-authkit:
+	$(GO) test ./internal/authkit -count=1
+
+.PHONY: format-application-subject
+format-application-subject:
+	$(GO) fmt ./internal/authkit ./internal/web
+	gofmt -w cmd/server/main.go
