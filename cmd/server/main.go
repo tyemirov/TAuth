@@ -357,7 +357,11 @@ func seedPasswordUsers(ctx context.Context, tenantConfig tenants.Config, userSto
 			if credentialErr != nil {
 				return fmt.Errorf("password_auth.seed_credential tenant=%s user=%s: %w", tenantID, passwordUser.Email(), credentialErr)
 			}
-			_, _, profileErr := userStore.UpsertPasswordUser(ctx, tenantID, passwordUser.Email(), passwordUser.DisplayName(), passwordUser.AvatarURL())
+			accounts := passwordCredentialStore.(authkit.AccountManagementStore)
+			profile, profileErr := accounts.EnsurePasswordAccount(ctx, tenantID, passwordUser.Email())
+			if profileErr == nil {
+				_, _, profileErr = userStore.UpsertAccountUser(ctx, tenantID, profile.AccountID, profile.UserEmail, profile.DisplayName, profile.AvatarURL)
+			}
 			if profileErr != nil {
 				return fmt.Errorf("password_auth.seed_profile tenant=%s user=%s: %w", tenantID, passwordUser.Email(), profileErr)
 			}

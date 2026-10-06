@@ -68,7 +68,11 @@ func testConsoleEnrollmentAndRestart(t *testing.T, insecure, header bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	existingUser, roles, err := users.UpsertGoogleUser(context.Background(), "imported", "existing", "existing@example.com", "Existing user", "")
+	importedAccount, err := users.UpsertGoogleAccount(context.Background(), "imported", authkit.GoogleAccountIdentity{Subject: "existing", UserEmail: "existing@example.com", DisplayName: "Existing user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingUser, roles, err := users.UpsertAccountUser(context.Background(), "imported", importedAccount.AccountID, "existing@example.com", "Existing user", "")
 	if err != nil {
 		t.Fatal(err)
 	}
