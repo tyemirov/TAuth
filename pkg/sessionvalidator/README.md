@@ -37,8 +37,8 @@ func main() {
 }
 ```
 
-Consumers should never set an issuer; the validator uses the TAuth issuer
-automatically, so pass only the signing key and cookie name (if you override it).
+Without an `Issuer` value, the validator uses `tauth`.
+If the TAuth server uses another issuer, set `Issuer` to the same value.
 
 Read the tenant session key from your backend secret configuration.
 Pass that key and the session cookie name to `New`.
