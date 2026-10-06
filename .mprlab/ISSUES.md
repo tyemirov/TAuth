@@ -5,6 +5,27 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B129] (P1) Include the application-subject plan in release inputs.
+  Goal:
+  Supply each necessary migration plan from source control to the release.
+  Evidence:
+  Deployment of v2.2.13 stopped because its `inputs` directory did not contain `20261006-application-subjects.json`.
+  The local plan existed, but the `*.json` ignore rule did not include it in source control.
+  Requirements:
+  - Include the public application-subject plan in source control.
+  - Validate the necessary plans before database changes.
+  Validation:
+  - Verify the real rollout CLI with repository inputs selected through Git.
+  - Verify that the test rejects the release before the ignore exception is added.
+  - Run `make test-deployment-migration` and `make ci`.
+  Deliverables:
+  The exact ignore exception includes the public migration plan in source control.
+  The rollout CLI test consumes repository plans selected through a separate Git index.
+  The test reproduced the missing plan error before the fix and passed after the fix.
+  Final `make ci` passed all 13 declared targets. Independent review found no further defects.
+  Release, publication, and production deployment remain operator actions.
+  Changed files: `.gitignore`, `deployment/migrations/20261006-application-subjects.json`, `deployment/rollout/main_test.go`.
+
 - [x] [B126] (P2) Keep account IDs when configured password users are added again.
   Goal:
   Keep the public user ID when an operator removes a configured password user and adds that user again.
