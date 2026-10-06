@@ -62,20 +62,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	}
 	lifecycle := filepath.Join(root, ".git/mprlab-lifecycle")
 	releaseRoot := filepath.Join(lifecycle, "releases/v1.2.3")
-	planPath := filepath.Join(releaseRoot, "inputs/deployment/migrations/20260930-tenant-console.json")
-	if output, err := exec.Command("mkdir", "-p", filepath.Dir(planPath)).CombinedOutput(); err != nil {
-		t.Fatalf("create sealed input directory: %v %s", err, output)
-	}
-	plan := `{"owner_emails":["owner@example.com"],"console_origin":"https://console.example.com","console_source_tenant":"console","management_url":"https://auth.example.com","apps":[{"id":"product","name":"Product","tenant_ids":["product"],"contribution_owner":"product","contribution_id":"auth"}]}`
-	if err = writeFile(planPath, []byte(plan)); err != nil {
-		t.Fatal(err)
-	}
-	if err = writeFile(filepath.Join(filepath.Dir(planPath), "20261005-console-google-client.json"), []byte(`{"expected_client_id":"fixture-old","client_id":"fixture-new.apps.googleusercontent.com","console_origin":"https://console.example.com"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err = writeFile(filepath.Join(filepath.Dir(planPath), "20261006-application-subjects.json"), []byte(`{"id":"20261006-application-subjects","schema":"application-subjects"}`)); err != nil {
-		t.Fatal(err)
-	}
+	captureRepositoryRolloutInputs(t, filepath.Join(releaseRoot, "inputs"))
 	imagePath := filepath.Join(releaseRoot, "image.oci.tar")
 	image, err := os.Create(imagePath)
 	if err != nil {
@@ -129,6 +116,40 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatalf("independent migration phase absent or out of order: %s", output)
 	}
 
+}
+
+func captureRepositoryRolloutInputs(t *testing.T, destination string) {
+	t.Helper()
+	repositoryRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatalf("locate repository: %v", err)
+	}
+	// Use a disposable index to capture the next source tree, including local edits,
+	// while applying the real ignore rules and leaving the user's index unchanged.
+	indexPath := filepath.Join(t.TempDir(), "index")
+	git := func(arguments ...string) *exec.Cmd {
+		command := exec.Command("git", arguments...)
+		command.Dir = strings.TrimSpace(string(repositoryRoot))
+		command.Env = append(os.Environ(), "GIT_INDEX_FILE="+indexPath)
+		return command
+	}
+	for _, arguments := range [][]string{
+		{"read-tree", "HEAD"},
+		{"add", "--all", "--", ":/deployment/migrations", ":/deployment/rollout"},
+	} {
+		if output, err := git(arguments...).CombinedOutput(); err != nil {
+			t.Fatalf("capture repository inputs: %v\n%s", err, output)
+		}
+	}
+	paths, err := git("ls-files", "-z", "--full-name", "--", ":/deployment/migrations/*.json", ":/deployment/rollout/*.yml").Output()
+	if err != nil {
+		t.Fatalf("list release inputs: %v", err)
+	}
+	command := git("checkout-index", "--prefix="+destination+string(filepath.Separator), "--stdin", "-z")
+	command.Stdin = bytes.NewReader(paths)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("extract release inputs: %v\n%s", err, output)
+	}
 }
 
 func TestPersistentServerKeyPreparation(t *testing.T) {
