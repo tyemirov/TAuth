@@ -46,7 +46,7 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 		tenantServerConfig.GoogleNativeClientID = tenant.GoogleNativeClientID()
 		tenantServerConfig.NativeGoogleClients = buildNativeGoogleClientConfigs(tenant.NativeGoogleClients())
 		tenantServerConfig.GitHubOAuth = tenant.GitHubOAuth()
-		tenantServerConfig.AppleOAuth = buildAppleOAuthConfig(tenant.AppleOAuth())
+		tenantServerConfig.AppleOAuth = AppleOAuthConfigFromSettings(tenant.AppleOAuth())
 		tenantServerConfig.PasswordAuthEnabled = tenant.PasswordAuthEnabled()
 		accountManagement := tenant.AccountManagement()
 		tenantServerConfig.AccountManagementEnabled = accountManagement.Enabled()
@@ -76,9 +76,11 @@ func BuildTenantRegistry(base ServerConfig, tenantConfig tenants.Config, sameSit
 	return NewTenantRegistryFromMap(defaultTenantID, configs), nil
 }
 
-func buildAppleOAuthConfig(settings tenants.AppleOAuth) AppleOAuthConfig {
+// AppleOAuthConfigFromSettings converts the canonical Apple settings for provider operations.
+func AppleOAuthConfigFromSettings(settings tenants.AppleOAuth) AppleOAuthConfig {
 	return AppleOAuthConfig{
 		Enabled:               settings.Enabled(),
+		NotificationAudience:  settings.NotificationAudience(),
 		ClientID:              settings.ClientID(),
 		NativeClientIDs:       settings.NativeClientIDs(),
 		TeamID:                settings.TeamID(),

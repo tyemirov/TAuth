@@ -53,10 +53,13 @@ type appleOAuthState struct {
 }
 
 type appleTokenResponse struct {
-	IDToken string `json:"id_token"`
+	IDToken      string `json:"id_token"`
+	RefreshToken string `json:"refresh_token"`
+	AccessToken  string `json:"access_token"`
 }
 
 type appleIdentity struct {
+	Audience      string
 	Subject       string
 	Email         string
 	EmailVerified bool
@@ -228,7 +231,9 @@ func exchangeAppleAuthorizationCode(ctx context.Context, client *http.Client, co
 	form.Set("client_secret", clientSecret)
 	form.Set("code", strings.TrimSpace(code))
 	form.Set("grant_type", appleOAuthGrantTypeCode)
-	form.Set("redirect_uri", strings.TrimSpace(config.RedirectURI))
+	if strings.TrimSpace(config.RedirectURI) != "" {
+		form.Set("redirect_uri", strings.TrimSpace(config.RedirectURI))
+	}
 	request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(config.TokenEndpoint), strings.NewReader(form.Encode()))
 	if requestErr != nil {
 		return appleTokenResponse{}, fmt.Errorf("%w: request: %w", errAppleOAuthToken, requestErr)
@@ -307,7 +312,13 @@ func validateAppleIDTokenForAudiences(ctx context.Context, client *http.Client, 
 			lastParseErr = parseErr
 			continue
 		}
+		tokenAudiences, audienceErr := claims.GetAudience()
+		if audienceErr != nil || len(tokenAudiences) != 1 || tokenAudiences[0] != audience {
+			lastParseErr = errors.New("ambiguous_audience")
+			continue
+		}
 		return appleIdentity{
+			Audience:      audience,
 			Subject:       readStringMapClaim(claims, "sub"),
 			Email:         strings.ToLower(readStringMapClaim(claims, "email")),
 			EmailVerified: readBoolishMapClaim(claims, "email_verified"),

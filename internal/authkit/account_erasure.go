@@ -24,6 +24,7 @@ const (
 	erasureBlocked              = "blocked"
 	erasureCompleted            = "completed"
 	erasureProviderPhase        = "provider_revocation"
+	erasureRevokePhase          = "provider_completion"
 	erasureOAuthPhase           = "oauth_purge"
 	erasureRefreshPhase         = "refresh_purge"
 	erasureUserPhase            = "user_purge"
@@ -66,10 +67,11 @@ type AccountProviderRevoker interface {
 
 // AccountErasureCoordinator executes durable, fenced account erasure phases.
 type AccountErasureCoordinator struct {
-	accounts *DatabaseUserStore
-	refresh  UserDataPurger
-	oauth    UserDataPurger
-	provider AccountProviderRevoker
+	accounts    *DatabaseUserStore
+	refresh     UserDataPurger
+	oauth       UserDataPurger
+	provider    AccountProviderRevoker
+	appleConfig func(context.Context, string) (AppleOAuthConfig, error)
 }
 
 // NewAccountErasureCoordinator requires an account store with its own canonical user profiles.
@@ -89,7 +91,11 @@ func NewAccountErasureCoordinator(accounts *DatabaseUserStore, users UserStore, 
 			return nil, errors.New("account.erasure.oauth_purge_unavailable")
 		}
 	}
-	return &AccountErasureCoordinator{accounts: accounts, refresh: refreshPurger, oauth: oauthPurger, provider: provider}, nil
+	coordinator := &AccountErasureCoordinator{accounts: accounts, refresh: refreshPurger, oauth: oauthPurger, provider: provider}
+	if apple, ok := provider.(*AppleAccountRevoker); ok {
+		coordinator.appleConfig = apple.config
+	}
+	return coordinator, nil
 }
 
 func validateErasureStatusKey(key string) (string, error) {
@@ -105,13 +111,29 @@ func erasureRepresentation(job databaseAccountErasure) gin.H {
 	if job.ExpiresUnix != 0 {
 		expires = time.Unix(job.ExpiresUnix, 0).UTC()
 	}
-	return gin.H{"operation_id": job.OperationID, "state": job.State, "reason": job.Reason, "created_at": time.Unix(job.CreatedUnix, 0).UTC(), "updated_at": time.Unix(job.UpdatedUnix, 0).UTC(), "expires_at": expires}
+	providers := make([]gin.H, 0, len(job.Providers))
+	for _, provider := range job.Providers {
+		providers = append(providers, gin.H{"provider": provider.Provider, "state": provider.State})
+	}
+	return gin.H{"account_state": job.AccountState, "provider_revocations": providers, "operation_id": job.OperationID, "state": job.State, "reason": job.Reason, "created_at": time.Unix(job.CreatedUnix, 0).UTC(), "updated_at": time.Unix(job.UpdatedUnix, 0).UTC(), "expires_at": expires}
 }
 
-func mountAccountErasureRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, accountStore AccountManagementStore, refresh RefreshTokenStore, oauth OAuthGrantRevoker) {
+func mountAccountErasureRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, accountStore AccountManagementStore, refresh RefreshTokenStore, oauth OAuthGrantRevoker, providers ...AccountProviderRevoker) {
 	accounts, _ := accountStore.(*DatabaseUserStore)
-	provider, _ := oauth.(AccountProviderRevoker)
+	var provider AccountProviderRevoker
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
 	coordinator, coordinatorErr := NewAccountErasureCoordinator(accounts, users, refresh, oauth, provider)
+	if coordinatorErr == nil {
+		coordinator.appleConfig = func(ctx context.Context, id string) (AppleOAuthConfig, error) {
+			config, ok := registry.ConfigByID(id)
+			if !ok {
+				return AppleOAuthConfig{}, errors.New("account.erasure.tenant_not_configured")
+			}
+			return config.AppleOAuth, nil
+		}
+	}
 	tenant := func(request *gin.Context) (string, bool) {
 		id, ok := resolveTenantIDRequired(request, registry)
 		if !ok {
@@ -197,7 +219,7 @@ func mountAccountErasureRoutes(router gin.IRouter, registry TenantRegistry, user
 				request.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAccountManagementNotConfigured})
 				return
 			}
-			job, err = accounts.beginAccountErasure(request.Request.Context(), tenantID, claims.GetUserID(), keyHash)
+			job, err = accounts.beginAccountErasure(request.Request.Context(), tenantID, claims.GetUserID(), keyHash, config.AppleOAuth.NotificationAudience)
 			if errors.Is(err, errErasureKeyConflict) || errors.Is(err, errErasureConfigured) {
 				reason := "status_key_conflict"
 				if errors.Is(err, errErasureConfigured) {
@@ -235,7 +257,7 @@ func (coordinator *AccountErasureCoordinator) Process(ctx context.Context, opera
 	if err != nil || !claimed {
 		return err
 	}
-	if job.UserID == nil {
+	if job.UserID == nil && job.Phase != erasureRevokePhase {
 		return errors.New("account.erasure.application_subject_missing")
 	}
 	for {
@@ -243,21 +265,30 @@ func (coordinator *AccountErasureCoordinator) Process(ctx context.Context, opera
 		reason := ""
 		switch job.Phase {
 		case erasureProviderPhase:
-			providers, providerErr := coordinator.accounts.requiredErasureProviders(phaseCtx, job)
-			err = providerErr
-			for _, provider := range providers {
-				if err != nil {
-					break
+			if !job.ProviderSnapshot {
+				err = coordinator.resolveSnapshotConfiguration(phaseCtx, &job)
+				if err == nil {
+					err = coordinator.accounts.snapshotClaimedErasure(phaseCtx, job)
 				}
-				if coordinator.provider == nil {
-					reason = erasureProviderUnavailable
-					err = errors.New("account.erasure.provider_revoker_unavailable")
-					break
-				}
-				err = coordinator.provider.RevokeAccountProvider(phaseCtx, job.TenantID, *job.AccountID, provider)
+			} else {
+				err = nil
 			}
-			if reason == "" {
-				reason = erasureProviderFailed
+
+			reason = erasureProviderFailed
+			if coordinator.provider == nil {
+				reason = erasureProviderUnavailable
+			}
+		case erasureRevokePhase:
+			err = coordinator.revokeProviders(phaseCtx, job)
+			reason = erasureProviderFailed
+			if coordinator.provider == nil {
+				reason = erasureProviderUnavailable
+			}
+			if errors.Is(err, errAppleManual) {
+				reason = appleManualReason
+			}
+			if err == nil {
+				err = coordinator.accounts.finishErasure(phaseCtx, job)
 			}
 		case erasureOAuthPhase:
 			if coordinator.oauth != nil {
@@ -284,14 +315,19 @@ func (coordinator *AccountErasureCoordinator) Process(ctx context.Context, opera
 			persistCancel()
 			return errors.Join(failure, persistErr)
 		}
-		if job.Phase == erasureUserPhase {
+		if job.Phase == erasureRevokePhase {
 			return nil
 		}
-		next := map[string]string{erasureProviderPhase: erasureOAuthPhase, erasureOAuthPhase: erasureRefreshPhase, erasureRefreshPhase: erasureUserPhase}[job.Phase]
+		next := map[string]string{erasureProviderPhase: erasureOAuthPhase, erasureOAuthPhase: erasureRefreshPhase, erasureRefreshPhase: erasureUserPhase, erasureUserPhase: erasureRevokePhase}[job.Phase]
 		if err := coordinator.accounts.advanceErasure(ctx, job, next); err != nil {
 			return err
 		}
 		job.Phase = next
+		if next == erasureRevokePhase {
+			job.AccountState = erasureAccountRemoved
+			job.AccountID = nil
+			job.UserID = nil
+		}
 	}
 }
 

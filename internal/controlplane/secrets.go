@@ -56,3 +56,27 @@ func (store *Store) LoadSecret(ctx context.Context, ref SecretReference) ([]byte
 	}
 	return store.unseal(record.EncryptedValue, ref.binding(record.EncryptionKeyID))
 }
+
+// SealProviderGrant authenticates provider data with the canonical server key and exact ownership binding.
+func (store *Store) SealProviderGrant(binding string, value []byte) ([]byte, error) {
+	envelope, err := json.Marshal(struct {
+		KeyID      string `json:"key_id"`
+		Ciphertext []byte `json:"ciphertext"`
+	}{store.keyID, store.seal(value, binding+store.keyID)})
+	return envelope, err
+}
+
+// OpenProviderGrant verifies the canonical key and ownership binding before decrypting provider data.
+func (store *Store) OpenProviderGrant(binding string, value []byte) ([]byte, error) {
+	var envelope struct {
+		KeyID      string `json:"key_id"`
+		Ciphertext []byte `json:"ciphertext"`
+	}
+	if err := json.Unmarshal(value, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.KeyID != store.keyID {
+		return nil, errors.New("management.encryption_key_mismatch")
+	}
+	return store.unseal(envelope.Ciphertext, binding+store.keyID)
+}

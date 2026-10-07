@@ -74,6 +74,7 @@ type NativeGoogleClientConfig struct {
 
 // AppleOAuthConfig configures Sign in with Apple for one tenant.
 type AppleOAuthConfig struct {
+	NotificationAudience  string
 	Enabled               bool
 	ClientID              string
 	NativeClientIDs       []string

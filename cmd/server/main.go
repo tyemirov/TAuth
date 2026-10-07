@@ -209,7 +209,19 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if storeErr != nil {
 		return storeErr
 	}
-	erasures, erasureErr := authkit.NewAccountErasureCoordinator(persistentUserStore, userStore, refreshStore, persistentOAuthStore, nil)
+	persistentUserStore.SetProviderGrantCipher(managementStore)
+	appleRevoker := authkit.NewAppleAccountRevoker(persistentUserStore, func(ctx context.Context, id string) (authkit.AppleOAuthConfig, error) {
+		config, err := managementStore.RuntimeTenants(ctx)
+		if err != nil {
+			return authkit.AppleOAuthConfig{}, err
+		}
+		tenant, ok := config.TenantByID(tenants.TenantID(id))
+		if !ok {
+			return authkit.AppleOAuthConfig{}, fmt.Errorf("account.erasure.tenant_not_active")
+		}
+		return authkit.AppleOAuthConfigFromSettings(tenant.AppleOAuth()), nil
+	}, nil)
+	erasures, erasureErr := authkit.NewAccountErasureCoordinator(persistentUserStore, userStore, refreshStore, persistentOAuthStore, appleRevoker)
 	if erasureErr != nil {
 		return erasureErr
 	}
@@ -243,7 +255,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	defer authkit.ProvideMetrics(nil)
 
 	publisher := &runtimePublisher{}
-	deps := &runtimeDependencies{config: appConfig, logger: logger, users: userStore, refresh: refreshStore, passwords: passwordCredentialStore, nonce: persistentNonceStore, oauth: persistentOAuthStore, github: githubTransactions, store: managementStore, console: consoleTenant}
+	deps := &runtimeDependencies{config: appConfig, logger: logger, users: userStore, refresh: refreshStore, passwords: passwordCredentialStore, nonce: persistentNonceStore, oauth: persistentOAuthStore, github: githubTransactions, provider: appleRevoker, store: managementStore, console: consoleTenant}
 	builder := func(ctx context.Context, config tenants.Config) (controlplane.PreparedRuntime, error) {
 		snapshot, err := deps.build(ctx, config)
 		if err != nil {
@@ -403,7 +415,7 @@ func appleOAuthBypassPath(request *http.Request) bool {
 	if request == nil || request.URL == nil {
 		return false
 	}
-	if request.URL.Path == authkit.AppleCallbackPath {
+	if request.URL.Path == authkit.AppleCallbackPath || request.URL.Path == authkit.AppleNotificationPath {
 		return true
 	}
 	return request.URL.Path == "/auth/apple/start" && strings.TrimSpace(request.Header.Get("Origin")) == ""

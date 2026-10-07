@@ -146,9 +146,10 @@ type googleLoginInbound struct {
 }
 
 type nativeAppleLoginInbound struct {
-	AppleIDToken string                      `json:"apple_id_token"`
-	NonceToken   string                      `json:"nonce_token"`
-	FullName     *nativeAppleFullNameInbound `json:"full_name"`
+	AppleIDToken      string                      `json:"apple_id_token"`
+	AuthorizationCode string                      `json:"authorization_code"`
+	NonceToken        string                      `json:"nonce_token"`
+	FullName          *nativeAppleFullNameInbound `json:"full_name"`
 }
 
 type nativeAppleFullNameInbound struct {
@@ -303,18 +304,20 @@ func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
-func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
+func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
 	accountStore, _ := passwordCredentials.(AccountManagementStore)
-	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, emailChallengeSender, oauthGrants)
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, emailChallengeSender, oauthGrants, providers...)
 }
 
-func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker) {
+func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
 	router = router.Group("", boundedAuthBody)
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
 	}
-	mountAccountErasureRoutes(router, registry, users, accountStore, refreshTokens, oauthGrants)
+	mountAccountErasureRoutes(router, registry, users, accountStore, refreshTokens, oauthGrants, providers...)
+	accounts, _ := accountStore.(*DatabaseUserStore)
+	mountAppleNotifications(router, registry, accounts)
 	if nonces == nil {
 		nonces = NewMemoryNonceStoreWithTTLResolver(func(tenantID string) time.Duration {
 			return registry.Config(tenantID).NonceTTL
@@ -621,7 +624,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
 		}
-		if consumeErr := nonces.Consume(contextGin, statePayload.TenantID, statePayload.Nonce); consumeErr != nil {
+		if consumeErr := nonces.Consume(contextGin.Request.Context(), statePayload.TenantID, statePayload.Nonce); consumeErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.invalid_nonce_token", consumeErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
@@ -652,10 +655,15 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				UserEmail:   identity.Email,
 				DisplayName: identity.DisplayName,
 			}
-			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, statePayload.TenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin.Request.Context(), statePayload.TenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if err := persistAppleLoginGrant(requestContext, accountStore, statePayload.TenantID, accountProfile.AccountID, identity, tokenResponse); err != nil {
+				logAuthError("auth.apple.grant_store", err)
+				contextGin.AbortWithStatus(http.StatusServiceUnavailable)
 				return
 			}
 			responsePayload, finalizeErr := finalizeAccountLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProfile)
@@ -700,6 +708,10 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
 			return
 		}
+		if strings.TrimSpace(inbound.AuthorizationCode) == "" {
+			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_authorization_code"})
+			return
+		}
 		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.native.insecure_http", nil)
@@ -726,7 +738,20 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
 			return
 		}
-		if consumeErr := nonces.Consume(contextGin, tenantID, nonceToken); consumeErr != nil {
+		nativeConfig := config.AppleOAuth
+		nativeConfig.ClientID = identity.Audience
+		nativeConfig.RedirectURI = ""
+		tokenResponse, exchangeErr := exchangeAppleAuthorizationCode(contextGin.Request.Context(), resolveAppleOAuthHTTPClient(), nativeConfig, clock, inbound.AuthorizationCode)
+		if exchangeErr != nil {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
+			return
+		}
+		exchanged, exchangeErr := validateAppleIDToken(contextGin.Request.Context(), resolveAppleOAuthHTTPClient(), nativeConfig, tokenResponse.IDToken)
+		if exchangeErr != nil || exchanged.Subject != identity.Subject || exchanged.Audience != identity.Audience || exchanged.Nonce != identity.Nonce {
+			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errorAppleTokenInvalid})
+			return
+		}
+		if consumeErr := nonces.Consume(contextGin.Request.Context(), tenantID, nonceToken); consumeErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.apple.native.invalid_nonce_token", consumeErr)
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
@@ -759,10 +784,15 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				UserEmail:   identity.Email,
 				DisplayName: identity.DisplayName,
 			}
-			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin.Request.Context(), tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
+				return
+			}
+			if err := persistAppleLoginGrant(contextGin.Request.Context(), accountStore, tenantID, accountProfile.AccountID, identity, tokenResponse); err != nil {
+				logAuthError("auth.apple.grant_store", err)
+				contextGin.AbortWithStatus(http.StatusServiceUnavailable)
 				return
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
@@ -2169,7 +2199,7 @@ func finalizeAccountLoginPayload(
 		return nil, validateErr
 	}
 	applicationUserID, userRoles, upsertErr := users.UpsertAccountUser(
-		contextGin,
+		contextGin.Request.Context(),
 		tenantID,
 		profile.AccountID,
 		profile.UserEmail,
@@ -2215,7 +2245,7 @@ func finalizeAuthenticatedSessionPayload(
 		return nil, fmt.Errorf("%w: %w", errGoogleLoginMintJWT, mintErr)
 	}
 	refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
-	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, profile.applicationUserID, refreshDeadline.Unix(), "")
+	_, refreshOpaque, issueErr := refreshTokens.Issue(contextGin.Request.Context(), tenantID, profile.applicationUserID, refreshDeadline.Unix(), "")
 	if issueErr != nil || strings.TrimSpace(refreshOpaque) == "" {
 		if issueErr != nil {
 			return nil, fmt.Errorf("%w: %w", errGoogleLoginIssueRefresh, issueErr)
