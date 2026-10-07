@@ -560,6 +560,37 @@ Planning and recurring entries stay in this tracker with unresolved work.
 - [ ] [TA-434] (P1) Add `tauth doctor` to proactively diagnose auth misconfiguration.
   Provide a CLI command that reads `config.yaml` and prints a focused, actionable report (and stable error codes) for common “can’t authenticate” issues: origin not configured/unknown, ambiguous origins requiring tenant override, CORS allowlist missing the frontend origin, cookie scope collisions, cookie_domain/localhost pitfalls, missing/incorrect `enable_tenant_header_override` for shared-origin clients, and JWT validation parameters to sync with downstream services (issuer, session cookie name, tenant signing key fingerprints). Include a dedicated check/hint for issuer mismatch with common downstream validators (e.g. expecting `mprlab-auth` vs TAuth issuer `tauth`).
 
+## Features
+
+- [x] [F019] (P1) {F002,B125} Remove Apple access during account erasure.
+  Goal:
+  Report account removal separately from each provider revocation.
+  Requirements:
+  - Exchange the native Apple authorization code before TAuth issues a session.
+  - Keep reusable Apple and GitHub provider grants encrypted in TAuth.
+  - Store the required revocation context before account removal.
+  - Keep account removal independent of provider response failures.
+  - Report pending, manual, and completed provider revocations truthfully.
+  - Accept signed Apple notifications for an explicit tenant notification audience.
+  - Bind each accepted event to the exact provider subject, audience, and grant generation.
+  - Preserve completed revocations during concurrent erasure and notification requests.
+  - Migrate existing erasure records once into the current database contract.
+  Deliverables:
+  Native and browser Apple flows retain the provider grant after a verified code exchange.
+  The erasure response includes the account state and each provider revocation.
+  Apple notification events can complete a matching pending or manual revocation.
+  The API documentation and architecture describe the current contract.
+  Validation:
+  Public HTTP tests cover code exchange, encrypted grants, provider failures, notifications, restart, concurrency, and database migration.
+  Final `make ci`, focused race tests, and whitespace checks pass.
+  Independent review accepts all 23 source bindings and the 13 validation log bindings.
+  Operational status:
+  This result qualifies local source and controlled provider protocols.
+  Apple notification registration, actual provider acceptance, release, and production activation remain separate operations.
+  GitHub revocation can remain pending. Complete erasure requires every provider result to complete.
+  Files:
+  `cmd/server/`, `internal/authkit/`, `internal/controlplane/`, `internal/tenants/config.go`, `README.md`, `ARCHITECTURE.md`, `docs/openapi.yaml`, and `.mprlab/TERMINOLOGY.md`.
+
 ## Planning
 
 - [x] [P002] (P1) Plan a tenant console from the Ledger and LLM Proxy workflows.

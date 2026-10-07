@@ -10,21 +10,25 @@ import (
 )
 
 type databaseAccountErasure struct {
-	UserID          *string
-	OperationID     string  `gorm:"primaryKey"`
-	TenantID        string  `gorm:"uniqueIndex:idx_erasure_account;uniqueIndex:idx_erasure_status"`
-	AccountID       *string `gorm:"uniqueIndex:idx_erasure_account"`
-	StatusHash      string  `gorm:"uniqueIndex:idx_erasure_status;not null"`
-	State           string  `gorm:"index;not null"`
-	Reason          string  `gorm:"not null"`
-	Phase           string  `gorm:"not null"`
-	LeaseToken      string  `gorm:"not null"`
-	LeaseUntilUnix  int64   `gorm:"not null"`
-	NextAttemptUnix int64   `gorm:"index;not null"`
-	AttemptCount    int     `gorm:"not null"`
-	CreatedUnix     int64   `gorm:"not null"`
-	UpdatedUnix     int64   `gorm:"not null"`
-	ExpiresUnix     int64   `gorm:"index;not null"`
+	AccountState         string                    `gorm:"not null;default:retained"`
+	NotificationAudience string                    `gorm:"-"`
+	ProviderSnapshot     bool                      `gorm:"not null;default:false"`
+	Providers            []databaseErasureProvider `gorm:"-"`
+	UserID               *string
+	OperationID          string  `gorm:"primaryKey"`
+	TenantID             string  `gorm:"uniqueIndex:idx_erasure_account;uniqueIndex:idx_erasure_status"`
+	AccountID            *string `gorm:"uniqueIndex:idx_erasure_account"`
+	StatusHash           string  `gorm:"uniqueIndex:idx_erasure_status;not null"`
+	State                string  `gorm:"index;not null"`
+	Reason               string  `gorm:"not null"`
+	Phase                string  `gorm:"not null"`
+	LeaseToken           string  `gorm:"not null"`
+	LeaseUntilUnix       int64   `gorm:"not null"`
+	NextAttemptUnix      int64   `gorm:"index;not null"`
+	AttemptCount         int     `gorm:"not null"`
+	CreatedUnix          int64   `gorm:"not null"`
+	UpdatedUnix          int64   `gorm:"not null"`
+	ExpiresUnix          int64   `gorm:"index;not null"`
 }
 
 func (databaseAccountErasure) TableName() string { return "account_erasures" }
@@ -39,10 +43,13 @@ func (store *DatabaseUserStore) erasureByKey(ctx context.Context, tenantID, keyH
 	if err != nil {
 		return job, fmt.Errorf("account.erasure.status: %w", err)
 	}
+	if err := store.db.WithContext(ctx).Where("operation_id = ?", job.OperationID).Order("provider").Find(&job.Providers).Error; err != nil {
+		return job, err
+	}
 	return job, nil
 }
 
-func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantID, userID, keyHash string) (databaseAccountErasure, error) {
+func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantID, userID, keyHash, notificationAudience string) (databaseAccountErasure, error) {
 	operationID, err := newOpaqueAccountID()
 	if err != nil {
 		return databaseAccountErasure{}, err
@@ -94,8 +101,11 @@ func (store *DatabaseUserStore) beginAccountErasure(ctx context.Context, tenantI
 		if configured != 0 {
 			return errErasureConfigured
 		}
-		job = databaseAccountErasure{UserID: &userID, OperationID: operationID, TenantID: tenantID, AccountID: &accountID, StatusHash: keyHash, State: erasurePending, Phase: erasureProviderPhase, CreatedUnix: now, UpdatedUnix: now}
-		return tx.Create(&job).Error
+		job = databaseAccountErasure{UserID: &userID, OperationID: operationID, TenantID: tenantID, AccountID: &accountID, StatusHash: keyHash, AccountState: erasureAccountRetained, NotificationAudience: notificationAudience, ProviderSnapshot: true, State: erasurePending, Phase: erasureProviderPhase, CreatedUnix: now, UpdatedUnix: now}
+		if err := tx.Create(&job).Error; err != nil {
+			return err
+		}
+		return store.captureErasureProviders(ctx, tx, job)
 	})
 	if err != nil {
 		return databaseAccountErasure{}, fmt.Errorf("account.erasure.begin: %w", err)
@@ -122,27 +132,6 @@ func (store *DatabaseUserStore) claimErasure(ctx context.Context, operationID st
 		return job, false, fmt.Errorf("account.erasure.claim_read: %w", err)
 	}
 	return job, true, nil
-}
-
-func (store *DatabaseUserStore) requiredErasureProviders(ctx context.Context, job databaseAccountErasure) ([]string, error) {
-	var identities []databaseAccountIdentityRecord
-	if err := store.db.WithContext(ctx).Where("tenant_id = ? AND account_id = ?", job.TenantID, *job.AccountID).Find(&identities).Error; err != nil {
-		return nil, err
-	}
-	providers := []string{}
-	for _, identity := range identities {
-		if identity.Provider == accountProviderApple {
-			providers = append(providers, accountProviderApple)
-		}
-	}
-	var githubCount int64
-	if err := store.db.WithContext(ctx).Model(&databaseGitHubCredential{}).Where("tenant_id = ? AND user_id = ?", job.TenantID, gorm.Expr("(SELECT user_id FROM accounts WHERE tenant_id = ? AND account_id = ?)", job.TenantID, *job.AccountID)).Count(&githubCount).Error; err != nil {
-		return nil, err
-	}
-	if githubCount != 0 {
-		providers = append(providers, accountProviderGitHub)
-	}
-	return providers, nil
 }
 
 func (store *DatabaseUserStore) advanceErasure(ctx context.Context, job databaseAccountErasure, next string) error {
@@ -199,7 +188,7 @@ func (store *DatabaseUserStore) completeAccountErasure(ctx context.Context, job 
 			model   any
 			subject string
 		}{
-			{&githubTransaction{}, "account_id"}, {&databaseAccountChallengeRecord{}, "account_id"}, {&passwordCredentialRecord{}, "account_id"}, {&databaseAccountIdentityRecord{}, "account_id"}, {&databaseGitHubCredential{}, "user_id"}, {&userProfileRecord{}, "user_id"}, {&databaseAccountRecord{}, "account_id"},
+			{&databaseAppleGrant{}, "account_id"}, {&githubTransaction{}, "account_id"}, {&databaseAccountChallengeRecord{}, "account_id"}, {&passwordCredentialRecord{}, "account_id"}, {&databaseAccountIdentityRecord{}, "account_id"}, {&databaseGitHubCredential{}, "user_id"}, {&userProfileRecord{}, "user_id"}, {&databaseAccountRecord{}, "account_id"},
 		}
 		for _, model := range models {
 			subject := accountID
@@ -211,13 +200,21 @@ func (store *DatabaseUserStore) completeAccountErasure(ctx context.Context, job 
 			}
 		}
 		return tx.Model(&databaseAccountErasure{}).Where("operation_id = ? AND lease_token = ?", job.OperationID, job.LeaseToken).
-			Updates(map[string]any{"state": erasureCompleted, "reason": "", "phase": "", "account_id": nil, "user_id": nil, "lease_token": "", "lease_until_unix": 0, "next_attempt_unix": 0, "attempt_count": 0, "updated_unix": now, "expires_unix": now + int64(erasureReceiptTTL/time.Second)}).Error
+			Updates(map[string]any{"account_state": erasureAccountRemoved, "phase": erasureRevokePhase, "account_id": nil, "user_id": nil, "updated_unix": now}).Error
 	})
 }
 
 func (store *DatabaseUserStore) cleanupErasureReceipts(ctx context.Context) error {
 	now := store.now().UTC().Unix()
-	if err := store.db.WithContext(ctx).Where("state = ? AND expires_unix > 0 AND expires_unix <= ?", erasureCompleted, now).Delete(&databaseAccountErasure{}).Error; err != nil {
+	if err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("operation_id IN (SELECT operation_id FROM account_erasures WHERE state = ? AND expires_unix > 0 AND expires_unix <= ?)", erasureCompleted, now).Delete(&databaseErasureProvider{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("operation_id IN (SELECT operation_id FROM account_erasures WHERE state = ? AND expires_unix > 0 AND expires_unix <= ?)", erasureCompleted, now).Delete(&databaseAppleErasureSubject{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("state = ? AND expires_unix > 0 AND expires_unix <= ?", erasureCompleted, now).Delete(&databaseAccountErasure{}).Error
+	}); err != nil {
 		return fmt.Errorf("account.erasure.receipt_cleanup: %w", err)
 	}
 	return nil

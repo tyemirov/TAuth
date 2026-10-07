@@ -70,6 +70,7 @@ type AppleOAuth struct {
 	enabled               bool
 	clientID              string
 	nativeClientIDs       []string
+	notificationAudience  string
 	teamID                string
 	keyID                 string
 	privateKey            string
@@ -284,6 +285,7 @@ func LoadResolvedConfig(document FileDocument) (Config, error) {
 	originToTenantIDs := make(map[string][]TenantID)
 	nativeGoogleClientIDs := make(map[string]TenantID)
 	nativeAppleClientIDs := make(map[string]TenantID)
+	appleNotificationAudiences := make(map[string]TenantID)
 	oauthResourceIDs := make(map[string]TenantID)
 	oauthClientIDs := make(map[string]TenantID)
 	orderedTenants := make([]Tenant, 0, len(document.Tenants))
@@ -313,6 +315,12 @@ func LoadResolvedConfig(document FileDocument) (Config, error) {
 				)
 			}
 			nativeGoogleClientIDs[nativeGoogleClientID] = tenant.id
+		}
+		if audience := tenant.AppleOAuth().NotificationAudience(); audience != "" {
+			if owner, exists := appleNotificationAudiences[audience]; exists {
+				return Config{}, fmt.Errorf("%w: duplicate_apple_notification_audience tenant=%s other_tenant=%s", ErrInvalidTenantConfig, tenant.id, owner)
+			}
+			appleNotificationAudiences[audience] = tenant.id
 		}
 		for _, nativeAppleClientID := range tenant.AppleOAuth().NativeClientIDs() {
 			if otherTenantID, exists := nativeAppleClientIDs[nativeAppleClientID]; exists {
@@ -488,6 +496,9 @@ func (settings AppleOAuth) Enabled() bool {
 func (settings AppleOAuth) ClientID() string {
 	return settings.clientID
 }
+
+// NotificationAudience returns the explicitly configured primary App ID for Apple notifications.
+func (settings AppleOAuth) NotificationAudience() string { return settings.notificationAudience }
 
 // NativeClientIDs returns the accepted native Apple audiences.
 func (settings AppleOAuth) NativeClientIDs() []string {
@@ -969,6 +980,7 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 		enabled:               true,
 		clientID:              clientID,
 		nativeClientIDs:       nativeClientIDs,
+		notificationAudience:  strings.TrimSpace(raw.NotificationAudience),
 		teamID:                teamID,
 		keyID:                 keyID,
 		privateKey:            privateKey,
@@ -1022,6 +1034,7 @@ func parseApplePrivateKey(raw FileAppleOAuth, tenantID TenantID) (string, error)
 func appleOAuthBlockHasFields(raw FileAppleOAuth) bool {
 	return strings.TrimSpace(raw.ClientID) != "" ||
 		len(raw.NativeClientIDs) > 0 ||
+		strings.TrimSpace(raw.NotificationAudience) != "" ||
 		strings.TrimSpace(raw.TeamID) != "" ||
 		strings.TrimSpace(raw.KeyID) != "" ||
 		strings.TrimSpace(raw.PrivateKey) != "" ||
@@ -1613,6 +1626,7 @@ func expandFileTenantEnv(tenant FileTenant) FileTenant {
 	tenant.GitHubOAuth.CredentialKey = os.ExpandEnv(tenant.GitHubOAuth.CredentialKey)
 	tenant.GitHubOAuth.RedirectURI = os.ExpandEnv(tenant.GitHubOAuth.RedirectURI)
 	tenant.GitHubOAuth.Scopes = expandEnvSlice(tenant.GitHubOAuth.Scopes)
+	tenant.AppleOAuth.NotificationAudience = os.ExpandEnv(tenant.AppleOAuth.NotificationAudience)
 	tenant.AppleOAuth.ClientID = os.ExpandEnv(tenant.AppleOAuth.ClientID)
 	tenant.AppleOAuth.NativeClientIDs = expandEnvSlice(tenant.AppleOAuth.NativeClientIDs)
 	tenant.AppleOAuth.TeamID = os.ExpandEnv(tenant.AppleOAuth.TeamID)
@@ -1704,6 +1718,7 @@ type FileAppleOAuth struct {
 	Enabled               yamlBool `json:"enabled" yaml:"enabled"`
 	ClientID              string   `json:"client_id" yaml:"client_id"`
 	NativeClientIDs       []string `json:"native_client_ids" yaml:"native_client_ids"`
+	NotificationAudience  string   `json:"notification_audience" yaml:"notification_audience"`
 	TeamID                string   `json:"team_id" yaml:"team_id"`
 	KeyID                 string   `json:"key_id" yaml:"key_id"`
 	PrivateKey            string   `json:"private_key" yaml:"private_key"`

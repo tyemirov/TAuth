@@ -7,7 +7,7 @@ TAuth is an authentication service that sits between identity providers and your
 ```
 Browser ──(Google ID token)──────────────> TAuth ──(verify)──> Google Identity Services
 Browser ──(Apple auth code)──────────────> TAuth ──(exchange/verify)──> Apple ID
-Native iOS ──(Apple ID token)────────────> TAuth ──(verify)──> Apple ID
+Native iOS ──(Apple ID token + code)─────> TAuth ──(exchange/verify)──> Apple ID
 Browser ──(email/password credential)────> TAuth ──(bcrypt)──> PasswordCredentialStore
 Browser <─(HttpOnly cookies)───────────── TAuth ──(refresh token persistence)──> Database
 ```
@@ -39,7 +39,7 @@ are public integration surfaces.
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | GET    | `/auth/apple/native/config` | Return native Apple client metadata for the resolved tenant | `200` JSON `{ client_id, client_ids, nonce_required, ... }` |
-| POST   | `/auth/apple/native` | Verify a native Apple ID token and issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
+| POST   | `/auth/apple/native` | Exchange the native authorization code, verify both ID tokens, and issue session cookies | `200` JSON `{ user_id, user_email, ... }` |
 | GET    | `/auth/apple/start` | Start a Sign in with Apple redirect for the resolved tenant | `302` to Apple authorization endpoint |
 | GET/POST | `/auth/apple/callback` | Complete Apple code exchange, validate Apple ID token, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
@@ -115,10 +115,12 @@ Native iOS apps use the system Sign in with Apple sheet:
 
 1. The client reads `GET /auth/apple/native/config` with `X-TAuth-Tenant` and confirms its App ID is the selected client.
 2. The client obtains a one-time nonce from `POST /auth/nonce` with the same tenant header.
-3. The client passes the nonce to Apple and obtains an Apple ID token.
-4. The client posts the token, nonce, and available `fullName` components to `/auth/apple/native`.
+3. Pass the nonce to Apple. Get the ID token and authorization code.
+4. Post `apple_id_token`, `authorization_code`, and `nonce_token` to `/auth/apple/native`. Include available `full_name` components.
 5. TAuth stores the first credential name and keeps it when a later authorization omits the name.
-6. TAuth validates the Apple signature, issuer, expiration, configured native audience, verified email, and exact nonce. It then consumes the nonce and issues the standard cookies.
+6. Validate the native ID token. Exchange the authorization code with its exact audience.
+7. Require matching subject, audience, and nonce values in the exchanged ID token.
+8. Store the encrypted refresh token before session creation.
 
 Apple Developer groups the native App ID with the browser Services ID. This provider association keeps the Apple subject stable across the two Apple sign-in modes. TAuth then resolves both modes to the same provider identity and account.
 
@@ -134,9 +136,14 @@ Apple login is tenant-enabled with `apple_oauth.enabled: true`. It uses a provid
 6. `allowed_users` applies to the Apple email the same way it applies to Google and password login.
 7. Resolve the verified Apple subject through its stored provider binding to the persistent account.
    Keep the same public user ID in either account-management state.
-8. Session JWT and refresh cookie issuance then uses the same finalizer as other login methods.
+8. Store the encrypted refresh token before session cookie creation.
+9. Issue the session JWT and refresh cookie with the shared finalizer.
 
-TAuth does not expose Apple access tokens to JavaScript and does not store Apple API refresh tokens.
+TAuth keeps Apple provider tokens out of JavaScript. It stores refresh tokens with the canonical server encryption key before session creation.
+Account erasure copies the encrypted grants into operation storage before it removes account data.
+Local account removal and provider revocation have separate durable outcomes.
+A completed provider outcome must have verified revocation or a qualified Apple notification.
+Accounts without stored grants get local removal and a manual provider revocation outcome.
 
 ### 3.6 Email/password accounts
 

@@ -4164,6 +4164,9 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 		}
 		tokenRequest = request.PostForm
 		idToken := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.web", "apple-subject", "apple@example.com", "Apple User", expectedNonce)
+		if strings.HasPrefix(request.PostForm.Get("code"), "ey") {
+			idToken = request.PostForm.Get("code")
+		}
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(map[string]interface{}{
 			"access_token":  "apple-access-token",
@@ -4199,14 +4202,14 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 		JWKSURL:               appleServer.URL + "/auth/keys",
 	}
 	registry := NewSingleTenantRegistry(config)
-	userStore := newTestUserStore()
+	userStore := newAppleHTTPUserStore(testingHandle)
 	refreshStore := NewMemoryRefreshTokenStore()
 	clock := &controllableClock{current: time.Now().UTC()}
 	ProvideClock(clock)
 	defer ProvideClock(nil)
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, userStore)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	client := server.Client()
@@ -4321,8 +4324,9 @@ func TestHTTPAppleOAuthStartAndCallbackMintSession(testingHandle *testing.T) {
 	nativeNonce := issueNonceViaClient(testingHandle, client, server.URL)
 	nativeIDToken := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.ios", "apple-subject", "apple@example.com", "Apple User", nativeNonce)
 	nativeLoginPayload, nativeMarshalErr := json.Marshal(map[string]string{
-		"apple_id_token": nativeIDToken,
-		"nonce_token":    nativeNonce,
+		"apple_id_token":     nativeIDToken,
+		"authorization_code": nativeIDToken,
+		"nonce_token":        nativeNonce,
 	})
 	if nativeMarshalErr != nil {
 		testingHandle.Fatalf("marshal native Apple login payload: %v", nativeMarshalErr)
@@ -4385,6 +4389,7 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	}
 	appleKeyID := "native-apple-test-key"
 	appleRouter := http.NewServeMux()
+	mountAppleTestCodeExchange(appleRouter)
 	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
@@ -4400,12 +4405,13 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 		Enabled:         true,
 		ClientID:        "com.example.web",
 		NativeClientIDs: []string{"com.example.ios"},
-		JWKSURL:         appleServer.URL + "/auth/keys",
+		JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 	}
 	userStore, userStoreErr := NewDatabaseUserStore(context.Background(), sqliteDatabaseURL(testingHandle))
 	if userStoreErr != nil {
 		testingHandle.Fatalf("create native Apple user store: %v", userStoreErr)
 	}
+	userStore.SetProviderGrantCipher(newTestProviderGrantCipher(testingHandle))
 	router := gin.New()
 	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, userStore, nil, nil)
 	server := newInProcessServer(router, true)
@@ -4445,8 +4451,9 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	delete(claims, "name")
 	idToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, claims)
 	loginPayload, marshalErr := json.Marshal(map[string]interface{}{
-		"apple_id_token": idToken,
-		"nonce_token":    nonce,
+		"apple_id_token":     idToken,
+		"authorization_code": idToken,
+		"nonce_token":        nonce,
 		"full_name": map[string]string{
 			"name_prefix": "Dr.",
 			"given_name":  "Native",
@@ -4509,8 +4516,9 @@ func TestHTTPNativeAppleConfigAndLoginMintSession(testingHandle *testing.T) {
 	delete(secondClaims, "name")
 	secondIDToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, secondClaims)
 	secondPayload, secondMarshalErr := json.Marshal(map[string]string{
-		"apple_id_token": secondIDToken,
-		"nonce_token":    secondNonce,
+		"apple_id_token":     secondIDToken,
+		"authorization_code": secondIDToken,
+		"nonce_token":        secondNonce,
 	})
 	if secondMarshalErr != nil {
 		testingHandle.Fatalf("marshal later native Apple login payload: %v", secondMarshalErr)
@@ -4567,8 +4575,9 @@ func TestHTTPNativeAppleLoginCancelsJWKSRequest(testingHandle *testing.T) {
 
 	nonce := issueNonceViaClient(testingHandle, server.Client(), server.URL)
 	payload, marshalErr := json.Marshal(map[string]string{
-		"apple_id_token": "unverified-token",
-		"nonce_token":    nonce,
+		"apple_id_token":     "unverified-token",
+		"authorization_code": "fixture-code",
+		"nonce_token":        nonce,
 	})
 	if marshalErr != nil {
 		testingHandle.Fatalf("marshal native Apple payload: %v", marshalErr)
@@ -4696,6 +4705,7 @@ func TestHTTPNativeAppleLoginRejectsInvalidClaims(testingHandle *testing.T) {
 	}
 	appleKeyID := "native-apple-rejection-key"
 	appleRouter := http.NewServeMux()
+	mountAppleTestCodeExchange(appleRouter)
 	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
@@ -4710,7 +4720,7 @@ func TestHTTPNativeAppleLoginRejectsInvalidClaims(testingHandle *testing.T) {
 		Enabled:         true,
 		ClientID:        "com.example.web",
 		NativeClientIDs: []string{"com.example.ios"},
-		JWKSURL:         appleServer.URL + "/auth/keys",
+		JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 	}
 	router := gin.New()
 	MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
@@ -4792,8 +4802,9 @@ func TestHTTPNativeAppleLoginRejectsInvalidClaims(testingHandle *testing.T) {
 				bodyNonce = testCase.changeBodyNonce(nonce)
 			}
 			payload, marshalErr := json.Marshal(map[string]string{
-				"apple_id_token": idToken,
-				"nonce_token":    bodyNonce,
+				"apple_id_token":     idToken,
+				"authorization_code": idToken,
+				"nonce_token":        bodyNonce,
 			})
 			if marshalErr != nil {
 				subTest.Fatalf("marshal native Apple payload: %v", marshalErr)
@@ -4822,6 +4833,7 @@ func TestHTTPNativeAppleLoginEnforcesTransportAndUserPolicy(testingHandle *testi
 	}
 	appleKeyID := "native-apple-policy-key"
 	appleRouter := http.NewServeMux()
+	mountAppleTestCodeExchange(appleRouter)
 	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
@@ -4863,7 +4875,7 @@ func TestHTTPNativeAppleLoginEnforcesTransportAndUserPolicy(testingHandle *testi
 				Enabled:         true,
 				ClientID:        "com.example.web",
 				NativeClientIDs: []string{"com.example.ios"},
-				JWKSURL:         appleServer.URL + "/auth/keys",
+				JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 			}
 			router := gin.New()
 			MountAuthRoutes(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
@@ -4873,8 +4885,9 @@ func TestHTTPNativeAppleLoginEnforcesTransportAndUserPolicy(testingHandle *testi
 			nonce := issueNonceViaClient(subTest, server.Client(), server.URL)
 			idToken := mintMockAppleIDToken(subTest, rsaKey, appleKeyID, "com.example.ios", "policy-subject", "denied@example.com", "Denied User", nonce)
 			payload, marshalErr := json.Marshal(map[string]string{
-				"apple_id_token": idToken,
-				"nonce_token":    nonce,
+				"apple_id_token":     idToken,
+				"authorization_code": idToken,
+				"nonce_token":        nonce,
 			})
 			if marshalErr != nil {
 				subTest.Fatalf("marshal native Apple policy payload: %v", marshalErr)
@@ -4903,6 +4916,7 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	}
 	appleKeyID := "native-apple-account-key"
 	appleRouter := http.NewServeMux()
+	mountAppleTestCodeExchange(appleRouter)
 	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
@@ -4918,10 +4932,10 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 		Enabled:         true,
 		ClientID:        "com.example.web",
 		NativeClientIDs: []string{"com.example.ios"},
-		JWKSURL:         appleServer.URL + "/auth/keys",
+		JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 	}
-	accountStore := NewMemoryPasswordCredentialStore()
-	userStore := newTestUserStore()
+	userStore := newAppleHTTPUserStore(testingHandle)
+	accountStore := userStore
 	router := gin.New()
 	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), userStore, NewMemoryRefreshTokenStore(), nil, accountStore, nil, nil)
 	server := newInProcessServer(router, true)
@@ -4935,8 +4949,9 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 		delete(claims, "name")
 		idToken := mintMockAppleIDTokenWithClaims(testingHandle, rsaKey, appleKeyID, claims)
 		payload := map[string]interface{}{
-			"apple_id_token": idToken,
-			"nonce_token":    nonce,
+			"apple_id_token":     idToken,
+			"authorization_code": idToken,
+			"nonce_token":        nonce,
 		}
 		if includeFullName {
 			payload["full_name"] = map[string]string{
@@ -4996,7 +5011,7 @@ func TestHTTPNativeAppleLoginUsesAccountManagementIdentity(testingHandle *testin
 	if accountProfile.DisplayName != "Account Apple User" {
 		testingHandle.Fatalf("expected persisted Apple account full name, got %#v", accountProfile)
 	}
-	if _, exists := userStore.profiles[config.TenantID][firstUserID]; !exists {
+	if _, profileErr := userStore.ResolveAccountForUser(context.Background(), config.TenantID, firstUserID); profileErr != nil {
 		testingHandle.Fatalf("expected account-managed user profile %q to be persisted", firstUserID)
 	}
 }
@@ -5260,6 +5275,7 @@ func TestHTTPNativeAppleLoginIsTenantIsolated(testingHandle *testing.T) {
 	}
 	appleKeyID := "native-apple-tenant-key"
 	appleRouter := http.NewServeMux()
+	mountAppleTestCodeExchange(appleRouter)
 	appleRouter.HandleFunc("/auth/keys", func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(responseWriter).Encode(mockAppleJWKS(rsaKey, appleKeyID))
@@ -5277,7 +5293,7 @@ func TestHTTPNativeAppleLoginIsTenantIsolated(testingHandle *testing.T) {
 		Enabled:         true,
 		ClientID:        "com.example.web.a",
 		NativeClientIDs: []string{"com.example.ios.a"},
-		JWKSURL:         appleServer.URL + "/auth/keys",
+		JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 	}
 	configB := newTestServerConfig()
 	configB.TenantID = "tenant-b"
@@ -5287,7 +5303,7 @@ func TestHTTPNativeAppleLoginIsTenantIsolated(testingHandle *testing.T) {
 		Enabled:         true,
 		ClientID:        "com.example.web.b",
 		NativeClientIDs: []string{"com.example.ios.b"},
-		JWKSURL:         appleServer.URL + "/auth/keys",
+		JWKSURL:         appleServer.URL + "/auth/keys", TokenEndpoint: appleServer.URL + "/auth/token", PrivateKey: generateTestAppleClientPrivateKeyPEM(testingHandle), TeamID: "TEAM", KeyID: "KEY",
 	}
 	registry := NewTenantRegistryFromMap(configA.TenantID, map[string]ServerConfig{
 		configA.TenantID: configA,
@@ -5324,10 +5340,10 @@ tenants:
 	if resolverErr != nil {
 		testingHandle.Fatalf("create tenant resolver: %v", resolverErr)
 	}
-	userStore := newTestUserStore()
+	userStore := newAppleHTTPUserStore(testingHandle)
 	router := gin.New()
 	router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-	MountAuthRoutes(router, registry, userStore, NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, NewMemoryRefreshTokenStore(), nil, userStore)
 	server := newInProcessServer(router, true)
 	defer server.Close()
 	client := server.Client()
@@ -5360,8 +5376,9 @@ tenants:
 	nonceA := issueNonceViaClientWithHeaders(testingHandle, client, server.URL, tenantAHeaders)
 	tokenA := mintMockAppleIDToken(testingHandle, rsaKey, appleKeyID, "com.example.ios.a", "tenant-a-subject", "tenant-a@example.com", "Tenant A User", nonceA)
 	payloadA, marshalErr := json.Marshal(map[string]string{
-		"apple_id_token": tokenA,
-		"nonce_token":    nonceA,
+		"apple_id_token":     tokenA,
+		"authorization_code": tokenA,
+		"nonce_token":        nonceA,
 	})
 	if marshalErr != nil {
 		testingHandle.Fatalf("marshal tenant A native Apple payload: %v", marshalErr)
@@ -5395,11 +5412,11 @@ tenants:
 		testingHandle.Fatalf("expected tenant A native Apple login status 200, got %d", tenantAResponse.StatusCode)
 	}
 	firstUserID := fixtureSessionSubject(testingHandle, collectCookies(tenantAResponse.Cookies())[registry.Config("tenant-a").SessionCookieName].Value, registry.Config("tenant-a"))
-	if _, exists := userStore.profiles["tenant-a"][firstUserID]; !exists {
-		testingHandle.Fatalf("expected tenant A Apple profile in tenant A store")
+	if _, err := userStore.ResolveAccountForUser(context.Background(), "tenant-a", firstUserID); err != nil {
+		testingHandle.Fatal(err)
 	}
-	if _, exists := userStore.profiles["tenant-b"][firstUserID]; exists {
-		testingHandle.Fatalf("tenant A Apple profile leaked into tenant B store")
+	if _, err := userStore.ResolveAccountForUser(context.Background(), "tenant-b", firstUserID); err == nil {
+		testingHandle.Fatal("tenant identity leaked")
 	}
 }
 

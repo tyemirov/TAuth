@@ -5,7 +5,7 @@
 TAuth accepts Google, Apple, GitHub, and tenant-managed password authentication. It issues first-party cookies and keeps provider tokens out of browser storage.
 The Go service owns `/auth/*` and `/me`. Product applications call these endpoints with the shipped `tauth.js` helper.
 
-TAuth validates provider identities and issues first-party session cookies. Its optional OAuth 2.1 authorization server issues TAuth access tokens for declared first-party resources. It does not keep provider access tokens. GitHub and Apple token exchanges occur only on the server.
+TAuth validates provider identities and issues first-party session cookies. Its optional OAuth 2.1 authorization server issues TAuth access tokens for declared first-party resources. It stores encrypted Apple refresh tokens for provider revocation. GitHub and Apple token exchanges occur only on the server.
 
 ---
 
@@ -366,7 +366,7 @@ The GitHub Pages artifact publishes the documentation site and the single helper
 
 `tauth.js` already fetches nonces, initializes Google Identity Services, and exchanges credentials for you. Render the button, provide `onAuthenticated` / `onUnauthenticated` callbacks, and the helper keeps cookies fresh across your origin. When building a custom UI, follow the handshake described in [ARCHITECTURE.md#google-sign-in-exchange](ARCHITECTURE.md#google-sign-in-exchange): fetch a nonce, pass it to Google when initializing the popup, then POST `{ google_id_token, nonce_token }` to `/auth/google`. The minted `app_session` cookie authenticates `/api/me` and any downstream routes on the configured domain (e.g. `.example.com`).
 
-For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control. The control calls `startAppleLogin()` or opens the `getAppleLoginUrl()` value. The helper builds `/auth/apple/start` and includes the tenant ID when necessary. It also adds the current page as `return_to`. The callback can then return to the product after TAuth sets cookies. `startAppleLogin()` records the restore hint before it leaves the page. The returned app uses `/auth/session` to restore the session. A native iOS app first reads `/auth/apple/native/config` and obtains a TAuth nonce. It then posts the Apple ID token and nonce to `/auth/apple/native`. TAuth validates the token and nonce. It then sets the same cookies and profile data as the other providers.
+For tenants with `apple_oauth.enabled: true`, render a Sign in with Apple control. The control calls `startAppleLogin()` or opens the `getAppleLoginUrl()` value. The helper builds `/auth/apple/start` and includes the tenant ID when necessary. It also adds the current page as `return_to`. The callback can then return to the product after TAuth sets cookies. `startAppleLogin()` records the restore hint before it leaves the page. The returned app uses `/auth/session` to restore the session. A native iOS app first reads `/auth/apple/native/config` and obtains a TAuth nonce. It posts the Apple ID token, authorization code, and nonce to `/auth/apple/native`. TAuth validates both ID tokens and the nonce. It then sets the same cookies and profile data as the other providers.
 
 For tenants with `password_auth.enabled: true`, use `exchangePasswordCredential({ email, password })` through the helper.
 The direct API is `/auth/password/login` with `credentials: "include"`.
@@ -408,7 +408,11 @@ See the [stable application user ID contract](docs/application-subjects.md).
 
 The Apple callback accepts cross-origin form navigation without CORS response headers. Ordinary API routes retain the tenant CORS allowlist.
 
-Apple redirects back to TAuth with an authorization code. TAuth posts that code to Apple’s token endpoint with an ES256 client secret, validates the returned ID token through Apple JWKS, checks the original nonce, enforces `allowed_users`, issues the standard first-party cookies, and redirects to the signed `return_to` URL when it was provided. Apple access tokens are not returned to the browser or stored.
+Apple redirects back to TAuth with an authorization code.
+TAuth posts the code to Apple with an ES256 client secret.
+It validates the ID token through Apple JWKS and checks the original nonce.
+It enforces `allowed_users` and issues the standard cookies.
+If the request included a signed `return_to` URL, TAuth redirects to that URL. TAuth stores the Apple refresh token with the server encryption key before it issues a session. It keeps provider tokens out of browser responses.
 
 ### Native desktop and mobile login (system browser + PKCE)
 
@@ -432,9 +436,12 @@ Set `enable_tenant_header_override: true` because native requests do not send a 
 1. Fetch `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
 2. Fetch a one-time nonce from `POST /auth/nonce` with the same tenant header.
 3. Pass that nonce to the native Apple authorization request.
-4. Post the token, nonce, and available `fullName` components to `/auth/apple/native`.
+4. Post `apple_id_token`, `authorization_code`, `nonce_token`, and available `full_name` components to `/auth/apple/native`.
 5. Reuse the first-party cookies that TAuth returns.
 
+TAuth exchanges the authorization code with the exact native audience. It omits the browser callback URI for this exchange.
+The exchanged ID token must have the same subject, audience, and nonce as the native ID token.
+TAuth stores the encrypted refresh token before it issues a session.
 TAuth accepts only a configured `native_client_ids` audience. It also requires Apple issuer, signature, expiration, verified email, and an exact nonce match. It consumes each nonce once. The mobile app does not receive or store Apple access or refresh tokens.
 TAuth stores the native credential name during the first authorization. Later authorizations keep that stored display name when Apple omits it.
 
@@ -671,7 +678,7 @@ The tenant must enable `account_management.enabled`.
 Unknown JSON fields return HTTP 400. Invalid keys return HTTP 422.
 
 The HTTP 202 response contains `operation_id`, `state`, `reason`, `created_at`,
-`updated_at`, and `expires_at`. Its Location is `/auth/account-erasure`.
+`updated_at`, `expires_at`, `account_state`, and `provider_revocations`. Its Location is `/auth/account-erasure`.
 Read that resource with `Authorization: Bearer CLIENT_GENERATED_KEY`.
 Status reads return HTTP 200 and use `Cache-Control: no-store`.
 Keep the key private. Do not put it in a URL or log it.
@@ -686,7 +693,7 @@ Unknown keys and expired receipts return HTTP 404.
 The operation states are `pending`, `running`, `blocked`, and `completed`.
 A blocked operation has one of these reasons: `provider_revocation_unavailable`,
 `provider_revocation_failed`, `oauth_purge_failed`, `refresh_purge_failed`, or
-`user_purge_failed`. Incomplete operations do not expire. A completed receipt
+`user_purge_failed`, or `apple_revocation_manual_action_required`. Incomplete operations do not expire. A completed receipt
 expires after 30 days. Completion removes its account ID and phase details.
 The server removes expired receipts during automatic recovery.
 
@@ -704,15 +711,45 @@ Each phase has a 15-second deadline. The supported storage contract requires
 canonical database user profiles and database refresh and OAuth stores for the
 same selected database URL. Unsupported store combinations return HTTP 503.
 
-Provider revocation runs before local credential removal. Apple identities and
-stored GitHub grants require a qualified provider revoker. The current server
-has no such revoker. Those operations remain blocked and retain their credentials.
-Local unlinking does not count as provider revocation.
-Accounts without those grants can complete erasure of account profiles,
-identities, passwords, challenges, GitHub credential rows, and application refresh rows.
-Erasure also removes OAuth authorization codes, consents, and refresh grants.
+Account removal and provider revocation have separate durable results.
+`account_state` is `retained` or `removed`.
+`provider_revocations` contains one entry for each required provider, in provider name order.
+Each entry contains `provider` (`apple` or `github`) and `state` (`pending`, `manual_action_required`, or `revoked`).
+Only Apple can require manual action. An empty array means no required provider revocations.
+`completed` requires account removal and every required provider revocation.
+
+Initiation copies the encrypted provider grants into the operation before account removal.
+Account removal deletes profiles, identities, passwords, challenges, provider credential rows, and application refresh rows.
+It also deletes OAuth authorization codes, consents, and refresh grants.
+Pending operations keep only the minimum encrypted revocation context and operation fences.
+The HTTP routes and background worker use the same Apple revoker.
+Apple HTTP 200 confirms token revocation, including an already invalid token.
+A failed provider request leaves provider revocation pending after account removal.
+The worker repeats the request automatically.
+Stored GitHub grants remain pending until a qualified GitHub revoker is available.
+Local removal does not count as provider revocation.
+
+Accounts without stored Apple grants still get local account removal.
+Their Apple entry becomes `manual_action_required`.
+Use [Apple's manual revocation instructions](https://support.apple.com/en-us/102571) to remove the app authorization.
+The operation does not claim provider completion without a verified Apple notification.
+
+Configure `apple_oauth.notification_audience` with the exact primary App ID for the Apple group.
+The value is optional. An empty value disables notification acceptance for that tenant.
+Register `/auth/apple/notifications` as the server notification endpoint in Apple Developer.
+Verify the primary App ID and provider registration separately from local tests.
+The endpoint accepts JSON `{"payload":"SIGNED_APPLE_NOTIFICATION"}` without a session cookie.
+It verifies the Apple signature, issuer, explicit audience, event subject, and event time.
+Only `consent-revoked` and `account-deleted` can confirm provider revocation.
+Email events cannot complete erasure.
+Each event must be later than the operation and each applicable grant generation, measured in whole seconds.
+Same-second events keep the operation pending because their order is ambiguous.
+Durable event receipts prevent repeated events from completing another operation.
+An ordinary Apple login cannot bypass an incomplete operation fence.
+
+These provider rules follow [Apple TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
 
 Completion does not delete RevenueCat records or backups. Previously issued
 access tokens can remain valid in an offline verifier until their expiry.
-Database schema version 8 adds the operation table through automatic startup
-migration and preserves existing account data.
+Database schema version 9 adds encrypted grant storage and provider outcomes through automatic startup migration.
+The migration preserves existing accounts and marks earlier completed receipts as removed.

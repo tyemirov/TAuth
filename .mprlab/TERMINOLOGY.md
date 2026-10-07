@@ -204,6 +204,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 Use the simple present, simple past, simple future, imperative, or infinitive form of these verbs.
 
+- `provider grant`: A reusable credential that permits access to an external identity provider.
+- `provider revocation`: The removal of access that a provider grant permits.
+- `revocation context`: The minimum encrypted provider data that an erasure operation needs after account removal.
+- `Apple notification`: A signed Apple event that reports an account or consent change.
+
 ## Repository Technical Verbs
 
 Add repository-specific technical verbs below this line.

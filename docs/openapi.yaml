@@ -13,6 +13,48 @@ info:
 servers:
   - url: https://auth.example.com
 paths:
+  /auth/apple/native:
+    post:
+      operationId: authenticateNativeApple
+      description: Exchange the authorization code, verify both Apple ID tokens, and issue a session after encrypted grant storage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apple_id_token, authorization_code, nonce_token]
+              properties:
+                apple_id_token: {type: string}
+                authorization_code: {type: string}
+                nonce_token: {type: string}
+                full_name: {type: object, additionalProperties: {type: string}}
+      responses:
+        "200": {description: The authenticated public user profile and session cookies.}
+        "400": {description: Invalid JSON or a missing authorization code or nonce.}
+        "401": {description: Invalid identity or an authorization code exchange mismatch.}
+        "403": {description: The user is not allowed.}
+        "404": {description: Native Apple authentication is disabled.}
+        "503": {description: The encrypted grant cannot be stored. No session is issued.}
+  /auth/apple/notifications:
+    post:
+      operationId: acceptAppleNotification
+      description: Verify an Apple event with the explicit notification audience and record its durable receipt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [payload]
+              properties:
+                payload: {type: string, maxLength: 65536}
+      responses:
+        "204": {description: The verified event was processed. Stale or ambiguous events cannot complete erasure.}
+        "400": {description: Invalid JSON or notification size.}
+        "401": {description: Invalid signature, issuer, audience, or event data.}
+        "503": {description: Notification persistence is unavailable.}
   /auth/account:
     patch:
       operationId: correctAccountProfile
@@ -1390,11 +1432,22 @@ components:
     AccountErasureOperation:
       type: object
       additionalProperties: false
-      required: [operation_id, state, reason, created_at, updated_at, expires_at]
+      required: [operation_id, state, reason, created_at, updated_at, expires_at, account_state, provider_revocations]
       properties:
         operation_id: {type: string}
+        account_state: {type: string, enum: [retained, removed]}
+        provider_revocations:
+          type: array
+          uniqueItems: true
+          items:
+            type: object
+            additionalProperties: false
+            required: [provider, state]
+            properties:
+              provider: {type: string, enum: [apple, github]}
+              state: {type: string, enum: [pending, manual_action_required, revoked]}
         state: {type: string, enum: [pending, running, blocked, completed]}
-        reason: {type: string, enum: ["", provider_revocation_unavailable, provider_revocation_failed, oauth_purge_failed, refresh_purge_failed, user_purge_failed]}
+        reason: {type: string, enum: ["", provider_revocation_unavailable, provider_revocation_failed, oauth_purge_failed, refresh_purge_failed, user_purge_failed, apple_revocation_manual_action_required]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         expires_at: {type: [string, "null"], format: date-time}

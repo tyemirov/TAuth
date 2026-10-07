@@ -25,7 +25,7 @@ const (
 	schemaMigrationLookupByName  = "store_name = ?"
 	schemaErrorFormat            = "%s.schema.%s: %w"
 	refreshStoreSchemaVersion    = 1
-	userStoreSchemaVersion       = 8
+	userStoreSchemaVersion       = 9
 	nonceStoreSchemaVersion      = 1
 	oauthStoreSchemaVersion      = 3
 )
@@ -272,6 +272,11 @@ func migrateDatabaseSchema(requestContext context.Context, databaseHandle *gorm.
 	migrationError := databaseHandle.WithContext(requestContext).AutoMigrate(models...)
 	if migrationError != nil {
 		return fmt.Errorf("%s.migrate.%s: %w", errorPrefix, driverLabel, migrationError)
+	}
+	if errorPrefix == userStoreErrorPrefix && migrationRecord.Version == 9 {
+		if err := databaseHandle.WithContext(requestContext).Model(&databaseAccountErasure{}).Where("state = ? AND account_id IS NULL", erasureCompleted).Update("account_state", erasureAccountRemoved).Error; err != nil {
+			return fmt.Errorf(schemaErrorFormat, errorPrefix, driverLabel, err)
+		}
 	}
 	upsertError := databaseHandle.WithContext(requestContext).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: schemaMigrationNameColumn}},

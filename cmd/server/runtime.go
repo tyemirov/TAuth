@@ -30,6 +30,7 @@ type runtimeDependencies struct {
 	nonce      *authkit.DatabaseNonceStore
 	oauth      oauthserver.Store
 	github     authkit.GitHubTransactionStore
+	provider   authkit.AccountProviderRevoker
 	store      *controlplane.Store
 	management *controlplane.Management
 	console    tenants.FileTenant
@@ -219,6 +220,7 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		oauthBrowserPaths[tenants.GitHubStartPath] = struct{}{}
 		oauthBrowserPaths[tenants.GitHubCallbackPath] = struct{}{}
 		oauthBrowserPaths[authkit.AppleCallbackPath] = struct{}{}
+		oauthBrowserPaths[authkit.AppleNotificationPath] = struct{}{}
 		router.Use(corsMiddlewareExceptPaths(corsMiddleware, oauthBrowserPaths))
 	}
 
@@ -285,7 +287,7 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		ctx.Next()
 	})
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore, deps.provider)
 
 	protected := tenantRouter.Group("/api")
 	protected.Use(authkit.RequireSession(registry))

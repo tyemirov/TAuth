@@ -42,6 +42,7 @@ func newErasureHTTPFixture(t *testing.T) *erasureHTTPFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	accounts.SetProviderGrantCipher(newTestProviderGrantCipher(t))
 	refresh, err := NewDatabaseRefreshTokenStore(context.Background(), databaseURL)
 	if err != nil {
 		t.Fatal(err)
@@ -152,22 +153,26 @@ func TestAccountErasureHTTPCompletedReceiptAndActualPurge(t *testing.T) {
 
 func TestAccountErasureHTTPBlockedProviderAndWrites(t *testing.T) {
 	fixture := newErasureHTTPFixture(t)
-	identity := AccountProviderIdentity{Provider: "apple", Subject: "apple-parent", UserEmail: "parent@example.com", DisplayName: "Parent"}
+	fixture.accounts.SetProviderGrantCipher(newTestProviderGrantCipher(t))
+	identity := AccountProviderIdentity{Provider: "github", Subject: "github-parent", UserEmail: "parent@example.com", DisplayName: "Parent"}
 	if _, err := fixture.accounts.LinkProviderIdentity(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.accounts.SaveGitHubCredential(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, []byte("fixture-ciphertext")); err != nil {
 		t.Fatal(err)
 	}
 	key := newErasureStatusKey(t)
 	status, operation := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", key)
-	if status != http.StatusAccepted || operation["state"] != "blocked" || operation["reason"] != "provider_revocation_unavailable" {
+	if status != http.StatusAccepted || operation["state"] != "blocked" || operation["reason"] != erasureProviderUnavailable {
 		t.Fatalf("provider block: %d %+v", status, operation)
 	}
 	if status, retry := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", key); status != http.StatusAccepted || retry["operation_id"] != operation["operation_id"] {
 		t.Fatalf("operation replaced: %d %+v", status, retry)
 	}
-	if status, _ := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", newErasureStatusKey(t)); status != http.StatusConflict {
+	if status, _ := erasureHTTP(t, fixture, http.MethodDelete, "/auth/account", newErasureStatusKey(t)); status != http.StatusForbidden {
 		t.Fatalf("capability rotation accepted: %d", status)
 	}
-	if status, _ := patchAccountProfile(t, &githubHTTPFixture{server: fixture.server, client: fixture.client}, `{"display_name":"Forbidden"}`); status != http.StatusForbidden {
+	if status, _ := patchAccountProfile(t, &githubHTTPFixture{server: fixture.server, client: fixture.client}, `{"display_name":"Forbidden"}`); status != http.StatusNotFound {
 		t.Fatalf("erasing profile write: %d", status)
 	}
 	if _, err := fixture.accounts.ReactivateAccount(context.Background(), fixture.config.TenantID, fixture.profile.AccountID); err == nil {
@@ -176,13 +181,6 @@ func TestAccountErasureHTTPBlockedProviderAndWrites(t *testing.T) {
 	if _, err := fixture.accounts.UpsertProviderAccount(context.Background(), fixture.config.TenantID, identity); err == nil {
 		t.Fatal("erasing identity recreated")
 	}
-	hash, err := HashPassword("replacement correct horse battery staple")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.accounts.UpsertPasswordCredential(context.Background(), fixture.config.TenantID, PasswordCredentialSeed{UserEmail: "parent@example.com", PasswordHash: hash}); err == nil {
-		t.Fatal("config seed detached erasing credential")
-	}
 	if _, _, err := fixture.accounts.UpsertAccountUser(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, "parent@example.com", "Late Login", ""); err == nil {
 		t.Fatal("late profile write accepted")
 	}
@@ -190,14 +188,14 @@ func TestAccountErasureHTTPBlockedProviderAndWrites(t *testing.T) {
 		t.Fatal("late refresh issuance accepted")
 	}
 	profile, err := fixture.accounts.ResolveAccountProfile(context.Background(), fixture.config.TenantID, fixture.profile.AccountID)
-	if err != nil || profile.State != "erasing" {
-		t.Fatalf("blocked provider account lost: %+v %v", profile, err)
+	if !errors.Is(err, ErrAccountNotFound) {
+		t.Fatalf("local account retained: %+v %v", profile, err)
 	}
 	var job databaseAccountErasure
 	if err := fixture.accounts.db.Take(&job).Error; err != nil {
 		t.Fatal(err)
 	}
-	if job.StatusHash == key || job.AccountID == nil || job.ExpiresUnix != 0 {
+	if job.StatusHash == key || job.AccountID != nil || job.ExpiresUnix != 0 {
 		t.Fatalf("unsafe pending receipt: %+v", job)
 	}
 }
@@ -407,10 +405,13 @@ func TestAccountErasureHTTPTenantAndOwnerIsolation(t *testing.T) {
 
 func TestAccountErasureHTTPInFlightPasswordLogin(t *testing.T) {
 	fixture := newErasureHTTPFixture(t)
-	if _, err := fixture.accounts.LinkProviderIdentity(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, AccountProviderIdentity{Provider: "apple", Subject: "inflight-parent", UserEmail: "parent@example.com"}); err != nil {
+	if _, err := fixture.accounts.LinkProviderIdentity(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, AccountProviderIdentity{Provider: "github", Subject: "inflight-parent", UserEmail: "parent@example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	original := fixture.accounts.passwordHashComparer
+	if err := fixture.accounts.SaveGitHubCredential(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, []byte("fixture-ciphertext")); err != nil {
+		t.Fatal(err)
+	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	fixture.accounts.passwordHashComparer = func(hash, password []byte) error { close(entered); <-release; return original(hash, password) }
@@ -434,7 +435,7 @@ func TestAccountErasureHTTPInFlightPasswordLogin(t *testing.T) {
 		t.Fatalf("in-flight login accepted: %d", status)
 	}
 	profile, err := fixture.accounts.ResolveAccountProfile(context.Background(), fixture.config.TenantID, fixture.profile.AccountID)
-	if err != nil || profile.State != "erasing" {
+	if !errors.Is(err, ErrAccountNotFound) {
 		t.Fatalf("login recreated identity: %+v %v", profile, err)
 	}
 }
@@ -463,7 +464,7 @@ func (revoker fixtureProviderRevoker) RevokeAccountProvider(ctx context.Context,
 func TestAccountErasureHTTPFencedProviderCompletion(t *testing.T) {
 	fixture := newErasureHTTPFixture(t)
 	ctx := context.Background()
-	if _, err := fixture.accounts.LinkProviderIdentity(ctx, fixture.config.TenantID, fixture.profile.AccountID, AccountProviderIdentity{Provider: "apple", Subject: "fenced-parent", UserEmail: "parent@example.com"}); err != nil {
+	if err := fixture.accounts.SaveGitHubCredential(ctx, fixture.config.TenantID, fixture.profile.AccountID, []byte("fixture-ciphertext")); err != nil {
 		t.Fatal(err)
 	}
 	key := newErasureStatusKey(t)
@@ -531,8 +532,12 @@ func TestAccountErasureHTTPValidationAndGitHubBlock(t *testing.T) {
 	if status != 202 || body["reason"] != "provider_revocation_unavailable" {
 		t.Fatalf("GitHub revocation gap: %d %+v", status, body)
 	}
-	if _, err := fixture.accounts.LoadGitHubCredential(context.Background(), fixture.config.TenantID, fixture.profile.AccountID); err != nil {
-		t.Fatalf("blocked credential removed: %v", err)
+	if _, err := fixture.accounts.LoadGitHubCredential(context.Background(), fixture.config.TenantID, fixture.profile.AccountID); !errors.Is(err, ErrGitHubCredentialMissing) {
+		t.Fatalf("account credential survived removal: %v", err)
+	}
+	var snapshot databaseErasureProvider
+	if err := fixture.accounts.db.Where("provider = ?", accountProviderGitHub).Take(&snapshot).Error; err != nil || len(snapshot.Ciphertext) == 0 {
+		t.Fatalf("operation grant lost: %+v %v", snapshot, err)
 	}
 	config := fixture.config
 	config.AccountManagementEnabled = false
@@ -571,7 +576,7 @@ func TestAccountErasureHTTPAutomaticSchemaSevenMigration(t *testing.T) {
 		t.Fatalf("migration lost account: %+v %v", profile, err)
 	}
 	var marker schemaMigrationRecord
-	if err := reopened.db.Where(schemaMigrationLookupByName, userStoreErrorPrefix).Take(&marker).Error; err != nil || marker.Version != 8 {
+	if err := reopened.db.Where(schemaMigrationLookupByName, userStoreErrorPrefix).Take(&marker).Error; err != nil || marker.Version != userStoreSchemaVersion {
 		t.Fatalf("migration marker: %+v %v", marker, err)
 	}
 	router := gin.New()

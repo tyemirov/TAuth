@@ -30,6 +30,7 @@ type DatabaseUserStore struct {
 	databaseIdentity     string
 	now                  func() time.Time
 	passwordHashComparer passwordHashComparer
+	providerGrantCipher  ProviderGrantCipher
 }
 
 // Driver returns the active database driver label.
@@ -175,7 +176,7 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 	if err := guardApplicationSubjectSchema(ctx, databaseURL); err != nil {
 		return nil, err
 	}
-	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &databaseAppleGrant{}, &databaseErasureProvider{}, &databaseAppleEventReceipt{}, &databaseAppleErasureSubject{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
 	if openErr != nil {
 		return nil, openErr
 	}
@@ -958,6 +959,18 @@ func (store *DatabaseUserStore) UpsertProviderAccount(ctx context.Context, tenan
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 		if result.Error != nil {
 			return result.Error
+		}
+		var fences int64
+		if err := tx.Model(&databaseErasureProvider{}).Where("tenant_id = ? AND provider = ? AND subject_hash = ? AND state <> ?", tenantID, normalized.Provider, hashOpaque(normalized.Subject), providerRevoked).Count(&fences).Error; err != nil {
+			return err
+		}
+		if normalized.Provider == accountProviderApple {
+			if err := tx.Model(&databaseAppleErasureSubject{}).Where("tenant_id = ? AND subject_hash = ? AND EXISTS (SELECT 1 FROM account_erasures WHERE account_erasures.operation_id = apple_erasure_subjects.operation_id AND state <> ?)", tenantID, hashOpaque(normalized.Subject), erasureCompleted).Count(&fences).Error; err != nil {
+				return err
+			}
+		}
+		if fences != 0 {
+			return ErrAccountNotActive
 		}
 		if result.RowsAffected == 1 {
 			account := databaseAccountRecord{TenantID: tenantID, AccountID: candidateID, UserID: candidateID, UserEmail: normalized.UserEmail, UserDisplayName: normalized.DisplayName, UserAvatarURL: normalized.AvatarURL, AccountState: accountStateActive, UserRoles: roleList{defaultUserRole}, CreatedAtUnix: now, LastUpdatedUnix: now}
