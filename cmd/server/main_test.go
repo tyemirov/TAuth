@@ -94,7 +94,7 @@ func TestCORSMiddlewareExcludesOAuthBrowserRoutes(t *testing.T) {
 
 func TestRunServerAppleCallbackCORS(t *testing.T) {
 	restoreServe := withServeHTTPStub(func(server *http.Server) error {
-		testServer := httptest.NewServer(server.Handler)
+		testServer := httptest.NewTLSServer(server.Handler)
 		defer testServer.Close()
 		for _, scenario := range []struct {
 			name, path, origin, body string
@@ -158,6 +158,62 @@ func TestRunServerMissingConfig(t *testing.T) {
 	expectedMessage := "config.uninitialized_server_config: server configuration not prepared; PreRunE must execute before RunE"
 	if err.Error() != expectedMessage {
 		t.Fatalf("expected error %q, got %q", expectedMessage, err.Error())
+	}
+}
+
+func TestRunServerProtectedIdentityTransport(t *testing.T) {
+	restoreServe := withServeHTTPStub(func(server *http.Server) error {
+		plain := httptest.NewServer(server.Handler)
+		defer plain.Close()
+		tls := httptest.NewTLSServer(server.Handler)
+		defer tls.Close()
+		for _, scenario := range []struct {
+			name, url, errorCode string
+			client               *http.Client
+			status               int
+		}{
+			{"forged", plain.URL, "https_required", plain.Client(), http.StatusBadRequest},
+			{"tls", tls.URL, "", tls.Client(), http.StatusUnauthorized},
+		} {
+			t.Run(scenario.name, func(t *testing.T) {
+				request, err := http.NewRequest(http.MethodGet, scenario.url+"/api/me", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Origin", "https://alpha.localhost")
+				request.Header.Set("X-Forwarded-Proto", "https")
+				request.Header.Set("Forwarded", "proto=https")
+				request.Host = "localhost:443"
+				response, err := scenario.client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != scenario.status || !strings.Contains(string(body), scenario.errorCode) {
+					t.Fatalf("expected %d %q, got %d: %s", scenario.status, scenario.errorCode, response.StatusCode, body)
+				}
+				if len(response.Cookies()) != 0 {
+					t.Fatal("rejected request set cookies")
+				}
+			})
+		}
+		return http.ErrServerClosed
+	})
+	defer restoreServe()
+	restoreValidator := withGoogleValidatorBuilderStub(func(context.Context) (authkit.GoogleTokenValidator, error) { return noopGoogleValidator{}, nil })
+	defer restoreValidator()
+	config := sampleApplicationConfig()
+	for index := range config.Tenants {
+		config.Tenants[index].AllowInsecureHTTP = false
+	}
+	command := &cobra.Command{}
+	command.SetContext(context.WithValue(context.Background(), appConfigContextKey, testconfig.Prepare(t, config)))
+	if err := runServer(command, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

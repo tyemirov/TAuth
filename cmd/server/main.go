@@ -194,9 +194,6 @@ func runServer(command *cobra.Command, arguments []string) error {
 	if corsErr := appconfig.ValidateCORSAllowlist(appConfig.Server, tenantConfig); corsErr != nil {
 		return corsErr
 	}
-	if passwordSeedErr := seedPasswordUsers(shutdownContext, tenantConfig, userStore, passwordCredentialStore); passwordSeedErr != nil {
-		return passwordSeedErr
-	}
 	persistentNonceStore, nonceStoreErr := authkit.NewDatabaseNonceStore(shutdownContext, databaseURL, 5*time.Minute)
 	if nonceStoreErr != nil {
 		return nonceStoreErr
@@ -208,6 +205,27 @@ func runServer(command *cobra.Command, arguments []string) error {
 	githubTransactions, storeErr := authkit.NewDatabaseGitHubTransactionStore(shutdownContext, databaseURL)
 	if storeErr != nil {
 		return storeErr
+	}
+	cleanupTicker := time.NewTicker(transientCleanupInterval)
+	stopCleanup, cleanupErr := startTransientCleanup(shutdownContext, []namedTransientStore{
+		{"accounts", persistentUserStore},
+		{"nonces", persistentNonceStore},
+		{"application_refresh", persistentStore},
+		{"github_transactions", githubTransactions},
+		{"oauth", persistentOAuthStore},
+	}, time.Now, cleanupTicker.C, func(err error) {
+		logger.Error("transient record cleanup failed", zap.Error(err))
+	})
+	if cleanupErr != nil {
+		cleanupTicker.Stop()
+		return cleanupErr
+	}
+	defer func() {
+		stopCleanup()
+		cleanupTicker.Stop()
+	}()
+	if passwordSeedErr := seedPasswordUsers(shutdownContext, tenantConfig, userStore, passwordCredentialStore); passwordSeedErr != nil {
+		return passwordSeedErr
 	}
 	persistentUserStore.SetProviderGrantCipher(managementStore)
 	appleRevoker := authkit.NewAppleAccountRevoker(persistentUserStore, func(ctx context.Context, id string) (authkit.AppleOAuthConfig, error) {
@@ -255,7 +273,7 @@ func runServer(command *cobra.Command, arguments []string) error {
 	defer authkit.ProvideMetrics(nil)
 
 	publisher := &runtimePublisher{}
-	deps := &runtimeDependencies{config: appConfig, logger: logger, users: userStore, refresh: refreshStore, passwords: passwordCredentialStore, nonce: persistentNonceStore, oauth: persistentOAuthStore, github: githubTransactions, provider: appleRevoker, store: managementStore, console: consoleTenant}
+	deps := &runtimeDependencies{serviceContext: shutdownContext, config: appConfig, logger: logger, users: userStore, refresh: refreshStore, passwords: passwordCredentialStore, nonce: persistentNonceStore, oauth: persistentOAuthStore, github: githubTransactions, provider: appleRevoker, store: managementStore, console: consoleTenant}
 	builder := func(ctx context.Context, config tenants.Config) (controlplane.PreparedRuntime, error) {
 		snapshot, err := deps.build(ctx, config)
 		if err != nil {

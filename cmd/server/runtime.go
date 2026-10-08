@@ -22,25 +22,27 @@ import (
 )
 
 type runtimeDependencies struct {
-	config     *appconfig.ApplicationConfig
-	logger     *zap.Logger
-	users      authkit.UserStore
-	refresh    authkit.RefreshTokenStore
-	passwords  authkit.PasswordCredentialStore
-	nonce      *authkit.DatabaseNonceStore
-	oauth      oauthserver.Store
-	github     authkit.GitHubTransactionStore
-	provider   authkit.AccountProviderRevoker
-	store      *controlplane.Store
-	management *controlplane.Management
-	console    tenants.FileTenant
+	serviceContext context.Context
+	config         *appconfig.ApplicationConfig
+	logger         *zap.Logger
+	users          authkit.UserStore
+	refresh        authkit.RefreshTokenStore
+	passwords      authkit.PasswordCredentialStore
+	nonce          *authkit.DatabaseNonceStore
+	oauth          oauthserver.Store
+	github         authkit.GitHubTransactionStore
+	provider       authkit.AccountProviderRevoker
+	store          *controlplane.Store
+	management     *controlplane.Management
+	console        tenants.FileTenant
 }
 type runtimeSnapshot struct {
-	handler http.Handler
-	cleanup func()
-	refs    int
-	retired bool
-	done    chan struct{}
+	handler        http.Handler
+	cleanup        func()
+	refs           int
+	retired        bool
+	cleanupStarted bool
+	done           chan struct{}
 }
 type runtimePublisher struct {
 	mu      sync.Mutex
@@ -56,30 +58,44 @@ func (prepared *preparedSnapshot) Discard() { prepared.snapshot.cleanup() }
 func (prepared *preparedSnapshot) Publish() {
 	publisher := prepared.publisher
 	publisher.mu.Lock()
-	defer publisher.mu.Unlock()
 	previous := publisher.current
 	publisher.current = prepared.snapshot
+	publisher.retainPendingCleanup()
 	if previous != nil {
 		previous.retired = true
-		publisher.releaseRetired(previous)
-		pending := publisher.retired[:0]
-		for _, retired := range publisher.retired {
-			if retired.refs > 0 {
-				pending = append(pending, retired)
-			}
-		}
-		publisher.retired = pending
-		if previous.refs > 0 {
-			publisher.retired = append(publisher.retired, previous)
-		}
+		publisher.retired = append(publisher.retired, previous)
+	}
+	cleanup := publisher.claimCleanup(previous)
+	publisher.mu.Unlock()
+	if cleanup {
+		finishSnapshotCleanup(previous)
 	}
 }
-func (publisher *runtimePublisher) releaseRetired(snapshot *runtimeSnapshot) {
-	if snapshot.retired && snapshot.refs == 0 {
-		snapshot.cleanup()
-		close(snapshot.done)
-		snapshot.retired = false
+
+// claimCleanup requires publisher.mu. Cleanup itself runs after unlocking.
+func (publisher *runtimePublisher) claimCleanup(snapshot *runtimeSnapshot) bool {
+	if snapshot == nil || !snapshot.retired || snapshot.refs != 0 || snapshot.cleanupStarted {
+		return false
 	}
+	snapshot.cleanupStarted = true
+	return true
+}
+func finishSnapshotCleanup(snapshot *runtimeSnapshot) {
+	snapshot.cleanup()
+	close(snapshot.done)
+}
+
+// retainPendingCleanup requires publisher.mu.
+func (publisher *runtimePublisher) retainPendingCleanup() {
+	remaining := publisher.retired[:0]
+	for _, snapshot := range publisher.retired {
+		select {
+		case <-snapshot.done:
+		default:
+			remaining = append(remaining, snapshot)
+		}
+	}
+	publisher.retired = remaining
 }
 func (prepared *preparedSnapshot) Drain(ctx context.Context) error {
 	publisher := prepared.publisher
@@ -94,7 +110,7 @@ func (prepared *preparedSnapshot) Drain(ctx context.Context) error {
 		}
 	}
 	publisher.mu.Lock()
-	publisher.retired = nil
+	publisher.retainPendingCleanup()
 	publisher.mu.Unlock()
 	return nil
 }
@@ -110,19 +126,31 @@ func (publisher *runtimePublisher) ServeHTTP(writer http.ResponseWriter, request
 	if counted {
 		defer func() {
 			publisher.mu.Lock()
-			defer publisher.mu.Unlock()
 			snapshot.refs--
-			publisher.releaseRetired(snapshot)
+			cleanup := publisher.claimCleanup(snapshot)
+			publisher.mu.Unlock()
+			if cleanup {
+				finishSnapshotCleanup(snapshot)
+			}
 		}()
 	}
 	snapshot.handler.ServeHTTP(writer, request)
 }
 func (publisher *runtimePublisher) Close() {
 	publisher.mu.Lock()
-	defer publisher.mu.Unlock()
-	if publisher.current != nil {
-		publisher.current.retired = true
-		publisher.releaseRetired(publisher.current)
+	current := publisher.current
+	if current != nil && !current.retired {
+		current.retired = true
+		publisher.retired = append(publisher.retired, current)
+	}
+	cleanup := publisher.claimCleanup(current)
+	retired := append([]*runtimeSnapshot{}, publisher.retired...)
+	publisher.mu.Unlock()
+	if cleanup {
+		finishSnapshotCleanup(current)
+	}
+	for _, snapshot := range retired {
+		<-snapshot.done
 	}
 }
 func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants.Config) (snapshot *runtimeSnapshot, buildErr error) {
@@ -155,6 +183,7 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		}
 	}()
 	baseServerConfig := authkit.ServerConfig{
+		TransportPolicy:   appConfig.TransportPolicy(),
 		AppJWTSigningKey:  nil,
 		AppJWTIssuer:      defaultAppJWTIssuer,
 		TenantID:          defaultTenantID,
@@ -191,6 +220,12 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		}
 		emailChallengeSender = pinguinSender
 	}
+	resetDispatcher, dispatcherErr := authkit.NewPasswordResetDispatcher(deps.serviceContext)
+	if dispatcherErr != nil {
+		return nil, dispatcherErr
+	}
+	closeSender := cleanup
+	cleanup = func() { resetDispatcher.Close(); closeSender() }
 	resolverOptions := []tenants.ResolverOption{}
 	if enableTenantHeaderOverride {
 		resolverOptions = append(resolverOptions, tenants.WithHeaderOverride(""))
@@ -246,6 +281,7 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		}
 		oauthHandler, oauthHandlerErr := oauthserver.NewServer(
 			appConfig.OAuthServer(),
+			appConfig.TransportPolicy(),
 			oauthRegistry,
 			oauthStore,
 			oauthSigner,
@@ -287,9 +323,10 @@ func (deps *runtimeDependencies) build(ctx context.Context, tenantConfig tenants
 		ctx.Next()
 	})
 
-	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, emailChallengeSender, oauthStore, deps.provider)
+	authkit.MountAuthRoutesWithPassword(tenantRouter, registry, userStore, refreshStore, nonceStore, passwordCredentialStore, resetDispatcher, emailChallengeSender, oauthStore, deps.provider)
 
 	protected := tenantRouter.Group("/api")
+	protected.Use(authkit.RequireCredentialTransport(registry))
 	protected.Use(authkit.RequireSession(registry))
 	protected.GET("/me", web.HandleWhoAmI(logger))
 
