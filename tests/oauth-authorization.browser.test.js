@@ -330,6 +330,21 @@ if (!puppeteer) {
     ]);
     assert.equal(rejectedLoginResponse.status(), 401);
     assert.match(await page.$eval('[role="alert"]', (node) => node.textContent), /Authentication was not accepted/);
+    const delayedLoginResponse = await fetch(`${issuer}/oauth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: issuer },
+      body: new URLSearchParams({
+        request: new URL(page.url()).searchParams.get("request") || "",
+        provider: "password",
+        email: "browser@example.com",
+        password: "browser-test-password",
+      }),
+    });
+    assert.equal(delayedLoginResponse.status, 429, "A failure delay must also apply to a correct password");
+    assert.deepEqual(await delayedLoginResponse.json(), { error: "temporarily_unavailable" });
+    const retrySeconds = Number(delayedLoginResponse.headers.get("retry-after"));
+    assert.ok(Number.isInteger(retrySeconds) && retrySeconds > 0 && retrySeconds <= 2);
+    await new Promise((resolve) => setTimeout(resolve, retrySeconds * 1000));
     await page.type('input[name="email"]', "browser@example.com");
     await page.type('input[name="password"]', "browser-test-password");
     try {
