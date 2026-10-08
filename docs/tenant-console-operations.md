@@ -112,6 +112,9 @@ See the [application subject contract](application-subjects.md) for the identity
 ## Service inputs
 
 Set `server.database_url` to the persistent database URL.
+For TLS termination at a proxy, set `TAUTH_TRUSTED_PROXY_CIDRS` to its actual connection peer CIDRs, separated by commas.
+The generated `server.trusted_proxy_cidrs` setting reads that environment input. An empty value trusts no forwarding peer.
+Set the proxy's `X-Forwarded-Proto` from its client connection scheme. TAuth requires one exact `https` value from a configured peer.
 The production deployment supplies `server.tenant_encryption_key` through `TAUTH_TENANT_ENCRYPTION_KEY`.
 Deployment creates its 32 random bytes automatically when no existing key is present.
 Deployment preserves the key in private service configuration and its remote recovery reference.
