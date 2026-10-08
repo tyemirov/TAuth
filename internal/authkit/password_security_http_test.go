@@ -41,8 +41,9 @@ func TestSecurityPasswordAbuse(t *testing.T) {
 			if _, err := accounts.VerifyEmailChallenge(context.Background(), config.TenantID, signup.Token); err != nil {
 				t.Fatal(err)
 			}
+			dispatcher := newTestPasswordResetDispatcher(t)
 			router := gin.New()
-			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, credentials, sender, nil)
+			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, credentials, dispatcher, sender, nil)
 			server := httptest.NewTLSServer(router)
 			defer server.Close()
 			post := func(path, email, password string) (int, string) {
@@ -60,6 +61,9 @@ func TestSecurityPasswordAbuse(t *testing.T) {
 			}
 			t.Run("guesses", func(t *testing.T) {
 				for attempt := 0; attempt < 5; attempt++ {
+					if attempt > 0 {
+						now = now.Add(time.Second * time.Duration(1<<(attempt-1)))
+					}
 					status, _ := post("/auth/password/login", "known@example.com", "wrong")
 					if status != http.StatusUnauthorized {
 						t.Fatalf("attempt %d: %d", attempt, status)
@@ -82,19 +86,22 @@ func TestSecurityPasswordAbuse(t *testing.T) {
 						t.Errorf("throttled response changed: %d %s", status, body)
 					}
 				}
-				if len(sender.requests) != 1 {
-					t.Fatalf("reset email flood: %d deliveries", len(sender.requests))
+				sender.WaitRequests(t, 1)
+				if len(sender.Snapshot()) != 1 {
+					t.Fatalf("reset email flood: %d deliveries", len(sender.Snapshot()))
 				}
+				waitTestPasswordResetIdle(t, dispatcher)
 				now = now.Add(time.Minute + time.Second)
 				status, body := post("/auth/password/reset/start", "known@example.com", "")
-				if status != knownStatus || body != known || len(sender.requests) != 2 {
+				sender.WaitRequests(t, 2)
+				if status != knownStatus || body != known || len(sender.Snapshot()) != 2 {
 					t.Fatal("reset did not recover after cooldown")
 				}
-				oldToken := challengeTokenFromDeliveryURL(t, sender.requests[0], EmailChallengeKindPasswordReset)
+				oldToken := challengeTokenFromDeliveryURL(t, sender.Snapshot()[0], EmailChallengeKindPasswordReset)
 				if _, err := accounts.CompletePasswordReset(context.Background(), config.TenantID, oldToken, "replacement correct horse battery staple"); err == nil {
 					t.Fatal("replaced reset challenge remains usable")
 				}
-				newToken := challengeTokenFromDeliveryURL(t, sender.requests[1], EmailChallengeKindPasswordReset)
+				newToken := challengeTokenFromDeliveryURL(t, sender.Snapshot()[1], EmailChallengeKindPasswordReset)
 				if _, err := accounts.CompletePasswordReset(context.Background(), config.TenantID, newToken, "replacement correct horse battery staple"); err != nil {
 					t.Fatal(err)
 				}

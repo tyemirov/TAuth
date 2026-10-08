@@ -71,6 +71,10 @@ func RedactGitHubCallbackQuery() gin.HandlerFunc {
 
 func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Request) {
 	githubPrivateHeaders(response)
+	if !login.sessions.registry.DefaultConfig().TransportPolicy.IsHTTPS(request) {
+		githubError(response, http.StatusBadRequest, "https_required")
+		return
+	}
 	query := request.URL.Query()
 	if !githubQueryValid(query, "tenant_id", "return_to", "operation", "oauth_request", "popup", "correlation") {
 		githubError(response, http.StatusBadRequest, "invalid_request")
@@ -92,10 +96,6 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 	config, exists := login.sessions.registry.ConfigByID(tenantID)
 	if !exists || !config.GitHubOAuth.Enabled() {
 		githubError(response, http.StatusNotFound, "github_login_not_configured")
-		return
-	}
-	if !isHTTPS(request) {
-		githubError(response, http.StatusBadRequest, "https_required")
 		return
 	}
 	transaction := githubTransaction{TenantID: tenantID, ClientID: config.GitHubOAuth.ClientID(), RedirectURI: config.GitHubOAuth.RedirectURI(), Operation: githubSessionLogin}
@@ -181,7 +181,7 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 	if err := login.transactions.create(request.Context(), transaction); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrGitHubStoreFull) {
-			status = http.StatusServiceUnavailable
+			status = http.StatusTooManyRequests
 		}
 		githubError(response, status, "store_failure")
 		return
@@ -194,6 +194,10 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 
 func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.Request) {
 	githubPrivateHeaders(response)
+	if !login.sessions.registry.DefaultConfig().TransportPolicy.IsHTTPS(request) {
+		githubError(response, http.StatusBadRequest, "https_required")
+		return
+	}
 	query := request.URL.Query()
 	state := query.Get("state")
 	if !githubQueryValid(query, "state", "code", "error", "error_description", "error_uri", "tenant_id", "iss") || query.Get("iss") != githubIssuer || !githubOpaqueValid(state) {
@@ -201,7 +205,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		return
 	}
 	browser, err := request.Cookie(githubBrowserCookie(state))
-	if err != nil || !githubOpaqueValid(browser.Value) || !isHTTPS(request) {
+	if err != nil || !githubOpaqueValid(browser.Value) {
 		githubError(response, http.StatusBadRequest, "invalid_state")
 		return
 	}
@@ -293,6 +297,10 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		}
 	}
 	if err := login.sessions.writeBrowserSession(request.Context(), response, config, transaction.TenantID, profile); err != nil {
+		if errors.Is(err, ErrTransientCapacity) {
+			login.failure(response, request, transaction, http.StatusTooManyRequests, errorTransientCapacity)
+			return
+		}
 		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
 		return
 	}

@@ -35,7 +35,7 @@ func TestApplicationSubjectMountedDatabaseHTTP(t *testing.T) {
 	t.Cleanup(func() { ProvideGoogleTokenValidator(nil) })
 	newRouter := func() *gin.Engine {
 		router := gin.New()
-		MountAuthRoutes(router, registry, users, refresh, nil, users)
+		MountAuthRoutes(router, registry, users, refresh, nil, users, newTestPasswordResetDispatcher(t))
 		return router
 	}
 	server := httptest.NewTLSServer(newRouter())

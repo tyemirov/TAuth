@@ -52,6 +52,7 @@ func (githubTransaction) TableName() string { return "github_login_transactions"
 type GitHubTransactionStore interface {
 	create(context.Context, githubTransaction) error
 	claim(context.Context, string, string, int64) (githubTransaction, error)
+	CleanupExpired(context.Context, int64) error
 }
 
 type memoryGitHubTransactions struct {
@@ -75,7 +76,13 @@ func (store *memoryGitHubTransactions) create(ctx context.Context, transaction g
 			delete(store.transactions, key)
 		}
 	}
-	if len(store.transactions) >= githubTransactionCapacity {
+	tenantCount := 0
+	for _, pending := range store.transactions {
+		if pending.TenantID == transaction.TenantID {
+			tenantCount++
+		}
+	}
+	if tenantCount >= transientTenantCapacity || len(store.transactions) >= githubTransactionCapacity {
 		return ErrGitHubStoreFull
 	}
 	if _, exists := store.transactions[transaction.StateHash]; exists {
@@ -91,6 +98,11 @@ func (store *memoryGitHubTransactions) claim(ctx context.Context, stateHash, bro
 	}
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
+	for key, pending := range store.transactions {
+		if pending.ExpiresAtUnix <= now {
+			delete(store.transactions, key)
+		}
+	}
 	transaction, exists := store.transactions[stateHash]
 	if !exists || transaction.BrowserHash != browserHash {
 		return githubTransaction{}, ErrGitHubStateInvalid
@@ -114,7 +126,11 @@ func NewDatabaseGitHubTransactionStore(ctx context.Context, databaseURL string) 
 }
 
 func (store *databaseGitHubTransactions) create(ctx context.Context, transaction githubTransaction) error {
+	var capacityErr error
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTransientCapacity(tx, githubStoreErrorPrefix); err != nil {
+			return err
+		}
 		if transaction.AccountID != "" {
 			if err := lockActiveAccount(ctx, tx, transaction.TenantID, transaction.AccountID); err != nil {
 				return err
@@ -123,15 +139,28 @@ func (store *databaseGitHubTransactions) create(ctx context.Context, transaction
 		if err := tx.Where("expires_at_unix <= ?", transaction.CreatedAtUnix).Delete(&githubTransaction{}).Error; err != nil {
 			return err
 		}
+		capacityErr = checkTransientCapacity(tx, &githubTransaction{}, transaction.TenantID, transientTenantCapacity, githubTransactionCapacity)
+		if errors.Is(capacityErr, ErrTransientCapacity) {
+			return nil
+		}
+		if capacityErr != nil {
+			return capacityErr
+		}
 		return tx.Create(&transaction).Error
 	})
 	if err != nil {
 		return fmt.Errorf("github_login_store.create: %w", err)
 	}
+	if capacityErr != nil {
+		return ErrGitHubStoreFull
+	}
 	return nil
 }
 
 func (store *databaseGitHubTransactions) claim(ctx context.Context, stateHash, browserHash string, now int64) (githubTransaction, error) {
+	if err := store.CleanupExpired(ctx, now); err != nil {
+		return githubTransaction{}, err
+	}
 	var transaction githubTransaction
 	query := store.db.WithContext(ctx).Where("state_hash = ? AND browser_hash = ? AND expires_at_unix > ?", stateHash, browserHash, now)
 	if err := query.Take(&transaction).Error; err != nil {
@@ -148,4 +177,30 @@ func (store *databaseGitHubTransactions) claim(ctx context.Context, stateHash, b
 		return githubTransaction{}, ErrGitHubStateInvalid
 	}
 	return transaction, nil
+}
+
+func (store *memoryGitHubTransactions) CleanupExpired(ctx context.Context, nowUnix int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	for key, pending := range store.transactions {
+		if pending.ExpiresAtUnix <= nowUnix {
+			delete(store.transactions, key)
+		}
+	}
+	return nil
+}
+func (store *databaseGitHubTransactions) CleanupExpired(ctx context.Context, nowUnix int64) error {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTransientCapacity(tx, githubStoreErrorPrefix); err != nil {
+			return err
+		}
+		return tx.Where("expires_at_unix <= ?", nowUnix).Delete(&githubTransaction{}).Error
+	})
+	if err != nil {
+		return fmt.Errorf("github_login_store.cleanup: %w", err)
+	}
+	return nil
 }

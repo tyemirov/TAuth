@@ -54,7 +54,7 @@ func TestApplicationSubjectGoogleHTTP(t *testing.T) {
 			ProvideGoogleTokenValidator(validator)
 			t.Cleanup(func() { ProvideGoogleTokenValidator(nil) })
 			router := gin.New()
-			MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, nil, nil)
+			MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, newTestPasswordResetDispatcher(t), nil, nil)
 			server := httptest.NewTLSServer(router)
 			t.Cleanup(server.Close)
 			client := server.Client()
@@ -91,8 +91,13 @@ func TestApplicationSubjectGoogleHTTP(t *testing.T) {
 					audience = "ios-client-id"
 					redirect = "com.promptdew.mobile://oauth2redirect/google"
 				}
-				validator.results["identity"] = validatorResult{payload: &idtoken.Payload{Claims: map[string]interface{}{"iss": googleIssuerHTTPS, "sub": subject, "email": email, "email_verified": true, "name": "Parent", "nonce": "nonce"}}, expectedAudience: audience}
-				encoded, _ := json.Marshal(map[string]string{"google_id_token": "identity", "nonce_token": "nonce", "platform": platform, "redirect_uri": redirect})
+				status, noncePayload := read(http.MethodPost, "/auth/nonce", `{}`)
+				if status != http.StatusOK {
+					t.Fatalf("nonce=%d %v", status, noncePayload)
+				}
+				nonce := noncePayload["nonce"].(string)
+				validator.results["identity"] = validatorResult{payload: &idtoken.Payload{Claims: map[string]interface{}{"iss": googleIssuerHTTPS, "sub": subject, "email": email, "email_verified": true, "name": "Parent", "nonce": nonce}}, expectedAudience: audience}
+				encoded, _ := json.Marshal(map[string]string{"google_id_token": "identity", "nonce_token": nonce, "platform": platform, "redirect_uri": redirect})
 				status, payload := read(http.MethodPost, "/auth/google/native", string(encoded))
 				if status != http.StatusOK {
 					t.Fatalf("login=%d %v", status, payload)
@@ -183,7 +188,7 @@ func TestApplicationSubjectGoogleHTTP(t *testing.T) {
 				t.Fatalf("duplicate identity=%d %v", count, err)
 			}
 			router = gin.New()
-			MountAuthRoutesWithPassword(router, registry, reopened, refresh, nil, reopened, nil, nil)
+			MountAuthRoutesWithPassword(router, registry, reopened, refresh, nil, reopened, newTestPasswordResetDispatcher(t), nil, nil)
 			server.Config.Handler = router
 			if status, payload = read(http.MethodGet, "/auth/session", ""); status != http.StatusOK || payload["user_id"] != original {
 				t.Fatalf("restarted session=%d %v", status, payload)

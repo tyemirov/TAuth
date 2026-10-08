@@ -22,6 +22,8 @@ var (
 const (
 	maximumPendingPerTenant   = 1000
 	maximumPendingGlobal      = 10000
+	maximumRefreshPerTenant   = 100000
+	maximumRefreshGlobal      = 1000000
 	refreshTokenStatusActive  = "active"
 	refreshTokenStatusRotated = "rotated"
 	refreshTokenStatusRevoked = "revoked"
@@ -71,12 +73,9 @@ func (store *MemoryStore) CreateAuthorizationRequest(ctx context.Context, reques
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(request.CreatedAtUnix)
 	tenantCount := 0
-	for key, existing := range store.requests {
-		if existing.request.ExpiresAtUnix <= request.CreatedAtUnix {
-			delete(store.requests, key)
-			continue
-		}
+	for _, existing := range store.requests {
 		if existing.request.TenantID == request.TenantID {
 			tenantCount++
 		}
@@ -93,6 +92,7 @@ func (store *MemoryStore) GetAuthorizationRequest(ctx context.Context, requestTo
 	digest := digestToken(requestToken)
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	record, exists := store.requests[digest]
 	if !exists || record.request.ExpiresAtUnix <= nowUnix {
 		delete(store.requests, digest)
@@ -106,6 +106,7 @@ func (store *MemoryStore) ConsumeAuthorizationRequest(ctx context.Context, reque
 	digest := digestToken(requestToken)
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	record, exists := store.requests[digest]
 	if !exists || record.request.ExpiresAtUnix <= nowUnix {
 		delete(store.requests, digest)
@@ -136,6 +137,10 @@ func (store *MemoryStore) CompleteAuthorizationRequest(ctx context.Context, requ
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("oauth_store.request.complete.memory: %w", err)
 	}
+	store.cleanupExpiredLocked(completion.NowUnix)
+	if store.codeCapacityLocked(completion.Grant.TenantID) {
+		return "", ErrAuthorizationCapacity
+	}
 	record, exists := store.requests[requestDigest]
 	if !exists || record.request.ExpiresAtUnix <= completion.NowUnix || record.request != completion.Request {
 		return "", ErrAuthorizationRequestInvalid
@@ -154,6 +159,7 @@ func (store *MemoryStore) CompleteAuthorizationRequest(ctx context.Context, requ
 func (store *MemoryStore) FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	for _, consent := range store.consents {
 		if consent.ConsentKey != key || consent.RevokedAtUnix != 0 || consent.ExpiresAtUnix <= nowUnix {
 			continue
@@ -173,48 +179,71 @@ func (store *MemoryStore) SaveConsent(ctx context.Context, consent Consent) (Con
 		consent.ID = consentID
 	}
 	store.mu.Lock()
+	store.cleanupExpiredLocked(consent.CreatedAtUnix)
 	store.consents[consent.ID] = consent
 	store.mu.Unlock()
 	return consent, nil
 }
 
 // IssueAuthorizationCode stores one short-lived one-time code as a digest.
-func (store *MemoryStore) IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error) {
+func (store *MemoryStore) IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant, nowUnix int64) (string, error) {
 	code, digest, codeErr := newOpaqueToken("authorization_code")
 	if codeErr != nil {
 		return "", codeErr
 	}
 	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
+	if store.codeCapacityLocked(grant.TenantID) {
+		return "", ErrAuthorizationCapacity
+	}
 	store.codes[digest] = memoryAuthorizationCode{grant: grant}
-	store.mu.Unlock()
 	return code, nil
 }
 
-// RedeemAuthorizationCode atomically validates every code binding and consumes the code.
-func (store *MemoryStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error) {
+// RedeemAuthorizationCode atomically consumes a bound code and creates its initial refresh family.
+func (store *MemoryStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, string, error) {
 	digest := digestToken(code)
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(exchange.NowUnix)
 	record, exists := store.codes[digest]
 	if !exists || record.consumedAtUnix != 0 || record.grant.ExpiresAtUnix <= exchange.NowUnix {
-		return AuthorizationGrant{}, ErrAuthorizationCodeInvalid
+		return AuthorizationGrant{}, "", ErrAuthorizationCodeInvalid
 	}
 	if record.grant.ClientID != exchange.ClientID || record.grant.Resource != exchange.Resource {
-		return AuthorizationGrant{}, ErrAuthorizationCodeInvalid
+		return AuthorizationGrant{}, "", ErrAuthorizationCodeInvalid
 	}
 	if !pkceVerifierMatches(record.grant.CodeChallenge, exchange.CodeVerifier) {
-		return AuthorizationGrant{}, ErrAuthorizationCodeInvalid
+		return AuthorizationGrant{}, "", ErrAuthorizationCodeInvalid
 	}
 	if err := authorize(ctx, record.grant.TenantID, record.grant.UserID); err != nil {
-		return AuthorizationGrant{}, err
+		return AuthorizationGrant{}, "", err
 	}
-	record.consumedAtUnix = exchange.NowUnix
-	store.codes[digest] = record
-	return record.grant, nil
+	if store.refreshCapacityLocked(record.grant.TenantID) {
+		return AuthorizationGrant{}, "", ErrAuthorizationCapacity
+	}
+	refresh := refreshGrantForCode(record.grant, exchange.RefreshExpiresAtUnix)
+	token, err := store.issueRefreshTokenLocked(refresh, exchange.NowUnix)
+	if err != nil {
+		return AuthorizationGrant{}, "", err
+	}
+	delete(store.codes, digest)
+	return record.grant, token, nil
 }
 
 // IssueRefreshToken creates one opaque refresh-token family member and stores only its digest.
-func (store *MemoryStore) IssueRefreshToken(ctx context.Context, grant RefreshGrant) (string, error) {
+func (store *MemoryStore) IssueRefreshToken(ctx context.Context, grant RefreshGrant, nowUnix int64) (string, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
+	if store.refreshCapacityLocked(grant.TenantID) {
+		return "", ErrAuthorizationCapacity
+	}
+	return store.issueRefreshTokenLocked(grant, nowUnix)
+}
+
+func (store *MemoryStore) issueRefreshTokenLocked(grant RefreshGrant, nowUnix int64) (string, error) {
 	if strings.TrimSpace(grant.FamilyID) == "" {
 		familyID, _, familyErr := newOpaqueToken("refresh_family")
 		if familyErr != nil {
@@ -226,9 +255,7 @@ func (store *MemoryStore) IssueRefreshToken(ctx context.Context, grant RefreshGr
 	if tokenErr != nil {
 		return "", tokenErr
 	}
-	store.mu.Lock()
-	store.refreshTokens[digest] = memoryRefreshToken{grant: grant, status: refreshTokenStatusActive}
-	store.mu.Unlock()
+	store.refreshTokens[digest] = memoryRefreshToken{grant: grant, status: refreshTokenStatusActive, issuedAtUnix: nowUnix}
 	return token, nil
 }
 
@@ -237,6 +264,7 @@ func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken s
 	digest := digestToken(refreshToken)
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	record, exists := store.refreshTokens[digest]
 	if !exists || record.grant.ClientID != clientID || record.grant.Resource != resource || record.grant.ExpiresAtUnix <= nowUnix {
 		return RefreshGrant{}, "", ErrRefreshTokenInvalid
@@ -254,6 +282,9 @@ func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken s
 	if err := authorize(ctx, record.grant.TenantID, record.grant.UserID); err != nil {
 		return RefreshGrant{}, "", err
 	}
+	if store.refreshCapacityLocked(record.grant.TenantID) {
+		return RefreshGrant{}, "", ErrAuthorizationCapacity
+	}
 	newToken, newDigest, tokenErr := newOpaqueToken("refresh_token")
 	if tokenErr != nil {
 		return RefreshGrant{}, "", tokenErr
@@ -269,6 +300,7 @@ func (store *MemoryStore) RotateRefreshToken(ctx context.Context, refreshToken s
 func (store *MemoryStore) RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	record, exists := store.refreshTokens[digestToken(refreshToken)]
 	if !exists || record.grant.ClientID != clientID {
 		return nil
@@ -281,6 +313,7 @@ func (store *MemoryStore) RevokeRefreshToken(ctx context.Context, refreshToken s
 func (store *MemoryStore) RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	store.revokeRefreshFamilyLocked("", consentID, nowUnix)
 	return nil
 }
@@ -289,6 +322,7 @@ func (store *MemoryStore) RevokeConsent(ctx context.Context, consentID string, n
 func (store *MemoryStore) RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
 	for consentID, consent := range store.consents {
 		if consent.TenantID == tenantID && consent.UserID == userID && consent.RevokedAtUnix == 0 {
 			consent.RevokedAtUnix = nowUnix
@@ -388,4 +422,65 @@ func (store *MemoryStore) PurgeUser(ctx context.Context, tenantID, userID string
 		}
 	}
 	return nil
+}
+
+// CleanupExpired physically removes expired transient state and unreferenced inactive consents.
+func (store *MemoryStore) CleanupExpired(ctx context.Context, nowUnix int64) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("oauth_store.cleanup: %w", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
+	return nil
+}
+func (store *MemoryStore) cleanupExpiredLocked(nowUnix int64) {
+	for key, record := range store.requests {
+		if record.request.ExpiresAtUnix <= nowUnix {
+			delete(store.requests, key)
+		}
+	}
+	for key, record := range store.codes {
+		if record.grant.ExpiresAtUnix <= nowUnix || record.consumedAtUnix != 0 {
+			delete(store.codes, key)
+		}
+	}
+	for key, record := range store.refreshTokens {
+		if record.grant.ExpiresAtUnix <= nowUnix {
+			delete(store.refreshTokens, key)
+		}
+	}
+	referenced := make(map[string]bool)
+	for _, record := range store.codes {
+		referenced[record.grant.ConsentID] = true
+	}
+	for _, record := range store.refreshTokens {
+		referenced[record.grant.ConsentID] = true
+	}
+	for key, consent := range store.consents {
+		if (consent.ExpiresAtUnix <= nowUnix || consent.RevokedAtUnix != 0) && !referenced[key] {
+			delete(store.consents, key)
+		}
+	}
+}
+func (store *MemoryStore) codeCapacityLocked(tenantID string) bool {
+	count := 0
+	for _, record := range store.codes {
+		if record.grant.TenantID == tenantID {
+			count++
+		}
+	}
+	return count >= maximumPendingPerTenant || len(store.codes) >= maximumPendingGlobal
+}
+func (store *MemoryStore) refreshCapacityLocked(tenantID string) bool {
+	count := 0
+	for _, record := range store.refreshTokens {
+		if record.grant.TenantID == tenantID {
+			count++
+		}
+	}
+	return count >= maximumRefreshPerTenant || len(store.refreshTokens) >= maximumRefreshGlobal
+}
+func refreshGrantForCode(grant AuthorizationGrant, expiresAtUnix int64) RefreshGrant {
+	return RefreshGrant{ConsentID: grant.ConsentID, TenantID: grant.TenantID, UserID: grant.UserID, ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy, ExpiresAtUnix: expiresAtUnix}
 }

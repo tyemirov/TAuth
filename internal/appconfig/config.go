@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/internal/transportsecurity"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,15 +34,17 @@ const DefaultJWTIssuer = "tauth"
 
 // ApplicationConfig represents the parsed config.yaml payload.
 type ApplicationConfig struct {
-	Admin   AdminSettings        `yaml:"admin"`
-	Server  ServerSettings       `yaml:"server"`
-	OAuth   FileOAuthSettings    `yaml:"oauth"`
-	Tenants []tenants.FileTenant `yaml:"tenants,omitempty"`
-	oauth   OAuthServerConfig
+	Admin           AdminSettings        `yaml:"admin"`
+	Server          ServerSettings       `yaml:"server"`
+	OAuth           FileOAuthSettings    `yaml:"oauth"`
+	Tenants         []tenants.FileTenant `yaml:"tenants,omitempty"`
+	oauth           OAuthServerConfig
+	transportPolicy transportsecurity.Policy
 }
 
 // ServerSettings describe server-level configuration settings.
 type ServerSettings struct {
+	TrustedProxyCIDRs           []string `yaml:"trusted_proxy_cidrs"`
 	ListenAddr                  string   `yaml:"listen_addr"`
 	DatabaseURL                 string   `yaml:"database_url"`
 	TenantEncryptionKey         string   `yaml:"tenant_encryption_key"`
@@ -145,6 +148,11 @@ func finishConfig(document ApplicationConfig) (*ApplicationConfig, error) {
 		return nil, err
 	}
 	document.Admin = admin
+	policy, policyErr := transportsecurity.NewPolicy(document.Server.TrustedProxyCIDRs)
+	if policyErr != nil {
+		return nil, fmt.Errorf("%s: %w", ErrorCodeInvalidConfigFile, policyErr)
+	}
+	document.transportPolicy = policy
 	if strings.TrimSpace(document.Server.ListenAddr) == "" {
 		document.Server.ListenAddr = DefaultListenAddr
 	}
@@ -166,7 +174,23 @@ func (config ApplicationConfig) OAuthServer() OAuthServerConfig {
 	return config.oauth.clone()
 }
 
+// TransportPolicy returns the validated server transport policy.
+func (config ApplicationConfig) TransportPolicy() transportsecurity.Policy {
+	return config.transportPolicy
+}
+
 func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
+	var proxyCIDRs []string
+	for _, raw := range config.Server.TrustedProxyCIDRs {
+		expanded := os.ExpandEnv(raw)
+		if strings.TrimSpace(expanded) == "" {
+			continue
+		}
+		for _, cidr := range strings.Split(expanded, ",") {
+			proxyCIDRs = append(proxyCIDRs, strings.TrimSpace(cidr))
+		}
+	}
+	config.Server.TrustedProxyCIDRs = proxyCIDRs
 	config.Admin.Emails = expandEnvSlice(config.Admin.Emails)
 	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
 	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)

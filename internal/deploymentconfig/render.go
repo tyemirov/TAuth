@@ -57,6 +57,7 @@ func Render(reader io.Reader) ([]byte, error) {
 	// Tenant contributions use management resources. Only service settings belong in this artifact.
 	document.Tenants = nil
 	document.Server.TenantEncryptionKey = "${TAUTH_TENANT_ENCRYPTION_KEY}"
+	document.Server.TrustedProxyCIDRs = []string{"${TAUTH_TRUSTED_PROXY_CIDRS}"}
 	document.Server.CORSAllowedOrigins = []string{"https://accounts.google.com"}
 	document.Server.EnableTenantHeaderOverride = true
 	payload, marshalErr := yaml.Marshal(document)
@@ -295,6 +296,7 @@ type nativeDocument struct {
 type nativeServer struct {
 	TenantEncryptionKey         string   `yaml:"tenant_encryption_key,omitempty"`
 	ListenAddr                  string   `yaml:"listen_addr"`
+	TrustedProxyCIDRs           []string `yaml:"trusted_proxy_cidrs"`
 	DatabaseURL                 string   `yaml:"database_url"`
 	EnableCORS                  bool     `yaml:"enable_cors"`
 	CORSAllowedOrigins          []string `yaml:"cors_allowed_origins"`

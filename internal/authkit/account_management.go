@@ -129,6 +129,14 @@ func (store *MemoryPasswordCredentialStore) ensureAccountMaps(tenantID string) {
 
 // CreatePasswordSignup starts a tenant-managed password signup.
 func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Context, tenantID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error) {
+	email, validationErr := validateSignupRequest(request)
+	if validationErr != nil {
+		return AccountChallenge{}, validationErr
+	}
+	if err := store.reserveAuthenticationBudget(ctx, "signup", tenantID, email, 1, 10); err != nil {
+		return AccountChallenge{}, err
+	}
+
 	credential, credentialErr := buildAccountPasswordCredential(request)
 	if credentialErr != nil {
 		return AccountChallenge{}, credentialErr
@@ -141,6 +149,10 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordSignup(ctx context.Con
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.ensureAccountMaps(tenantID)
+	store.cleanupExpiredLocked(store.now().Unix())
+	if err := store.checkAccountCapacityLocked(tenantID, true); err != nil {
+		return AccountChallenge{}, err
+	}
 	if _, exists := store.tenants[tenantID][credential.userEmail]; exists {
 		return AccountChallenge{}, ErrAccountExists
 	}
@@ -222,6 +234,7 @@ func (store *MemoryPasswordCredentialStore) CancelAccountChallenge(_ context.Con
 func (store *MemoryPasswordCredentialStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(store.now().Unix())
 	challenge, challengeErr := store.consumeChallengeLocked(tenantID, token, accountChallengeEmailVerification)
 	if challengeErr != nil {
 		return AccountProfile{}, challengeErr
@@ -259,6 +272,10 @@ func (store *MemoryPasswordCredentialStore) StartPasswordReset(ctx context.Conte
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.ensureAccountMaps(tenantID)
+	store.cleanupExpiredLocked(store.now().Unix())
+	if err := store.checkAccountCapacityLocked(tenantID, false); err != nil {
+		return AccountChallenge{}, err
+	}
 	credential, exists := store.tenants[tenantID][normalizedEmail]
 	if !exists || credential.accountID == "" || !credential.verified {
 		return AccountChallenge{}, ErrAccountNotFound
@@ -304,6 +321,7 @@ func (store *MemoryPasswordCredentialStore) CompletePasswordReset(ctx context.Co
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.cleanupExpiredLocked(store.now().Unix())
 	challenge, challengeErr := store.consumeChallengeLocked(tenantID, token, accountChallengePasswordReset)
 	if challengeErr != nil {
 		return AccountProfile{}, challengeErr
@@ -392,6 +410,10 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordLink(ctx context.Conte
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.ensureAccountMaps(tenantID)
+	store.cleanupExpiredLocked(store.now().Unix())
+	if err := store.checkAccountCapacityLocked(tenantID, false); err != nil {
+		return AccountChallenge{}, err
+	}
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
 		return AccountChallenge{}, ErrAccountNotFound
@@ -416,16 +438,18 @@ func (store *MemoryPasswordCredentialStore) CreatePasswordLink(ctx context.Conte
 func (store *MemoryPasswordCredentialStore) VerifyPasswordLink(ctx context.Context, tenantID string, accountID string, token string) (AccountProfile, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	challenge, challengeErr := store.consumeChallengeLocked(tenantID, token, accountChallengePasswordLink)
-	if challengeErr != nil {
-		return AccountProfile{}, challengeErr
-	}
-	if challenge.accountID != accountID {
+	store.cleanupExpiredLocked(store.now().Unix())
+	challenge := store.challenges[tenantID][hashOpaque(strings.TrimSpace(token))]
+	if challenge == nil || challenge.accountID != accountID {
 		return AccountProfile{}, ErrAccountChallengeInvalid
 	}
 	account := store.accounts[tenantID][accountID]
 	if account == nil {
 		return AccountProfile{}, ErrAccountNotFound
+	}
+	challenge, challengeErr := store.consumeChallengeLocked(tenantID, token, accountChallengePasswordLink)
+	if challengeErr != nil {
+		return AccountProfile{}, challengeErr
 	}
 	store.identities[tenantID][identityKey(accountProviderPassword, challenge.userEmail)] = accountIdentityRecord{
 		accountID:  accountID,
@@ -673,7 +697,7 @@ func (store *MemoryPasswordCredentialStore) consumeChallengeLocked(tenantID stri
 	if challenge == nil || challenge.consumed || challenge.kind != kind {
 		return nil, ErrAccountChallengeInvalid
 	}
-	if time.Unix(challenge.expiresUnix, 0).Before(time.Now().UTC()) {
+	if !store.now().UTC().Before(time.Unix(challenge.expiresUnix, 0)) {
 		return nil, ErrAccountChallengeInvalid
 	}
 	challenge.consumed = true

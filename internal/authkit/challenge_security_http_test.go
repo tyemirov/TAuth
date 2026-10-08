@@ -28,7 +28,7 @@ func TestSecurityChallengeResponsesContainNoSecret(t *testing.T) {
 	}
 	sender := &recordingEmailChallengeSender{}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accounts, sender, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accounts, newTestPasswordResetDispatcher(t), sender, nil)
 	server := httptest.NewServer(router)
 	defer server.Close()
 	response, err := server.Client().Post(server.URL+"/auth/password/reset/start", "application/json", strings.NewReader(`{"email":"known@example.com"}`))
@@ -43,10 +43,11 @@ func TestSecurityChallengeResponsesContainNoSecret(t *testing.T) {
 	if _, present := body["reset_token"]; present {
 		t.Fatal("public reset response contains a usable secret")
 	}
-	if response.StatusCode != http.StatusAccepted || len(sender.requests) != 1 {
-		t.Fatalf("reset delivery failed: status=%d deliveries=%d", response.StatusCode, len(sender.requests))
+	sender.WaitRequests(t, 1)
+	if response.StatusCode != http.StatusAccepted || len(sender.Snapshot()) != 1 {
+		t.Fatalf("reset delivery failed: status=%d deliveries=%d", response.StatusCode, len(sender.Snapshot()))
 	}
-	token := challengeTokenFromDeliveryURL(t, sender.requests[0], EmailChallengeKindPasswordReset)
+	token := challengeTokenFromDeliveryURL(t, sender.Snapshot()[0], EmailChallengeKindPasswordReset)
 	completed, err := server.Client().Post(server.URL+"/auth/password/reset/complete", "application/json", strings.NewReader(`{"token":"`+token+`","password":"replacement correct horse battery staple"}`))
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tyemirov/tauth/internal/transportsecurity"
 	"google.golang.org/api/idtoken"
 )
 
@@ -99,7 +100,7 @@ func TestIsHTTPSDetectsSignals(t *testing.T) {
 				req.Header.Set("X-Forwarded-Proto", "https")
 				return req
 			}(),
-			expected: true,
+			expected: false,
 		},
 		{
 			name: "forwarded_proto",
@@ -108,12 +109,12 @@ func TestIsHTTPSDetectsSignals(t *testing.T) {
 				req.Header.Set("Forwarded", "for=192.0.2.1;proto=https")
 				return req
 			}(),
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "localhost_with_port",
 			request:  &http.Request{Host: "localhost:8080"},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "plain_http",
@@ -124,7 +125,7 @@ func TestIsHTTPSDetectsSignals(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := isHTTPS(testCase.request); got != testCase.expected {
+			if got := (transportsecurity.Policy{}).IsHTTPS(testCase.request); got != testCase.expected {
 				t.Fatalf("expected %v, got %v", testCase.expected, got)
 			}
 		})

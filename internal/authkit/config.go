@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/internal/transportsecurity"
 )
 
 // ServerConfig configures issuers, cookies, and TTL.
 type ServerConfig struct {
+	TransportPolicy          transportsecurity.Policy
 	GoogleWebClientID        string
 	GoogleNativeClientID     string
 	NativeGoogleClients      []NativeGoogleClientConfig

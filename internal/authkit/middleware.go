@@ -75,7 +75,7 @@ func RequireActiveAccountSession(registry TenantRegistry, accountStore AccountMa
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		if _, activeErr := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID()); activeErr != nil {
+		if _, activeErr := activeAccountProfileForSession(contextGin.Request.Context(), config, accountStore, tenantID, claims.GetUserID()); activeErr != nil {
 			if isInactiveAccountSessionError(activeErr) {
 				clearCookie(contextGin, config, config.SessionCookieName, "/")
 				clearCookie(contextGin, config, config.RefreshCookieName, "/auth")
@@ -84,5 +84,31 @@ func RequireActiveAccountSession(registry TenantRegistry, accountStore AccountMa
 			return
 		}
 		contextGin.Next()
+	}
+}
+
+// RequireCredentialTransport rejects insecure requests before credential parsing and effects.
+func RequireCredentialTransport(registry TenantRegistry) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		if strings.HasSuffix(ctx.FullPath(), "/native/config") {
+			ctx.Next()
+			return
+		}
+		config := registry.DefaultConfig()
+		if config.TransportPolicy.IsHTTPS(ctx.Request) {
+			ctx.Next()
+			return
+		}
+		tenantID, resolved := resolveTenantIDRequired(ctx, registry)
+		if ctx.FullPath() == "/auth/apple/start" {
+			tenantID, resolved = resolveAppleStartTenantID(ctx, registry)
+		}
+		if resolved {
+			if tenantConfig, exists := registry.ConfigByID(tenantID); exists && tenantConfig.AllowInsecureHTTP {
+				ctx.Next()
+				return
+			}
+		}
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
 	}
 }

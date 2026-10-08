@@ -174,6 +174,7 @@ func TestDatabaseUserStoreAccountManagementLifecycle(testContext *testing.T) {
 		testContext.Fatalf("expected consumed challenge to be rejected, got %v", reuseErr)
 	}
 
+	advancePasswordTestClock(store, time.Second)
 	passwordProfile, passwordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "correct horse battery staple")
 	if passwordErr != nil {
 		testContext.Fatalf("expected verified password login: %v", passwordErr)
@@ -204,6 +205,7 @@ func TestDatabaseUserStoreAccountManagementLifecycle(testContext *testing.T) {
 	if changeProfile.AccountID != expectedAccountID {
 		testContext.Fatalf("unexpected change profile: %#v", changeProfile)
 	}
+	advancePasswordTestClock(store, time.Second)
 	if _, newPasswordErr := store.AuthenticatePassword(ctx, "tenant-a", "account@example.com", "changed correct horse battery staple"); newPasswordErr != nil {
 		testContext.Fatalf("expected changed password to authenticate: %v", newPasswordErr)
 	}

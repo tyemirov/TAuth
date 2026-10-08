@@ -93,7 +93,7 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
 				sender := &tenantSelectiveEmailSender{requests: make(chan EmailChallengeRequest, 1)}
 				router := gin.New()
 				router.Use(tenants.TenantMiddleware(resolver, http.StatusNotFound))
-				MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, sender, nil)
+				MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, accountStore, newTestPasswordResetDispatcher(t), sender, nil)
 				server := httptest.NewServer(router)
 				defer server.Close()
 				client := server.Client()
@@ -154,7 +154,7 @@ func TestHTTPMixedTenantChallengeDelivery(t *testing.T) {
 							t.Fatalf("unexpected delivery tenant or recipient: %#v", delivery)
 						}
 						deliveryToken = challengeTokenFromDeliveryURL(t, delivery, flow.kind)
-					default:
+					case <-time.After(time.Second):
 						t.Fatal("expected a challenge email")
 					}
 				}

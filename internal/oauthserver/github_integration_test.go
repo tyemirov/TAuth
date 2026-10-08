@@ -108,7 +108,7 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool, configur
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := NewServer(config.OAuthServer(), oauthRegistry, store, signer, fixtureMetadataResolver{}, sessions)
+	server, err := NewServer(config.OAuthServer(), config.TransportPolicy(), oauthRegistry, store, signer, fixtureMetadataResolver{}, sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func newGitHubOAuthFixture(t *testing.T, storage string, disclose bool, configur
 		t.Fatal(err)
 	}
 	login.Mount(router)
-	authkit.MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, accounts, nil, server.store)
+	authkit.MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, accounts, newTestPasswordResetDispatcher(t), nil, server.store)
 	listener.StartTLS()
 	t.Cleanup(listener.Close)
 	client := listener.Client()

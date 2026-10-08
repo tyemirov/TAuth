@@ -140,7 +140,7 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 	}
 	nonces := authkit.NewMemoryNonceStore(time.Minute)
 	sessions := authkit.NewOAuthBrowserSessions(registry, users, refresh, nonces, accounts)
-	server, err := NewServer(config.OAuthServer(), oauthRegistry, store, signer, fixtureMetadataResolver{}, sessions)
+	server, err := NewServer(config.OAuthServer(), config.TransportPolicy(), oauthRegistry, store, signer, fixtureMetadataResolver{}, sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func newAccountOAuthFixture(t *testing.T, storage string) accountOAuthFixture {
 	if err := server.Mount(router); err != nil {
 		t.Fatal(err)
 	}
-	authkit.MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, accounts, nil, store)
+	authkit.MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, accounts, newTestPasswordResetDispatcher(t), nil, store)
 	httpServer := &http.Server{Handler: router, ReadHeaderTimeout: time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 	t.Cleanup(func() { _ = httpServer.Shutdown(context.Background()) })

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -63,7 +64,7 @@ func (store *InMemoryUsers) upsertUserProfile(tenantID string, applicationUserID
 		store.tenants[tenantID] = make(map[string]UserProfile)
 	}
 	store.tenants[tenantID][applicationUserID] = record
-	return applicationUserID, record.Roles, nil
+	return applicationUserID, slices.Clone(record.Roles), nil
 }
 
 // GetUserProfile returns a profile by application user id.
@@ -78,7 +79,7 @@ func (store *InMemoryUsers) GetUserProfile(ctx context.Context, tenantID string,
 	if !ok {
 		return "", "", "", nil, ErrUserNotFound
 	}
-	return record.Email, record.Display, record.AvatarURL, record.Roles, nil
+	return record.Email, record.Display, record.AvatarURL, slices.Clone(record.Roles), nil
 }
 
 // HandleWhoAmI returns the authenticated user's profile.

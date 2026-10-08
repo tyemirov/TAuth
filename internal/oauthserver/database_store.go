@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tyemirov/tauth/internal/authkit"
 	"gorm.io/gorm"
@@ -168,6 +167,9 @@ func (store *DatabaseStore) CreateAuthorizationRequest(ctx context.Context, requ
 }
 
 func (store *DatabaseStore) GetAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return AuthorizationRequest{}, err
+	}
 	var record databaseAuthorizationRequest
 	queryErr := store.db.WithContext(ctx).Where("request_hash = ? AND expires_at_unix > ?", digestToken(requestToken), nowUnix).Take(&record).Error
 	if queryErr != nil {
@@ -180,39 +182,50 @@ func (store *DatabaseStore) GetAuthorizationRequest(ctx context.Context, request
 }
 
 func (store *DatabaseStore) ConsumeAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return AuthorizationRequest{}, err
+	}
 	var request AuthorizationRequest
-	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
-		var record databaseAuthorizationRequest
-		queryErr := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("request_hash = ?", digestToken(requestToken)).Take(&record).Error
-		if queryErr != nil {
-			if errors.Is(queryErr, gorm.ErrRecordNotFound) {
-				return ErrAuthorizationRequestInvalid
-			}
-			return queryErr
+	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
 		}
-		if record.ExpiresAtUnix <= nowUnix {
-			return ErrAuthorizationRequestInvalid
-		}
-		deleted := transaction.Where("request_hash = ?", record.RequestHash).Delete(&databaseAuthorizationRequest{})
-		if deleted.Error != nil {
-			return deleted.Error
-		}
-		if deleted.RowsAffected != 1 {
-			return ErrAuthorizationRequestInvalid
-		}
-		request = authorizationRequestFromDatabase(record)
-		return nil
+		var err error
+		request, err = consumeAuthorizationRequestDatabase(transaction, requestToken, nowUnix)
+		return err
 	})
-	if transactionErr != nil {
-		if errors.Is(transactionErr, ErrAuthorizationRequestInvalid) {
-			return AuthorizationRequest{}, ErrAuthorizationRequestInvalid
-		}
-		return AuthorizationRequest{}, fmt.Errorf("oauth_store.request.consume.%s: %w", store.driverLabel, transactionErr)
+	if err != nil {
+		return AuthorizationRequest{}, fmt.Errorf("oauth_store.request.consume.%s: %w", store.driverLabel, err)
 	}
 	return request, nil
 }
 
+func consumeAuthorizationRequestDatabase(transaction *gorm.DB, requestToken string, nowUnix int64) (AuthorizationRequest, error) {
+	var record databaseAuthorizationRequest
+	err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("request_hash = ?", digestToken(requestToken)).Take(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return AuthorizationRequest{}, ErrAuthorizationRequestInvalid
+	}
+	if err != nil {
+		return AuthorizationRequest{}, err
+	}
+	if record.ExpiresAtUnix <= nowUnix {
+		return AuthorizationRequest{}, ErrAuthorizationRequestInvalid
+	}
+	deleted := transaction.Where("request_hash = ?", record.RequestHash).Delete(&databaseAuthorizationRequest{})
+	if deleted.Error != nil {
+		return AuthorizationRequest{}, deleted.Error
+	}
+	if deleted.RowsAffected != 1 {
+		return AuthorizationRequest{}, ErrAuthorizationRequestInvalid
+	}
+	return authorizationRequestFromDatabase(record), nil
+}
+
 func (store *DatabaseStore) FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return Consent{}, false, err
+	}
 	var record databaseConsent
 	queryErr := store.db.WithContext(ctx).
 		Where("tenant_id = ? AND user_id = ? AND client_id = ? AND resource = ? AND scope = ? AND disclosure_policy = ? AND revoked_at_unix = 0 AND expires_at_unix > ?", key.TenantID, key.UserID, key.ClientID, key.Resource, key.Scope, key.DisclosurePolicy, nowUnix).
@@ -228,10 +241,19 @@ func (store *DatabaseStore) FindConsent(ctx context.Context, key ConsentKey, now
 
 // CompleteAuthorizationRequest commits the request, consent, and code together.
 func (store *DatabaseStore) CompleteAuthorizationRequest(ctx context.Context, requestToken string, completion AuthorizationCompletion) (string, error) {
+	if err := store.CleanupExpired(ctx, completion.NowUnix); err != nil {
+		return "", err
+	}
 	var code string
 	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
+		if err := admitOAuthCapacity(transaction, &databaseAuthorizationCode{}, completion.Grant.TenantID, maximumPendingPerTenant, maximumPendingGlobal); err != nil {
+			return err
+		}
 		transactionStore := &DatabaseStore{db: transaction, driverLabel: store.driverLabel}
-		pending, err := transactionStore.ConsumeAuthorizationRequest(ctx, requestToken, completion.NowUnix)
+		pending, err := consumeAuthorizationRequestDatabase(transaction, requestToken, completion.NowUnix)
 		if err != nil {
 			return err
 		}
@@ -247,7 +269,7 @@ func (store *DatabaseStore) CompleteAuthorizationRequest(ctx context.Context, re
 		}
 		grant := completion.Grant
 		grant.ConsentID = consent.ID
-		code, err = transactionStore.IssueAuthorizationCode(ctx, grant)
+		code, err = transactionStore.issueAuthorizationCode(ctx, grant)
 		return err
 	})
 	if err != nil {
@@ -257,6 +279,9 @@ func (store *DatabaseStore) CompleteAuthorizationRequest(ctx context.Context, re
 }
 
 func (store *DatabaseStore) SaveConsent(ctx context.Context, consent Consent) (Consent, error) {
+	if err := store.CleanupExpired(ctx, consent.CreatedAtUnix); err != nil {
+		return Consent{}, err
+	}
 	if strings.TrimSpace(consent.ID) == "" {
 		consentID, _, consentIDErr := newOpaqueToken("consent")
 		if consentIDErr != nil {
@@ -275,7 +300,26 @@ func (store *DatabaseStore) SaveConsent(ctx context.Context, consent Consent) (C
 	return consent, nil
 }
 
-func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error) {
+func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant, nowUnix int64) (string, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return "", err
+	}
+	var code string
+	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
+		if err := admitOAuthCapacity(transaction, &databaseAuthorizationCode{}, grant.TenantID, maximumPendingPerTenant, maximumPendingGlobal); err != nil {
+			return err
+		}
+		var err error
+		code, err = (&DatabaseStore{db: transaction, driverLabel: store.driverLabel}).issueAuthorizationCode(ctx, grant)
+		return err
+	})
+	return code, err
+}
+
+func (store *DatabaseStore) issueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error) {
 	code, digest, codeErr := newOpaqueToken("authorization_code")
 	if codeErr != nil {
 		return "", codeErr
@@ -291,9 +335,16 @@ func (store *DatabaseStore) IssueAuthorizationCode(ctx context.Context, grant Au
 	return code, nil
 }
 
-func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error) {
+func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, string, error) {
+	if err := store.CleanupExpired(ctx, exchange.NowUnix); err != nil {
+		return AuthorizationGrant{}, "", err
+	}
+	var refreshToken string
 	var grant AuthorizationGrant
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
 		var record databaseAuthorizationCode
 		queryErr := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code_hash = ?", digestToken(code)).Take(&record).Error
 		if queryErr != nil {
@@ -314,6 +365,9 @@ func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code st
 		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
 			return err
 		}
+		if err := admitOAuthCapacity(transaction, &databaseOAuthRefreshToken{}, record.TenantID, maximumRefreshPerTenant, maximumRefreshGlobal); err != nil {
+			return err
+		}
 		update := transaction.Model(&databaseAuthorizationCode{}).Where("code_hash = ? AND consumed_at_unix = 0", record.CodeHash).Update("consumed_at_unix", exchange.NowUnix)
 		if update.Error != nil {
 			return update.Error
@@ -322,18 +376,39 @@ func (store *DatabaseStore) RedeemAuthorizationCode(ctx context.Context, code st
 			return ErrAuthorizationCodeInvalid
 		}
 		grant = authorizationGrantFromDatabase(record)
-		return nil
+		var err error
+		refreshToken, err = (&DatabaseStore{db: transaction, driverLabel: store.driverLabel}).issueRefreshToken(ctx, refreshGrantForCode(grant, exchange.RefreshExpiresAtUnix), exchange.NowUnix)
+		return err
 	})
 	if transactionErr != nil {
 		if errors.Is(transactionErr, ErrAuthorizationCodeInvalid) {
-			return AuthorizationGrant{}, ErrAuthorizationCodeInvalid
+			return AuthorizationGrant{}, "", ErrAuthorizationCodeInvalid
 		}
-		return AuthorizationGrant{}, fmt.Errorf("oauth_store.code.redeem.%s: %w", store.driverLabel, transactionErr)
+		return AuthorizationGrant{}, "", fmt.Errorf("oauth_store.code.redeem.%s: %w", store.driverLabel, transactionErr)
 	}
-	return grant, nil
+	return grant, refreshToken, nil
 }
 
-func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant RefreshGrant) (string, error) {
+func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant RefreshGrant, nowUnix int64) (string, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return "", err
+	}
+	var token string
+	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
+		if err := admitOAuthCapacity(transaction, &databaseOAuthRefreshToken{}, grant.TenantID, maximumRefreshPerTenant, maximumRefreshGlobal); err != nil {
+			return err
+		}
+		var err error
+		token, err = (&DatabaseStore{db: transaction, driverLabel: store.driverLabel}).issueRefreshToken(ctx, grant, nowUnix)
+		return err
+	})
+	return token, err
+}
+
+func (store *DatabaseStore) issueRefreshToken(ctx context.Context, grant RefreshGrant, nowUnix int64) (string, error) {
 	if strings.TrimSpace(grant.FamilyID) == "" {
 		familyID, _, familyErr := newOpaqueToken("refresh_family")
 		if familyErr != nil {
@@ -345,7 +420,7 @@ func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant Refresh
 	if tokenErr != nil {
 		return "", tokenErr
 	}
-	record := refreshRecordFromGrant(digest, grant, time.Now().UTC().Unix())
+	record := refreshRecordFromGrant(digest, grant, nowUnix)
 	if createErr := store.createUserRecord(ctx, record.TenantID, record.UserID, &record); createErr != nil {
 		return "", fmt.Errorf("oauth_store.refresh.create.%s: %w", store.driverLabel, createErr)
 	}
@@ -353,12 +428,18 @@ func (store *DatabaseStore) IssueRefreshToken(ctx context.Context, grant Refresh
 }
 
 func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64, authorize AccountAuthorization) (RefreshGrant, string, error) {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return RefreshGrant{}, "", err
+	}
 	var grant RefreshGrant
 	var newToken string
 	reused := false
 	invalid := false
 	invalidScope := false
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
 		var record databaseOAuthRefreshToken
 		queryErr := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("token_hash = ?", digestToken(refreshToken)).Take(&record).Error
 		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
@@ -405,6 +486,9 @@ func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken
 		if err := authorize(ctx, record.TenantID, record.UserID); err != nil {
 			return err
 		}
+		if err := admitOAuthCapacity(transaction, &databaseOAuthRefreshToken{}, record.TenantID, maximumRefreshPerTenant, maximumRefreshGlobal); err != nil {
+			return err
+		}
 		generatedToken, generatedDigest, tokenErr := newOpaqueToken("refresh_token")
 		if tokenErr != nil {
 			return tokenErr
@@ -442,7 +526,13 @@ func (store *DatabaseStore) RotateRefreshToken(ctx context.Context, refreshToken
 }
 
 func (store *DatabaseStore) RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return err
+	}
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
 		var record databaseOAuthRefreshToken
 		queryErr := transaction.Where("token_hash = ?", digestToken(refreshToken)).Take(&record).Error
 		if errors.Is(queryErr, gorm.ErrRecordNotFound) || (queryErr == nil && record.ClientID != clientID) {
@@ -460,7 +550,13 @@ func (store *DatabaseStore) RevokeRefreshToken(ctx context.Context, refreshToken
 }
 
 func (store *DatabaseStore) RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return err
+	}
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
 		return revokeRefreshFamilyDatabase(transaction, "", consentID, nowUnix)
 	})
 	if transactionErr != nil {
@@ -471,7 +567,13 @@ func (store *DatabaseStore) RevokeConsent(ctx context.Context, consentID string,
 
 // RevokeUser atomically revokes consents and refresh tokens and removes codes for one tenant and user.
 func (store *DatabaseStore) RevokeUser(ctx context.Context, tenantID string, userID string, nowUnix int64) error {
+	if err := store.CleanupExpired(ctx, nowUnix); err != nil {
+		return err
+	}
 	transactionErr := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
 		if err := transaction.Model(&databaseConsent{}).
 			Where("tenant_id = ? AND user_id = ? AND revoked_at_unix = 0", tenantID, userID).
 			Update("revoked_at_unix", nowUnix).Error; err != nil {
@@ -574,3 +676,43 @@ func (store *DatabaseStore) createUserRecord(ctx context.Context, tenantID, user
 
 // ErasureDatabaseIdentity identifies the selected database without disclosing its URL.
 func (store *DatabaseStore) ErasureDatabaseIdentity() string { return store.databaseIdentity }
+
+// CleanupExpired commits physical removal before callers reject expired credentials.
+func (store *DatabaseStore) CleanupExpired(ctx context.Context, nowUnix int64) error {
+	err := store.db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := lockOAuthCapacity(transaction); err != nil {
+			return err
+		}
+		for _, model := range []any{&databaseAuthorizationRequest{}, &databaseOAuthRefreshToken{}} {
+			if err := transaction.Where("expires_at_unix <= ?", nowUnix).Delete(model).Error; err != nil {
+				return err
+			}
+		}
+		if err := transaction.Where("expires_at_unix <= ? OR consumed_at_unix <> 0", nowUnix).Delete(&databaseAuthorizationCode{}).Error; err != nil {
+			return err
+		}
+		codes := transaction.Model(&databaseAuthorizationCode{}).Select("consent_id").Where("expires_at_unix > ?", nowUnix)
+		refresh := transaction.Model(&databaseOAuthRefreshToken{}).Select("consent_id").Where("expires_at_unix > ?", nowUnix)
+		return transaction.Where("(expires_at_unix <= ? OR revoked_at_unix <> 0) AND consent_id NOT IN (?) AND consent_id NOT IN (?)", nowUnix, codes, refresh).Delete(&databaseConsent{}).Error
+	})
+	if err != nil {
+		return fmt.Errorf("oauth_store.cleanup.%s: %w", store.driverLabel, err)
+	}
+	return nil
+}
+func lockOAuthCapacity(transaction *gorm.DB) error {
+	return transaction.Model(&databaseCapacityLock{}).Where("id = 1").Update("id", 1).Error
+}
+func admitOAuthCapacity(transaction *gorm.DB, model any, tenantID string, tenantLimit, globalLimit int64) error {
+	var tenantCount, globalCount int64
+	if err := transaction.Model(model).Count(&globalCount).Error; err != nil {
+		return err
+	}
+	if err := transaction.Model(model).Where("tenant_id = ?", tenantID).Count(&tenantCount).Error; err != nil {
+		return err
+	}
+	if tenantCount >= tenantLimit || globalCount >= globalLimit {
+		return ErrAuthorizationCapacity
+	}
+	return nil
+}

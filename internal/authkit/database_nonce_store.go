@@ -69,9 +69,6 @@ func NewDatabaseNonceStoreWithTTLResolver(ctx context.Context, databaseURL strin
 
 // Issue creates and stores a nonce token for the provided tenant.
 func (store *DatabaseNonceStore) Issue(ctx context.Context, tenantID string) (string, error) {
-	if purgeErr := store.purgeExpired(ctx, tenantID); purgeErr != nil {
-		return "", purgeErr
-	}
 	opaqueToken, hashValue, randomErr := generateOpaqueToken(store.randReader, store.tokenSize, nonceStoreErrorPrefix)
 	if randomErr != nil {
 		return "", fmt.Errorf("%s.issue.%s: %w", nonceStoreErrorPrefix, store.driverLabel, randomErr)
@@ -83,8 +80,28 @@ func (store *DatabaseNonceStore) Issue(ctx context.Context, tenantID string) (st
 		ExpiresUnix:  now.Add(store.ttlResolver(tenantID)).Unix(),
 		IssuedAtUnix: now.Unix(),
 	}
-	if createErr := store.db.WithContext(ctx).Create(&record).Error; createErr != nil {
-		return "", fmt.Errorf("%s.issue.%s: %w", nonceStoreErrorPrefix, store.driverLabel, createErr)
+	var capacityErr error
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTransientCapacity(tx, nonceStoreErrorPrefix); err != nil {
+			return err
+		}
+		if err := tx.Where("expires_unix <= ?", now.Unix()).Delete(&nonceRecord{}).Error; err != nil {
+			return err
+		}
+		capacityErr = checkTransientCapacity(tx, &nonceRecord{}, tenantID, transientTenantCapacity, transientGlobalCapacity)
+		if errors.Is(capacityErr, ErrTransientCapacity) {
+			return nil
+		}
+		if capacityErr != nil {
+			return capacityErr
+		}
+		return tx.Create(&record).Error
+	})
+	if err != nil {
+		return "", fmt.Errorf("nonce_store.issue: %w", err)
+	}
+	if capacityErr != nil {
+		return "", capacityErr
 	}
 	return opaqueToken, nil
 }
@@ -92,52 +109,36 @@ func (store *DatabaseNonceStore) Issue(ctx context.Context, tenantID string) (st
 // Consume validates and invalidates a previously issued nonce token.
 func (store *DatabaseNonceStore) Consume(ctx context.Context, tenantID string, token string) error {
 	hashValue := hashOpaque(token)
-	var record nonceRecord
-	queryErr := store.db.WithContext(ctx).
-		Where("tenant_id = ? AND token_hash IN (?, ?)", tenantID, hashValue, token).
-		Take(&record).Error
-	if queryErr != nil {
-		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
-			if purgeErr := store.purgeExpired(ctx, tenantID); purgeErr != nil {
-				return purgeErr
-			}
-			return ErrNonceNotFound
-		}
-		return fmt.Errorf("%s.consume.%s: %w", nonceStoreErrorPrefix, store.driverLabel, queryErr)
+	nowUnix := store.now().UTC().Unix()
+	result := store.db.WithContext(ctx).
+		Where("tenant_id = ? AND token_hash = ? AND expires_unix > ?", tenantID, hashValue, nowUnix).
+		Delete(&nonceRecord{})
+	if result.Error != nil {
+		return fmt.Errorf("%s.consume.%s: %w", nonceStoreErrorPrefix, store.driverLabel, result.Error)
 	}
-	now := store.now().UTC()
-	if now.After(time.Unix(record.ExpiresUnix, 0)) {
-		if deleteErr := store.deleteRecord(ctx, tenantID, record.TokenHash); deleteErr != nil {
-			return deleteErr
+	if result.RowsAffected != 1 {
+		// A failed admission cannot authorize a credential operation. This read
+		// only distinguishes an expired token from an absent or consumed token.
+		var record nonceRecord
+		queryErr := store.db.WithContext(ctx).Where("tenant_id = ? AND token_hash = ?", tenantID, hashValue).Take(&record).Error
+		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%s.consume.%s: %w", nonceStoreErrorPrefix, store.driverLabel, queryErr)
 		}
 		if purgeErr := store.purgeExpired(ctx, tenantID); purgeErr != nil {
 			return purgeErr
 		}
-		return ErrNonceExpired
+		if queryErr == nil && record.ExpiresUnix <= nowUnix {
+			return ErrNonceExpired
+		}
+		return ErrNonceNotFound
 	}
-	if deleteErr := store.deleteRecord(ctx, tenantID, record.TokenHash); deleteErr != nil {
-		return deleteErr
-	}
-	if purgeErr := store.purgeExpired(ctx, tenantID); purgeErr != nil {
-		return purgeErr
-	}
-	return nil
-}
-
-func (store *DatabaseNonceStore) deleteRecord(ctx context.Context, tenantID string, tokenHash string) error {
-	deleteErr := store.db.WithContext(ctx).
-		Where("tenant_id = ? AND token_hash = ?", tenantID, tokenHash).
-		Delete(&nonceRecord{}).Error
-	if deleteErr != nil {
-		return fmt.Errorf("%s.delete.%s: %w", nonceStoreErrorPrefix, store.driverLabel, deleteErr)
-	}
-	return nil
+	return store.purgeExpired(ctx, tenantID)
 }
 
 func (store *DatabaseNonceStore) purgeExpired(ctx context.Context, tenantID string) error {
 	nowUnix := store.now().UTC().Unix()
 	purgeErr := store.db.WithContext(ctx).
-		Where("tenant_id = ? AND expires_unix < ?", tenantID, nowUnix).
+		Where("tenant_id = ? AND expires_unix <= ?", tenantID, nowUnix).
 		Delete(&nonceRecord{}).Error
 	if purgeErr != nil {
 		return fmt.Errorf("%s.purge.%s: %w", nonceStoreErrorPrefix, store.driverLabel, purgeErr)
