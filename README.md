@@ -275,6 +275,7 @@ server:
   listen_addr: ":8080"
   database_url: "${TAUTH_DATABASE_URL}"
   tenant_encryption_key: "${TAUTH_TENANT_ENCRYPTION_KEY}"
+  trusted_proxy_cidrs: ["${TAUTH_TRUSTED_PROXY_CIDRS}"]
   enable_cors: true
   cors_allowed_origins: ["https://tauth.mprlab.com"]
   enable_tenant_header_override: true
@@ -285,6 +286,21 @@ tauth doctor service.yaml --json
 tauth --config service.yaml preflight
 tauth --config service.yaml
 ```
+
+Set `TAUTH_TRUSTED_PROXY_CIDRS` to the actual proxy peer CIDRs, separated by commas, when the proxy terminates TLS.
+The selected deployment passes this input through its private values and service environment.
+An unset or empty value trusts no forwarding peer. Invalid nonempty CIDRs stop configuration loading.
+TAuth accepts direct TLS, or one exact `X-Forwarded-Proto: https` value from a configured connection peer.
+Duplicate or comma-separated scheme values fail transport classification. `Forwarded` and `Host` supply no transport evidence.
+The proxy must overwrite `X-Forwarded-Proto` from its actual client connection scheme.
+For Nginx, use its [proxy header directive](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header):
+
+```nginx
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Credential routes require this transport contract before they read credentials or change state.
+The explicit tenant `allow_insecure_http` setting disables the tenant HTTPS requirement. Use this setting for development. OAuth local HTTP requires its loopback issuer and a loopback connection peer.
 
 The database URL and base64 encryption key are required. The decoded key must contain 32 bytes.
 The service rejects missing console bootstrap data and incorrect encryption keys.
@@ -416,16 +432,23 @@ If the request included a signed `return_to` URL, TAuth redirects to that URL. T
 
 ### Native desktop and mobile login (system browser + PKCE)
 
-TAuth also supports installed apps that cannot use the browser popup flow. Native clients such as PromptDew desktop or PromptDew Mobile should:
+TAuth supports installed apps through a system browser and PKCE.
+Use this procedure for desktop and mobile clients:
 
-1. Fetch tenant-specific metadata from `GET /auth/google/native/config`. Mobile clients should pass `?platform=ios` or `?platform=android`; non-browser requests must include `X-TAuth-Tenant`.
-2. Open Google in the system browser with `response_type=code`, `scope=openid email profile`, PKCE `S256`, and the OIDC nonce. Desktop apps can use a loopback redirect like `http://127.0.0.1:<port>/oauth/google/callback`; Expo mobile apps should use one configured custom-scheme or HTTPS app-link redirect URI.
-3. Exchange the authorization code directly with Google and extract the returned `id_token`.
-4. Send that `id_token` plus the original OIDC nonce to `POST /auth/google/native`. Mobile clients should also send `platform` and the `redirect_uri` they used so TAuth can select the correct accepted audience and reject unconfigured redirects.
-5. Reuse the minted `app_session` / `app_refresh` cookies just like a browser client.
+1. Fetch tenant metadata from `GET /auth/google/native/config`. Include `X-TAuth-Tenant` on requests without a browser `Origin`. For mobile clients, add `?platform=ios` or `?platform=android`.
+2. Obtain a nonce from `POST /auth/nonce` with the same `X-TAuth-Tenant` header.
+3. Open Google in the system browser with `response_type=code`, `scope=openid email profile`, PKCE `S256`, and the issued nonce. Use a configured redirect URI. Desktop clients can use `http://127.0.0.1:<port>/oauth/google/callback`. Mobile clients can use a configured custom-scheme or HTTPS app-link URI.
+4. Exchange the authorization code directly with Google and extract the returned `id_token`.
+5. Send the `id_token` and issued nonce as `nonce_token` to `POST /auth/google/native`. For mobile clients, include `platform` and the configured `redirect_uri` used for authorization.
+6. Use the returned `app_session` and `app_refresh` cookies for subsequent requests.
 
 This keeps TAuth authentication-only: Google authorization codes and Google refresh tokens never transit through TAuth.
 TAuth does not return bearer or refresh tokens in the response body for mobile clients. Expo apps should preserve the `Set-Cookie` headers in the native cookie jar and send cookies on calls to TAuth and downstream API hosts. For cross-host use, configure a shared `cookie_domain` such as `.example.com` and have downstream services validate `app_session` with `pkg/sessionvalidator`.
+
+TAuth requires the raw issued nonce in the Google authorization request and the `nonce_token` field.
+TAuth consumes the nonce before account or session writes.
+Unknown, expired, cross-tenant, and used nonces return `401` with `error: "invalid_nonce"`.
+Obtain a fresh nonce for each authorization.
 
 ### Native iOS Sign in with Apple
 
@@ -622,18 +645,32 @@ The HTTP server uses a 15-second read limit, a 30-second write limit, and a
 Password login permits five attempts per tenant and email address per minute.
 It also permits 30 attempts per connection source and 1,000 attempts across the
 service per minute. JSON login and OAuth login share these limits. A rejected
-login returns HTTP 429 with `Retry-After: 60`. Budgets include successful attempts.
+login returns HTTP 429. Request budget rejection uses `Retry-After: 60`. Budgets include successful attempts.
+
+New passwords must contain at least 15 Unicode code points in valid UTF-8 and at most 72 bytes.
+Signup, reset, change, link, and `HashPassword` use this policy. Authentication verifies current stored bcrypt hashes.
+Each failed login delays the next attempt for 1, 2, 4, 8, 16, 32, then 60 seconds.
+The delay remains at 60 seconds for later failures and expires after 15 minutes without an admitted attempt.
+Parallel valid login requests can receive HTTP 429 while one password verification remains pending.
+A successful active-account login clears its own delay reservation. Concurrent requests cannot remove a newer reservation.
+JSON and OAuth share this state by tenant and normalized email. `Retry-After` reports the remaining delay, rounded up.
+Each store permits at most 10,000 delay records. Request budgets apply before delay admission and bcrypt work.
+The minimum follows the [NIST single-factor password length guidance](https://pages.nist.gov/800-63-4/sp800-63b.html#passwordver).
 
 Source identity comes from the connection peer. Deployments behind a proxy share
 the proxy source budget. PostgreSQL and SQLite deployments share budgets through
 the database. Memory deployments share them within one process.
 
 Password reset permits one request per tenant and email address per minute,
-10 per connection source, and 1,000 across the service per minute. Each accepted
-request replaces the previous reset challenge for that account. Reset initiation
+10 per connection source, and 1,000 across the service per minute. Each admitted
+recovery job replaces the previous reset challenge for that account. Reset initiation
 always returns `202` with `{"status":"accepted"}` after valid input, including
-unknown accounts, throttled requests, and delivery errors. Email delivery remains
-synchronous, so response duration can depend on the delivery service.
+unknown accounts, throttled requests, full queues, storage failures, and delivery errors.
+Account lookup, challenge creation, and email delivery run independently of the public response.
+Each runtime snapshot permits 256 outstanding recovery jobs, with limits of 8 per source and 64 per tenant.
+Repeated pending requests for the same tenant and email share one job. Full or closed queues retain the same public response.
+Jobs have a 30-second execution limit. Failed delivery cancels its challenge through a separate cleanup context with a five-second limit.
+Retirement and shutdown cancel and join recovery work before the notification client closes.
 
 Rate-limit records expire after one minute and are removed at the next admission.
 Their global capacity is 10,000 records. Reset challenges have a global capacity
