@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/tyemirov/tauth/internal/appconfig"
 )
 
@@ -44,8 +46,11 @@ func TestConsoleRendererTrustedProxyInput(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "${TAUTH_TRUSTED_PROXY_CIDRS}") || !strings.Contains(output.String(), "trusted_proxy_cidrs:") {
-		t.Fatal("rendered service lacks the explicit trusted proxy input")
+	if !strings.Contains(output.String(), "${TAUTH_TRUSTED_PROXY_HOSTS}") || !strings.Contains(output.String(), "trusted_proxy_hosts:") || !strings.Contains(output.String(), "${TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT}") {
+		t.Fatal("rendered service lacks managed hostname proxy trust")
+	}
+	if strings.Contains(output.String(), "TAUTH_TRUSTED_PROXY_CIDRS") {
+		t.Fatal("managed rendering still requires an operator CIDR input")
 	}
 }
 
@@ -73,15 +78,22 @@ func TestConsoleRendererTrustedProxyValidationCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, value    string
-		valid, trusted bool
+		name, hostname, timeout string
+		valid, trusted          bool
 	}{
-		{"empty", "", true, false},
-		{"configured", "127.0.0.1/32,::1/128", true, true},
-		{"malformed", "127.0.0.1/32,invalid", false, false},
+		{"empty", "", "", true, false},
+		{"configured", "localhost", "1s", true, true},
+		{"managed name absent locally", "mprlab-caddy", "1s", true, false},
+		{"malformed", "https://localhost", "1s", false, false},
+		{"literal address", "127.0.0.1", "1s", false, false},
+		{"timeout missing", "localhost", "", false, false},
+		{"timeout invalid", "localhost", "invalid", false, false},
+		{"timeout zero", "localhost", "0s", false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("TAUTH_TRUSTED_PROXY_CIDRS", test.value)
+			t.Setenv("TAUTH_TRUSTED_PROXY_HOSTS", test.hostname)
+			t.Setenv("TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT", test.timeout)
+			t.Setenv("TAUTH_TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
 			validate := newRootCommand()
 			var result bytes.Buffer
 			validate.SetOut(&result)
@@ -105,5 +117,41 @@ func TestConsoleRendererTrustedProxyValidationCLI(t *testing.T) {
 				t.Fatalf("rendered trusted peer=%v want=%v", secure, test.trusted)
 			}
 		})
+	}
+}
+
+func TestManagedProxyTrustManifest(t *testing.T) {
+	payload, err := os.ReadFile("../../.mprlab/deploy/resources.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Resources struct {
+			Resources map[string]struct {
+				Bindings map[string]string `yaml:"bindings"`
+				Services map[string]struct {
+					Environment map[string]struct {
+						Value string `yaml:"value"`
+					} `yaml:"environment"`
+				} `yaml:"services"`
+			} `yaml:"resources"`
+		} `yaml:"mprlab_resources"`
+	}
+	if err := yaml.Unmarshal(payload, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range manifest.Resources.Resources {
+		for _, binding := range resource.Bindings {
+			if binding == "TAUTH_TRUSTED_PROXY_CIDRS" || binding == "TAUTH_TRUSTED_PROXY_HOSTS" {
+				t.Fatal("proxy trust still requires a private operator input")
+			}
+		}
+	}
+	environment := manifest.Resources.Resources["runtime"].Services["tauth-api"].Environment
+	if environment["TAUTH_TRUSTED_PROXY_HOSTS"].Value != "mprlab-caddy" || environment["TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT"].Value != "1s" {
+		t.Fatal("deployment does not configure managed proxy identity and bounded resolution")
+	}
+	if _, exists := environment["TAUTH_TRUSTED_PROXY_CIDRS"]; exists {
+		t.Fatal("managed deployment still supplies manual CIDRs")
 	}
 }
