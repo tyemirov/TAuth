@@ -15,7 +15,7 @@ func TestPolicyHTTPTransport(t *testing.T) {
 		if trusted {
 			cidrs = []string{"127.0.0.1/32", "::1/128"}
 		}
-		policy, err := transportsecurity.NewPolicy(cidrs)
+		policy, err := transportsecurity.NewPolicy(transportsecurity.ProxyConfig{CIDRs: cidrs}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func TestPolicyHTTPTransport(t *testing.T) {
 }
 
 func TestPolicyAddressAndHeaderContract(t *testing.T) {
-	policy, err := transportsecurity.NewPolicy([]string{"192.0.2.0/24", "2001:db8::/32", "::ffff:198.51.100.0/120"})
+	policy, err := transportsecurity.NewPolicy(transportsecurity.ProxyConfig{CIDRs: []string{"192.0.2.0/24", "2001:db8::/32", "::ffff:198.51.100.0/120"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestPolicyAddressAndHeaderContract(t *testing.T) {
 		t.Fatal("TLS rejected")
 	}
 	for _, cidr := range []string{"", "localhost", "127.0.0.1", "127.0.0.1/33", "::ffff:0:0/80"} {
-		if _, err := transportsecurity.NewPolicy([]string{cidr}); err == nil {
+		if _, err := transportsecurity.NewPolicy(transportsecurity.ProxyConfig{CIDRs: []string{cidr}}, nil); err == nil {
 			t.Errorf("accepted invalid CIDR %q", cidr)
 		}
 	}
