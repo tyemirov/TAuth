@@ -1,5 +1,6 @@
 // @ts-check
 import "./integration.js";
+import { initializePalette } from "./palette.js";
 import {
   Client,
   app,
@@ -1018,6 +1019,13 @@ window.addEventListener("pagehide", () => {
 });
 async function start() {
   try {
+    const disposePalette = initializePalette(
+      document.querySelector("mpr-footer"),
+      showError,
+    );
+    window.addEventListener("pagehide", (event) => {
+      if (!event.persisted) disposePalette();
+    });
     client = await loadClient();
     const publicConfig = await client.bootstrap(controller.signal);
     const config = {
