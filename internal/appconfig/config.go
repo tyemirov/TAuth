@@ -2,9 +2,11 @@ package appconfig
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/transportsecurity"
@@ -24,7 +26,7 @@ const ErrorCodeInvalidCORSOrigin = "config.cors_invalid_origin"
 const ErrorCodeCORSOriginNotAllowed = "config.cors_origin_not_allowed"
 
 // ConfigSchemaVersion identifies the config.yaml schema version.
-const ConfigSchemaVersion = "tauth.config.v10"
+const ConfigSchemaVersion = "tauth.config.v11"
 
 // DefaultListenAddr is used when listen_addr is omitted.
 const DefaultListenAddr = ":8080"
@@ -45,6 +47,8 @@ type ApplicationConfig struct {
 // ServerSettings describe server-level configuration settings.
 type ServerSettings struct {
 	TrustedProxyCIDRs           []string `yaml:"trusted_proxy_cidrs"`
+	TrustedProxyHosts           []string `yaml:"trusted_proxy_hosts"`
+	TrustedProxyLookupTimeout   string   `yaml:"trusted_proxy_lookup_timeout"`
 	ListenAddr                  string   `yaml:"listen_addr"`
 	DatabaseURL                 string   `yaml:"database_url"`
 	TenantEncryptionKey         string   `yaml:"tenant_encryption_key"`
@@ -148,7 +152,16 @@ func finishConfig(document ApplicationConfig) (*ApplicationConfig, error) {
 		return nil, err
 	}
 	document.Admin = admin
-	policy, policyErr := transportsecurity.NewPolicy(document.Server.TrustedProxyCIDRs)
+	var lookupTimeout time.Duration
+	if document.Server.TrustedProxyLookupTimeout != "" {
+		lookupTimeout, err = time.ParseDuration(document.Server.TrustedProxyLookupTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("%s: trusted_proxy_lookup_timeout: %w", ErrorCodeInvalidConfigFile, err)
+		}
+	}
+	policy, policyErr := transportsecurity.NewPolicy(transportsecurity.ProxyConfig{
+		CIDRs: document.Server.TrustedProxyCIDRs, Hosts: document.Server.TrustedProxyHosts, LookupTimeout: lookupTimeout,
+	}, net.DefaultResolver)
 	if policyErr != nil {
 		return nil, fmt.Errorf("%s: %w", ErrorCodeInvalidConfigFile, policyErr)
 	}
@@ -191,6 +204,18 @@ func expandApplicationConfigEnv(config ApplicationConfig) ApplicationConfig {
 		}
 	}
 	config.Server.TrustedProxyCIDRs = proxyCIDRs
+	var proxyHosts []string
+	for _, raw := range config.Server.TrustedProxyHosts {
+		expanded := os.ExpandEnv(raw)
+		if strings.TrimSpace(expanded) == "" {
+			continue
+		}
+		for _, hostname := range strings.Split(expanded, ",") {
+			proxyHosts = append(proxyHosts, strings.TrimSpace(hostname))
+		}
+	}
+	config.Server.TrustedProxyHosts = proxyHosts
+	config.Server.TrustedProxyLookupTimeout = os.ExpandEnv(config.Server.TrustedProxyLookupTimeout)
 	config.Admin.Emails = expandEnvSlice(config.Admin.Emails)
 	config.Server.ListenAddr = os.ExpandEnv(config.Server.ListenAddr)
 	config.Server.DatabaseURL = os.ExpandEnv(config.Server.DatabaseURL)

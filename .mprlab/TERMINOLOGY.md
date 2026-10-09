@@ -101,6 +101,8 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `proxy trust`: A rule that permits a reverse proxy to supply the HTTPS scheme of a client request.
+
 - `public user ID`: The fixed tenant-scoped account identifier that TAuth supplies to applications and uses in session claims.
 - `internal account ID`: The opaque identifier that TAuth uses for its account resources.
 - `application subject`: The public user ID in a signed TAuth session or OAuth credential.
@@ -118,6 +120,8 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `App`: An account-owned resource that contains related application tenants.
 
 - `tenant console`: The TAuth browser frontend through which an owner configures application tenants.
+- `color palette`: A set of interface colors selected by one footer control.
+- `palette quadrant`: One of four areas in the square palette control.
 - `owner account`: A console account that owns Apps through a verified TAuth subject.
 - `application tenant`: An isolated TAuth configuration and its application users, credentials, and sessions.
 - `console tenant`: The reserved TAuth tenant that authenticates tenant console owners.
@@ -210,6 +214,9 @@ Use the simple present, simple past, simple future, imperative, or infinitive fo
 - `Apple notification`: A signed Apple event that reports an account or consent change.
 
 ## Repository Technical Verbs
+
+- `resolve`: Get the network addresses of a configured hostname from its DNS response.
+- `trust`: Accept the HTTPS scheme from a configured reverse proxy after connection peer verification.
 
 Add repository-specific technical verbs below this line.
 

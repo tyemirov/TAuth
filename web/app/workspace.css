@@ -20,6 +20,7 @@
   background: var(--page);
 }
 :root[data-mpr-theme="light"] {
+  color-scheme: light;
   --surface: #fff;
   --page: #f3f5f9;
   --raised: #fff;
@@ -31,6 +32,43 @@
   --accent: #214fa0;
   --success: #477013;
   --danger: #a62f2f;
+}
+:root[data-mpr-theme="light"][data-tauth-palette="sunrise"] {
+  --surface: #fff9df;
+  --page: #fff4c2;
+  --raised: #fffbea;
+  --line: #d5bf7a;
+  --hover: #a38b48;
+  --ink: #352b16;
+  --muted: #6b592f;
+  --quiet: #6b592f;
+  --accent: #8a4b08;
+  --success: #477013;
+  --danger: #a62f2f;
+}
+:root[data-mpr-theme="dark"][data-tauth-palette="forest"] {
+  --surface: #1c3028;
+  --page: #101f19;
+  --raised: #172a21;
+  --line: #385346;
+  --hover: #567863;
+  --ink: #e1f1e7;
+  --muted: #b9d1c2;
+  --quiet: #94b5a2;
+  --accent: #8ed9b0;
+  --success: #b5d578;
+  --danger: #f08080;
+}
+:root[data-mpr-theme][data-tauth-palette],
+body[data-mpr-theme][data-tauth-palette] {
+  --mpr-color-surface-primary: var(--page);
+  --mpr-color-surface-elevated: var(--surface);
+  --mpr-color-text-primary: var(--ink);
+  --mpr-color-text-muted: var(--muted);
+  --mpr-color-border: var(--line);
+  --mpr-color-divider: var(--line);
+  --mpr-color-accent: var(--accent);
+  --mpr-color-accent-alt: var(--success);
 }
 * {
   box-sizing: border-box;

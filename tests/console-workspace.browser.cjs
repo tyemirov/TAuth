@@ -141,6 +141,106 @@ test(
       visible: true,
       timeout: 10000,
     });
+    const palettes = [
+      { mode: "default-light", theme: "light", palette: "default" },
+      { mode: "sunrise-light", theme: "light", palette: "sunrise" },
+      { mode: "default-dark", theme: "dark", palette: "default" },
+      { mode: "forest-dark", theme: "dark", palette: "forest" },
+    ];
+    const paletteColors = [];
+    const paletteControl = 'mpr-footer [data-mpr-theme-toggle="control"]';
+    for (const [index, palette] of palettes.entries()) {
+      const quad = await page.$(
+        `mpr-footer [data-mpr-theme-toggle="quad"][data-quad-index="${index}"]`,
+      );
+      const bounds = await quad.boundingBox();
+      await page.mouse.click(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      );
+      assert.equal(
+        await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+        palette.mode,
+        `Quadrant ${index} must select ${palette.mode}`,
+      );
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          theme: document.documentElement.dataset.mprTheme,
+          palette: document.documentElement.dataset.tauthPalette,
+        })),
+        { theme: palette.theme, palette: palette.palette },
+      );
+      paletteColors.push(
+        await page.evaluate(() => ({
+          page: getComputedStyle(document.documentElement).backgroundColor,
+          header: getComputedStyle(document.querySelector("header.mpr-header"))
+            .backgroundColor,
+          footer: getComputedStyle(document.querySelector("footer.mpr-footer"))
+            .backgroundColor,
+        })),
+      );
+    }
+    assert.equal(new Set(paletteColors.map((colors) => colors.page)).size, 4);
+    assert.equal(new Set(paletteColors.map((colors) => colors.header)).size, 4);
+    assert.equal(new Set(paletteColors.map((colors) => colors.footer)).size, 4);
+    await page.goto(process.env.TAUTH_CONSOLE_URL + "?palette-navigation");
+    await page.goBack();
+    await page.waitForSelector(paletteControl);
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.reload();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.evaluate(() => {
+      const store = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === "tauth.console.palette") {
+          throw new DOMException(
+            "Fixture storage failure",
+            "QuotaExceededError",
+          );
+        }
+        store.call(this, key, value);
+      };
+    });
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "sunrise-light",
+    );
+    assert.match(
+      await page.$eval("#notice", (node) => node.textContent),
+      /Color palette could not be stored/,
+    );
+    await page.reload();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.focus(paletteControl);
+    for (const palette of [...palettes.slice(1), palettes[0]]) {
+      await page.keyboard.press("ArrowRight");
+      assert.equal(
+        await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+        palette.mode,
+      );
+    }
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-dark",
+    );
+    await page.waitForSelector("#fixture-google-login", { visible: true });
     await page.screenshot({ path: "/tmp/tauth-console-login.png" });
     await page.click("#fixture-google-login");
 
