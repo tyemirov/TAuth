@@ -5,6 +5,24 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B131] (P2) Apply all four console color palettes.
+  Goal: Each palette quadrant selects its specified color palette.
+  Evidence: The console configured two modes for four palette quadrants. The last two palette quadrants selected dark.
+  Requirements:
+  - Configure light, sunrise, dark, and forest in the displayed sequence.
+  - Apply each palette to the workspace, header, and footer.
+  - Store the selection automatically and keep it when the page opens again.
+  Validation: Verify pointer selection, keyboard selection, rendered colors, and reload through `make test-console-browser`. Run `make ci`.
+  Deliverables:
+  The footer selects light, sunrise, dark, and forest.
+  Each selection changes the workspace, header, and footer colors.
+  The browser stores each selection automatically and keeps it after reload and browser Back.
+  The browser shows an error when storage fails.
+  Browser tests reproduced the mode mismatch and lost persistence before their corrections.
+  The completed browser test and `make ci` passed in automated Chromium and local container fixtures.
+  Independent review found no remaining defects after the browser Back correction.
+  Changed files: `web/app/palette.js`, `web/app/workspace.js`, `web/app/workspace.css`, `web/app/index.html`, `tests/console-workspace.browser.cjs`, and `.mprlab/TERMINOLOGY.md`.
+
 Review 2026-10-08: All nine open bugs still have remaining work at source `a822f34`.
 Full `make ci` passed, including local browser, container, and automatic migration checks.
 The review used controlled provider protocols and automated browsers.
@@ -518,6 +536,45 @@ The issue notes below distinguish existing repairs, test results, and remaining 
   Runtime tests also verify that `/api/me` rejects forged HTTPS before session checks.
   Focused race tests and renderer tests passed. Final `make ci` passed on 2026-10-08.
   Independent review found no forwarding or host bypass for HTTPS-only tenants.
+
+## Improvements
+
+- [x] [I223] (P1) Establish managed proxy trust without private container addresses.
+  Goal:
+  Let deployment establish reverse proxy trust without operator-managed IP addresses.
+  Evidence:
+  Gateway deployment rejected the missing `TAUTH_TRUSTED_PROXY_CIDRS` private input.
+  The temporary container address can change when Caddy is replaced.
+  Requirements:
+  - Use the stable reverse proxy hostname in the managed deployment.
+  - Remove the private CIDR input and the temporary address.
+  - Verify the proxy addresses in each DNS response.
+  - Reject untrusted peers, invalid headers, and DNS failures.
+  - Keep direct TLS and explicit standalone CIDR configuration.
+  Validation:
+  - Verify credential and OAuth routes through HTTP.
+  - Verify proxy replacement and failure recovery without an application restart.
+  - Verify the renderer CLI and real Docker DNS.
+  - Run `make ci` and the applicable document checks.
+  Deliverables:
+  Deployment supplies the stable Caddy hostname and a one-second lookup timeout as public service inputs.
+  TAuth resolves the hostname for each forwarded HTTPS request and accepts only a matching connection peer.
+  DNS errors and empty responses reject these requests and produce diagnostics.
+  The private CIDR binding and the temporary address are removed.
+  Direct TLS and explicit standalone CIDR configuration remain available.
+  Validation:
+  The initial renderer and HTTP tests reproduced the absent hostname contract.
+  `make test-proxy-trust` and final `make ci` passed on 2026-10-09.
+  Real Docker DNS and Caddy verified credential and OAuth routes, proxy replacement, and old address reassignment.
+  Proxy replacement succeeded without a TAuth restart.
+  Injected HTTP scenarios verified DNS errors, empty responses, timeout, and recovery.
+  The installed Gateway lookup verified both private bindings without a proxy CIDR input.
+  Independent architecture and implementation reviews found no blocking issues.
+  Changed prose has no new mechanical language findings. Existing document findings remain outside this change.
+  Governor reports existing differences in `.gitignore`, `.mprlab/AGENTS.DOCKER.md`, `.mprlab/AGENTS.GO.md`, `.mprlab/PLANNING.md`, `.mprlab/POLICY.md`, and `.mprlab/issues-md-format.md`.
+  These six files are unchanged.
+  Production release, publication, and deployment did not run.
+  Changed files: `.mprlab/deploy/resources.yml`, `.mprlab/deploy/.env`, `.mprlab/TERMINOLOGY.md`, `.mprlab/ISSUES.md`, `Makefile`, `README.md`, `docs/tenant-console-operations.md`, `internal/appconfig/config.go`, `internal/appconfig/proxy_host_http_test.go`, `internal/deploymentconfig/render.go`, `internal/transportsecurity/policy.go`, `internal/transportsecurity/policy_test.go`, `internal/transportsecurity/hostname_test.go`, `internal/authkit/transport_security_http_test.go`, `internal/authkit/proxy_host_http_test.go`, `cmd/server/service_renderer_test.go`, `tests/managed-proxy-trust.sh`.
 
 ## Maintenance
 
