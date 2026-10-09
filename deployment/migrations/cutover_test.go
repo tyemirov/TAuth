@@ -373,7 +373,7 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	save("gateway-token", []byte(cutoverPlan.CredentialMap(bytes.Repeat([]byte{7}, 32))["product"]["authentication"]))
-	save("source.yaml", []byte("server:\n  database_url: sqlite:///data/tauth.db\ntenants:\n  - id: product\n    display_name: Product\n    tenant_origins: [https://console.example.com]\n    google_web_client_id: existing-google-client\n    jwt_signing_key: existing-client-key\n    session_cookie_name: product_session\n    refresh_cookie_name: product_refresh\n    session_ttl: 15m\n    refresh_ttl: 720h\n"+`  - id: rsvp-production
+	save("source.yaml", []byte("server:\n  database_url: sqlite:///data/tauth.db\ntenants:\n  - id: product\n    display_name: Product\n    tenant_origins: [https://console.example.com]\n    google_web_client_id: existing-google-client\n    jwt_signing_key: existing-client-key\n    session_cookie_name: product_session\n    refresh_cookie_name: product_refresh\n    session_ttl: 15m\n    refresh_ttl: 720h\n    allow_insecure_http: true\n"+`  - id: rsvp-production
     display_name: RSVP
     tenant_origins: [https://rsvp.example.com]
     google_web_client_id: rsvp-google-client
@@ -382,6 +382,7 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
     refresh_cookie_name: rsvp_refresh
     session_ttl: 30m
     refresh_ttl: 240h
+    allow_insecure_http: true
 `))
 	save("service.yaml", []byte("server:\n  listen_addr: ':8080'\n  database_url: sqlite:///data/tauth.db\n  tenant_encryption_key: "+key+"\n  enable_cors: true\n  cors_allowed_origins: [https://accounts.google.com]\n  cors_allowed_origin_exceptions: [https://accounts.google.com]\n  enable_tenant_header_override: true\n"))
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -15,6 +16,7 @@ import (
 const (
 	passwordBcryptCost           = bcrypt.DefaultCost
 	passwordMaxBytes             = 72
+	passwordMinCodePoints        = 15
 	passwordCredentialTimingHash = "$2a$10$7EqJtq98hPqEX7fNZaFWoOhiG6MQT2Vjex6Dh2M1ngqRh5JalXH1V6"
 )
 
@@ -55,6 +57,7 @@ type passwordHashComparer func(hashedPassword []byte, password []byte) error
 type MemoryPasswordCredentialStore struct {
 	now                  func() time.Time
 	abuseBudgets         map[string]abuseBudgetRecord
+	passwordFailures     map[string]passwordFailureRecord
 	githubCredentials    map[githubCredentialIdentity][]byte
 	mu                   sync.RWMutex
 	tenants              map[string]map[string]passwordCredential
@@ -69,6 +72,7 @@ func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 	return &MemoryPasswordCredentialStore{
 		now:                  time.Now,
 		abuseBudgets:         make(map[string]abuseBudgetRecord),
+		passwordFailures:     make(map[string]passwordFailureRecord),
 		githubCredentials:    make(map[githubCredentialIdentity][]byte),
 		tenants:              make(map[string]map[string]passwordCredential),
 		accounts:             make(map[string]map[string]*accountRecord),
@@ -82,6 +86,9 @@ func NewMemoryPasswordCredentialStore() *MemoryPasswordCredentialStore {
 func HashPassword(password string) (string, error) {
 	if err := validatePlainPassword(password); err != nil {
 		return "", err
+	}
+	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < passwordMinCodePoints {
+		return "", fmt.Errorf("%w: password_too_short_or_invalid_utf8", ErrPasswordCredentialConfig)
 	}
 	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte(password), passwordBcryptCost)
 	if hashErr != nil {
@@ -168,6 +175,10 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	if err := store.reserveAuthenticationBudget(ctx, "password", tenantID, normalizedEmail, 5, 30); err != nil {
 		return PasswordCredentialProfile{}, err
 	}
+	ticket, attemptErr := store.reservePasswordAttempt(ctx, tenantID, normalizedEmail)
+	if attemptErr != nil {
+		return PasswordCredentialProfile{}, attemptErr
+	}
 	store.mu.RLock()
 	tenantCredentials := store.tenants[tenantID]
 	credential, exists := tenantCredentials[normalizedEmail]
@@ -194,6 +205,9 @@ func (store *MemoryPasswordCredentialStore) AuthenticatePassword(ctx context.Con
 	}
 	if accountState != "" && accountState != accountStateActive {
 		return PasswordCredentialProfile{}, ErrAccountNotActive
+	}
+	if err := store.clearPasswordAttempt(ctx, tenantID, normalizedEmail, ticket); err != nil {
+		return PasswordCredentialProfile{}, err
 	}
 	return PasswordCredentialProfile{
 		AccountID:   credential.accountID,

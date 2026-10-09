@@ -35,7 +35,7 @@ are public integration surfaces.
 | Method | Path            | Responsibility                                          | Response                                    |
 | ------ | --------------- | ------------------------------------------------------- | ------------------------------------------- |
 | POST   | `/auth/nonce`   | Issue short-lived single-use nonce for Google exchange | `200` JSON `{ nonce }`                       |
-| GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, ... }` |
+| GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, nonce_required, ... }` |
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | GET    | `/auth/apple/native/config` | Return native Apple client metadata for the resolved tenant | `200` JSON `{ client_id, client_ids, nonce_required, ... }` |
@@ -45,7 +45,7 @@ are public integration surfaces.
 | POST   | `/auth/password/login` | Verify a tenant-managed email/password credential, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | POST   | `/auth/password/signup` | Start a first-party password signup when account management and signup are enabled | `202` JSON challenge metadata |
 | POST   | `/auth/password/verify-email` | Verify a signup challenge, activate the account, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }` |
-| POST   | `/auth/password/reset/start` | Start a password reset with a timing-masked accepted response | `202` JSON challenge metadata |
+| POST   | `/auth/password/reset/start` | Request password recovery without waiting for account lookup or delivery | `202` with `{"status":"accepted"}` |
 | POST   | `/auth/password/reset/complete` | Complete reset, rotate password, revoke account refresh sessions, issue cookies | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/password/change` | Authenticated password rotation through the stored account relation | `200` JSON `{ user_id, user_email, ... }` |
 | POST   | `/auth/account/password/link/start` | Start linking a password identity to the current account | `202` JSON challenge metadata |
@@ -102,11 +102,18 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 Installed apps such as PromptDew use the same session issuance path without embedding Google sign-in in a `WKWebView`:
 
 1. The native client resolves tenant metadata from `GET /auth/google/native/config`. Expo iOS/Android clients request `?platform=ios` or `?platform=android`.
-2. The client opens Google in the system browser with `response_type=code`, PKCE `S256`, `scope=openid email profile`, one configured redirect URI, and an OIDC nonce.
-3. Google redirects back to a loopback URI for desktop, or to a custom-scheme/app-link URI for mobile.
-4. The native client exchanges the authorization code directly with Google and extracts the returned `id_token`.
-5. The client posts `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }` to `/auth/google/native`.
-6. `MountAuthRoutes` validates that ID token against the selected platform’s accepted Google native audience, checks any supplied redirect URI against config, requires the nonce claim to match the posted `nonce_token`, then mints the same access and refresh cookies used by the browser flow.
+2. The client obtains a tenant nonce from `POST /auth/nonce`.
+3. Open Google in the system browser with `response_type=code`, PKCE `S256`, `scope=openid email profile`, a configured redirect URI, and the issued nonce.
+4. Google redirects back to a loopback URI for desktop, or to a custom-scheme/app-link URI for mobile.
+5. The native client exchanges the authorization code directly with Google and extracts the returned `id_token`.
+6. The client posts `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }` to `/auth/google/native`.
+7. TAuth validates the ID token audience, issuer, identity, redirect URI, and tenant allowlist.
+8. TAuth requires the nonce claim to equal the raw issued nonce in `nonce_token`.
+9. TAuth consumes the tenant nonce atomically before account or session writes.
+10. TAuth issues the same access and refresh cookies as the browser flow.
+
+Unknown, expired, cross-tenant, and used nonces return `401` with `error: "invalid_nonce"`.
+Each Google authorization requires a fresh server-issued nonce.
 
 TAuth still does not receive Google authorization codes or store Google refresh tokens.
 TAuth also does not return mobile bearer tokens in the response body. Mobile apps persist the issued `HttpOnly` cookies in the platform cookie jar; downstream API hosts under the same configured `cookie_domain` validate `app_session` with `pkg/sessionvalidator`.
@@ -148,6 +155,9 @@ Accounts without stored grants get local removal and a manual provider revocatio
 ### 3.6 Email/password accounts
 
 Password authentication is tenant-enabled with `password_auth.enabled: true`.
+The [password policy and attempt limits](README.md#authentication-request-limits) define password creation and authentication.
+The memory store and database store reserve each attempt before bcrypt work.
+Each reservation has one unique ticket. Successful authentication clears only the reservation with that ticket.
 Each account has one immutable public user ID and one internal opaque account ID.
 `account_management.enabled` controls account operations. It does not change the public session subject.
 See the [stable application user ID contract](docs/application-subjects.md).
@@ -158,10 +168,16 @@ See the [stable application user ID contract](docs/application-subjects.md).
 4. TAuth sends the public verification link to Pinguin. Pinguin queues the email for the configured tenant.
 5. Production responses do not contain the raw challenge token.
 6. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard cookies.
-7. `POST /auth/password/reset/start` always returns an accepted response shape for valid-looking input. Known verified accounts receive a reset challenge.
+7. `POST /auth/password/reset/start` returns the same accepted response without waiting for account lookup or delivery. A bounded worker delivers challenges for eligible accounts.
 8. `POST /auth/password/reset/complete` consumes the reset challenge, changes the password hash, revokes account sessions, and issues fresh cookies.
 9. Resolve the authenticated public subject to its internal opaque account ID before a permitted account operation.
 10. Resolve each verified provider identity through its stored account binding.
+
+Runtime snapshots own password recovery workers and their notification clients.
+Snapshot retirement stops admission, cancels and joins recovery work, then closes its notification client.
+The publisher claims cleanup under its mutex and executes cleanup after it releases the mutex.
+New snapshot traffic proceeds while retired cleanup runs. Drain waits until cleanup completes.
+The [authentication request limits](README.md#authentication-request-limits) specify recovery queue and execution bounds.
 
 ### 3.7 Browser helper handshake
 
@@ -214,6 +230,10 @@ Nonce handling rules:
 - Echo the same nonce back to `/auth/google` as `nonce_token`. Requests without a matching nonce fail with `auth.login.nonce_mismatch`.
 - Google Identity Services may hash the nonce inside the ID token (`base64url(sha256(nonce_token))`). TAuth accepts hashed or raw forms.
 - Fetch a fresh nonce for every sign-in attempt. Nonces are invalidated once consumed and cannot be reused.
+- Send the opaque token from `/auth/nonce` as `nonce_token`. A stored token digest cannot replace that token.
+- Persistent stores admit one consumer through a conditional mutation. The mutation checks the tenant, token, and expiry before credential issuance.
+- Account challenge consumption also checks the challenge kind and unused state. Credential changes and challenge consumption commit in one transaction.
+- Tokens expire at their recorded expiry time. Concurrent losers receive no session cookies.
 - The default helper (`tauth.js`) already implements these invariants; custom UIs should mirror the same flow when wiring auth state.
 
 For Apple, custom UIs do not fetch or manage a nonce themselves. Use `getAppleLoginUrl()` to render a tenant-aware link or call `startAppleLogin()` from a click handler. TAuth creates and validates the nonce/state pair around the Apple redirect.
@@ -260,7 +280,7 @@ outside this authorization-server contract.
 
 ### 4.3 `internal/web`
 
-- `NewInMemoryUsers`: placeholder application user store (maps provider subjects or password emails to profiles).
+- `NewInMemoryUsers`: local application profile store keyed by tenant and canonical account ID. One mutex protects map access. Returned role slices are caller-owned copies.
 - `PermissiveCORS`: development-only CORS middleware.
 - `HandleHealth`: returns backend readiness at `/health` without tenant resolution.
 - `HandleWhoAmI`: returns profile data for `/api/me`.
@@ -602,7 +622,35 @@ SQLite accepts absolute paths such as `sqlite:///data/tauth.db` and memory URLs 
 It rejects host-prefixed forms such as `sqlite://file:/data/tauth.db`.
 Shared helpers keep token ID and hash derivation consistent across stores.
 
+Transient state has atomic tenant and global admission limits. Creation and access remove expired records.
+OAuth capacity responses use HTTP 429 with `temporarily_unavailable` and `Retry-After`. Rejected operations preserve valid requests and tokens.
+Startup completes a persistent cleanup sweep before password seeding and traffic admission.
+A service worker repeats the sweep every 30 seconds, reports failures, and cancels and joins during shutdown.
+Account cleanup reads at most 250 accounts per batch and uses bulk deletion.
+
+| State | Tenant limit | Global limit | Retention |
+| --- | --- | --- | --- |
+| Pending password signups | 1,000 | 10,000 | Remove abandoned pending accounts and unmanaged unverified credentials after verification expiry |
+| Account challenges | 1,000 | 10,000 | Remove expired or consumed challenges after pending account cleanup |
+| Nonces | 1,000 | 10,000 | Remove expired or consumed tokens |
+| GitHub transactions | 1,000 | 4,096 | Remove expired or claimed transactions |
+| OAuth requests and authorization codes, each | 1,000 | 10,000 | Remove expired or consumed records |
+| Application refresh rows | 100,000 | 1,000,000 | Keep the complete family until every member expires |
+| OAuth refresh rows | 100,000 | 1,000,000 | Keep unexpired replay evidence |
+
+Expired or revoked OAuth consents remain while an unexpired code or refresh grant refers to them.
+Active accounts, managed credentials, and current grants survive cleanup. Erasure receipts retain their existing retention period.
+Quota rejection preserves pending requests, redeemable codes, and active refresh tokens. Code redemption and initial OAuth refresh issuance share one transaction.
+Signup request budgets apply before password hashing. Account, source, and global limits are 1, 10, and 1,000 attempts per minute.
+
 ## 7. Security Considerations
+
+`server.trusted_proxy_cidrs` defines one immutable forwarding trust policy for authentication and OAuth routes.
+Direct TLS is secure. Plain connections require a configured peer CIDR and one exact `X-Forwarded-Proto: https` value.
+Classification uses the connection peer in `RemoteAddr`. `Host`, `Forwarded`, and forwarded client addresses do not establish HTTPS.
+The transport guard runs before credential parsing, state mutation, recovery admission, and cookie emission.
+Health and public discovery remain available. Explicit local HTTP uses the configured tenant or loopback OAuth exception.
+Generated service configuration reads `TAUTH_TRUSTED_PROXY_CIDRS`. Its empty default trusts no proxy.
 
 - Always run behind HTTPS in production; set a tenant’s `allow_insecure_http` to `true` only for local development.
 - Access cookies are short-lived; refresh cookies survive longer but are `HttpOnly` and scoped to `/auth`.

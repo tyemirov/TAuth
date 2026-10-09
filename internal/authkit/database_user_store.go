@@ -176,7 +176,7 @@ func NewDatabaseUserStore(ctx context.Context, databaseURL string) (*DatabaseUse
 	if err := guardApplicationSubjectSchema(ctx, databaseURL); err != nil {
 		return nil, err
 	}
-	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &databaseAppleGrant{}, &databaseErasureProvider{}, &databaseAppleEventReceipt{}, &databaseAppleErasureSubject{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{})
+	databaseHandle, driverLabel, openErr := openDatabase(ctx, databaseURL, userStoreErrorPrefix, &userProfileRecord{}, &passwordCredentialRecord{}, &databaseAccountRecord{}, &databaseAccountIdentityRecord{}, &databaseAccountChallengeRecord{}, &databaseAccountErasure{}, &databaseAppleGrant{}, &databaseErasureProvider{}, &databaseAppleEventReceipt{}, &databaseAppleErasureSubject{}, &githubTransaction{}, &databaseGitHubCredential{}, &abuseBudgetRecord{}, &abuseBudgetLock{}, &passwordFailureRecord{})
 	if openErr != nil {
 		return nil, openErr
 	}
@@ -396,6 +396,10 @@ func (store *DatabaseUserStore) AuthenticatePassword(ctx context.Context, tenant
 	if err := store.reserveAuthenticationBudget(ctx, "password", tenantID, normalizedEmail, 5, 30); err != nil {
 		return PasswordCredentialProfile{}, err
 	}
+	ticket, attemptErr := store.reservePasswordAttempt(ctx, tenantID, normalizedEmail)
+	if attemptErr != nil {
+		return PasswordCredentialProfile{}, attemptErr
+	}
 	var record passwordCredentialRecord
 	queryErr := store.db.WithContext(ctx).
 		Where("tenant_id = ? AND user_email = ?", tenantID, normalizedEmail).
@@ -427,6 +431,9 @@ func (store *DatabaseUserStore) AuthenticatePassword(ctx context.Context, tenant
 			}
 		}
 	}
+	if err := store.clearPasswordAttempt(ctx, tenantID, normalizedEmail, ticket); err != nil {
+		return PasswordCredentialProfile{}, err
+	}
 	return PasswordCredentialProfile{
 		AccountID:   record.AccountID,
 		UserEmail:   record.UserEmail,
@@ -452,6 +459,14 @@ func (store *DatabaseUserStore) GetUserProfile(ctx context.Context, tenantID str
 
 // CreatePasswordSignup starts a tenant-managed password signup.
 func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenantID string, request AccountPasswordRequest, expiresUnix int64) (AccountChallenge, error) {
+	email, validationErr := validateSignupRequest(request)
+	if validationErr != nil {
+		return AccountChallenge{}, validationErr
+	}
+	if err := store.reserveAuthenticationBudget(ctx, "signup", tenantID, email, 1, 10); err != nil {
+		return AccountChallenge{}, err
+	}
+
 	credential, credentialErr := buildAccountPasswordCredential(request)
 	if credentialErr != nil {
 		return AccountChallenge{}, credentialErr
@@ -462,11 +477,26 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 	}
 	now := store.now().UTC().Unix()
 	var accountID string
+	var admissionErr error
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
+		if err := cleanupDatabaseAccounts(tx, now); err != nil {
+			return err
+		}
+		admissionErr = checkDatabaseAccountCapacity(tx, tenantID, true)
+		if errors.Is(admissionErr, ErrTransientCapacity) {
+			return nil
+		}
+		if admissionErr != nil {
+			return admissionErr
+		}
 		var existingCredential passwordCredentialRecord
 		credentialErr := tx.WithContext(ctx).Where("tenant_id = ? AND user_email = ?", tenantID, credential.userEmail).Take(&existingCredential).Error
 		if credentialErr == nil {
-			return ErrAccountExists
+			admissionErr = ErrAccountExists
+			return nil
 		}
 		if credentialErr != nil && !errors.Is(credentialErr, gorm.ErrRecordNotFound) {
 			return credentialErr
@@ -475,7 +505,8 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 			if existsErr != nil {
 				return existsErr
 			}
-			return ErrAccountExists
+			admissionErr = ErrAccountExists
+			return nil
 		}
 		generatedAccountID, accountIDErr := store.newUniqueOpaqueAccountID(ctx, tx, tenantID)
 		if accountIDErr != nil {
@@ -535,12 +566,18 @@ func (store *DatabaseUserStore) CreatePasswordSignup(ctx context.Context, tenant
 	if err != nil {
 		return AccountChallenge{}, fmt.Errorf("%s.account_signup.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
+	if admissionErr != nil {
+		return AccountChallenge{}, admissionErr
+	}
 	return AccountChallenge{AccountID: accountID, Token: token, ExpiresUnix: expiresUnix}, nil
 }
 
 // CancelPasswordSignup removes a pending signup after delivery fails.
 func (store *DatabaseUserStore) CancelPasswordSignup(ctx context.Context, tenantID string, accountID string) error {
 	cancelErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
 		var account databaseAccountRecord
 		accountErr := tx.Where("tenant_id = ? AND account_id = ? AND account_state = ?", tenantID, accountID, accountStatePendingVerification).Take(&account).Error
 		if accountErr != nil {
@@ -582,8 +619,14 @@ func (store *DatabaseUserStore) CancelAccountChallenge(ctx context.Context, tena
 
 // VerifyEmailChallenge activates a pending signup.
 func (store *DatabaseUserStore) VerifyEmailChallenge(ctx context.Context, tenantID string, token string) (AccountProfile, error) {
+	if err := store.CleanupExpired(ctx, store.now().Unix()); err != nil {
+		return AccountProfile{}, err
+	}
 	var profile AccountProfile
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
 		challenge, challengeErr := store.consumeDatabaseChallenge(ctx, tx, tenantID, token, accountChallengeEmailVerification)
 		if challengeErr != nil {
 			return challengeErr
@@ -641,6 +684,9 @@ func (store *DatabaseUserStore) StartPasswordReset(ctx context.Context, tenantID
 	if tokenErr != nil {
 		return AccountChallenge{}, fmt.Errorf("%s.account_reset_token.%s: %w", userStoreErrorPrefix, store.driverLabel, tokenErr)
 	}
+	if err := store.CleanupExpired(ctx, store.now().Unix()); err != nil {
+		return AccountChallenge{}, err
+	}
 	var record passwordCredentialRecord
 	queryErr := store.db.WithContext(ctx).Where("tenant_id = ? AND user_email = ? AND email_verified = ?", tenantID, normalizedEmail, true).Take(&record).Error
 	if queryErr != nil {
@@ -666,10 +712,20 @@ func (store *DatabaseUserStore) StartPasswordReset(ctx context.Context, tenantID
 	}
 	var capacityExceeded bool
 	createErr := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockActiveAccount(ctx, tx, tenantID, record.AccountID); err != nil {
+		if err := lockAccountCapacity(tx); err != nil {
 			return err
 		}
-		if err := tx.Model(&abuseBudgetLock{}).Where("id = ?", 1).Update("id", 1).Error; err != nil {
+		if err := cleanupDatabaseAccounts(tx, now); err != nil {
+			return err
+		}
+		if err := checkDatabaseAccountCapacity(tx, tenantID, false); err != nil {
+			if errors.Is(err, ErrTransientCapacity) {
+				capacityExceeded = true
+				return nil
+			}
+			return err
+		}
+		if err := lockActiveAccount(ctx, tx, tenantID, record.AccountID); err != nil {
 			return err
 		}
 		if err := tx.Where("challenge_kind = ? AND (expires_unix <= ? OR (tenant_id = ? AND account_id = ?))", accountChallengePasswordReset, now, tenantID, record.AccountID).Delete(&databaseAccountChallengeRecord{}).Error; err != nil {
@@ -700,8 +756,14 @@ func (store *DatabaseUserStore) CompletePasswordReset(ctx context.Context, tenan
 	if hashErr != nil {
 		return AccountProfile{}, ErrPasswordCredentialInvalid
 	}
+	if err := store.CleanupExpired(ctx, store.now().Unix()); err != nil {
+		return AccountProfile{}, err
+	}
 	var profile AccountProfile
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
 		challenge, challengeErr := store.consumeDatabaseChallenge(ctx, tx, tenantID, token, accountChallengePasswordReset)
 		if challengeErr != nil {
 			return challengeErr
@@ -815,18 +877,41 @@ func (store *DatabaseUserStore) CreatePasswordLink(ctx context.Context, tenantID
 		return AccountChallenge{}, fmt.Errorf("%s.account_link_password_token.%s: %w", userStoreErrorPrefix, store.driverLabel, tokenErr)
 	}
 	now := store.now().UTC().Unix()
+	var admissionErr error
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
+		if err := cleanupDatabaseAccounts(tx, now); err != nil {
+			return err
+		}
+		admissionErr = checkDatabaseAccountCapacity(tx, tenantID, false)
+		if errors.Is(admissionErr, ErrTransientCapacity) {
+			return nil
+		}
+		if admissionErr != nil {
+			return admissionErr
+		}
 		if err := lockActiveAccount(ctx, tx, tenantID, accountID); err != nil {
+			if isAccountAdmissionError(err) {
+				admissionErr = err
+				return nil
+			}
 			return err
 		}
 		if _, profileErr := store.accountProfileWithTx(ctx, tx, tenantID, accountID); profileErr != nil {
+			if isAccountAdmissionError(profileErr) {
+				admissionErr = profileErr
+				return nil
+			}
 			return profileErr
 		}
 		if exists, existsErr := store.accountIdentityExists(ctx, tx, tenantID, accountProviderPassword, credential.userEmail); existsErr != nil || exists {
 			if existsErr != nil {
 				return existsErr
 			}
-			return ErrAccountExists
+			admissionErr = ErrAccountExists
+			return nil
 		}
 		challenge := databaseAccountChallengeRecord{
 			TenantID:        tenantID,
@@ -845,13 +930,22 @@ func (store *DatabaseUserStore) CreatePasswordLink(ctx context.Context, tenantID
 	if err != nil {
 		return AccountChallenge{}, fmt.Errorf("%s.account_link_password.%s: %w", userStoreErrorPrefix, store.driverLabel, err)
 	}
+	if admissionErr != nil {
+		return AccountChallenge{}, admissionErr
+	}
 	return AccountChallenge{AccountID: accountID, Token: token, ExpiresUnix: expiresUnix}, nil
 }
 
 // VerifyPasswordLink completes linking a password identity to the authenticated account.
 func (store *DatabaseUserStore) VerifyPasswordLink(ctx context.Context, tenantID string, accountID string, token string) (AccountProfile, error) {
+	if err := store.CleanupExpired(ctx, store.now().Unix()); err != nil {
+		return AccountProfile{}, err
+	}
 	var profile AccountProfile
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAccountCapacity(tx); err != nil {
+			return err
+		}
 		challenge, challengeErr := store.consumeDatabaseChallenge(ctx, tx, tenantID, token, accountChallengePasswordLink)
 		if challengeErr != nil {
 			return challengeErr
@@ -1122,22 +1216,19 @@ func (store *DatabaseUserStore) ResolveAccountProfile(ctx context.Context, tenan
 
 func (store *DatabaseUserStore) consumeDatabaseChallenge(ctx context.Context, tx *gorm.DB, tenantID string, token string, kind string) (databaseAccountChallengeRecord, error) {
 	tokenHash := hashOpaque(strings.TrimSpace(token))
-	var challenge databaseAccountChallengeRecord
-	queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND token_hash = ? AND challenge_kind = ? AND consumed_at_unix = 0", tenantID, tokenHash, kind).Take(&challenge).Error
-	if queryErr != nil {
-		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
-			return databaseAccountChallengeRecord{}, ErrAccountChallengeInvalid
-		}
-		return databaseAccountChallengeRecord{}, queryErr
+	nowUnix := store.now().UTC().Unix()
+	result := tx.WithContext(ctx).Model(&databaseAccountChallengeRecord{}).
+		Where("tenant_id = ? AND token_hash = ? AND challenge_kind = ? AND consumed_at_unix = 0 AND expires_unix > ?", tenantID, tokenHash, kind, nowUnix).
+		Update("consumed_at_unix", nowUnix)
+	if result.Error != nil {
+		return databaseAccountChallengeRecord{}, result.Error
 	}
-	if time.Unix(challenge.ExpiresUnix, 0).Before(store.now().UTC()) {
+	if result.RowsAffected != 1 {
 		return databaseAccountChallengeRecord{}, ErrAccountChallengeInvalid
 	}
-	updateErr := tx.WithContext(ctx).Model(&databaseAccountChallengeRecord{}).
-		Where("tenant_id = ? AND token_hash = ?", tenantID, tokenHash).
-		Update("consumed_at_unix", store.now().UTC().Unix()).Error
-	if updateErr != nil {
-		return databaseAccountChallengeRecord{}, updateErr
+	var challenge databaseAccountChallengeRecord
+	if queryErr := tx.WithContext(ctx).Where("tenant_id = ? AND token_hash = ?", tenantID, tokenHash).Take(&challenge).Error; queryErr != nil {
+		return databaseAccountChallengeRecord{}, queryErr
 	}
 	return challenge, nil
 }

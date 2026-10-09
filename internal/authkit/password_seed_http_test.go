@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tyemirov/tauth/internal/web"
@@ -66,7 +67,7 @@ func newPasswordSeedHTTPFixture(t *testing.T, storage string) passwordSeedHTTPFi
 		t.Fatal(err)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore(), nil, store, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore(), nil, store, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	t.Cleanup(server.Close)
 	client := server.Client()
@@ -128,6 +129,7 @@ func TestPasswordSeedRestorationHTTP(t *testing.T) {
 			if err := fixture.store.UpsertPasswordCredential(context.Background(), fixture.config.TenantID, fixture.seed); err != nil {
 				t.Fatalf("restore configured credential: %v", err)
 			}
+			advancePasswordTestClock(fixture.store, time.Second)
 			after := fixture.login(t, http.StatusOK)
 			if after.UserID != before.UserID {
 				t.Fatalf("restoration changed public user ID: %s -> %s", before.UserID, after.UserID)

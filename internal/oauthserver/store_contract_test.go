@@ -92,37 +92,37 @@ func assertOAuthStoreContract(t *testing.T, store Store) {
 		RedirectURI: "https://client.example/callback", Resource: "https://resource.example",
 		Scope: "resource:use", CodeChallenge: pkceChallenge(verifier), ExpiresAtUnix: 500,
 	}
-	code, codeErr := store.IssueAuthorizationCode(ctx, grant)
+	code, codeErr := store.IssueAuthorizationCode(ctx, grant, 0)
 	if codeErr != nil {
 		t.Fatalf("issue code: %v", codeErr)
 	}
-	if _, wrongErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
-		ClientID: "client-b", Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 200,
+	if _, _, wrongErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
+		ClientID: "client-b", Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 200, RefreshExpiresAtUnix: 900,
 	}, allowAccount); !errors.Is(wrongErr, ErrAuthorizationCodeInvalid) {
 		t.Fatalf("expected cross-client rejection, got %v", wrongErr)
 	}
-	if _, wrongResourceErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
-		ClientID: grant.ClientID, Resource: "https://other.example", CodeVerifier: verifier, NowUnix: 200,
+	if _, _, wrongResourceErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
+		ClientID: grant.ClientID, Resource: "https://other.example", CodeVerifier: verifier, NowUnix: 200, RefreshExpiresAtUnix: 900,
 	}, allowAccount); !errors.Is(wrongResourceErr, ErrAuthorizationCodeInvalid) {
 		t.Fatalf("expected cross-resource rejection, got %v", wrongResourceErr)
 	}
-	exchanged, exchangeErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
-		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 200,
+	exchanged, _, exchangeErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
+		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 200, RefreshExpiresAtUnix: 900,
 	}, allowAccount)
 	if exchangeErr != nil || exchanged.TenantID != grant.TenantID || exchanged.UserID != grant.UserID {
 		t.Fatalf("redeem code: %v", exchangeErr)
 	}
-	if _, replayErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
-		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 201,
+	if _, _, replayErr := store.RedeemAuthorizationCode(ctx, code, CodeExchange{
+		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: 201, RefreshExpiresAtUnix: 1000,
 	}, allowAccount); !errors.Is(replayErr, ErrAuthorizationCodeInvalid) {
 		t.Fatalf("expected code replay rejection, got %v", replayErr)
 	}
-	expiringCode, expiringCodeErr := store.IssueAuthorizationCode(ctx, grant)
+	expiringCode, expiringCodeErr := store.IssueAuthorizationCode(ctx, grant, 0)
 	if expiringCodeErr != nil {
 		t.Fatalf("issue expiring code: %v", expiringCodeErr)
 	}
-	if _, expiryErr := store.RedeemAuthorizationCode(ctx, expiringCode, CodeExchange{
-		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: grant.ExpiresAtUnix,
+	if _, _, expiryErr := store.RedeemAuthorizationCode(ctx, expiringCode, CodeExchange{
+		ClientID: grant.ClientID, Resource: grant.Resource, CodeVerifier: verifier, NowUnix: grant.ExpiresAtUnix, RefreshExpiresAtUnix: 1000,
 	}, allowAccount); !errors.Is(expiryErr, ErrAuthorizationCodeInvalid) {
 		t.Fatalf("expected code expiry, got %v", expiryErr)
 	}
@@ -131,7 +131,7 @@ func assertOAuthStoreContract(t *testing.T, store Store) {
 		ConsentID: consent.ID, TenantID: grant.TenantID, UserID: grant.UserID,
 		ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, ExpiresAtUnix: 900,
 	}
-	refreshToken, refreshErr := store.IssueRefreshToken(ctx, refreshGrant)
+	refreshToken, refreshErr := store.IssueRefreshToken(ctx, refreshGrant, 0)
 	if refreshErr != nil {
 		t.Fatalf("issue refresh: %v", refreshErr)
 	}
@@ -160,7 +160,7 @@ func assertOAuthStoreContract(t *testing.T, store Store) {
 	expiringRefresh, expiringRefreshErr := store.IssueRefreshToken(ctx, RefreshGrant{
 		ConsentID: consent.ID, TenantID: grant.TenantID, UserID: grant.UserID,
 		ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, ExpiresAtUnix: 400,
-	})
+	}, 0)
 	if expiringRefreshErr != nil {
 		t.Fatalf("issue expiring refresh token: %v", expiringRefreshErr)
 	}
@@ -192,7 +192,7 @@ func assertOAuthUserRevocation(t *testing.T, store Store) {
 		code, err := store.IssueAuthorizationCode(ctx, AuthorizationGrant{
 			ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID,
 			Resource: key.Resource, Scope: key.Scope, CodeChallenge: pkceChallenge(verifier), ExpiresAtUnix: 1000,
-		})
+		}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +201,7 @@ func assertOAuthUserRevocation(t *testing.T, store Store) {
 			refresh, err := store.IssueRefreshToken(ctx, RefreshGrant{
 				ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID,
 				Resource: key.Resource, Scope: key.Scope, ExpiresAtUnix: 1000,
-			})
+			}, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,8 +223,8 @@ func assertOAuthUserRevocation(t *testing.T, store Store) {
 		if _, exists, err := store.FindConsent(ctx, grant.key, 201); err != nil || exists == revoked {
 			t.Fatalf("consent revocation isolation: revoked=%v exists=%v error=%v", revoked, exists, err)
 		}
-		_, err := store.RedeemAuthorizationCode(ctx, grant.code, CodeExchange{
-			ClientID: grant.key.ClientID, Resource: grant.key.Resource, CodeVerifier: verifier, NowUnix: 201,
+		_, _, err := store.RedeemAuthorizationCode(ctx, grant.code, CodeExchange{
+			ClientID: grant.key.ClientID, Resource: grant.key.Resource, CodeVerifier: verifier, NowUnix: 201, RefreshExpiresAtUnix: 1000,
 		}, allowAccount)
 		if revoked && !errors.Is(err, ErrAuthorizationCodeInvalid) || !revoked && err != nil {
 			t.Fatalf("code revocation isolation: %v", err)

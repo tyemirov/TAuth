@@ -106,7 +106,7 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	store := NewMemoryStore()
 	nonces := authkit.NewMemoryNonceStore(5 * time.Minute)
 	oauthHandler, handlerErr := NewServer(
-		appConfig.OAuthServer(), registry, store, signer, fixtureMetadataResolver{},
+		appConfig.OAuthServer(), appConfig.TransportPolicy(), registry, store, signer, fixtureMetadataResolver{},
 		authkit.NewOAuthBrowserSessions(tenantRegistry, users, refreshSessions, nonces, passwords),
 	)
 	if handlerErr != nil {
@@ -387,7 +387,7 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 		ConsentID: codeConsent.ID, TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
 		RedirectURI: testOAuthRedirect, Resource: testOAuthResource, Scope: testOAuthScope,
 		CodeChallenge: challenge, ExpiresAtUnix: policyChangeTime.Add(time.Minute).Unix(),
-	})
+	}, 0)
 	if staleCodeErr != nil {
 		t.Fatalf("issue policy-change code: %v", staleCodeErr)
 	}
@@ -404,7 +404,7 @@ func TestAuthorizationServerBrowserPKCERefreshAndRevocation(t *testing.T) {
 	staleRefreshToken, staleRefreshErr := store.IssueRefreshToken(context.Background(), RefreshGrant{
 		ConsentID: refreshConsent.ID, TenantID: "demo", UserID: "policy-user", ClientID: testOAuthClient,
 		Resource: testOAuthResource, Scope: testOAuthScope, ExpiresAtUnix: policyChangeTime.Add(time.Hour).Unix(),
-	})
+	}, 0)
 	if staleRefreshErr != nil {
 		t.Fatalf("issue policy-change refresh token: %v", staleRefreshErr)
 	}
@@ -711,7 +711,7 @@ func TestSecurityOAuthPasswordSharesJSONBudget(t *testing.T) {
 	store := NewMemoryStore()
 	nonces := authkit.NewMemoryNonceStore(5 * time.Minute)
 	oauthHandler, handlerErr := NewServer(
-		appConfig.OAuthServer(), registry, store, signer, fixtureMetadataResolver{},
+		appConfig.OAuthServer(), appConfig.TransportPolicy(), registry, store, signer, fixtureMetadataResolver{},
 		authkit.NewOAuthBrowserSessions(tenantRegistry, users, refreshSessions, nonces, passwords),
 	)
 	if handlerErr != nil {
@@ -721,7 +721,7 @@ func TestSecurityOAuthPasswordSharesJSONBudget(t *testing.T) {
 	if mountErr := oauthHandler.Mount(router); mountErr != nil {
 		t.Fatalf("mount server: %v", mountErr)
 	}
-	authkit.MountAuthRoutesWithPassword(router, tenantRegistry, users, refreshSessions, nonces, passwords, nil, nil)
+	authkit.MountAuthRoutesWithPassword(router, tenantRegistry, users, refreshSessions, nonces, passwords, newTestPasswordResetDispatcher(t), nil, nil)
 	httpServer := &http.Server{Handler: router, ReadHeaderTimeout: time.Second}
 	go func() { _ = httpServer.Serve(listener) }()
 	t.Cleanup(func() { _ = httpServer.Shutdown(context.Background()) })
@@ -732,7 +732,7 @@ func TestSecurityOAuthPasswordSharesJSONBudget(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar, CheckRedirect: func(request *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
 
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := 0; attempt < 1; attempt++ {
 		response, err := client.Post(issuer+"/auth/password/login", "application/json", strings.NewReader(`{"email":"user@example.com","password":"wrong"}`))
 		if err != nil {
 			t.Fatal(err)

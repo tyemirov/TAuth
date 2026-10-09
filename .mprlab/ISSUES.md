@@ -5,6 +5,11 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+Review 2026-10-08: All nine open bugs still have remaining work at source `a822f34`.
+Full `make ci` passed, including local browser, container, and automatic migration checks.
+The review used controlled provider protocols and automated browsers.
+The issue notes below distinguish existing repairs, test results, and remaining work.
+
 - [x] [B130] (P2) Run the local frontend on the native Docker platform.
   Goal:
   Use the native container architecture for the local ghttp frontend.
@@ -139,12 +144,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
   Preserve the stable application key. Grant no new billing entitlement and introduce no application fallback.
   Production activation remains an operator action.
 
-- [ ] [B118] (P2) Use the request context for account database operations.
-  Goal: Account database operations use a context that remains valid after the HTTP handler returns.
+- [x] [B118] (P2) Use the request context for account database operations.
+  Goal: Account database operations use the HTTP request context and retain request cancellation.
   Evidence: The race detector found Gin context reuse while `database/sql.Rows.awaitDone` read that context.
   The password login handler passes its Gin context to `EnsurePasswordAccount` in `internal/authkit/routes.go`.
   Requirements: Pass the HTTP request context to database operations. Keep request cancellation.
   Validation: Run the erasure HTTP tests with the race detector and run `make ci`.
+  Review 2026-10-08:
+  `routes.go` still passes `contextGin` to `EnsurePasswordAccount`, `CompletePasswordReset`, provider account writes, and other storage operations.
+  `middleware.go` also passes the Gin context to account lookup.
+  `make test-go GO_TEST_FLAGS='-race -run Erasure -count=1'` passed without reproduction of the historical race.
+  This result does not verify the required context replacement.
+  Next actions:
+  - Pass `contextGin.Request.Context()` at each storage boundary, including shared helpers and middleware.
+  - Verify request cancellation and run the database-backed HTTP race tests again.
+  Implementation 2026-10-08:
+  Storage calls and active-account middleware now use the HTTP request context.
+  New HTTP tests reproduced lost context values and cancellation before the repair.
+  Request-context and erasure tests passed with the race detector after the repair.
+  Final `make ci` passed on 2026-10-08.
+
 
 - [ ] [B078] (P1) Preserve the OAuth request when consent completion fails.
   Goal:
@@ -188,8 +207,17 @@ Planning and recurring entries stay in this tracker with unresolved work.
   Local `make ci` passed formatting, lint, Go tests, JavaScript tests, browser tests, and renderer tests.
   The container check stopped at `test-empty-tenant-bootstrap-runtime` because Docker reported `meta.db: read-only file system`.
   Full CI and deployed browser acceptance remain unverified.
+  Review 2026-10-08:
+  The database transaction and memory lock still group request removal, consent storage, and code storage.
+  `make test-oauth-consent test-oauth-login` passed, including both browser callback scenarios.
+  SQLite failure tests verify rollback, request preservation, successful retry, and completed-request rejection.
+  The final combined `make ci` passed on 2026-10-08. Browser, container, and local deployment contract checks passed.
+  Next actions:
+  - Verify a deployed fresh Google login in normal Chrome and receipt of the Codex callback.
+  - Record account selection evidence separately from existing-session success.
 
-- [ ] [B057] (P1) Reject replayed native Google ID tokens.
+
+- [x] [B057] (P1) {B059} Reject replayed native Google ID tokens.
   Goal:
   One native Google authorization can create one TAuth credential set.
   The native handler compares two client-supplied nonce values and does not consume server nonce state.
@@ -212,8 +240,24 @@ Planning and recurring entries stay in this tracker with unresolved work.
   - Replay the same token and nonce.
   - Verify that the replay returns `invalid_nonce`.
   - Run `make ci`.
+  Review 2026-10-08:
+  The native route still compares the token claim with `nonce_token` and does not call `NonceStore.Consume`.
+  Existing native tests passed with a client-supplied nonce that the server never issued.
+  A temporary Go test overlay repeated the public native login with the same token and nonce.
+  The required replay rejection failed because the second response returned HTTP 200.
+  Next actions:
+  - Bind native login to a server-issued tenant nonce and consume it before credential writes.
+  - Verify replay, unknown, expired, cross-tenant, and concurrent nonce rejection with both stores.
+  Implementation 2026-10-08:
+  Native Google login now consumes the server-issued tenant nonce before account or session writes.
+  Native metadata requires a nonce. Client examples obtain the nonce from `/auth/nonce` before Google authorization.
+  HTTP tests reproduced replay before the repair and passed afterward with the race detector.
+  Both stores rejected replay, unknown tokens, exact expiry, tenant mismatch, and claim mismatch.
+  Eight concurrent requests issued one session. Storage failure issued no credentials.
+  Independent candidate review found no concrete bypass or regression. Final `make ci` passed on 2026-10-08.
 
-- [ ] [B059] (P1) Consume persistent one-time tokens atomically.
+
+- [x] [B059] (P1) Consume persistent one-time tokens atomically.
   Goal:
   One persistent nonce or account challenge can complete one credential operation.
   The database consumers read unused state before a separate mutation that does not verify one changed row.
@@ -237,11 +281,27 @@ Planning and recurring entries stay in this tracker with unresolved work.
   - Race one email verification challenge.
   - Verify that one request succeeds in each test.
   - Run `make ci`.
+  Review 2026-10-08:
+  `DatabaseNonceStore.Consume` still reads a record before deletion and does not require one changed row.
+  `consumeDatabaseChallenge` still updates after a read without an unused-state, kind, or expiry condition on the update.
+  Password reset already places credential changes and challenge consumption in one transaction.
+  Existing database nonce tests passed with the race detector. They do not verify concurrent single-use consumption.
+  Next actions:
+  - Use conditional mutations and require one changed row before credential operations continue.
+  - Keep the reset transaction and verify concurrent provider, reset, and email verification requests.
+  Implementation 2026-10-08:
+  Database consumers now use conditional mutations and require one changed row before credential operations continue.
+  The nonce store accepts only issued opaque tokens. Tokens expire at their recorded expiry time.
+  Memory password-link verification checks the account before token consumption.
+  HTTP race tests passed for provider login, reset, and email verification.
+  Isolation, exact expiry, and transaction rollback tests also passed with the race detector.
+  Independent candidate review found no concrete bypass or regression. Final `make ci` passed on 2026-10-08.
 
-- [ ] [B060] (P1) Limit password guesses and reject weak passwords.
+
+- [x] [B060] (P1) Limit password guesses and reject weak passwords.
   Goal:
   Password authentication resists repeated online guesses and trivial user passwords.
-  The login path has no attempt limit, and the password policy accepts one-byte passwords.
+  The original login path had no attempt limit. The current password policy still accepts one-byte passwords.
   Codex Security assigns medium severity, high confidence, CWE-307, and CWE-521.
   This issue tracks finding `csf_04c887ceb1ca32c26b210d36`.
   The source fingerprint is `codex-security/v1:sha256:edb749db4592eb8e71fc6009e8fd0350079544e5394bdb94c2b9d446864b4952`.
@@ -268,8 +328,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
   Remaining: Define the minimum password length and progressive failure delay required by B060.
   The selected audit finding concerns unlimited guesses. Its fixed one-minute request budget is implemented.
   Validation: Focused checks and final `make ci` passed for the completed audit scope.
+  Review 2026-10-08:
+  `TestSecurityPasswordAbuse` passed with the race detector for memory and database stores.
+  The existing request budgets stay active before bcrypt work.
+  `validatePlainPassword` rejects empty passwords and passwords above the maximum byte length, but has no minimum length.
+  The one-minute request budget has no progressive delay after failed attempts.
+  Next actions:
+  - Define the current minimum length and apply it to signup, reset, change, and link boundaries.
+  - Add progressive failure delay shared by JSON and OAuth login, with controlled-clock public tests.
+  Implementation 2026-10-08:
+  New passwords require valid UTF-8, at least 15 Unicode code points, and at most 72 bytes.
+  Signup, reset, change, and link use the shared creation boundary. Login still verifies current stored hashes.
+  JSON and OAuth share delays from one second to a 60-second cap, with 15-minute inactivity expiry.
+  Atomic admission occurs before bcrypt. Unique attempt tickets prevent an old success from clearing a newer failure.
+  The independent request budgets stay active. Delay records have a global capacity of 10,000.
+  HTTP password boundary tests and delay tests passed with the race detector for both stores.
+  Separate database connections, expiry, cancellation, capacity, and stale-success races also passed.
+  Independent candidate review found no concrete bypass or regression. Final `make ci` passed on 2026-10-08.
 
-- [ ] [B062] (P1) Bound transient state storage.
+
+- [x] [B062] (P1) Bound transient state storage.
   Goal:
   Public authorization and account flows cannot increase transient state without a limit.
   The memory and database stores have no complete capacity or expiry cleanup contract.
@@ -298,11 +376,32 @@ Planning and recurring entries stay in this tracker with unresolved work.
   B109 adds reset cooldowns and bounded reset state.
   Remaining: Complete signup limits, access-time cleanup, and scheduled cleanup for the other transient records required by B062.
   Validation: Focused checks and final `make ci` passed for the completed audit scope.
+  Review 2026-10-08:
+  `TestSecurityAuthorizationCapacity` passed with the race detector for memory and SQLite stores.
+  Pending OAuth request creation has tenant and global limits. Reset initiation has cooldowns and a global challenge limit.
+  Password signup still creates pending accounts and challenges without capacity admission.
+  Database authorization request access rejects expiry without deletion. Consumed account challenges remain stored.
+  The reviewed stores have no scheduled cleanup for these expired and consumed records.
+  Next actions:
+  - Bound signup admission, pending signup retention, and other transient records before creation.
+  - Add access-time removal and scheduled persistent cleanup, then verify physical record counts with a controlled clock.
+  Implementation 2026-10-08:
+  Memory and database stores enforce atomic tenant and global limits for signups, challenges, nonces, GitHub transactions, codes, and refresh rows.
+  Signup budgets apply before hashing. Capacity rejection preserves valid requests, codes, and active refresh tokens.
+  OAuth capacity responses use HTTP 429 with `temporarily_unavailable` and `Retry-After`.
+  Creation, access, and scheduled sweeps physically remove expired state. Complete application refresh families retain replay evidence until all members expire.
+  Startup runs cleanup before traffic. The service repeats cleanup every 30 seconds and cancels and joins the worker during shutdown.
+  HTTP capacity, cleanup, rollback, replay, and concurrent database admission tests passed with the race detector.
+  A persistent lifecycle test verified physical deletion and successful active-account login after a scheduled sweep.
+  Account cleanup uses batches of at most 250 accounts and bulk deletion. Race tests preserve protected accounts and credentials during cleanup.
+  Independent review found no current-contract capacity bypass or loss of replay evidence.
+  Validation covers the current schema. Final `make ci` passed on 2026-10-08.
 
-- [ ] [B063] (P2) Synchronize the in-memory user store.
+
+- [x] [B063] (P2) Synchronize the in-memory user store.
   Goal:
   Concurrent HTTP requests cannot cause a fatal map access in the in-memory user store.
-  The store reads and writes shared nested maps without a lock.
+  The original store read and wrote shared nested maps without a lock.
   Codex Security assigns low severity, high confidence, and CWE-362.
   This issue tracks finding `csf_3273d1b7b5bef5965ae694dc`.
   The source fingerprint is `codex-security/v1:sha256:9222bcfa4a1aa6594100016196cb4a8cc68e626962d59dcf88b8a48a3110dc25`.
@@ -318,11 +417,25 @@ Planning and recurring entries stay in this tracker with unresolved work.
   - Run concurrent user updates and profile reads with the race detector.
   - Run parallel login requests with the in-memory store.
   - Run `make ci`.
+  Review 2026-10-08:
+  `InMemoryUsers` now protects map reads and writes with `sync.RWMutex`.
+  Both `upsertUserProfile` and `GetUserProfile` still return the stored `record.Roles` slice.
+  The existing store test passed with the race detector.
+  A temporary public store test changed the returned role slice and observed the changed role in the next profile read.
+  Next actions:
+  - Make a copy of each mutable role slice that crosses the store boundary.
+  - Verify returned-slice isolation, concurrent profile reads and writes, and parallel HTTP login.
+  Implementation 2026-10-08:
+  Both public profile methods return copies of role slices. The existing mutex still protects all map reads and writes.
+  Public store tests reproduced caller mutation of stored roles before the repair.
+  Slice isolation, concurrent profile updates, and parallel TLS login tests passed with the race detector.
+  Independent candidate review found no remaining alias or concurrency defect. Final `make ci` passed on 2026-10-08.
 
-- [ ] [B064] (P2) Hide account identity in password reset responses.
+
+- [x] [B064] (P2) Hide account identity in password reset responses.
   Goal:
   Password reset initiation returns the same public response for known and unknown accounts.
-  The current response returns a stable account ID only for a known account.
+  The original response returned a stable account ID only for a known account.
   Codex Security assigns low severity, high confidence, and CWE-203.
   This issue tracks finding `csf_b66d799ea14c915e50b0f677`.
   The source fingerprint is `codex-security/v1:sha256:da724e9d301ce1fe04387f3dac5fac36649844b49edf7b7e30ee8a5cd2853b04`.
@@ -346,8 +459,27 @@ Planning and recurring entries stay in this tracker with unresolved work.
   HTTP tests compare known, unknown, and throttled responses. Email-based recovery still works.
   Remaining: Email delivery is synchronous. The uniform timing requirement remains open.
   Validation: Focused checks and final `make ci` passed for the completed audit scope.
+  Review 2026-10-08:
+  Public reset responses contain exactly `{"status":"accepted"}` for the reviewed known, unknown, and throttled cases.
+  The public recovery test passed with the race detector and verified challenge delivery through the trusted channel.
+  `SendEmailChallenge` still completes inside the HTTP handler only for known accounts.
+  Slow or failed delivery can thus change the response time without a response-body difference.
+  Next actions:
+  - Remove email delivery latency from the public response path and define one uniform response-time contract.
+  - Compare known, unknown, throttled, slow-delivery, and failed-delivery requests through HTTP.
+  Implementation 2026-10-08:
+  Reset initiation returns one constant accepted response without waiting for account lookup, challenge creation, or delivery.
+  Each runtime snapshot owns a bounded recovery queue. Source, tenant, and global admission limits also apply to outstanding work.
+  Queue rejection, account limits, storage capacity, and internal failures retain the same public response.
+  Jobs use the service context, independent of the request. Retirement cancels and joins work before the notification client closes.
+  Failed delivery cancels its challenge through a separate bounded cleanup context.
+  HTTP timing, recovery, capacity, cancellation, and shutdown tests passed with the race detector.
+  The full authentication race suite passed. Publisher tests preserve new traffic and wait for retired cleanup.
+  Independent candidate review found no remaining account response leak or lifecycle defect. Final `make ci` passed on 2026-10-08.
+  Recovery jobs can be rejected at capacity or canceled during retirement. The accepted response does not guarantee email delivery.
 
-- [ ] [B065] (P2) Use trusted HTTPS signals for credential routes.
+
+- [x] [B065] (P2) Use trusted HTTPS signals for credential routes.
   Goal:
   Only TLS or a trusted proxy can satisfy the HTTPS-only tenant contract.
   The current guard trusts client headers and `Host`, and password reset completion has no guard.
@@ -369,6 +501,23 @@ Planning and recurring entries stay in this tracker with unresolved work.
   - Send a forged localhost `Host` value and verify rejection.
   - Verify that password reset completion rejects direct plaintext.
   - Run `make ci`.
+  Review 2026-10-08:
+  `isHTTPS` still accepts forwarding headers without trusted-peer validation and accepts `Host: localhost:<port>`.
+  `TestAuthGoogleRequiresHTTPS` passed with the race detector because it expects these forged signals to permit login.
+  Password reset completion, password change, and password link routes still lack the shared transport guard.
+  Next actions:
+  - Define trusted proxy peers and strictly classify forwarded schemes from those peers.
+  - Apply one guard to every credential route and replace tests that permit client-forged HTTPS signals.
+  Implementation 2026-10-08:
+  One immutable transport policy now validates direct TLS or configured proxy peers with one exact HTTPS header.
+  The policy ignores `Host` and `Forwarded`. Invalid peer addresses, duplicate headers, and scheme lists fail the check.
+  Application and OAuth credential guards run before request parsing, storage changes, cookie changes, and recovery queue admission.
+  Native config and public discovery remain public. The explicit tenant HTTP setting retains its current behavior.
+  Runtime and renderer inputs now include validated proxy CIDRs. Operators supply the actual proxy peer ranges.
+  HTTP tests cover all credential routes, direct TLS, trusted proxies, forged signals, and reset token preservation.
+  Runtime tests also verify that `/api/me` rejects forged HTTPS before session checks.
+  Focused race tests and renderer tests passed. Final `make ci` passed on 2026-10-08.
+  Independent review found no forwarding or host bypass for HTTPS-only tenants.
 
 ## Maintenance
 

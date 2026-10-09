@@ -14,6 +14,7 @@ type MemoryRefreshTokenStore struct {
 	byID       map[string]*memoryRecord
 	byHash     map[string]string
 	sequenceID uint64
+	now        func() time.Time
 }
 
 type memoryRecord struct {
@@ -32,6 +33,7 @@ func NewMemoryRefreshTokenStore() *MemoryRefreshTokenStore {
 	return &MemoryRefreshTokenStore{
 		byID:   make(map[string]*memoryRecord),
 		byHash: make(map[string]string),
+		now:    time.Now,
 	}
 }
 
@@ -40,12 +42,23 @@ func (store *MemoryRefreshTokenStore) Issue(ctx context.Context, tenantID string
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
+	store.cleanupExpiredLocked(store.now().Unix())
+	total := len(store.byID)
+	tenantCount := 0
+	for _, record := range store.byID {
+		if record.TenantID == tenantID {
+			tenantCount++
+		}
+	}
+	if total >= refreshGlobalCapacity || tenantCount >= refreshTenantCapacity {
+		return "", "", ErrTransientCapacity
+	}
 	tokenID := store.nextID()
 	opaque, hashValue, err := store.randomOpaque()
 	if err != nil {
 		return "", "", fmt.Errorf("refresh_store.issue.memory: %w", err)
 	}
-	nowUnix := time.Now().UTC().Unix()
+	nowUnix := store.now().UTC().Unix()
 	if previousTokenID != "" {
 		parent := store.byID[previousTokenID]
 		if parent == nil || parent.TenantID != tenantID || parent.UserID != applicationUserID {
@@ -80,10 +93,11 @@ func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tenantID str
 
 	hashValue := store.hash(tokenOpaque)
 	tokenID, ok := store.byHash[store.hashKey(tenantID, hashValue)]
+	rec := store.byID[tokenID]
+	store.cleanupExpiredLocked(store.now().Unix())
 	if !ok {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
-	rec := store.byID[tokenID]
 	if rec == nil {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
@@ -91,10 +105,12 @@ func (store *MemoryRefreshTokenStore) Validate(ctx context.Context, tenantID str
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenNotFound)
 	}
 	if rec.RevokedAtUnix != 0 {
-		store.revokeFamily(rec, time.Now().UTC().Unix())
+		if store.byID[rec.TokenID] != nil {
+			store.revokeFamily(rec, store.now().UTC().Unix())
+		}
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenRevoked)
 	}
-	if time.Unix(rec.ExpiresUnix, 0).Before(time.Now().UTC()) {
+	if rec.ExpiresUnix <= store.now().Unix() {
 		return "", "", 0, fmt.Errorf("refresh_store.validate.memory: %w", ErrRefreshTokenExpired)
 	}
 	return rec.UserID, rec.TokenID, rec.ExpiresUnix, nil
@@ -126,6 +142,7 @@ func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tenantID strin
 	defer store.mutex.Unlock()
 
 	rec := store.byID[tokenID]
+	store.cleanupExpiredLocked(store.now().Unix())
 	if rec == nil {
 		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenNotFound)
 	}
@@ -135,7 +152,7 @@ func (store *MemoryRefreshTokenStore) Revoke(ctx context.Context, tenantID strin
 	if rec.RevokedAtUnix != 0 {
 		return fmt.Errorf("refresh_store.revoke.memory: %w", ErrRefreshTokenAlreadyRevoked)
 	}
-	rec.RevokedAtUnix = time.Now().UTC().Unix()
+	rec.RevokedAtUnix = store.now().UTC().Unix()
 	return nil
 }
 
@@ -144,7 +161,7 @@ func (store *MemoryRefreshTokenStore) RevokeUser(ctx context.Context, tenantID s
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
-	nowUnix := time.Now().UTC().Unix()
+	nowUnix := store.now().UTC().Unix()
 	for _, record := range store.byID {
 		if record == nil || record.TenantID != tenantID || record.UserID != applicationUserID || record.RevokedAtUnix != 0 {
 			continue
@@ -156,7 +173,7 @@ func (store *MemoryRefreshTokenStore) RevokeUser(ctx context.Context, tenantID s
 
 func (store *MemoryRefreshTokenStore) nextID() string {
 	store.sequenceID++
-	timestampID := newRefreshTokenID(time.Now().UTC())
+	timestampID := newRefreshTokenID(store.now().UTC())
 	sequenceFragment := base64.RawURLEncoding.EncodeToString([]byte{byte(store.sequenceID % 255)})
 	return timestampID + "-" + sequenceFragment
 }
@@ -187,4 +204,50 @@ func (store *MemoryRefreshTokenStore) PurgeUser(ctx context.Context, tenantID, u
 		}
 	}
 	return nil
+}
+
+// CleanupExpired removes whole refresh families after every retained member expires.
+func (store *MemoryRefreshTokenStore) CleanupExpired(ctx context.Context, nowUnix int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	store.cleanupExpiredLocked(nowUnix)
+	return nil
+}
+func (store *MemoryRefreshTokenStore) cleanupExpiredLocked(nowUnix int64) {
+	roots := make(map[string]string, len(store.byID))
+	live := map[string]bool{}
+	for _, record := range store.byID {
+		var rootID string
+		path := make([]string, 0)
+		current := record
+		for {
+			if cached, exists := roots[current.TokenID]; exists {
+				rootID = cached
+				break
+			}
+			path = append(path, current.TokenID)
+			if current.PreviousTokenID == "" {
+				rootID = current.TokenID
+				break
+			}
+			current = store.byID[current.PreviousTokenID]
+		}
+		for _, id := range path {
+			roots[id] = rootID
+		}
+		if record.ExpiresUnix > nowUnix {
+			live[rootID] = true
+		}
+	}
+
+	for id, root := range roots {
+		if !live[root] {
+			record := store.byID[id]
+			delete(store.byHash, store.hashKey(record.TenantID, record.Hash))
+			delete(store.byID, id)
+		}
+	}
 }

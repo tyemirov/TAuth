@@ -121,7 +121,7 @@ func (sessions *OAuthBrowserSessions) LoginPassword(
 	if !exists || !config.PasswordAuthEnabled || sessions.passwordCredentials == nil || sessions.users == nil || sessions.refreshTokens == nil {
 		return false, nil
 	}
-	if !config.AllowInsecureHTTP && !isHTTPS(request) {
+	if !config.AllowInsecureHTTP && !config.TransportPolicy.IsHTTPS(request) {
 		return false, nil
 	}
 	normalizedEmail, emailErr := normalizePasswordEmail(email)
@@ -161,7 +161,7 @@ func (sessions *OAuthBrowserSessions) LoginGoogle(
 	if !exists || strings.TrimSpace(config.GoogleWebClientID) == "" || sessions.nonces == nil || sessions.users == nil || sessions.refreshTokens == nil {
 		return false, nil
 	}
-	if !config.AllowInsecureHTTP && !isHTTPS(request) {
+	if !config.AllowInsecureHTTP && !config.TransportPolicy.IsHTTPS(request) {
 		return false, nil
 	}
 	validator, validatorErr := resolveGoogleValidator(ctx)

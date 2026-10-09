@@ -193,7 +193,7 @@ func TestAppleGrantCaptureAndErasureRestartHTTP(t *testing.T) {
 	registry := NewSingleTenantRegistry(config)
 	revoker := NewAppleAccountRevoker(users, func(context.Context, string) (AppleOAuthConfig, error) { return config.AppleOAuth, nil }, client)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, nil, nil, revoker)
+	MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, newTestPasswordResetDispatcher(t), nil, nil, revoker)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	browser := server.Client()
@@ -276,7 +276,7 @@ func TestAppleGrantCaptureAndErasureRestartHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	recoveredRouter := gin.New()
-	MountAuthRoutesWithPassword(recoveredRouter, registry, reopened, refresh, nil, reopened, nil, nil, resumedRevoker)
+	MountAuthRoutesWithPassword(recoveredRouter, registry, reopened, refresh, nil, reopened, newTestPasswordResetDispatcher(t), nil, nil, resumedRevoker)
 	server.Config.Handler = recoveredRouter
 	if status, receipt := erasureHTTP(t, fixture, http.MethodGet, "/auth/account-erasure", statusKey); status != 200 || receipt["state"] != "completed" || receipt["account_state"] != "removed" {
 		t.Fatalf("restart completion: %d %+v", status, receipt)
@@ -305,7 +305,7 @@ func TestAppleErasureVerifiedNotificationHTTP(t *testing.T) {
 	defer ProvideAppleOAuthHTTPClient(nil)
 	fixture.config.AppleOAuth = AppleOAuthConfig{Enabled: true, ClientID: "com.example.service", NotificationAudience: "com.example.primary", JWKSURL: provider.URL}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), fixture.accounts, fixture.refresh, nil, fixture.accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), fixture.accounts, fixture.refresh, nil, fixture.accounts, newTestPasswordResetDispatcher(t), nil, nil)
 	fixture.server.Config.Handler = router
 	subject := "historical-notification-subject"
 	if _, err := fixture.accounts.LinkProviderIdentity(context.Background(), fixture.config.TenantID, fixture.profile.AccountID, AccountProviderIdentity{Provider: "apple", Subject: subject, UserEmail: "parent@example.com"}); err != nil {
@@ -467,7 +467,7 @@ func TestAppleErasureNotificationCannotRegressInFlightGrantHTTP(t *testing.T) {
 	registry := NewSingleTenantRegistry(config)
 	revoker := NewAppleAccountRevoker(fixture.accounts, func(context.Context, string) (AppleOAuthConfig, error) { return config.AppleOAuth, nil }, providerClient)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, fixture.accounts, fixture.refresh, nil, fixture.accounts, nil, nil, revoker)
+	MountAuthRoutesWithPassword(router, registry, fixture.accounts, fixture.refresh, nil, fixture.accounts, newTestPasswordResetDispatcher(t), nil, nil, revoker)
 	fixture.server.Config.Handler = router
 	statusKey := newErasureStatusKey(t)
 	result := make(chan map[string]any, 1)
@@ -581,7 +581,7 @@ func TestAppleErasureLegacySchemaReopenHTTP(t *testing.T) {
 				t.Fatalf("legacy recovery failure: %v", resumeErr)
 			}
 			router := gin.New()
-			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), reopened, fixture.refresh, nil, reopened, nil, nil, revoker)
+			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), reopened, fixture.refresh, nil, reopened, newTestPasswordResetDispatcher(t), nil, nil, revoker)
 			fixture.server.Config.Handler = router
 			status, receipt := erasureHTTP(t, fixture, http.MethodGet, "/auth/account-erasure", key)
 			if status != 200 || receipt["operation_id"] != original.OperationID || receipt["account_state"] != erasureAccountRemoved {

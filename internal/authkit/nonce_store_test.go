@@ -82,8 +82,8 @@ func TestMemoryNonceStoreSupportsTenantTTL(t *testing.T) {
 	}
 
 	current = current.Add(2 * time.Second)
-	if err := store.Consume(context.Background(), "tenant-b", tokenB); err != ErrNonceExpired {
-		t.Fatalf("tenant-b nonce should be expired, got %v", err)
+	if err := store.Consume(context.Background(), "tenant-b", tokenB); err != ErrNonceNotFound {
+		t.Fatalf("tenant-b expired nonce should have been removed, got %v", err)
 	}
 }
 
@@ -129,5 +129,5 @@ func TestMemoryNonceStorePurgeExpiredLockedNoOpsWhenTenantEmpty(t *testing.T) {
 	store := NewMemoryNonceStore(time.Minute).(*memoryNonceStore)
 	store.entries["tenant-a"] = map[string]time.Time{}
 
-	store.purgeExpiredLocked("tenant-a")
+	store.cleanupExpiredLocked(store.now().Unix())
 }

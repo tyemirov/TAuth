@@ -165,7 +165,7 @@ func TestConsoleTenantManagement(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				token, err := grants.IssueRefreshToken(context.Background(), oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: tenantID, UserID: oauthParent.UserID, ClientID: "client", Resource: "https://resource.example", Scope: "read", ExpiresAtUnix: now + 3600})
+				token, err := grants.IssueRefreshToken(context.Background(), oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: tenantID, UserID: oauthParent.UserID, ClientID: "client", Resource: "https://resource.example", Scope: "read", ExpiresAtUnix: now + 3600}, now)
 				if err != nil {
 					t.Fatal(err)
 				}

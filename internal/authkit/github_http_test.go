@@ -41,7 +41,7 @@ func TestGitHubHTTPStart(t *testing.T) {
 	users := web.NewInMemoryUsers()
 	refresh := NewMemoryRefreshTokenStore()
 	nonces := NewMemoryNonceStore(time.Minute)
-	MountAuthRoutes(router, registry, users, refresh, nonces, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, users, refresh, nonces, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 	login, err := NewGitHubLogin(NewOAuthBrowserSessions(registry, users, refresh, nonces, NewMemoryPasswordCredentialStore()), NewMemoryGitHubTransactionStore(), NewGitHubProvider(http.DefaultTransport), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func newGitHubHTTPFixture(t *testing.T, database bool, accountManaged bool) *git
 		t.Fatal(err)
 	}
 	login.Mount(router)
-	MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, passwords, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, users, refresh, nonces, passwords, newTestPasswordResetDispatcher(t), nil, nil)
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	client := server.Client()
@@ -573,7 +573,7 @@ func TestGitHubHTTPMemoryCapacity(t *testing.T) {
 		store.transactions[fmt.Sprint(index)] = githubTransaction{ExpiresAtUnix: now + 300}
 	}
 	status, _ := githubHTTPResponse(t, fixture.client, fixture.server.URL+tenants.GitHubStartPath+"?tenant_id=github&return_to="+url.QueryEscape("https://app.example.com"))
-	if status != 503 {
+	if status != http.StatusTooManyRequests {
 		t.Fatalf("full store status=%d", status)
 	}
 	for key, transaction := range store.transactions {

@@ -153,6 +153,12 @@ The simplest way to use TAuth from the browser is through the helper served only
 - `exchangeGoogleCredential({ credential, nonceToken })` – exchanges the Google credential for cookies and updates the profile.
 - `getAppleLoginUrl()` – returns the tenant-aware `/auth/apple/start` URL for a Sign in with Apple button or link, including the current page as `return_to` when `window.location` is available.
 - `startAppleLogin()` – records a non-secret restore hint, navigates the browser to the Apple login start URL, and returns that URL for instrumentation.
+New passwords require valid UTF-8, at least 15 Unicode code points, and at most 72 bytes.
+Signup, reset, password change, and password link use this policy.
+JSON and OAuth login share progressive delays and request budgets.
+A delayed login returns HTTP 429 with the remaining `Retry-After` seconds, rounded up.
+See the [password policy](../README.md#authentication-request-limits) for the schedule and limits.
+
 - `exchangePasswordCredential({ email, password })` – exchanges a tenant-managed password credential for cookies and updates the profile.
 - `signupPasswordCredential({ email, password, displayName, avatarUrl })` – starts account signup and returns the accepted verification challenge metadata.
 - `verifyPasswordEmail({ token })` – verifies a signup challenge, mints cookies, and updates the profile.
@@ -307,11 +313,12 @@ When using `tauth.js` or the mpr‑ui header component, this flow is handled int
 
 Native apps such as PromptDew must not embed Google sign-in in a web view. Instead, they should:
 
-1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header. Expo clients should add `?platform=ios` or `?platform=android`.
-2. Open Google in the system browser with PKCE `S256`, `response_type=code`, `scope=openid email profile`, one configured redirect URI, and an OIDC `nonce`.
-3. Exchange the authorization code directly with Google and extract the returned `id_token`.
-4. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }`.
-5. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
+1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header. For Expo clients, add `?platform=ios` or `?platform=android`.
+2. Obtain a nonce from `POST /auth/nonce` with the same `X-TAuth-Tenant` header.
+3. Open Google in the system browser with PKCE `S256`, `response_type=code`, `scope=openid email profile`, one configured redirect URI, and the issued `nonce`.
+4. Exchange the authorization code directly with Google and extract the returned `id_token`.
+5. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }`.
+6. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
 
 This path validates the `id_token` against the tenant’s optional `google_native_client_id` and/or `google_native_clients` entries. If native clients are absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. If a requested platform is absent, they return `404` with `error: "native_google_platform_not_configured"`. Native client IDs must be unique across tenants.
 
@@ -325,7 +332,15 @@ const configResponse = await fetch(
   { headers: { "X-TAuth-Tenant": tenantId }, credentials: "include" },
 );
 const nativeConfig = await configResponse.json();
-const nonce = crypto.randomUUID();
+const nonceResponse = await fetch(`${tauthBaseUrl}/auth/nonce`, {
+  method: "POST",
+  headers: { "X-TAuth-Tenant": tenantId },
+  credentials: "include",
+});
+if (!nonceResponse.ok) {
+  throw new Error(`TAuth nonce request failed: ${nonceResponse.status}`);
+}
+const { nonce } = await nonceResponse.json();
 const request = new AuthSession.AuthRequest({
   clientId: nativeConfig.client_id,
   scopes: nativeConfig.scopes,
@@ -340,6 +355,11 @@ const result = await request.promptAsync({
 ```
 
 After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.example.com`.
+
+TAuth requires the raw issued nonce in the Google authorization request and the `nonce_token` field.
+TAuth consumes the nonce before account or session writes.
+Unknown, expired, cross-tenant, and used nonces return `401` with `error: "invalid_nonce"`.
+Obtain a fresh nonce for each authorization.
 
 ### 5.4 Sign in with Apple
 
@@ -636,6 +656,7 @@ Returns the tenant-specific metadata a native client needs before opening the Go
     "scopes": ["openid", "email", "profile"],
     "response_type": "code",
     "pkce_required": true,
+    "nonce_required": true,
     "code_challenge_methods_supported": ["S256"]
   }
   ```
@@ -654,7 +675,7 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
   ```json
   {
     "google_id_token": "<id_token_from_google_token_endpoint>",
-    "nonce_token": "<raw_oidc_nonce>",
+    "nonce_token": "<raw_nonce_from_auth_nonce>",
     "platform": "ios",
     "redirect_uri": "com.promptdew.mobile://oauth2redirect/google"
   }
@@ -666,8 +687,12 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
   - issuer must be Google
   - the ID token must contain a verified email
   - the ID token `nonce` claim must exactly equal `nonce_token`
+  - `nonce_token` must be an unused, unexpired nonce issued by `POST /auth/nonce` for the same tenant
+  - TAuth consumes the nonce atomically before account or session writes
 
 - **Response**: `200 OK` with the same profile payload and cookies as `POST /auth/google`
+- **Nonce errors**: `401` with `error: "invalid_nonce"` for unknown, expired, cross-tenant, or used nonces.
+- **Storage errors**: `500` if the nonce store fails. TAuth issues no cookies.
 
 ### 6.2b.1 `GET /auth/apple/native/config`
 
@@ -832,7 +857,7 @@ Consumes a signup verification challenge, activates the account, mints cookies, 
 
 ### 6.2h `POST /auth/password/reset/start`
 
-Starts password reset. The response shape is intentionally the same for known and unknown emails.
+Requests password recovery. The public response does not wait for account lookup or email delivery.
 
 - **Request body**:
 
@@ -840,7 +865,7 @@ Starts password reset. The response shape is intentionally the same for known an
   { "email": "user@example.com" }
   ```
 
-- **Response**: `202 Accepted` with exactly `{"status":"accepted"}`. Known accounts receive reset links through Pinguin. Unknown accounts, throttled requests, and delivery failures receive the same public response. One reset per account is permitted each minute. A new reset replaces the previous challenge. See the [authentication request limits](../README.md#authentication-request-limits) for source and global limits.
+- **Response**: `202 Accepted` with exactly `{"status":"accepted"}`. Eligible accounts receive reset links through Pinguin. Unknown accounts, throttled requests, full queues, and internal failures receive the same response. One reset per account is permitted each minute. An admitted recovery job replaces the previous challenge. See the [authentication request limits](../README.md#authentication-request-limits) for queue, source, and global limits.
 
 ### 6.2i `POST /auth/password/reset/complete`
 

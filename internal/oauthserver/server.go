@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"
+	"github.com/tyemirov/tauth/internal/transportsecurity"
 	"github.com/tyemirov/tauth/pkg/oauthvalidator"
 )
 
@@ -44,6 +46,7 @@ type BrowserSessions interface {
 // Server implements one OAuth 2.1 authorization issuer across tenant resources.
 type Server struct {
 	config           appconfig.OAuthServerConfig
+	transportPolicy  transportsecurity.Policy
 	registry         Registry
 	store            Store
 	signer           *Signer
@@ -55,6 +58,7 @@ type Server struct {
 // NewServer constructs the authorization server from validated dependencies.
 func NewServer(
 	config appconfig.OAuthServerConfig,
+	transportPolicy transportsecurity.Policy,
 	registry Registry,
 	store Store,
 	signer *Signer,
@@ -65,7 +69,7 @@ func NewServer(
 		return nil, fmt.Errorf("oauth.server.invalid_dependencies")
 	}
 	return &Server{
-		config: config, registry: registry, store: store, signer: signer,
+		config: config, transportPolicy: transportPolicy, registry: registry, store: store, signer: signer,
 		metadataResolver: metadataResolver, browserSessions: browserSessions,
 		now: func() time.Time { return time.Now().UTC() },
 	}, nil
@@ -93,7 +97,17 @@ func (server *Server) Mount(router gin.IRouter) error {
 		if route.address == "" {
 			return fmt.Errorf("oauth.server.invalid_endpoint_path")
 		}
-		router.Handle(route.method, route.address, gin.WrapF(route.handler))
+		handler := route.handler
+		if route.address != authorizationServerMetadataPath && route.address != endpointPath(server.config.JWKSURI()) {
+			handler = func(response http.ResponseWriter, request *http.Request) {
+				if !server.transportPolicy.IsHTTPS(request) && !(server.config.AllowInsecureHTTP() && server.transportPolicy.IsLoopbackPeer(request)) {
+					writeOAuthError(response, http.StatusBadRequest, "https_required")
+					return
+				}
+				route.handler(response, request)
+			}
+		}
+		router.Handle(route.method, route.address, gin.WrapF(handler))
 	}
 	return nil
 }
@@ -182,8 +196,7 @@ func (server *Server) handleAuthorize(response http.ResponseWriter, request *htt
 	}
 	requestToken, createErr := server.store.CreateAuthorizationRequest(request.Context(), pending)
 	if errors.Is(createErr, ErrAuthorizationCapacity) {
-		response.Header().Set("Retry-After", "60")
-		writeOAuthError(response, http.StatusTooManyRequests, "temporarily_unavailable")
+		writeOAuthCapacityError(response)
 		return
 	}
 	if createErr != nil {
@@ -268,7 +281,7 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 	}
 	if loginErr != nil {
 		if errors.Is(loginErr, authkit.ErrAuthenticationRateLimited) {
-			response.Header().Set("Retry-After", "60")
+			response.Header().Set("Retry-After", strconv.Itoa(authkit.AuthenticationRetryAfter(loginErr)))
 			writeOAuthError(response, http.StatusTooManyRequests, "temporarily_unavailable")
 			return
 		}
@@ -391,12 +404,14 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 		return
 	}
 	now := server.now().UTC()
-	grant, redeemErr := server.store.RedeemAuthorizationCode(request.Context(), request.PostForm.Get("code"), CodeExchange{
+	grant, refreshToken, redeemErr := server.store.RedeemAuthorizationCode(request.Context(), request.PostForm.Get("code"), CodeExchange{
 		ClientID: clientID, Resource: resourceID,
-		CodeVerifier: request.PostForm.Get("code_verifier"), NowUnix: now.Unix(),
+		CodeVerifier: request.PostForm.Get("code_verifier"), NowUnix: now.Unix(), RefreshExpiresAtUnix: now.Add(policy.RefreshTokenTTL).Unix(),
 	}, server.requireActiveUser)
 	if redeemErr != nil {
-		if errors.Is(redeemErr, ErrAuthorizationCodeInvalid) || errors.Is(redeemErr, errInactiveUser) {
+		if errors.Is(redeemErr, ErrAuthorizationCapacity) {
+			writeOAuthCapacityError(response)
+		} else if errors.Is(redeemErr, ErrAuthorizationCodeInvalid) || errors.Is(redeemErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
 		} else {
 			writeOAuthError(response, http.StatusInternalServerError, "server_error")
@@ -420,11 +435,6 @@ func (server *Server) exchangeAuthorizationCode(response http.ResponseWriter, re
 		ConsentID: grant.ConsentID, TenantID: grant.TenantID, UserID: grant.UserID,
 		ClientID: grant.ClientID, Resource: grant.Resource, Scope: grant.Scope, DisclosurePolicy: grant.DisclosurePolicy,
 		ExpiresAtUnix: now.Add(policy.RefreshTokenTTL).Unix(),
-	}
-	refreshToken, refreshErr := server.store.IssueRefreshToken(request.Context(), refreshGrant)
-	if refreshErr != nil {
-		writeOAuthError(response, http.StatusInternalServerError, "server_error")
-		return
 	}
 	server.writeTokenResponse(response, refreshGrant, identities, refreshToken, policy.AccessTokenTTL, now)
 }
@@ -450,7 +460,9 @@ func (server *Server) exchangeRefreshToken(response http.ResponseWriter, request
 	now := server.now().UTC()
 	grant, rotatedToken, rotateErr := server.store.RotateRefreshToken(request.Context(), request.PostForm.Get("refresh_token"), clientID, resourceID, requestedScope, now.Unix(), server.requireActiveUser)
 	if rotateErr != nil {
-		if errors.Is(rotateErr, ErrRefreshTokenScope) {
+		if errors.Is(rotateErr, ErrAuthorizationCapacity) {
+			writeOAuthCapacityError(response)
+		} else if errors.Is(rotateErr, ErrRefreshTokenScope) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_scope")
 		} else if errors.Is(rotateErr, ErrRefreshTokenInvalid) || errors.Is(rotateErr, ErrRefreshTokenReuse) || errors.Is(rotateErr, errInactiveUser) {
 			writeOAuthError(response, http.StatusBadRequest, "invalid_grant")
@@ -632,11 +644,20 @@ func (server *Server) completeAndRedirect(response http.ResponseWriter, request 
 }
 
 func writeAuthorizationRequestStoreError(response http.ResponseWriter, storeErr error) {
+	if errors.Is(storeErr, ErrAuthorizationCapacity) {
+		writeOAuthCapacityError(response)
+		return
+	}
 	if errors.Is(storeErr, ErrAuthorizationRequestInvalid) {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	writeOAuthError(response, http.StatusInternalServerError, "server_error")
+}
+
+func writeOAuthCapacityError(response http.ResponseWriter) {
+	response.Header().Set("Retry-After", "60")
+	writeOAuthError(response, http.StatusTooManyRequests, "temporarily_unavailable")
 }
 
 func (request AuthorizationRequest) consentKey(userID string) ConsentKey {

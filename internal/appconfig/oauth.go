@@ -292,7 +292,7 @@ func parseOAuthServerConfig(raw FileOAuthSettings) (OAuthServerConfig, error) {
 	}
 	return OAuthServerConfig{
 		enabled:                 true,
-		allowInsecureHTTP:       allowInsecureHTTP,
+		allowInsecureHTTP:       allowInsecureHTTP && isLoopbackHostname(issuerURL.Hostname()),
 		issuer:                  issuer,
 		authorizationEndpoint:   endpoints["authorization"],
 		tokenEndpoint:           endpoints["token"],

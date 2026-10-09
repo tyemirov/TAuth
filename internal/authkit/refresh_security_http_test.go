@@ -59,7 +59,7 @@ func TestSecurityConcurrentRefreshConsumesOnce(t *testing.T) {
 				synchronized := &synchronizedRefreshValidation{RefreshTokenStore: store}
 				synchronized.ready.Add(2)
 				router := gin.New()
-				MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, synchronized, nil, accounts.(PasswordCredentialStore), nil, nil)
+				MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, synchronized, nil, accounts.(PasswordCredentialStore), newTestPasswordResetDispatcher(t), nil, nil)
 				server := httptest.NewTLSServer(router)
 				defer server.Close()
 				responses := make(chan *http.Response, 2)

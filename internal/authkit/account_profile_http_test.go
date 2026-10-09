@@ -220,7 +220,7 @@ func TestAccountProfileCorrectionTenantBoundaryHTTP(t *testing.T) {
 		config.TenantID = tenantID
 		config.AccountManagementEnabled = true
 		router := gin.New()
-		MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), store, NewMemoryRefreshTokenStore(), nil, store, nil, nil)
+		MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), store, NewMemoryRefreshTokenStore(), nil, store, newTestPasswordResetDispatcher(t), nil, nil)
 		server := httptest.NewTLSServer(router)
 		defer server.Close()
 		token, _, err := MintAppJWT(NewSystemClock(), tenantID, accountID, "same@example.com", "Original", "", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
@@ -300,7 +300,7 @@ func TestAccountProfileCorrectionSchemaUpgradeHTTP(t *testing.T) {
 	config.AccountManagementEnabled = true
 	config.PasswordAuthEnabled = true
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), reopened, NewMemoryRefreshTokenStore(), nil, reopened, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), reopened, NewMemoryRefreshTokenStore(), nil, reopened, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	token, _, err := MintAppJWT(NewSystemClock(), config.TenantID, profile.AccountID, profile.UserEmail, profile.DisplayName, "", profile.Roles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
@@ -366,7 +366,7 @@ func TestAccountProfileCorrectionSplitStoreFailureHTTP(t *testing.T) {
 			}
 			router := gin.New()
 			users := githubFailingUsers{UserStore: newTestUserStore()}
-			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore(), nil, credentials, nil, nil)
+			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore(), nil, credentials, newTestPasswordResetDispatcher(t), nil, nil)
 			server := httptest.NewTLSServer(router)
 			defer server.Close()
 			token, _, err := MintAppJWT(NewSystemClock(), config.TenantID, profile.AccountID, profile.UserEmail, profile.DisplayName, "", profile.Roles, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)

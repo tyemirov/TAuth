@@ -3,6 +3,7 @@ package authkit
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -194,7 +195,7 @@ func addCookies(request *http.Request, cookies map[string]*http.Cookie, names ..
 func issueNonceForTest(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/auth/nonce", nil)
+	request := httptest.NewRequest(http.MethodPost, "https://auth.example/auth/nonce", nil)
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200 from /auth/nonce, got %d", recorder.Code)
@@ -258,7 +259,7 @@ func TestAuthLifecycle(t *testing.T) {
 	defer restoreValidator()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body := prepareLoginBody(t, router, payload, "valid-token")
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
@@ -366,7 +367,7 @@ func TestGoogleLoginReturnsNotConfiguredWhenTenantHasNoGoogleWebClient(t *testin
 	registry := singleTenantRegistry(config)
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"token","nonce_token":"nonce"}`))
 	loginRequest.Header.Set("Content-Type", "application/json")
@@ -409,7 +410,7 @@ func TestPasswordLoginLifecycle(testingHandle *testing.T) {
 	}
 
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, passwordStore, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, passwordStore, newTestPasswordResetDispatcher(testingHandle), nil, nil)
 
 	body, marshalErr := json.Marshal(map[string]string{
 		"email":    "USER@example.com",
@@ -454,7 +455,7 @@ func TestPasswordLoginRejectsInvalidCredentials(testingHandle *testing.T) {
 	config.PasswordAuthEnabled = true
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil, nil)
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(testingHandle), nil, nil)
 
 	body := []byte(`{"email":"missing@example.com","password":"wrong-password"}`)
 	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
@@ -480,7 +481,7 @@ func TestPasswordLoginDisabledReturnsNotFound(testingHandle *testing.T) {
 	config := newTestServerConfig()
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil, nil)
+	MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(testingHandle), nil, nil)
 
 	body := []byte(`{"email":"user@example.com","password":"correct horse battery staple"}`)
 	request := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer(body))
@@ -515,7 +516,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, newTestPasswordResetDispatcher(testingHandle), sender, nil)
 
 	signupBody := []byte(`{"email":"New@Example.com","password":"correct horse battery staple","display_name":"New User"}`)
 	signupResponse := httptest.NewRecorder()
@@ -529,7 +530,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.Snapshot()[len(sender.Snapshot())-1], EmailChallengeKindVerification)
 	accountID, _ := signupPayload["account_id"].(string)
 	if verificationToken == "" {
 		testingHandle.Fatalf("expected verification token and account id, got %#v", signupPayload)
@@ -575,7 +576,8 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(resetStartResponse.Body).Decode(&resetStartPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode reset start payload: %v", decodeErr)
 	}
-	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindPasswordReset)
+	sender.WaitRequests(testingHandle, 2)
+	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.Snapshot()[len(sender.Snapshot())-1], EmailChallengeKindPasswordReset)
 	if resetToken == "" {
 		testingHandle.Fatalf("expected reset token in test config")
 	}
@@ -596,6 +598,7 @@ func TestAccountManagementPasswordSignupVerifyAndReset(testingHandle *testing.T)
 		testingHandle.Fatalf("expected old refresh cookie revoked after reset, got %d", oldRefreshResponse.Code)
 	}
 
+	advancePasswordTestClock(accountStore, time.Second)
 	newLoginResponse := httptest.NewRecorder()
 	newLoginRequest := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer([]byte(`{"email":"new@example.com","password":"new correct horse battery staple"}`)))
 	newLoginRequest.Header.Set("Content-Type", "application/json")
@@ -622,7 +625,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, newTestPasswordResetDispatcher(testingHandle), sender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"New@Example.com","password":"correct horse battery staple"}`)))
@@ -635,7 +638,7 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.Snapshot()[len(sender.Snapshot())-1], EmailChallengeKindVerification)
 	if verificationToken == "" {
 		testingHandle.Fatalf("expected verification token, got %#v", signupPayload)
 	}
@@ -659,7 +662,8 @@ func TestAccountManagementPasswordResetRejectsRemovedAllowedUser(testingHandle *
 	if decodeErr := json.NewDecoder(resetStartResponse.Body).Decode(&resetStartPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode reset start payload: %v", decodeErr)
 	}
-	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindPasswordReset)
+	sender.WaitRequests(testingHandle, 2)
+	resetToken := challengeTokenFromDeliveryURL(testingHandle, sender.Snapshot()[len(sender.Snapshot())-1], EmailChallengeKindPasswordReset)
 	if resetToken == "" {
 		testingHandle.Fatalf("expected reset token, got %#v", resetStartPayload)
 	}
@@ -709,7 +713,7 @@ func TestAccountManagementSeededPasswordLoginUsesAccountSession(testingHandle *t
 		testingHandle.Fatalf("failed to seed password credential: %v", credentialErr)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, newTestPasswordResetDispatcher(testingHandle), nil, nil)
 
 	loginResponse := httptest.NewRecorder()
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewBuffer([]byte(`{"email":"seeded@example.com","password":"correct horse battery staple"}`)))
@@ -819,7 +823,7 @@ func TestAccountManagementRejectsUnmappedAccountSession(testingHandle *testing.T
 		config.AccountManagementEnabled = true
 		registry := singleTenantRegistry(config)
 		router := gin.New()
-		MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), nil, nil)
+		MountAuthRoutesWithPassword(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(testingHandle), nil, nil)
 		sessionToken, _, tokenErr := MintAppJWT(NewSystemClock(), config.TenantID, sessionSubject, "account@example.com", "Account User", "https://example.com/account.png", []string{"user"}, config.AppJWTIssuer, config.AppJWTSigningKey, config.SessionTTL)
 		if tokenErr != nil {
 			testingHandle.Fatalf("failed to mint malformed account session: %v", tokenErr)
@@ -858,7 +862,7 @@ func TestAccountManagementRejectsUnlinkingLastIdentity(testingHandle *testing.T)
 	refreshStore := NewMemoryRefreshTokenStore()
 	accountStore := NewMemoryPasswordCredentialStore()
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, sender, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accountStore, newTestPasswordResetDispatcher(testingHandle), sender, nil)
 
 	signupResponse := httptest.NewRecorder()
 	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewBuffer([]byte(`{"email":"solo@example.com","password":"correct horse battery staple"}`)))
@@ -868,7 +872,7 @@ func TestAccountManagementRejectsUnlinkingLastIdentity(testingHandle *testing.T)
 	if decodeErr := json.NewDecoder(signupResponse.Body).Decode(&signupPayload); decodeErr != nil {
 		testingHandle.Fatalf("decode signup payload: %v", decodeErr)
 	}
-	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.requests[len(sender.requests)-1], EmailChallengeKindVerification)
+	verificationToken := challengeTokenFromDeliveryURL(testingHandle, sender.Snapshot()[len(sender.Snapshot())-1], EmailChallengeKindVerification)
 
 	verifyResponse := httptest.NewRecorder()
 	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/password/verify-email", bytes.NewBuffer([]byte(`{"token":"`+verificationToken+`"}`)))
@@ -895,7 +899,7 @@ func TestNativeGoogleConfigLifecycle(t *testing.T) {
 	config := newTestServerConfig()
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	request := httptest.NewRequest(http.MethodGet, "/auth/google/native/config", nil)
 	response := httptest.NewRecorder()
@@ -956,11 +960,13 @@ func TestNativeGoogleLoginLifecycle(t *testing.T) {
 	defer restoreValidator()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
+	nonce := issueNonceForTest(t, router)
+	payload.Claims["nonce"] = nonce
 	body, err := json.Marshal(map[string]string{
 		"google_id_token": "valid-native-token",
-		"nonce_token":     "native-nonce",
+		"nonce_token":     nonce,
 	})
 	if err != nil {
 		t.Fatalf("marshal native login payload: %v", err)
@@ -997,7 +1003,7 @@ func TestNativeGoogleConfigReturnsNotFoundWhenClientMissing(t *testing.T) {
 	config.GoogleNativeClientID = ""
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	request := httptest.NewRequest(http.MethodGet, "/auth/google/native/config", nil)
 	response := httptest.NewRecorder()
@@ -1022,7 +1028,7 @@ func TestNativeGoogleLoginReturnsNotFoundWhenClientMissing(t *testing.T) {
 	config.GoogleNativeClientID = ""
 	registry := singleTenantRegistry(config)
 	router := gin.New()
-	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, newTestUserStore(), NewMemoryRefreshTokenStore(), nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body, err := json.Marshal(map[string]string{
 		"google_id_token": "any-token",
@@ -1080,7 +1086,7 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	plainBody := prepareLoginBody(t, router, payload, "valid-token")
 	plainRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(plainBody))
@@ -1097,8 +1103,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	forwardedRequest.Header.Set("X-Forwarded-Proto", "https")
 	forwardedResponse := httptest.NewRecorder()
 	router.ServeHTTP(forwardedResponse, forwardedRequest)
-	if forwardedResponse.Code != http.StatusOK {
-		t.Fatalf("expected 200 with forwarded https, got %d", forwardedResponse.Code)
+	if forwardedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with forwarded https, got %d", forwardedResponse.Code)
 	}
 
 	forwardedHeaderBody := prepareLoginBody(t, router, payload, "valid-token")
@@ -1107,8 +1113,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	forwardedHeaderRequest.Header.Set("Forwarded", "proto=https;host=example.com")
 	forwardedHeaderResponse := httptest.NewRecorder()
 	router.ServeHTTP(forwardedHeaderResponse, forwardedHeaderRequest)
-	if forwardedHeaderResponse.Code != http.StatusOK {
-		t.Fatalf("expected 200 with Forwarded https, got %d", forwardedHeaderResponse.Code)
+	if forwardedHeaderResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with Forwarded https, got %d", forwardedHeaderResponse.Code)
 	}
 
 	localhostBody := prepareLoginBody(t, router, payload, "valid-token")
@@ -1117,8 +1123,8 @@ func TestAuthGoogleRequiresHTTPS(t *testing.T) {
 	localhostRequest.Host = "localhost:8080"
 	localhostResponse := httptest.NewRecorder()
 	router.ServeHTTP(localhostResponse, localhostRequest)
-	if localhostResponse.Code != http.StatusOK {
-		t.Fatalf("expected 200 for localhost override, got %d", localhostResponse.Code)
+	if localhostResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for localhost override, got %d", localhostResponse.Code)
 	}
 }
 
@@ -1154,12 +1160,12 @@ func TestAuthCookiesSecureWhenHTTPSOnly(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body := prepareLoginBody(t, router, payload, "valid-token-secure")
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Forwarded-Proto", "https")
+	request.TLS = &tls.ConnectionState{}
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -1195,7 +1201,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	restoreValidator := withValidatorFactory(t, func(ctx context.Context) (GoogleTokenValidator, error) {
 		return nil, errors.New("factory_failure")
 	})
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	dummyPayload := &idtoken.Payload{Claims: map[string]interface{}{"nonce": ""}}
 	body := prepareLoginBody(t, router, dummyPayload, "valid-token")
@@ -1225,7 +1231,7 @@ func TestAuthGoogleValidatorFailures(t *testing.T) {
 	defer restoreValidator()
 
 	failureRouter := gin.New()
-	MountAuthRoutes(failureRouter, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(failureRouter, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 	failureBody := prepareLoginBody(t, failureRouter, badPayload, "bad-token")
 	failureRequest := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(failureBody))
 	failureRequest.Header.Set("Content-Type", "application/json")
@@ -1274,7 +1280,7 @@ func TestAuthGoogleSuccessMetrics(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 	body := prepareLoginBody(t, router, payload, "valid-token")
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -1330,7 +1336,7 @@ func TestAuthGoogleUserStoreFailureLogsAndMetrics(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body := prepareLoginBody(t, router, payload, "valid-token")
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
@@ -1397,7 +1403,7 @@ func TestAuthGoogleValidationBranches(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	for token, expectedStatus := range map[string]int{
 		"wrong-issuer": http.StatusUnauthorized,
@@ -1446,7 +1452,7 @@ func TestRefreshAndLogoutGuards(t *testing.T) {
 	refreshStore := NewMemoryRefreshTokenStore()
 
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	noCookieResponse := httptest.NewRecorder()
 	router.ServeHTTP(noCookieResponse, httptest.NewRequest(http.MethodPost, "/auth/refresh", nil))
@@ -1501,7 +1507,7 @@ func TestAuthGoogleBindJSONFailure(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString("{"))
 	request.Header.Set("Content-Type", "application/json")
@@ -1520,7 +1526,7 @@ func TestAuthGoogleMissingToken(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	nonce := issueNonceForTest(t, router)
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"","nonce_token":"`+nonce+`"}`))
@@ -1540,7 +1546,7 @@ func TestAuthGoogleMissingNonce(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBufferString(`{"google_id_token":"valid-token"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -1576,7 +1582,7 @@ func TestAuthGoogleNonceMismatch(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	issuedNonce := issueNonceForTest(t, router)
 	payload.Claims["nonce"] = "expected-nonce"
@@ -1620,7 +1626,7 @@ func TestAuthGoogleAcceptsHashedNonceClaim(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	nonce := issueNonceForTest(t, router)
 	payload.Claims["nonce"] = hashOpaque(nonce)
@@ -1677,7 +1683,7 @@ func TestAuthGoogleRejectsMissingNonceClaim(t *testing.T) {
 	userStore := newTestUserStore()
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	nonce := issueNonceForTest(t, router)
 	body := []byte(`{"google_id_token":"valid-token","nonce_token":"` + nonce + `"}`)
@@ -1719,7 +1725,7 @@ func TestAuthGoogleUserStoreError(t *testing.T) {
 	userStore := &failingUserStore{upsertErr: errors.New("upsert_fail")}
 	refreshStore := NewMemoryRefreshTokenStore()
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body := prepareLoginBody(t, router, payload, "valid-token")
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
@@ -1759,7 +1765,7 @@ func TestAuthGoogleRefreshIssueError(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	body := prepareLoginBody(t, router, payload, "valid-token")
 	request := httptest.NewRequest(http.MethodPost, "/auth/google", bytes.NewBuffer(body))
@@ -1783,7 +1789,7 @@ func TestAuthRefreshExpiredToken(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore())
+	MountAuthRoutes(router, registry, userStore, refreshStore, nil, NewMemoryPasswordCredentialStore(), newTestPasswordResetDispatcher(t))
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "expired"})
@@ -1811,7 +1817,7 @@ func TestAuthRefreshProfileFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, newTestPasswordResetDispatcher(t), nil, nil)
 
 	accounts.err = errors.New("profile_fail")
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
@@ -1844,7 +1850,7 @@ func TestAuthRefreshIssueFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, newTestPasswordResetDispatcher(t), nil, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})
@@ -1879,7 +1885,7 @@ func TestAuthRefreshRevokeFailure(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, userStore, refreshStore, nil, accounts, newTestPasswordResetDispatcher(t), nil, nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	request.AddCookie(&http.Cookie{Name: config.RefreshCookieName, Value: "refresh"})

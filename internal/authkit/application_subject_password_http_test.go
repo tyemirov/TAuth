@@ -13,9 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func newApplicationSubjectRouter(registry TenantRegistry, users *DatabaseUserStore, refresh RefreshTokenStore) *gin.Engine {
+func newApplicationSubjectRouter(t *testing.T, registry TenantRegistry, users *DatabaseUserStore, refresh RefreshTokenStore) *gin.Engine {
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, nil, nil)
+	MountAuthRoutesWithPassword(router, registry, users, refresh, nil, users, newTestPasswordResetDispatcher(t), nil, nil)
 	return router
 }
 
@@ -55,7 +55,7 @@ func TestApplicationSubjectPasswordHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := NewSingleTenantRegistry(config)
-	server := httptest.NewTLSServer(newApplicationSubjectRouter(registry, users, refresh))
+	server := httptest.NewTLSServer(newApplicationSubjectRouter(t, registry, users, refresh))
 	t.Cleanup(server.Close)
 	client := server.Client()
 	client.Jar, _ = cookiejar.New(nil)
@@ -93,7 +93,7 @@ func TestApplicationSubjectPasswordHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.Config.Handler = newApplicationSubjectRouter(registry, users, refresh)
+	server.Config.Handler = newApplicationSubjectRouter(t, registry, users, refresh)
 	if id := login(); id != profile.UserID {
 		t.Fatal("password restart changed public subject")
 	}
@@ -119,16 +119,17 @@ func TestApplicationSubjectConcurrentPasswordHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := NewSingleTenantRegistry(config)
-	server := httptest.NewTLSServer(newApplicationSubjectRouter(registry, users, refresh))
+	server := httptest.NewTLSServer(newApplicationSubjectRouter(t, registry, users, refresh))
 	t.Cleanup(server.Close)
 	expected, err := users.EnsurePasswordAccount(context.Background(), config.TenantID, "parent@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	type result struct {
-		status int
-		id     string
-		err    error
+		status  int
+		cookies int
+		id      string
+		err     error
 	}
 	for _, enabled := range []bool{false, true} {
 		next := registry.configs[config.TenantID]
@@ -146,17 +147,30 @@ func TestApplicationSubjectConcurrentPasswordHTTP(t *testing.T) {
 				}
 				defer response.Body.Close()
 				var profile map[string]any
-				err = json.NewDecoder(response.Body).Decode(&profile)
+				if response.StatusCode == http.StatusOK {
+					err = json.NewDecoder(response.Body).Decode(&profile)
+				}
 				id, _ := profile["user_id"].(string)
-				results <- result{status: response.StatusCode, id: id, err: err}
+				results <- result{status: response.StatusCode, cookies: len(response.Cookies()), id: id, err: err}
 			}()
 		}
 		close(ready)
+		successes := 0
 		for index := 0; index < 2; index++ {
 			outcome := <-results
+			if outcome.status == http.StatusTooManyRequests {
+				if outcome.cookies != 0 {
+					t.Fatal("throttled login issued cookies")
+				}
+				continue
+			}
+			successes++
 			if outcome.err != nil || outcome.status != http.StatusOK || outcome.id != expected.UserID {
 				t.Fatalf("concurrent password flag=%v outcome=%+v", enabled, outcome)
 			}
+		}
+		if successes < 1 || successes > 2 {
+			t.Fatalf("concurrent login successes=%d", successes)
 		}
 	}
 }

@@ -24,9 +24,9 @@ const (
 	schemaMigrationVersionColumn = "version"
 	schemaMigrationLookupByName  = "store_name = ?"
 	schemaErrorFormat            = "%s.schema.%s: %w"
-	refreshStoreSchemaVersion    = 1
-	userStoreSchemaVersion       = 9
-	nonceStoreSchemaVersion      = 1
+	refreshStoreSchemaVersion    = 2
+	userStoreSchemaVersion       = 11
+	nonceStoreSchemaVersion      = 2
 	oauthStoreSchemaVersion      = 3
 )
 
@@ -51,33 +51,28 @@ func (schemaMigrationRecord) TableName() string {
 }
 
 type storeSchemaPolicy struct {
-	StoreName             string
-	Version               int
-	AllowDestructiveReset bool
+	StoreName string
+	Version   int
 }
 
 var storeSchemaPolicies = map[string]storeSchemaPolicy{
-	"control_store":        {StoreName: "control_store", Version: 1, AllowDestructiveReset: false},
-	githubStoreErrorPrefix: {StoreName: githubStoreErrorPrefix, Version: 1, AllowDestructiveReset: false},
+	"control_store":        {StoreName: "control_store", Version: 1},
+	githubStoreErrorPrefix: {StoreName: githubStoreErrorPrefix, Version: 2},
 	refreshStoreErrorPrefix: {
-		StoreName:             refreshStoreErrorPrefix,
-		Version:               refreshStoreSchemaVersion,
-		AllowDestructiveReset: true,
+		StoreName: refreshStoreErrorPrefix,
+		Version:   refreshStoreSchemaVersion,
 	},
 	userStoreErrorPrefix: {
-		StoreName:             userStoreErrorPrefix,
-		Version:               userStoreSchemaVersion,
-		AllowDestructiveReset: false,
+		StoreName: userStoreErrorPrefix,
+		Version:   userStoreSchemaVersion,
 	},
 	nonceStoreErrorPrefix: {
-		StoreName:             nonceStoreErrorPrefix,
-		Version:               nonceStoreSchemaVersion,
-		AllowDestructiveReset: false,
+		StoreName: nonceStoreErrorPrefix,
+		Version:   nonceStoreSchemaVersion,
 	},
 	oauthStoreErrorPrefix: {
-		StoreName:             oauthStoreErrorPrefix,
-		Version:               oauthStoreSchemaVersion,
-		AllowDestructiveReset: false,
+		StoreName: oauthStoreErrorPrefix,
+		Version:   oauthStoreSchemaVersion,
 	},
 }
 
@@ -117,8 +112,16 @@ func openDatabase(requestContext context.Context, databaseURL string, errorPrefi
 		return nil, "", fmt.Errorf("%s.open.%s: %w", errorPrefix, driverLabel, openError)
 	}
 	if len(models) > 0 {
+		if errorPrefix == refreshStoreErrorPrefix || errorPrefix == nonceStoreErrorPrefix || errorPrefix == githubStoreErrorPrefix {
+			models = append(models, &transientCapacityLock{})
+		}
 		if resetError := ensureSchemaVersion(requestContext, databaseHandle, errorPrefix, driverLabel, models...); resetError != nil {
 			return nil, "", resetError
+		}
+	}
+	if errorPrefix == refreshStoreErrorPrefix || errorPrefix == nonceStoreErrorPrefix || errorPrefix == githubStoreErrorPrefix {
+		if err := databaseHandle.WithContext(requestContext).Clauses(clause.OnConflict{DoNothing: true}).Create(&transientCapacityLock{Category: errorPrefix}).Error; err != nil {
+			return nil, "", fmt.Errorf("%s.capacity_init: %w", errorPrefix, err)
 		}
 	}
 	return databaseHandle, driverLabel, nil
@@ -237,35 +240,8 @@ func ensureSchemaVersion(requestContext context.Context, databaseHandle *gorm.DB
 }
 
 func applySchemaPolicy(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, storePolicy storeSchemaPolicy, models ...interface{}) error {
-	migrationRecord := schemaMigrationRecord{
-		StoreName: storePolicy.StoreName,
-		Version:   storePolicy.Version,
-	}
-	if storePolicy.AllowDestructiveReset {
-		return resetDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, migrationRecord, models...)
-	}
+	migrationRecord := schemaMigrationRecord(storePolicy)
 	return migrateDatabaseSchema(requestContext, databaseHandle, errorPrefix, driverLabel, migrationRecord, models...)
-}
-
-func resetDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, schemaVersion schemaMigrationRecord, models ...interface{}) error {
-	migrator := databaseHandle.WithContext(requestContext).Migrator()
-	dropError := migrator.DropTable(models...)
-	if dropError != nil {
-		return fmt.Errorf("%s.reset.%s: %w", errorPrefix, driverLabel, dropError)
-	}
-	migrationError := databaseHandle.WithContext(requestContext).AutoMigrate(models...)
-	if migrationError != nil {
-		return fmt.Errorf("%s.migrate.%s: %w", errorPrefix, driverLabel, migrationError)
-	}
-	migrationRecord := schemaVersion
-	upsertError := databaseHandle.WithContext(requestContext).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: schemaMigrationNameColumn}},
-		DoUpdates: clause.AssignmentColumns([]string{schemaMigrationVersionColumn}),
-	}).Create(&migrationRecord).Error
-	if upsertError != nil {
-		return fmt.Errorf(schemaErrorFormat, errorPrefix, driverLabel, upsertError)
-	}
-	return nil
 }
 
 func migrateDatabaseSchema(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, migrationRecord schemaMigrationRecord, models ...interface{}) error {
@@ -273,7 +249,7 @@ func migrateDatabaseSchema(requestContext context.Context, databaseHandle *gorm.
 	if migrationError != nil {
 		return fmt.Errorf("%s.migrate.%s: %w", errorPrefix, driverLabel, migrationError)
 	}
-	if errorPrefix == userStoreErrorPrefix && migrationRecord.Version == 9 {
+	if errorPrefix == userStoreErrorPrefix && migrationRecord.Version >= 9 {
 		if err := databaseHandle.WithContext(requestContext).Model(&databaseAccountErasure{}).Where("state = ? AND account_id IS NULL", erasureCompleted).Update("account_state", erasureAccountRemoved).Error; err != nil {
 			return fmt.Errorf(schemaErrorFormat, errorPrefix, driverLabel, err)
 		}

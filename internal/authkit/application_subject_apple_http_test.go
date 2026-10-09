@@ -44,7 +44,7 @@ func TestApplicationSubjectAppleHTTP(t *testing.T) {
 	}
 	users.SetProviderGrantCipher(newTestProviderGrantCipher(t))
 	registry := NewSingleTenantRegistry(config)
-	fixtureRouter := newApplicationSubjectRouter(registry, users, refresh)
+	fixtureRouter := newApplicationSubjectRouter(t, registry, users, refresh)
 	server := httptest.NewTLSServer(fixtureRouter)
 	t.Cleanup(server.Close)
 	client := server.Client()
@@ -93,7 +93,7 @@ func TestApplicationSubjectAppleHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	users.SetProviderGrantCipher(newTestProviderGrantCipher(t))
-	server.Config.Handler = newApplicationSubjectRouter(registry, users, refresh)
+	server.Config.Handler = newApplicationSubjectRouter(t, registry, users, refresh)
 	if id := login("changed@example.com", false); id != original {
 		t.Fatal("Apple restart changed public subject")
 	}
@@ -110,7 +110,7 @@ func TestApplicationSubjectAppleNativeRequiresAuthorizationCodeHTTP(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewTLSServer(newApplicationSubjectRouter(NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore()))
+	server := httptest.NewTLSServer(newApplicationSubjectRouter(t, NewSingleTenantRegistry(config), users, NewMemoryRefreshTokenStore()))
 	defer server.Close()
 	client := server.Client()
 	nonce := issueNonceViaClient(t, client, server.URL)

@@ -56,7 +56,7 @@ func newErasureHTTPFixture(t *testing.T) *erasureHTTPFixture {
 		t.Fatal(err)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), accounts, refresh, nil, accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), accounts, refresh, nil, accounts, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	t.Cleanup(server.Close)
 	client := server.Client()
@@ -348,7 +348,7 @@ func TestAccountErasureHTTPPurgeFailureAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), reopened, fixture.refresh, nil, reopened, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), reopened, fixture.refresh, nil, reopened, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	resumed := &erasureHTTPFixture{server: server, client: server.Client()}
@@ -395,7 +395,7 @@ func TestAccountErasureHTTPTenantAndOwnerIsolation(t *testing.T) {
 	configB := fixture.config
 	configB.TenantID = tenantB
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(configB), fixture.accounts, fixture.refresh, nil, fixture.accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(configB), fixture.accounts, fixture.refresh, nil, fixture.accounts, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	if status, _ := erasureHTTP(t, &erasureHTTPFixture{server: server, client: server.Client()}, http.MethodGet, "/auth/account-erasure", key); status != http.StatusNotFound {
@@ -542,7 +542,7 @@ func TestAccountErasureHTTPValidationAndGitHubBlock(t *testing.T) {
 	config := fixture.config
 	config.AccountManagementEnabled = false
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), fixture.accounts, fixture.refresh, nil, fixture.accounts, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), fixture.accounts, fixture.refresh, nil, fixture.accounts, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	disabledClient := server.Client()
@@ -580,7 +580,7 @@ func TestAccountErasureHTTPAutomaticSchemaSevenMigration(t *testing.T) {
 		t.Fatalf("migration marker: %+v %v", marker, err)
 	}
 	router := gin.New()
-	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), reopened, fixture.refresh, nil, reopened, nil, nil)
+	MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(fixture.config), reopened, fixture.refresh, nil, reopened, newTestPasswordResetDispatcher(t), nil, nil)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	client := server.Client()

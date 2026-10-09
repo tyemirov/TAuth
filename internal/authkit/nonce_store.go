@@ -23,7 +23,7 @@ var (
 type NonceStore interface {
 	// Issue creates a new nonce token with the configured TTL for the provided tenant.
 	Issue(ctx context.Context, tenantID string) (string, error)
-	// Consume validates and invalidates an issued nonce token.
+	// Consume validates and invalidates the opaque token returned by Issue.
 	Consume(ctx context.Context, tenantID string, token string) error
 }
 
@@ -64,8 +64,15 @@ func (store *memoryNonceStore) Issue(ctx context.Context, tenantID string) (stri
 	}
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
+	store.cleanupExpiredLocked(store.now().Unix())
+	total := 0
+	for _, entries := range store.entries {
+		total += len(entries)
+	}
+	if total >= transientGlobalCapacity || len(store.entries[tenantID]) >= transientTenantCapacity {
+		return "", ErrTransientCapacity
+	}
 	store.ensureTenant(tenantID)
-	store.purgeExpiredLocked(tenantID)
 	store.entries[tenantID][token] = store.now().Add(store.ttlResolver(tenantID))
 	return token, nil
 }
@@ -73,32 +80,18 @@ func (store *memoryNonceStore) Issue(ctx context.Context, tenantID string) (stri
 func (store *memoryNonceStore) Consume(ctx context.Context, tenantID string, token string) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	store.ensureTenant(tenantID)
 	expiry, ok := store.entries[tenantID][token]
 	if !ok {
-		store.purgeExpiredLocked(tenantID)
+		store.cleanupExpiredLocked(store.now().Unix())
 		return ErrNonceNotFound
 	}
 	delete(store.entries[tenantID], token)
-	if store.now().After(expiry) {
-		store.purgeExpiredLocked(tenantID)
+	if !store.now().Before(expiry) {
+		store.cleanupExpiredLocked(store.now().Unix())
 		return ErrNonceExpired
 	}
-	store.purgeExpiredLocked(tenantID)
+	store.cleanupExpiredLocked(store.now().Unix())
 	return nil
-}
-
-func (store *memoryNonceStore) purgeExpiredLocked(tenantID string) {
-	tenantEntries := store.entries[tenantID]
-	if len(tenantEntries) == 0 {
-		return
-	}
-	now := store.now()
-	for token, expiry := range tenantEntries {
-		if now.After(expiry) {
-			delete(tenantEntries, token)
-		}
-	}
 }
 
 func (store *memoryNonceStore) ensureTenant(tenantID string) {

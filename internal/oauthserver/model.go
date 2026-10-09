@@ -116,10 +116,11 @@ type RefreshGrant struct {
 
 // CodeExchange contains every value that must match an authorization code.
 type CodeExchange struct {
-	ClientID     string
-	Resource     string
-	CodeVerifier string
-	NowUnix      int64
+	ClientID             string
+	Resource             string
+	CodeVerifier         string
+	NowUnix              int64
+	RefreshExpiresAtUnix int64
 }
 
 // AccountAuthorization verifies account access before a credential is consumed.
@@ -128,15 +129,16 @@ type AccountAuthorization func(ctx context.Context, tenantID string, userID stri
 
 // Store owns pending requests, codes, consents, and refresh-token families.
 type Store interface {
+	CleanupExpired(ctx context.Context, nowUnix int64) error
 	CreateAuthorizationRequest(ctx context.Context, request AuthorizationRequest) (string, error)
 	GetAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error)
 	ConsumeAuthorizationRequest(ctx context.Context, requestToken string, nowUnix int64) (AuthorizationRequest, error)
 	CompleteAuthorizationRequest(ctx context.Context, requestToken string, completion AuthorizationCompletion) (string, error)
 	FindConsent(ctx context.Context, key ConsentKey, nowUnix int64) (Consent, bool, error)
 	SaveConsent(ctx context.Context, consent Consent) (Consent, error)
-	IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant) (string, error)
-	RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, error)
-	IssueRefreshToken(ctx context.Context, grant RefreshGrant) (string, error)
+	IssueAuthorizationCode(ctx context.Context, grant AuthorizationGrant, nowUnix int64) (string, error)
+	RedeemAuthorizationCode(ctx context.Context, code string, exchange CodeExchange, authorize AccountAuthorization) (AuthorizationGrant, string, error)
+	IssueRefreshToken(ctx context.Context, grant RefreshGrant, nowUnix int64) (string, error)
 	RotateRefreshToken(ctx context.Context, refreshToken string, clientID string, resource string, scope string, nowUnix int64, authorize AccountAuthorization) (RefreshGrant, string, error)
 	RevokeRefreshToken(ctx context.Context, refreshToken string, clientID string, nowUnix int64) error
 	RevokeConsent(ctx context.Context, consentID string, nowUnix int64) error

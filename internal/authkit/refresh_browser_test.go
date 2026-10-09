@@ -56,7 +56,7 @@ func TestSecurityBrowserRefresh(t *testing.T) {
 				ctx.Data(http.StatusOK, "text/html", []byte(`<html><body><script src="/tauth.js"></script></body></html>`))
 			})
 			router.GET("/tauth.js", func(ctx *gin.Context) { ctx.File("../../web/tauth.js") })
-			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, delayedRefreshValidation{store}, nil, accounts.(PasswordCredentialStore), nil, nil)
+			MountAuthRoutesWithPassword(router, NewSingleTenantRegistry(config), users, delayedRefreshValidation{store}, nil, accounts.(PasswordCredentialStore), newTestPasswordResetDispatcher(t), nil, nil)
 			server := httptest.NewTLSServer(router)
 			defer server.Close()
 			command := exec.CommandContext(context.Background(), "node", "../../tests/auth-refresh.browser.cjs")

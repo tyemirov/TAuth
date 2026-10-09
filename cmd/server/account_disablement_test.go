@@ -42,7 +42,7 @@ func TestServerResumesPersistedAccountDisablement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oauth.IssueRefreshToken(ctx, oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID, Resource: key.Resource, Scope: key.Scope, ExpiresAtUnix: consent.ExpiresAtUnix}); err != nil {
+	if _, err := oauth.IssueRefreshToken(ctx, oauthserver.RefreshGrant{ConsentID: consent.ID, TenantID: key.TenantID, UserID: key.UserID, ClientID: key.ClientID, Resource: key.Resource, Scope: key.Scope, ExpiresAtUnix: consent.ExpiresAtUnix}, time.Now().UTC().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := accounts.BeginAccountDisable(ctx, "alpha", profile.AccountID); err != nil {

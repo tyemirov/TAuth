@@ -96,15 +96,15 @@ func testAccountErasureHTTPOAuthActualPurge(t *testing.T, migrated bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := oauth.IssueAuthorizationCode(ctx, AuthorizationGrant{TenantID: config.TenantID, UserID: user, ConsentID: consent.ID, ClientID: testOAuthClient, Resource: testOAuthResource, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()}); err != nil {
+		if _, err := oauth.IssueAuthorizationCode(ctx, AuthorizationGrant{TenantID: config.TenantID, UserID: user, ConsentID: consent.ID, ClientID: testOAuthClient, Resource: testOAuthResource, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()}, 0); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := oauth.IssueRefreshToken(ctx, RefreshGrant{TenantID: config.TenantID, UserID: user, ConsentID: consent.ID, ClientID: testOAuthClient, Resource: testOAuthResource, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()}); err != nil {
+		if _, err := oauth.IssueRefreshToken(ctx, RefreshGrant{TenantID: config.TenantID, UserID: user, ConsentID: consent.ID, ClientID: testOAuthClient, Resource: testOAuthResource, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	router := gin.New()
-	authkit.MountAuthRoutesWithPassword(router, registry, accounts, refresh, nil, accounts, nil, oauth)
+	authkit.MountAuthRoutesWithPassword(router, registry, accounts, refresh, nil, accounts, newTestPasswordResetDispatcher(t), nil, oauth)
 	server := httptest.NewTLSServer(router)
 	defer server.Close()
 	client := server.Client()

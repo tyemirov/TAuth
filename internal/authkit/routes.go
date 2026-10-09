@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +117,7 @@ const (
 	errorPasswordAuthNotConfigured         = "password_auth_not_configured"
 	errorPasswordCredentialInvalid         = "invalid_credentials"
 	errorAccountManagementNotConfigured    = "account_management_not_configured"
+	errorTransientCapacity                 = "transient_capacity"
 	errorPasswordSignupNotConfigured       = "password_signup_not_configured"
 	errorEmailChallengeDeliveryFailed      = "email_challenge_delivery_failed"
 	errorEmailVerificationDeliveryMissing  = "email_verification_delivery_not_configured"
@@ -237,6 +238,7 @@ type nativeGoogleConfigResponse struct {
 	TokenEndpoint                 string                       `json:"token_endpoint"`
 	Scopes                        []string                     `json:"scopes"`
 	ResponseType                  string                       `json:"response_type"`
+	NonceRequired                 bool                         `json:"nonce_required"`
 	PKCERequired                  bool                         `json:"pkce_required"`
 	CodeChallengeMethodsSupported []string                     `json:"code_challenge_methods_supported"`
 }
@@ -299,18 +301,18 @@ type OAuthGrantRevoker interface {
 }
 
 // MountAuthRoutes registers /auth endpoints with explicit canonical account storage.
-func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore) {
-	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, nil, nil, nil)
+func MountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, resetDispatcher *PasswordResetDispatcher) {
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, nil, resetDispatcher, nil, nil)
 }
 
 // MountAuthRoutesWithPassword registers /auth endpoints, including optional password login.
-func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
+func MountAuthRoutesWithPassword(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, passwordCredentials PasswordCredentialStore, resetDispatcher *PasswordResetDispatcher, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
 	accountStore, _ := passwordCredentials.(AccountManagementStore)
-	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, emailChallengeSender, oauthGrants, providers...)
+	mountAuthRoutes(router, registry, users, refreshTokens, nonces, accountStore, passwordCredentials, resetDispatcher, emailChallengeSender, oauthGrants, providers...)
 }
 
-func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
-	router = router.Group("", boundedAuthBody)
+func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStore, refreshTokens RefreshTokenStore, nonces NonceStore, accountStore AccountManagementStore, passwordCredentials PasswordCredentialStore, resetDispatcher *PasswordResetDispatcher, emailChallengeSender EmailChallengeSender, oauthGrants OAuthGrantRevoker, providers ...AccountProviderRevoker) {
+	router = router.Group("", RequireCredentialTransport(registry), boundedAuthBody)
 	clock := configuredClock
 	if clock == nil {
 		clock = NewSystemClock()
@@ -331,8 +333,12 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		token, issueErr := nonces.Issue(contextGin, tenantID)
+		token, issueErr := nonces.Issue(contextGin.Request.Context(), tenantID)
 		if issueErr != nil {
+			if errors.Is(issueErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			logAuthError("auth.nonce.issue_failed", issueErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -380,7 +386,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		var currentTokenID string
 		validationSucceeded := false
 		for _, cookieValue := range refreshCookieValues {
-			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, cookieValue)
+			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin.Request.Context(), tenantID, cookieValue)
 			if validateErr == nil {
 				applicationUserID = candidateUserID
 				currentTokenID = candidateTokenID
@@ -431,9 +437,13 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		}
 
 		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
-		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
+		_, newOpaque, issueErr := refreshTokens.Issue(contextGin.Request.Context(), tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
 		if errors.Is(issueErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(issueErr) {
 			contextGin.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		if errors.Is(issueErr, ErrTransientCapacity) {
+			contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
 			return
 		}
 		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
@@ -487,6 +497,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			Scopes:                        scopes,
 			ResponseType:                  googleOAuthResponseTypeCode,
 			PKCERequired:                  true,
+			NonceRequired:                 true,
 			CodeChallengeMethodsSupported: codeChallengeMethods,
 		})
 	})
@@ -528,14 +539,12 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAppleLoginNotConfigured})
 			return
 		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.apple.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
-			return
-		}
-		nonceToken, nonceErr := nonces.Issue(contextGin, tenantID)
+		nonceToken, nonceErr := nonces.Issue(contextGin.Request.Context(), tenantID)
 		if nonceErr != nil {
+			if errors.Is(nonceErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.apple.nonce", nonceErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -595,12 +604,6 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		if !config.AppleOAuth.Enabled {
 			recordMetric(metricAuthLoginFailure)
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorAppleLoginNotConfigured})
-			return
-		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.apple.callback.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
 			return
 		}
 		requestContext := contextGin.Request.Context()
@@ -668,6 +671,10 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			}
 			responsePayload, finalizeErr := finalizeAccountLoginPayload(contextGin, users, refreshTokens, clock, config, statePayload.TenantID, accountProfile)
 			if finalizeErr != nil {
+				if errors.Is(finalizeErr, ErrTransientCapacity) {
+					contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+					return
+				}
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.apple.account_finalize", finalizeErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -710,12 +717,6 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		}
 		if strings.TrimSpace(inbound.AuthorizationCode) == "" {
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_authorization_code"})
-			return
-		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.apple.native.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
 			return
 		}
 		identity, identityErr := validateAppleIDTokenForAudiences(
@@ -796,6 +797,10 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				return
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				if errors.Is(finalizeErr, ErrTransientCapacity) {
+					contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+					return
+				}
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.apple.native.account_finalize", finalizeErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -846,12 +851,6 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_password"})
 			return
 		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.password.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
-			return
-		}
 		if !isAllowedUser(normalizedEmail, config.AllowedUsers) {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.password.user_not_allowed", nil)
@@ -862,7 +861,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		if authErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			if errors.Is(authErr, ErrAuthenticationRateLimited) {
-				contextGin.Header("Retry-After", "60")
+				contextGin.Header("Retry-After", strconv.Itoa(AuthenticationRetryAfter(authErr)))
 				contextGin.AbortWithStatus(http.StatusTooManyRequests)
 				return
 			}
@@ -885,13 +884,17 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
-			accountProfile, ensureErr := store.EnsurePasswordAccount(contextGin, tenantID, profile.UserEmail)
+			accountProfile, ensureErr := store.EnsurePasswordAccount(contextGin.Request.Context(), tenantID, profile.UserEmail)
 			if ensureErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, ensureErr)
 				return
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				if errors.Is(finalizeErr, ErrTransientCapacity) {
+					contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+					return
+				}
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.password.account_finalize", finalizeErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -932,16 +935,12 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_email"})
 			return
 		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
-			return
-		}
 		if !isAllowedUser(normalizedEmail, config.AllowedUsers) {
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
 		expiresAt := clock.Now().UTC().Add(effectiveDuration(config.EmailVerificationTTL, 30*time.Minute))
-		challenge, signupErr := store.CreatePasswordSignup(contextGin, tenantID, AccountPasswordRequest{
+		challenge, signupErr := store.CreatePasswordSignup(withRequestSource(contextGin.Request.Context(), contextGin.Request), tenantID, AccountPasswordRequest{
 			UserEmail:   normalizedEmail,
 			Password:    inbound.Password,
 			DisplayName: inbound.DisplayName,
@@ -954,12 +953,12 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		if config.EmailDeliveryEnabled && emailChallengeSender != nil {
 			verificationURL, verificationURLErr := buildEmailChallengeURL(config.EmailVerificationURL, challenge.Token)
 			if verificationURLErr != nil {
-				cancelPasswordSignup(contextGin, store, tenantID, challenge.AccountID)
+				cancelPasswordSignup(contextGin.Request.Context(), store, tenantID, challenge.AccountID)
 				logAuthError("auth.account.email_verification_url", verificationURLErr)
 				contextGin.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
 			}
-			deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
+			deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin.Request.Context(), EmailChallengeRequest{
 				Kind:      EmailChallengeKindVerification,
 				TenantID:  tenantID,
 				Recipient: normalizedEmail,
@@ -967,7 +966,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				ExpiresAt: expiresAt,
 			})
 			if deliveryErr != nil {
-				cancelPasswordSignup(contextGin, store, tenantID, challenge.AccountID)
+				cancelPasswordSignup(contextGin.Request.Context(), store, tenantID, challenge.AccountID)
 				logAuthError("auth.account.email_verification_delivery", deliveryErr)
 				contextGin.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
@@ -993,12 +992,16 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		profile, verifyErr := store.VerifyEmailChallenge(contextGin, tenantID, inbound.Token)
+		profile, verifyErr := store.VerifyEmailChallenge(contextGin.Request.Context(), tenantID, inbound.Token)
 		if verifyErr != nil {
 			writeAccountError(contextGin, verifyErr)
 			return
 		}
 		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			if errors.Is(finalizeErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			logAuthError("auth.account.verify.finalize", finalizeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 		}
@@ -1021,28 +1024,8 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		expiresAt := clock.Now().UTC().Add(effectiveDuration(config.PasswordResetTTL, 15*time.Minute))
-		challenge, resetErr := store.StartPasswordReset(withRequestSource(contextGin.Request.Context(), contextGin.Request), tenantID, inbound.Email, expiresAt.Unix())
-		if resetErr != nil {
-			if !errors.Is(resetErr, ErrAccountNotFound) && !errors.Is(resetErr, ErrPasswordCredentialInvalid) && !errors.Is(resetErr, ErrAuthenticationRateLimited) {
-				logAuthError("auth.account.reset_start", resetErr)
-			}
-		} else if config.EmailDeliveryEnabled && emailChallengeSender != nil {
-			resetURL, resetURLErr := buildEmailChallengeURL(config.PasswordResetURL, challenge.Token)
-			if resetURLErr != nil {
-				cancelAccountChallenge(contextGin, store, tenantID, challenge)
-				logAuthError("auth.account.password_reset_url", resetURLErr)
-			} else if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
-				Kind:      EmailChallengeKindPasswordReset,
-				TenantID:  tenantID,
-				Recipient: strings.TrimSpace(strings.ToLower(inbound.Email)),
-				PublicURL: resetURL,
-				ExpiresAt: expiresAt,
-			}); deliveryErr != nil {
-				cancelAccountChallenge(contextGin, store, tenantID, challenge)
-				logAuthError("auth.account.password_reset_delivery", deliveryErr)
-			}
-		}
+		source, _ := withRequestSource(context.Background(), contextGin.Request).Value(requestSourceKey{}).(string)
+		resetDispatcher.enqueue(passwordResetJob{tenantID: tenantID, email: strings.TrimSpace(strings.ToLower(inbound.Email)), source: source, resetURL: config.PasswordResetURL, resetTTL: config.PasswordResetTTL, emailDeliveryEnabled: config.EmailDeliveryEnabled, store: store, sender: emailChallengeSender, clock: clock})
 		contextGin.JSON(http.StatusAccepted, gin.H{"status": "accepted"})
 	})
 
@@ -1063,7 +1046,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		profile, resetErr := store.CompletePasswordReset(contextGin, tenantID, inbound.Token, inbound.Password)
+		profile, resetErr := store.CompletePasswordReset(contextGin.Request.Context(), tenantID, inbound.Token, inbound.Password)
 		if resetErr != nil {
 			writeAccountError(contextGin, resetErr)
 			return
@@ -1073,12 +1056,16 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin.Request.Context(), tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.reset_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			if errors.Is(finalizeErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			logAuthError("auth.account.reset_finalize", finalizeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 		}
@@ -1112,21 +1099,14 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			return
 		}
 
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
-			return
-		}
-
-		validator, validatorErr := resolveGoogleValidator(context.Background())
+		validator, validatorErr := resolveGoogleValidator(contextGin.Request.Context())
 		if validatorErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.validator_init", validatorErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		payload, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
+		payload, identity, validateErr := validateGoogleIdentityToken(contextGin.Request.Context(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
 		if validateErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			if errors.Is(validateErr, errInvalidGoogleIssuer) {
@@ -1172,13 +1152,17 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				DisplayName: identity.DisplayName,
 				AvatarURL:   identity.AvatarURL,
 			}
-			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin.Request.Context(), tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				if errors.Is(finalizeErr, ErrTransientCapacity) {
+					contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+					return
+				}
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.account_finalize", finalizeErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -1231,20 +1215,14 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorNativeGoogleRedirectURIInvalid})
 			return
 		}
-		if !config.AllowInsecureHTTP && !isHTTPS(contextGin.Request) {
-			recordMetric(metricAuthLoginFailure)
-			logAuthWarning("auth.login.native.insecure_http", nil)
-			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "https_required"})
-			return
-		}
-		validator, validatorErr := resolveGoogleValidator(context.Background())
+		validator, validatorErr := resolveGoogleValidator(contextGin.Request.Context())
 		if validatorErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthError("auth.login.native.validator_init", validatorErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		_, identity, validateErr := validateGoogleIdentityTokenForAudiences(context.Background(), validator, inbound.GoogleIDToken, nativeGoogleClientIDs(nativeClients))
+		_, identity, validateErr := validateGoogleIdentityTokenForAudiences(contextGin.Request.Context(), validator, inbound.GoogleIDToken, nativeGoogleClientIDs(nativeClients))
 		if validateErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			if errors.Is(validateErr, errInvalidGoogleIssuer) {
@@ -1284,6 +1262,17 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": errorUserNotAllowed})
 			return
 		}
+		if consumeErr := nonces.Consume(contextGin.Request.Context(), tenantID, strings.TrimSpace(inbound.NonceToken)); consumeErr != nil {
+			recordMetric(metricAuthLoginFailure)
+			if errors.Is(consumeErr, ErrNonceNotFound) || errors.Is(consumeErr, ErrNonceExpired) {
+				logAuthWarning("auth.login.native.invalid_nonce_token", consumeErr)
+				contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_nonce"})
+				return
+			}
+			logAuthError("auth.login.native.consume_nonce", consumeErr)
+			contextGin.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
 		{
 			if accountStore == nil {
 				recordMetric(metricAuthLoginFailure)
@@ -1298,13 +1287,17 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 				DisplayName: identity.DisplayName,
 				AvatarURL:   identity.AvatarURL,
 			}
-			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin, tenantID, providerIdentity)
+			accountProfile, accountErr := accountStore.UpsertProviderAccount(contextGin.Request.Context(), tenantID, providerIdentity)
 			if accountErr != nil {
 				recordMetric(metricAuthLoginFailure)
 				writeAccountError(contextGin, accountErr)
 				return
 			}
 			if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, accountProfile); finalizeErr != nil {
+				if errors.Is(finalizeErr, ErrTransientCapacity) {
+					contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+					return
+				}
 				recordMetric(metricAuthLoginFailure)
 				logAuthError("auth.login.native.account_finalize", finalizeErr)
 				contextGin.AbortWithStatus(http.StatusInternalServerError)
@@ -1337,7 +1330,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		validationSucceeded := false
 		var lastUnauthorizedErr error
 		for _, cookieValue := range refreshCookieValues {
-			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, cookieValue)
+			candidateUserID, candidateTokenID, _, validateErr := refreshTokens.Validate(contextGin.Request.Context(), tenantID, cookieValue)
 			if validateErr == nil {
 				applicationUserID = candidateUserID
 				currentTokenID = candidateTokenID
@@ -1394,9 +1387,13 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		}
 
 		refreshDeadline := clock.Now().UTC().Add(config.RefreshTTL)
-		_, newOpaque, issueErr := refreshTokens.Issue(contextGin, tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
+		_, newOpaque, issueErr := refreshTokens.Issue(contextGin.Request.Context(), tenantID, applicationUserID, refreshDeadline.Unix(), currentTokenID)
 		if errors.Is(issueErr, ErrRefreshTokenRevoked) || isUnauthorizedRefreshTokenError(issueErr) {
 			contextGin.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		if errors.Is(issueErr, ErrTransientCapacity) {
+			contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
 			return
 		}
 		if issueErr != nil || strings.TrimSpace(newOpaque) == "" {
@@ -1423,9 +1420,9 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		config := registry.Config(tenantID)
 		refreshCookie, cookieErr := contextGin.Request.Cookie(config.RefreshCookieName)
 		if cookieErr == nil && refreshCookie != nil && strings.TrimSpace(refreshCookie.Value) != "" {
-			_, tokenID, _, validateErr := refreshTokens.Validate(contextGin, tenantID, refreshCookie.Value)
+			_, tokenID, _, validateErr := refreshTokens.Validate(contextGin.Request.Context(), tenantID, refreshCookie.Value)
 			if validateErr == nil && tokenID != "" {
-				if revokeErr := refreshTokens.Revoke(contextGin, tenantID, tokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
+				if revokeErr := refreshTokens.Revoke(contextGin.Request.Context(), tenantID, tokenID); revokeErr != nil && !errors.Is(revokeErr, ErrRefreshTokenAlreadyRevoked) {
 					logAuthWarning("auth.logout.revoke", revokeErr)
 				}
 			}
@@ -1449,17 +1446,21 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		profile, changeErr := store.ChangePassword(contextGin, tenantID, accountID, inbound.CurrentPassword, inbound.NewPassword)
+		profile, changeErr := store.ChangePassword(contextGin.Request.Context(), tenantID, accountID, inbound.CurrentPassword, inbound.NewPassword)
 		if changeErr != nil {
 			writeAccountError(contextGin, changeErr)
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin.Request.Context(), tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.change_password_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			if errors.Is(finalizeErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			logAuthError("auth.account.change_password_finalize", finalizeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 		}
@@ -1475,7 +1476,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		challenge, linkErr := store.CreatePasswordLink(contextGin, tenantID, accountID, AccountPasswordRequest{
+		challenge, linkErr := store.CreatePasswordLink(contextGin.Request.Context(), tenantID, accountID, AccountPasswordRequest{
 			UserEmail:   inbound.Email,
 			Password:    inbound.Password,
 			DisplayName: inbound.DisplayName,
@@ -1489,19 +1490,19 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			expiresAt := time.Unix(challenge.ExpiresUnix, 0).UTC()
 			linkURL, linkURLErr := buildEmailChallengeURL(config.PasswordLinkURL, challenge.Token)
 			if linkURLErr != nil {
-				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				cancelAccountChallenge(contextGin.Request.Context(), store, tenantID, challenge)
 				logAuthError("auth.account.password_link_url", linkURLErr)
 				contextGin.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
 			}
-			if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin, EmailChallengeRequest{
+			if deliveryErr := emailChallengeSender.SendEmailChallenge(contextGin.Request.Context(), EmailChallengeRequest{
 				Kind:      EmailChallengeKindPasswordLink,
 				TenantID:  tenantID,
 				Recipient: strings.TrimSpace(strings.ToLower(inbound.Email)),
 				PublicURL: linkURL,
 				ExpiresAt: expiresAt,
 			}); deliveryErr != nil {
-				cancelAccountChallenge(contextGin, store, tenantID, challenge)
+				cancelAccountChallenge(contextGin.Request.Context(), store, tenantID, challenge)
 				logAuthError("auth.account.password_link_delivery", deliveryErr)
 				contextGin.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": errorEmailChallengeDeliveryFailed})
 				return
@@ -1520,7 +1521,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 			return
 		}
-		profile, linkErr := store.VerifyPasswordLink(contextGin, tenantID, accountID, inbound.Token)
+		profile, linkErr := store.VerifyPasswordLink(contextGin.Request.Context(), tenantID, accountID, inbound.Token)
 		if linkErr != nil {
 			writeAccountError(contextGin, linkErr)
 			return
@@ -1542,13 +1543,13 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing_nonce"})
 			return
 		}
-		validator, validatorErr := resolveGoogleValidator(context.Background())
+		validator, validatorErr := resolveGoogleValidator(contextGin.Request.Context())
 		if validatorErr != nil {
 			logAuthError("auth.account.link_google.validator_init", validatorErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		payload, identity, validateErr := validateGoogleIdentityToken(context.Background(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
+		payload, identity, validateErr := validateGoogleIdentityToken(contextGin.Request.Context(), validator, inbound.GoogleIDToken, config.GoogleWebClientID)
 		if validateErr != nil {
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid_google_token"})
 			return
@@ -1561,7 +1562,7 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unverified_identity"})
 			return
 		}
-		profile, linkErr := store.LinkProviderIdentity(contextGin, tenantID, accountID, AccountProviderIdentity{
+		profile, linkErr := store.LinkProviderIdentity(contextGin.Request.Context(), tenantID, accountID, AccountProviderIdentity{
 			Provider:    accountProviderGoogle,
 			Subject:     identity.Sub,
 			UserEmail:   identity.Email,
@@ -1590,12 +1591,16 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			writeAccountError(contextGin, unlinkErr)
 			return
 		}
-		if revokeErr := refreshTokens.RevokeUser(contextGin, tenantID, profile.UserID); revokeErr != nil {
+		if revokeErr := refreshTokens.RevokeUser(contextGin.Request.Context(), tenantID, profile.UserID); revokeErr != nil {
 			logAuthError("auth.account.unlink_revoke", revokeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 		if finalizeErr := finalizeAccountLogin(contextGin, users, refreshTokens, clock, config, tenantID, profile); finalizeErr != nil {
+			if errors.Is(finalizeErr, ErrTransientCapacity) {
+				contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+				return
+			}
 			logAuthError("auth.account.unlink_finalize", finalizeErr)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 		}
@@ -1606,12 +1611,12 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 		if !ok {
 			return
 		}
-		profile, disableErr := store.BeginAccountDisable(contextGin, tenantID, accountID)
+		profile, disableErr := store.BeginAccountDisable(contextGin.Request.Context(), tenantID, accountID)
 		if disableErr != nil {
 			writeAccountError(contextGin, disableErr)
 			return
 		}
-		if err := completeAccountDisablement(contextGin, store, refreshTokens, oauthGrants, AccountReference{TenantID: tenantID, AccountID: profile.AccountID}, clock.Now().UTC().Unix()); err != nil {
+		if err := completeAccountDisablement(contextGin.Request.Context(), store, refreshTokens, oauthGrants, AccountReference{TenantID: tenantID, AccountID: profile.AccountID}, clock.Now().UTC().Unix()); err != nil {
 			logAuthError("auth.account.disable_cleanup", err)
 			contextGin.AbortWithStatus(http.StatusInternalServerError)
 			return
@@ -1702,9 +1707,6 @@ func bindChallengeTokenInbound(contextGin *gin.Context) (challengeTokenInbound, 
 func bindPasswordResetStartInbound(contextGin *gin.Context) (passwordResetStartInbound, bool) {
 	var inbound passwordResetStartInbound
 	if err := contextGin.BindJSON(&inbound); err != nil {
-		return passwordResetStartInbound{}, false
-	}
-	if strings.TrimSpace(inbound.Email) == "" {
 		return passwordResetStartInbound{}, false
 	}
 	return inbound, true
@@ -2018,7 +2020,7 @@ func requireAccountManagementStore(contextGin *gin.Context, config ServerConfig,
 }
 
 func activeSessionPayloadForClaims(contextGin *gin.Context, config ServerConfig, accountStore AccountManagementStore, tenantID string, claims *JwtCustomClaims) (gin.H, error) {
-	profile, err := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, claims.GetUserID())
+	profile, err := activeAccountProfileForSession(contextGin.Request.Context(), config, accountStore, tenantID, claims.GetUserID())
 	if err != nil {
 		return nil, err
 	}
@@ -2026,7 +2028,7 @@ func activeSessionPayloadForClaims(contextGin *gin.Context, config ServerConfig,
 }
 
 func activeSessionProfileForUser(contextGin *gin.Context, users UserStore, config ServerConfig, accountStore AccountManagementStore, tenantID, userID string) (authenticatedSessionProfile, error) {
-	profile, err := activeAccountProfileForSession(contextGin, config, accountStore, tenantID, userID)
+	profile, err := activeAccountProfileForSession(contextGin.Request.Context(), config, accountStore, tenantID, userID)
 	if err != nil {
 		return authenticatedSessionProfile{}, err
 	}
@@ -2075,7 +2077,7 @@ func currentAccountProfile(contextGin *gin.Context, registry TenantRegistry, acc
 		contextGin.AbortWithStatus(http.StatusUnauthorized)
 		return "", ServerConfig{}, AccountProfile{}, nil, false
 	}
-	profile, profileErr := store.ResolveAccountForUser(contextGin, tenantID, claims.GetUserID())
+	profile, profileErr := store.ResolveAccountForUser(contextGin.Request.Context(), tenantID, claims.GetUserID())
 	if profileErr != nil {
 		writeAccountError(contextGin, profileErr)
 		return "", ServerConfig{}, AccountProfile{}, nil, false
@@ -2126,6 +2128,10 @@ func resolveAppleStartTenantID(contextGin *gin.Context, registry TenantRegistry)
 
 func writeAccountError(contextGin *gin.Context, err error) {
 	switch {
+	case errors.Is(err, ErrTransientCapacity):
+		contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": errorTransientCapacity})
+	case errors.Is(err, ErrAuthenticationRateLimited):
+		contextGin.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited"})
 	case errors.Is(err, ErrAccountExists):
 		contextGin.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": errorAccountExists})
 	case errors.Is(err, ErrAccountChallengeInvalid):
@@ -2160,7 +2166,7 @@ func consumeBrowserNonce(contextGin *gin.Context, nonces NonceStore, tenantID st
 	if !nonceMatchesInbound && !nonceMatchesHashed {
 		return fmt.Errorf("%w: google nonce claim mismatch", ErrNonceNotFound)
 	}
-	return nonces.Consume(contextGin, tenantID, issuedNonceToken)
+	return nonces.Consume(contextGin.Request.Context(), tenantID, issuedNonceToken)
 }
 
 func finalizeAccountLogin(
@@ -2376,23 +2382,4 @@ func isAllowedUser(userEmail string, allowedUsers map[string]struct{}) bool {
 
 func normalizeUserEmail(userEmail string) string {
 	return strings.ToLower(strings.TrimSpace(userEmail))
-}
-
-func isHTTPS(request *http.Request) bool {
-	if request.TLS != nil {
-		return true
-	}
-	scheme := request.Header.Get("X-Forwarded-Proto")
-	if strings.EqualFold(scheme, "https") {
-		return true
-	}
-	forwarded := request.Header.Get("Forwarded")
-	if forwarded != "" && strings.Contains(strings.ToLower(forwarded), "proto=https") {
-		return true
-	}
-	host, _, splitErr := net.SplitHostPort(request.Host)
-	if splitErr == nil && host == "localhost" {
-		return true
-	}
-	return false
 }
