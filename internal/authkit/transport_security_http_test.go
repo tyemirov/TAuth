@@ -126,7 +126,7 @@ func TestCredentialTransportControls(t *testing.T) {
 			config := newTestServerConfig()
 			config.AllowInsecureHTTP = scenario.localHTTP
 			if scenario.trustProxy {
-				policy, err := transportsecurity.NewPolicy([]string{"127.0.0.1/32", "::1/128"})
+				policy, err := transportsecurity.NewPolicy(transportsecurity.ProxyConfig{CIDRs: []string{"127.0.0.1/32", "::1/128"}}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

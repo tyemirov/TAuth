@@ -203,6 +203,16 @@ The operator keeps inventory and private config under `MPRLAB_GATEWAY_OPERATOR_R
 The default operator root is `$HOME/.config/mprlab-gateway`.
 The TAuth artifact converts the declared TAuth resources to its native config.
 
+Gateway supplies reverse proxy trust automatically through the stable `mprlab-caddy` Docker DNS name.
+The managed service receives `TAUTH_TRUSTED_PROXY_HOSTS=mprlab-caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the manifest.
+Private proxy inputs and container IP addresses are not necessary.
+TAuth compares the connection peer with the DNS response for each forwarded HTTPS request.
+A TAuth restart is not necessary after proxy replacement.
+DNS failures reject forwarded HTTPS requests and produce diagnostics.
+
+Gateway and Docker administrators control the proxy alias and DNS configuration.
+TAuth does not trust an adjacent container without that alias.
+
 The `render-deployment-config` command reads one strict schema-v1 JSON request
 from standard input. The request contains complete TAuth resource contributions
 and their resolved output envelopes. The command validates contributions and writes service YAML to standard output.
@@ -288,7 +298,9 @@ tauth --config service.yaml
 ```
 
 Set `TAUTH_TRUSTED_PROXY_CIDRS` to the actual proxy peer CIDRs, separated by commas, when the proxy terminates TLS.
-The selected deployment passes this input through its private values and service environment.
+Use this CIDR configuration for a standalone proxy with fixed addresses.
+For a standalone proxy with a stable DNS name, configure `server.trusted_proxy_hosts` and a positive `server.trusted_proxy_lookup_timeout` duration.
+The managed Gateway deployment supplies hostname trust automatically and does not use the CIDR input.
 An unset or empty value trusts no forwarding peer. Invalid nonempty CIDRs stop configuration loading.
 TAuth accepts direct TLS, or one exact `X-Forwarded-Proto: https` value from a configured connection peer.
 Duplicate or comma-separated scheme values fail transport classification. `Forwarded` and `Host` supply no transport evidence.

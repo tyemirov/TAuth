@@ -112,9 +112,18 @@ See the [application subject contract](application-subjects.md) for the identity
 ## Service inputs
 
 Set `server.database_url` to the persistent database URL.
-For TLS termination at a proxy, set `TAUTH_TRUSTED_PROXY_CIDRS` to its actual connection peer CIDRs, separated by commas.
-The generated `server.trusted_proxy_cidrs` setting reads that environment input. An empty value trusts no forwarding peer.
-Set the proxy's `X-Forwarded-Proto` from its client connection scheme. TAuth requires one exact `https` value from a configured peer.
+Gateway supplies `TAUTH_TRUSTED_PROXY_HOSTS=mprlab-caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the managed manifest.
+The generated service configuration reads these values through `server.trusted_proxy_hosts` and `server.trusted_proxy_lookup_timeout`.
+Private proxy inputs and operator-managed container addresses are not necessary.
+TAuth resolves the stable proxy name for each forwarded HTTPS request and verifies the actual connection peer.
+DNS failures reject these requests and produce diagnostics.
+A TAuth restart is not necessary after proxy replacement.
+
+Gateway and Docker administrators control the proxy alias and DNS configuration.
+Caddy sets `X-Forwarded-Proto` from its client connection scheme.
+TAuth requires one exact `https` value from the configured peer.
+Standalone deployments can configure explicit `server.trusted_proxy_cidrs` for proxies with fixed addresses.
+
 The production deployment supplies `server.tenant_encryption_key` through `TAUTH_TENANT_ENCRYPTION_KEY`.
 Deployment creates its 32 random bytes automatically when no existing key is present.
 Deployment preserves the key in private service configuration and its remote recovery reference.

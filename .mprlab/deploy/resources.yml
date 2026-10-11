@@ -76,7 +76,6 @@ mprlab_resources:
       bindings:
         oauth-signing-key: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
         tenant-encryption-key: TAUTH_TENANT_ENCRYPTION_KEY
-        trusted-proxy-cidrs: TAUTH_TRUSTED_PROXY_CIDRS
     runtime:
       kind: compose_project
       retired_services:
@@ -102,9 +101,10 @@ mprlab_resources:
             TAUTH_TENANT_ENCRYPTION_KEY:
               resource: oauth-private
               output: tenant-encryption-key
-            TAUTH_TRUSTED_PROXY_CIDRS:
-              resource: oauth-private
-              output: trusted-proxy-cidrs
+            TAUTH_TRUSTED_PROXY_HOSTS:
+              value: mprlab-caddy
+            TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT:
+              value: 1s
           assets:
             /config/config.yml:
               managed: tauth.config

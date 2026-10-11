@@ -13,7 +13,14 @@ test-local-lifecycle:
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment
+ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment test-managed-proxy-trust
+
+.PHONY: test-proxy-trust test-managed-proxy-trust
+test-proxy-trust:
+	$(GO) test ./cmd/server ./internal/appconfig ./internal/authkit ./internal/oauthserver ./internal/transportsecurity -run 'TestConsoleRendererTrustedProxy|TestManagedProxy|TestTransportPolicy|TestProxyHost|TestPolicy|TestCredential.*Transport|TestOAuthCredentialRoutesRejectForgedTransport' -count=1
+
+test-managed-proxy-trust:
+	bash tests/managed-proxy-trust.sh
 
 .PHONY: up down
 up down:

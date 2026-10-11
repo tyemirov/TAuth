@@ -141,6 +141,196 @@ test(
       visible: true,
       timeout: 10000,
     });
+    const palettes = [
+      { mode: "default-light", theme: "light", palette: "default" },
+      { mode: "sunrise-light", theme: "light", palette: "sunrise" },
+      { mode: "default-dark", theme: "dark", palette: "default" },
+      { mode: "forest-dark", theme: "dark", palette: "forest" },
+    ];
+    const paletteColors = [];
+    const paletteControl = 'mpr-footer [data-mpr-theme-toggle="control"]';
+    for (const [index, palette] of palettes.entries()) {
+      const quad = await page.$(
+        `mpr-footer [data-mpr-theme-toggle="quad"][data-quad-index="${index}"]`,
+      );
+      const bounds = await quad.boundingBox();
+      await page.mouse.click(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      );
+      assert.equal(
+        await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+        palette.mode,
+        `Quadrant ${index} must select ${palette.mode}`,
+      );
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          theme: document.documentElement.dataset.mprTheme,
+          palette: document.documentElement.dataset.tauthPalette,
+        })),
+        { theme: palette.theme, palette: palette.palette },
+      );
+      paletteColors.push(
+        await page.evaluate(() => ({
+          page: getComputedStyle(document.documentElement).backgroundColor,
+          header: getComputedStyle(document.querySelector("header.mpr-header"))
+            .backgroundColor,
+          footer: getComputedStyle(document.querySelector("footer.mpr-footer"))
+            .backgroundColor,
+        })),
+      );
+    }
+    assert.equal(new Set(paletteColors.map((colors) => colors.page)).size, 4);
+    assert.equal(new Set(paletteColors.map((colors) => colors.header)).size, 4);
+    assert.equal(new Set(paletteColors.map((colors) => colors.footer)).size, 4);
+    const otherPage = await browser.newPage();
+    await otherPage.setRequestInterception(true);
+    otherPage.on("request", (request) => {
+      if (request.url().startsWith("https://accounts.google.com/")) {
+        void request.respond({
+          status: 200,
+          contentType: "text/javascript",
+          body: googleScript,
+        });
+      } else void request.continue();
+    });
+    await otherPage.goto(process.env.TAUTH_CONSOLE_URL);
+    await otherPage.waitForSelector(paletteControl);
+    await otherPage.focus(paletteControl);
+    await otherPage.keyboard.press("ArrowRight");
+    await page.waitForFunction(
+      () =>
+        document.documentElement.dataset.mprTheme === "light" &&
+        document.documentElement.dataset.tauthPalette === "default",
+      { timeout: 3000 },
+    );
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.evaluate(() => {
+      window.addEventListener("pageshow", (event) => {
+        window.paletteRestoredFromCache = event.persisted;
+      });
+    });
+    await page.goto(process.env.TAUTH_CONSOLE_URL + "?palette-other-page");
+    await page.waitForSelector(paletteControl);
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    await page.goBack();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.evaluate(() => window.paletteRestoredFromCache),
+      true,
+    );
+    await page.waitForFunction(
+      () => document.documentElement.dataset.tauthPalette === "sunrise",
+      { timeout: 3000 },
+    );
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "sunrise-light",
+    );
+    for (const event of ["focus", "pageshow", "visibilitychange"]) {
+      await page.bringToFront();
+      await page.evaluate((event) => {
+        localStorage.setItem("tauth.console.palette", "forest-dark");
+        const target = event === "visibilitychange" ? document : window;
+        target.dispatchEvent(new Event(event));
+      }, event);
+      await page.waitForFunction(
+        () => document.documentElement.dataset.tauthPalette === "forest",
+        { timeout: 3000 },
+      );
+      await page.focus(paletteControl);
+      await page.keyboard.press("ArrowLeft");
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem("tauth.console.palette"),
+        ),
+        "default-dark",
+      );
+    }
+    for (const clearAll of [false, true]) {
+      await otherPage.evaluate((clearAll) => {
+        if (clearAll) localStorage.clear();
+        else localStorage.removeItem("tauth.console.palette");
+      }, clearAll);
+      await page.waitForFunction(
+        () =>
+          document.documentElement.dataset.mprTheme === "dark" &&
+          document.documentElement.dataset.tauthPalette === "default",
+        { timeout: 3000 },
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem("tauth.console.palette"),
+        ),
+        null,
+        "Synchronizing a removed palette must not write it back",
+      );
+      await page.focus(paletteControl);
+      await page.keyboard.press("ArrowRight");
+    }
+    await otherPage.close();
+    await page.goto(process.env.TAUTH_CONSOLE_URL + "?palette-navigation");
+    await page.goBack();
+    await page.waitForSelector(paletteControl);
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.reload();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.evaluate(() => {
+      const store = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === "tauth.console.palette") {
+          throw new DOMException(
+            "Fixture storage failure",
+            "QuotaExceededError",
+          );
+        }
+        store.call(this, key, value);
+      };
+    });
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "sunrise-light",
+    );
+    assert.match(
+      await page.$eval("#notice", (node) => node.textContent),
+      /Color palette could not be stored/,
+    );
+    await page.reload();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.focus(paletteControl);
+    for (const palette of [...palettes.slice(1), palettes[0]]) {
+      await page.keyboard.press("ArrowRight");
+      assert.equal(
+        await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+        palette.mode,
+      );
+    }
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-dark",
+    );
+    await page.waitForSelector("#fixture-google-login", { visible: true });
     await page.screenshot({ path: "/tmp/tauth-console-login.png" });
     await page.click("#fixture-google-login");
 
