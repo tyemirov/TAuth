@@ -183,6 +183,96 @@ test(
     assert.equal(new Set(paletteColors.map((colors) => colors.page)).size, 4);
     assert.equal(new Set(paletteColors.map((colors) => colors.header)).size, 4);
     assert.equal(new Set(paletteColors.map((colors) => colors.footer)).size, 4);
+    const otherPage = await browser.newPage();
+    await otherPage.setRequestInterception(true);
+    otherPage.on("request", (request) => {
+      if (request.url().startsWith("https://accounts.google.com/")) {
+        void request.respond({
+          status: 200,
+          contentType: "text/javascript",
+          body: googleScript,
+        });
+      } else void request.continue();
+    });
+    await otherPage.goto(process.env.TAUTH_CONSOLE_URL);
+    await otherPage.waitForSelector(paletteControl);
+    await otherPage.focus(paletteControl);
+    await otherPage.keyboard.press("ArrowRight");
+    await page.waitForFunction(
+      () =>
+        document.documentElement.dataset.mprTheme === "light" &&
+        document.documentElement.dataset.tauthPalette === "default",
+      { timeout: 3000 },
+    );
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "default-light",
+    );
+    await page.evaluate(() => {
+      window.addEventListener("pageshow", (event) => {
+        window.paletteRestoredFromCache = event.persisted;
+      });
+    });
+    await page.goto(process.env.TAUTH_CONSOLE_URL + "?palette-other-page");
+    await page.waitForSelector(paletteControl);
+    await page.focus(paletteControl);
+    await page.keyboard.press("ArrowRight");
+    await page.goBack();
+    await page.waitForSelector(paletteControl);
+    assert.equal(
+      await page.evaluate(() => window.paletteRestoredFromCache),
+      true,
+    );
+    await page.waitForFunction(
+      () => document.documentElement.dataset.tauthPalette === "sunrise",
+      { timeout: 3000 },
+    );
+    assert.equal(
+      await page.$eval(paletteControl, (node) => node.dataset.squareMode),
+      "sunrise-light",
+    );
+    for (const event of ["focus", "pageshow", "visibilitychange"]) {
+      await page.bringToFront();
+      await page.evaluate((event) => {
+        localStorage.setItem("tauth.console.palette", "forest-dark");
+        const target = event === "visibilitychange" ? document : window;
+        target.dispatchEvent(new Event(event));
+      }, event);
+      await page.waitForFunction(
+        () => document.documentElement.dataset.tauthPalette === "forest",
+        { timeout: 3000 },
+      );
+      await page.focus(paletteControl);
+      await page.keyboard.press("ArrowLeft");
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem("tauth.console.palette"),
+        ),
+        "default-dark",
+      );
+    }
+    for (const clearAll of [false, true]) {
+      await otherPage.evaluate((clearAll) => {
+        if (clearAll) localStorage.clear();
+        else localStorage.removeItem("tauth.console.palette");
+      }, clearAll);
+      await page.waitForFunction(
+        () =>
+          document.documentElement.dataset.mprTheme === "dark" &&
+          document.documentElement.dataset.tauthPalette === "default",
+        { timeout: 3000 },
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem("tauth.console.palette"),
+        ),
+        null,
+        "Synchronizing a removed palette must not write it back",
+      );
+      await page.focus(paletteControl);
+      await page.keyboard.press("ArrowRight");
+    }
+    await otherPage.close();
     await page.goto(process.env.TAUTH_CONSOLE_URL + "?palette-navigation");
     await page.goBack();
     await page.waitForSelector(paletteControl);
