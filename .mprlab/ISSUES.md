@@ -5,6 +5,22 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B132] (P2) Synchronize the color palette across console pages.
+  Goal: Each open console page shows the current stored color palette.
+  Evidence: A palette change in one page leaves another open page with its previous palette.
+  Requirements:
+  - Update the palette automatically after a storage change.
+  - Read the current palette when the user returns to the page.
+  - Remove event subscriptions when the page closes.
+  Validation: Run `make test-console-browser` and `make ci`.
+  Deliverables:
+  Storage changes update open pages without another storage write.
+  Focus, visibility changes, and browser Back restore the current stored palette.
+  Page closure removes all palette event subscriptions.
+  Browser tests reproduced the missing update and unwanted storage write before their corrections.
+  `make ci` passed. `make test-console-browser` passed again after the final browser fixture change.
+  Changed files: `web/app/palette.js`, `tests/console-workspace.browser.cjs`, and `.mprlab/ISSUES.md`.
+
 - [x] [B131] (P2) Apply all four console color palettes.
   Goal: Each palette quadrant selects its specified color palette.
   Evidence: The console configured two modes for four palette quadrants. The last two palette quadrants selected dark.
