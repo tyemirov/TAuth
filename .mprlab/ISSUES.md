@@ -5,6 +5,23 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B133] (P1) Show session key export without a customer API origin.
+  Goal: Owners can export the session key for each active tenant.
+  Evidence: Production does not show the export control when an imported tenant has no customer API origin.
+  Requirements:
+  - Keep key export separate from browser example requirements.
+  - Use the active revision and current owner for reauthentication.
+  - Remove the displayed key after dismissal, expiry, tenant changes, and logout.
+  Validation: Run `make test-console-browser` and `make ci`.
+  Deliverables:
+  The Integration tab shows key export for active tenants without a customer API origin.
+  Key export uses the active revision and keeps fresh Google authentication.
+  The browser test reproduced the missing control before the change.
+  Automated Chromium verified key export, dismissal, configured tenants, and suspended tenants.
+  `make ci` passed. Independent review found no remaining defects.
+  Production publication and deployment remain pending.
+  Changed files: `web/app/client.js`, `web/app/integration.js`, `web/app/index.html`, `tests/console-workspace.browser.cjs`, `docs/tenant-console-operations.md`, and `.mprlab/ISSUES.md`.
+
 - [x] [B132] (P2) Synchronize the color palette across console pages.
   Goal: Each open console page shows the current stored color palette.
   Evidence: A palette change in one page leaves another open page with its previous palette.
