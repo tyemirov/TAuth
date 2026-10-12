@@ -195,6 +195,10 @@ export class Client {
     };
   }
 }
+/** @param {number} revision @returns {string} */
+export function configurationETag(revision) {
+  return `"configuration-${revision}"`;
+}
 /** @returns {Promise<Client>} */
 export async function loadClient() {
   const response = await fetch("./runtime.json", { cache: "no-store" });

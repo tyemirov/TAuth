@@ -3,6 +3,7 @@ import {
   Client,
   RequestError,
   integrationView,
+  configurationETag,
   reauthentication,
   exportedKey,
   setupCheck,
@@ -44,6 +45,7 @@ function clearSelection() {
   element("backend-example").textContent = "";
   element("proxy-routes").textContent = "";
   element("integration-ready").hidden = true;
+  element("key-export-ready").hidden = true;
   element("setup-result").textContent = "";
   button("run-setup-check").disabled = false;
   element("integration-status").textContent =
@@ -67,6 +69,7 @@ document.addEventListener("tauth-console:selected", (event) => {
       "Activate a saved configuration to prepare its integration.";
     return;
   }
+  element("key-export-ready").hidden = false;
   void client
     .request(
       "GET",
@@ -110,16 +113,17 @@ document.addEventListener("tauth-console:selected", (event) => {
       element("integration-status").textContent =
         error instanceof RequestError &&
         error.code === "management.customer_api_configuration_required"
-          ? "Set a customer API origin and Google client ID to prepare integration settings."
+          ? "Set a customer API origin and Google client ID for browser examples and setup checks."
           : error.message;
     });
 });
 element("export-session-key").onclick = async () => {
   clearSecret();
   const selected = selection,
-    active = view,
     api = client;
-  if (!selected || !active || !api) return;
+  if (!selected || selected.tenant.state !== "active" || !api) return;
+  const revision = /** @type {number} */ (selected.tenant.active_revision);
+  const exportETag = configurationETag(revision);
   exportController = new AbortController();
   const controller = exportController;
   const version = generation;
@@ -139,8 +143,8 @@ element("export-session-key").onclick = async () => {
       "POST",
       tenantPath(selected.tenant.id) + "/reauthentications",
       controller.signal,
-      { revision: active.revision, operation: "session-key-export" },
-      etag,
+      { revision, operation: "session-key-export" },
+      exportETag,
       crypto.randomUUID(),
     );
     const challenge = reauthentication(result.value);
@@ -176,7 +180,7 @@ element("export-session-key").onclick = async () => {
               reauthentication_id: challenge.id,
               google_id_token: response.credential,
             },
-            etag,
+            exportETag,
             crypto.randomUUID(),
           )
           .then((exported) => {
