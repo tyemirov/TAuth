@@ -582,13 +582,63 @@ test(
         document.getElementById("tenant-name").textContent ===
         "Imported application",
     );
+    // Activate the imported tenant without a customer API origin.
+    await page.click("[data-section=configuration]");
+    await page.$eval("#frontend-origins", (node) => {
+      node.value = "http://localhost:9391";
+    });
+    await page.click("#local-development");
+    await page.$eval("#configuration", (node) =>
+      node.dispatchEvent(new Event("input", { bubbles: true })),
+    );
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-state").textContent ===
+          "Authentication active" &&
+        document.getElementById("configuration").getAttribute("aria-busy") ===
+          "false",
+    );
+    // An active imported tenant can export its key before API setup.
+    await page.reload();
+    await page.waitForFunction(
+      () =>
+        document.getElementById("tenant-id").textContent === "imported-browser",
+    );
+    await page.click("[data-section=integration]");
+    await page.waitForFunction(() =>
+      document
+        .getElementById("integration-status")
+        .textContent.includes("Set a customer API origin"),
+    );
+    assert.equal(
+      await page.$eval("#integration-ready", (node) => node.hidden),
+      true,
+    );
+    assert.equal(
+      await page.$eval("#export-session-key", (node) => node.checkVisibility()),
+      true,
+    );
+    await page.screenshot({ path: "/tmp/tauth-key-export-no-api.png" });
+    await page.click("#export-session-key");
+    await page.waitForSelector("#reauth-google #fixture-google-login", {
+      visible: true,
+    });
+    await page.click("#reauth-google #fixture-google-login");
+    await page.waitForSelector("#export-key-panel:not([hidden])");
+    assert.equal(
+      await page.$eval("#export-key", (node) => node.textContent),
+      Buffer.from("imported-browser-signing-key").toString("base64"),
+    );
+    await page.click("#dismiss-export");
+    await page.waitForFunction(
+      () => document.getElementById("export-key").textContent === "",
+    );
     // The imported tenant uses the same settings and protected export UI.
     await page.click("[data-section=configuration]");
     await page.$eval("#frontend-origins", (node) => {
       node.value = "http://localhost:9391";
     });
     await page.type("#api-base", "http://localhost:9392");
-    await page.click("#local-development");
     await page.$eval("#configuration", (node) =>
       node.dispatchEvent(new Event("input", { bubbles: true })),
     );
@@ -606,7 +656,7 @@ test(
         );
         return (await response.json()).active_revision;
       }, process.env.TAUTH_CONSOLE_API),
-      2,
+      3,
     );
     await page.click("[data-section=integration]");
     await page.waitForSelector("#integration-ready:not([hidden])");
@@ -1437,6 +1487,12 @@ test(
       ),
       "Resume authentication",
     );
+    await page.click("[data-section=integration]");
+    assert.equal(
+      await page.$eval("#export-session-key", (node) => node.checkVisibility()),
+      false,
+    );
+    await page.click("[data-section=configuration]");
     await page.focus("#authentication-toggle");
     await page.keyboard.press("Enter");
     await page.waitForFunction(

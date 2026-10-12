@@ -183,9 +183,20 @@
                 your customer API at <code>/auth/google</code>.
               </p>
 
+              <div id="key-export-ready" hidden>
+                <h4>Backend session key</h4>
+                <p>
+                  Export the active tenant's session key for your backend secret
+                  store. Use your Google account to confirm this operation.
+                </p>
+                <button type="button" id="export-session-key">
+                  Export session key
+                </button>
+              </div>
               <div id="integration-content">
                 <p id="integration-status">
-                  Set the customer API origin to prepare integration settings.
+                  Set the customer API origin for browser examples and setup
+                  checks.
                 </p>
                 <div id="integration-ready" hidden>
                   <h4>Browser</h4>
@@ -209,9 +220,6 @@
                     API binds the tenant and uses host-only cookies.
                   </p>
                   <pre id="proxy-routes"></pre>
-                  <button type="button" id="export-session-key">
-                    Export session key
-                  </button>
                   <h4>Setup check</h4>
                   <p>
                     Check the verified API destination, tenant binding, CORS,
