@@ -672,6 +672,12 @@ Google uses the browser frontend origin as its authorized JavaScript origin.
 This first integration uses the Google credential callback and nonce exchange. It does not require a Google redirect callback URL.
 See the [Google JavaScript reference](https://developers.google.com/identity/gsi/web/reference/js-reference) for the nonce and callback fields.
 
+The Integration tab shows session key export for each active tenant.
+A customer API origin and tenant Google client ID are not necessary for key export.
+Those settings are necessary for browser examples and setup checks.
+Key export uses the active revision, including when a newer configuration is not active.
+Draft and suspended tenants cannot export a key.
+
 Public settings contain the Google client ID, tenant ID, API origin, cookie name, session lifetime, and complete browser example.
 They contain no session key, provisioning credential, or provider secret.
 The backend receives the session key as base64. Decode it before validator construction.
