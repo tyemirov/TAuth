@@ -147,6 +147,36 @@ test(
       { mode: "default-dark", theme: "dark", palette: "default" },
       { mode: "forest-dark", theme: "dark", palette: "forest" },
     ];
+    async function assertPalette(palette) {
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          catalog: MPRUI.configureTheme({}).modes.map((mode) => mode.value),
+          active: MPRUI.getThemeMode(),
+          theme: document.documentElement.dataset.mprTheme,
+          palette: document.documentElement.dataset.tauthPalette,
+          picker: document.querySelector('mpr-footer [data-mpr-theme-toggle="control"]').dataset.squareMode,
+          saved: localStorage.getItem("tauth.console.palette"),
+        })),
+        {
+          catalog: palettes.map((mode) => mode.mode),
+          active: palette.mode,
+          theme: palette.theme,
+          palette: palette.palette,
+          picker: palette.mode,
+          saved: palette.mode,
+        },
+      );
+    }
+    await page.focus('mpr-footer [data-mpr-theme-toggle="control"]');
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await assertPalette(palettes[1]);
+    await page.$eval("#console-header", (header) => header.setAttribute("brand-label", "Updated"));
+    await assertPalette(palettes[1]);
+    await page.focus('mpr-footer [data-mpr-theme-toggle="control"]');
+    await page.keyboard.press("ArrowRight");
+    await assertPalette(palettes[2]);
     const paletteColors = [];
     const paletteControl = 'mpr-footer [data-mpr-theme-toggle="control"]';
     for (const [index, palette] of palettes.entries()) {
@@ -170,6 +200,10 @@ test(
         })),
         { theme: palette.theme, palette: palette.palette },
       );
+      await assertPalette(palette);
+      await page.reload();
+      await page.waitForSelector(paletteControl);
+      await assertPalette(palette);
       paletteColors.push(
         await page.evaluate(() => ({
           page: getComputedStyle(document.documentElement).backgroundColor,
