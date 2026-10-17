@@ -5,6 +5,22 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B134] (P1) Accept an optional Apple notification audience during deployment.
+  Goal: Deploy Apple login when notifications are disabled.
+  Evidence: The deployment config renderer rejected an empty `notification_audience` from Gateway.
+  Requirements:
+  - Accept an omitted or empty `notification_audience` with notifications disabled.
+  - Keep Apple login enabled for both tenant resource kinds.
+  - Pass a configured audience to the tenant configuration.
+  - Reject unknown Apple configuration fields.
+  Validation:
+  The CLI regression test reproduced the unknown-field error before the production code change.
+  The corrected CLI and tenant projection passed all audience cases for both tenant resource kinds.
+  The renderer CLI suite and final `make ci` passed, including local browser and container tests.
+  Independent review found no remaining defects.
+  Release, publication, and production deployment remain pending.
+  Files: `internal/deploymentconfig/render.go`, `cmd/server/service_renderer_apple_test.go`, and `.mprlab/ISSUES.md`.
+
 - [x] [B133] (P1) Show session key export without a customer API origin.
   Goal: Owners can export the session key for each active tenant.
   Evidence: Production does not show the export control when an imported tenant has no customer API origin.
