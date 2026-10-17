@@ -176,12 +176,13 @@ type nativeGitHubOAuth struct {
 }
 
 type appleOAuthResource struct {
-	ClientID        string            `json:"client_id"`
-	NativeClientIDs []string          `json:"native_client_ids,omitempty"`
-	TeamID          string            `json:"team_id"`
-	KeyID           string            `json:"key_id"`
-	PrivateKey      resourceReference `json:"private_key"`
-	RedirectURI     string            `json:"redirect_uri"`
+	ClientID             string            `json:"client_id"`
+	NativeClientIDs      []string          `json:"native_client_ids,omitempty"`
+	NotificationAudience string            `json:"notification_audience,omitempty"`
+	TeamID               string            `json:"team_id"`
+	KeyID                string            `json:"key_id"`
+	PrivateKey           resourceReference `json:"private_key"`
+	RedirectURI          string            `json:"redirect_uri"`
 }
 
 type passwordAuthResource struct {
@@ -347,13 +348,14 @@ type nativeGoogleClient struct {
 }
 
 type nativeAppleOAuth struct {
-	Enabled          bool     `yaml:"enabled"`
-	ClientID         string   `yaml:"client_id"`
-	NativeClientIDs  []string `yaml:"native_client_ids,omitempty"`
-	TeamID           string   `yaml:"team_id"`
-	KeyID            string   `yaml:"key_id"`
-	PrivateKeyBase64 string   `yaml:"private_key_base64"`
-	RedirectURI      string   `yaml:"redirect_uri"`
+	Enabled              bool     `yaml:"enabled"`
+	ClientID             string   `yaml:"client_id"`
+	NativeClientIDs      []string `yaml:"native_client_ids,omitempty"`
+	NotificationAudience string   `yaml:"notification_audience,omitempty"`
+	TeamID               string   `yaml:"team_id"`
+	KeyID                string   `yaml:"key_id"`
+	PrivateKeyBase64     string   `yaml:"private_key_base64"`
+	RedirectURI          string   `yaml:"redirect_uri"`
 }
 
 type nativeAccountManagement struct {
@@ -584,13 +586,14 @@ func buildTenant(item contribution) (nativeTenant, error) {
 			return nativeTenant{}, outputErr
 		}
 		tenant.AppleOAuth = &nativeAppleOAuth{
-			Enabled:          true,
-			ClientID:         resource.Tenant.AppleOAuth.ClientID,
-			NativeClientIDs:  resource.Tenant.AppleOAuth.NativeClientIDs,
-			TeamID:           resource.Tenant.AppleOAuth.TeamID,
-			KeyID:            resource.Tenant.AppleOAuth.KeyID,
-			PrivateKeyBase64: privateKey,
-			RedirectURI:      resource.Tenant.AppleOAuth.RedirectURI,
+			Enabled:              true,
+			ClientID:             resource.Tenant.AppleOAuth.ClientID,
+			NativeClientIDs:      resource.Tenant.AppleOAuth.NativeClientIDs,
+			NotificationAudience: resource.Tenant.AppleOAuth.NotificationAudience,
+			TeamID:               resource.Tenant.AppleOAuth.TeamID,
+			KeyID:                resource.Tenant.AppleOAuth.KeyID,
+			PrivateKeyBase64:     privateKey,
+			RedirectURI:          resource.Tenant.AppleOAuth.RedirectURI,
 		}
 	}
 	if resource.Tenant.PasswordAuth.Enabled {
