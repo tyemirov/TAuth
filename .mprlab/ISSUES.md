@@ -18,6 +18,9 @@ Planning and recurring entries stay in this tracker with unresolved work.
   The corrected CLI and tenant projection passed all audience cases for both tenant resource kinds.
   The renderer CLI suite and final `make ci` passed, including local browser and container tests.
   Independent review found no remaining defects.
+  Review correction removed an incomplete palette regression from this Apple change.
+  The palette defect remains in MPR UI B080, GitHub issue #238.
+  Final `make ci` passed after the review correction.
   Release, publication, and production deployment remain pending.
   Files: `internal/deploymentconfig/render.go`, `cmd/server/service_renderer_apple_test.go`, and `.mprlab/ISSUES.md`.
 
