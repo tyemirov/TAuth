@@ -29,6 +29,8 @@ TAUTH_AUTOMATIC_DEPLOYMENT_ROOT="$test_root" make test-deployment-migration
 builder="tauth-automatic-builder-$$"
 docker buildx create --driver docker-container --name "$builder" >/dev/null
 docker buildx build --builder "$builder" --load --tag "$image" "$repository_root" >"$test_root/build.log" 2>&1
+TAUTH_ROLLOUT_IMAGE="$image" TAUTH_ROLLOUT_REAL_DOCKER="$(command -v docker)" \
+  make test-deployment-migration
 docker volume create "$volume" >/dev/null
 docker run --rm --entrypoint=/bin/sh --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$test_root,dst=/fixture,readonly" "$image" -c 'cp /fixture/tauth.db /data/tauth.db'

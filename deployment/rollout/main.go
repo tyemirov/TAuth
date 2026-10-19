@@ -3,6 +3,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -28,7 +29,6 @@ func main() {
 
 func execute(ctx context.Context, executable string, args ...string) error {
 	command := exec.CommandContext(ctx, executable, args...)
-	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	return command.Run()
@@ -98,24 +98,27 @@ func run(ctx context.Context, args []string) error {
 	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return fmt.Errorf("cutover.already_running: %w", err)
 	}
-	planPath := filepath.Join(releaseRoot, "inputs/deployment/migrations/20260930-tenant-console.json")
-	plan, err := migrations.LoadCutoverPlan(planPath)
-	if err != nil {
-		return fmt.Errorf("cutover.sealed_plan: %w", err)
-	}
-	consolePlanPath := filepath.Join(releaseRoot, "inputs/deployment/migrations/"+migrations.ConsoleGoogleClientID+".json")
-	if _, err = migrations.LoadConsoleGoogleClientPlan(consolePlanPath); err != nil {
-		return fmt.Errorf("console_client.sealed_plan: %w", err)
-	}
-	subjectPlanPath := filepath.Join(releaseRoot, "inputs/deployment/migrations/"+migrations.ApplicationSubjectsID+".json")
-	if _, err = migrations.LoadApplicationSubjectsPlan(subjectPlanPath); err != nil {
-		return fmt.Errorf("application_subjects.sealed_plan: %w", err)
-	}
 	localRoot, err := os.MkdirTemp("", migrations.CutoverID+"-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(localRoot)
+	if err = extractDeploymentPayload(ctx, image, localRoot); err != nil {
+		return fmt.Errorf("cutover.image_payload: %w", err)
+	}
+	planPath := filepath.Join(localRoot, "deployment/migrations/"+migrations.CutoverID+".json")
+	plan, err := migrations.LoadCutoverPlan(planPath)
+	if err != nil {
+		return fmt.Errorf("cutover.sealed_plan: %w", err)
+	}
+	consolePlanPath := filepath.Join(localRoot, "deployment/migrations/"+migrations.ConsoleGoogleClientID+".json")
+	if _, err = migrations.LoadConsoleGoogleClientPlan(consolePlanPath); err != nil {
+		return fmt.Errorf("console_client.sealed_plan: %w", err)
+	}
+	subjectPlanPath := filepath.Join(localRoot, "deployment/migrations/"+migrations.ApplicationSubjectsID+".json")
+	if _, err = migrations.LoadApplicationSubjectsPlan(subjectPlanPath); err != nil {
+		return fmt.Errorf("application_subjects.sealed_plan: %w", err)
+	}
 	ansible := filepath.Join(packageRoot, "toolchain/bin/ansible-playbook")
 	inputsPath := filepath.Join(localRoot, "inputs.json")
 	payload, err := json.Marshal(map[string]string{"tauth_cutover_id": migrations.CutoverID, "tauth_recovered_key": filepath.Join(localRoot, "recovered-key"), "tauth_cutover_volume": "mprlab-nginx-gateway_tauth-data"})
@@ -125,7 +128,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(inputsPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
+	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
 		return fmt.Errorf("cutover.input_preflight: %w", err)
 	}
 	recoveredKey := ""
@@ -158,7 +161,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("cutover.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = consolePlanPath
@@ -170,7 +173,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("console_client.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = subjectPlanPath
@@ -182,10 +185,70 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(releaseRoot, "inputs/deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("application_subjects.migration_failed: %w", err)
 	}
 	return execute(ctx, native, "app-deploy", "--app-root", root)
+}
+
+var deploymentPayloadPaths = []string{
+	"deployment/migrations/" + migrations.CutoverID + ".json",
+	"deployment/migrations/" + migrations.ConsoleGoogleClientID + ".json",
+	"deployment/migrations/" + migrations.ApplicationSubjectsID + ".json",
+	"deployment/rollout/inputs.yml",
+	"deployment/rollout/cutover.yml",
+	"deployment/rollout/console-google-client.yml",
+	"deployment/rollout/application-subjects.yml",
+}
+
+func extractDeploymentPayload(ctx context.Context, image, destination string) error {
+	arguments := []string{"run", "--rm", "--network", "none", "--entrypoint", "tar", image, "-cf", "-", "-C", "/usr/local/share/tauth"}
+	command := exec.CommandContext(ctx, "docker", append(arguments, deploymentPayloadPaths...)...)
+	payload, err := command.Output()
+	if err != nil {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
+			return fmt.Errorf("extract deployment files from %s: %w: %s", image, err, strings.TrimSpace(string(exitError.Stderr)))
+		}
+		return fmt.Errorf("extract deployment files from %s: %w", image, err)
+	}
+	pending := make(map[string]bool, len(deploymentPayloadPaths))
+	for _, name := range deploymentPayloadPaths {
+		pending[name] = true
+	}
+	archive := tar.NewReader(bytes.NewReader(payload))
+	for {
+		header, err := archive.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read deployment archive: %w", err)
+		}
+		if !pending[header.Name] || header.Typeflag != tar.TypeReg {
+			return fmt.Errorf("unexpected deployment archive entry %q", header.Name)
+		}
+		path := filepath.Join(destination, header.Name)
+		if err := exec.CommandContext(ctx, "mkdir", "-p", filepath.Dir(path)).Run(); err != nil {
+			return fmt.Errorf("create deployment directory: %w", err)
+		}
+		file, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("create deployment file %s: %w", header.Name, err)
+		}
+		_, copyErr := io.Copy(file, archive)
+		closeErr := file.Close()
+		if err := errors.Join(copyErr, closeErr); err != nil {
+			return fmt.Errorf("extract deployment file %s: %w", header.Name, err)
+		}
+		delete(pending, header.Name)
+	}
+	for _, name := range deploymentPayloadPaths {
+		if pending[name] {
+			return fmt.Errorf("deployment file %s absent from %s", name, image)
+		}
+	}
+	return nil
 }
 
 func prepareKey(path, encoded, recovered string) ([]byte, error) {

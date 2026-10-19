@@ -5,6 +5,25 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B137] (P1) Read deployment plans from the published service image.
+  Goal: Deploy current release artifacts without the retired release inputs directory.
+  Evidence: Deployment of v2.2.19 failed before remote operations because its migration plan was absent from that directory.
+  Requirements:
+  - Package the three JSON plans and four rollout playbooks in the service image.
+  - Copy only these files from the exact selected image digest before private input preparation or remote operations.
+  - Reject a file set with missing files and remove temporary files after success or failure.
+  - Keep migration order, completion receipts, credentials, and encryption keys.
+  Validation:
+  The public CLI regression reproduced the absent migration plan before the production change.
+  Focused CLI tests passed without a release inputs directory.
+  The real CLI consumed all seven files from a fresh Docker image through a controlled Docker boundary.
+  Byte comparisons verified the image files against source.
+  The CLI rejected missing files, duplicate files, and unexpected paths before remote work.
+  Temporary files were absent after success and failure.
+  `CI=1 make test-deployment-migration </dev/null` and `CI=1 make test-automatic-deployment </dev/null` passed.
+  `CI=1 make ci </dev/null` passed. Independent review found no blocking issues.
+  Files: `Dockerfile`, `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, `tests/automatic-deployment.sh`, and `docs/tenant-console-operations.md`.
+
 - [x] [B136] (P2) Reject fixture output paths with URL delimiters.
   Goal: Fixture preparation cannot change a database outside its new output directory.
   Evidence: A path with `#`, `?`, or `%` can select a different database during URL conversion.

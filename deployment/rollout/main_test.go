@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,7 +27,71 @@ func init() {
 		} else {
 			fmt.Println("fixture gateway:", strings.Join(os.Args[1:], " "))
 		}
+	case "docker":
+		expected := "ghcr.io/example/auth@sha256:" + strings.Repeat("a", 64)
+		if len(os.Args) < 9 || os.Args[7] != expected {
+			panic("unexpected image extraction: " + strings.Join(os.Args, " "))
+		}
+		if image := os.Getenv("TAUTH_ROLLOUT_IMAGE"); image != "" {
+			command := exec.Command(os.Getenv("TAUTH_ROLLOUT_REAL_DOCKER"), append(os.Args[1:7], append([]string{image}, os.Args[8:]...)...)...)
+			command.Stdout, command.Stderr = os.Stdout, os.Stderr
+			if err := command.Run(); err != nil {
+				os.Exit(9)
+			}
+			break
+		}
+		archive := tar.NewWriter(os.Stdout)
+		if name := os.Getenv("TAUTH_ROLLOUT_EXTRA_ENTRY"); name != "" {
+			if err := archive.WriteHeader(&tar.Header{Name: name, Size: 1}); err != nil {
+				panic(err)
+			}
+			if _, err := archive.Write([]byte("x")); err != nil {
+				panic(err)
+			}
+		}
+		for _, name := range os.Args[12:] {
+			if name == os.Getenv("TAUTH_ROLLOUT_MISSING") {
+				continue
+			}
+			payload, err := os.ReadFile(filepath.Join(os.Getenv("TAUTH_ROLLOUT_SOURCE"), name))
+			if err != nil {
+				panic(err)
+			}
+			if err = archive.WriteHeader(&tar.Header{Name: name, Size: int64(len(payload))}); err != nil {
+				panic(err)
+			}
+			if _, err = archive.Write(payload); err != nil {
+				panic(err)
+			}
+		}
+		if err := archive.Close(); err != nil {
+			panic(err)
+		}
 	case "ansible-playbook":
+		playbook := os.Args[3]
+		source := filepath.Join(os.Getenv("TAUTH_ROLLOUT_SOURCE"), "deployment/rollout", filepath.Base(playbook))
+		assertPayload := func(actual, expected string) {
+			contents, err := os.ReadFile(actual)
+			if err != nil {
+				panic(err)
+			}
+			reference, err := os.ReadFile(expected)
+			if err != nil || !bytes.Equal(contents, reference) {
+				panic("image payload differs: " + actual)
+			}
+		}
+		assertPayload(playbook, source)
+		variables, err := os.ReadFile(strings.TrimPrefix(os.Args[5], "@"))
+		if err != nil {
+			panic(err)
+		}
+		var request map[string]string
+		if err := json.Unmarshal(variables, &request); err != nil {
+			panic(err)
+		}
+		if plan := request["tauth_cutover_plan"]; plan != "" {
+			assertPayload(plan, filepath.Join(os.Getenv("TAUTH_ROLLOUT_SOURCE"), "deployment/migrations", filepath.Base(plan)))
+		}
 		if os.Getenv("TAUTH_ROLLOUT_ALL_PHASES") == "1" {
 			fmt.Println("fixture phase:", strings.Join(os.Args[1:], " "))
 		} else {
@@ -52,7 +117,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	rollout := filepath.Join(packageRoot, "rollout-fixture")
 	gateway := filepath.Join(packageRoot, "runtime/bin/mprlab-gateway")
 	ansible := filepath.Join(packageRoot, "toolchain/bin/ansible-playbook")
-	for _, path := range []string{rollout, gateway, ansible} {
+	for _, path := range []string{rollout, gateway, ansible, filepath.Join(packageRoot, "docker")} {
 		if output, err := exec.Command("mkdir", "-p", filepath.Dir(path)).CombinedOutput(); err != nil {
 			t.Fatalf("create fixture directory: %v %s", err, output)
 		}
@@ -62,7 +127,22 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	}
 	lifecycle := filepath.Join(root, ".git/mprlab-lifecycle")
 	releaseRoot := filepath.Join(lifecycle, "releases/v1.2.3")
-	captureRepositoryRolloutInputs(t, filepath.Join(releaseRoot, "inputs"))
+	if output, err := exec.Command("mkdir", "-p", releaseRoot).CombinedOutput(); err != nil {
+		t.Fatalf("create release: %v %s", err, output)
+	}
+	source, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extractionRoot := t.TempDir()
+	environment := append(os.Environ(), "PATH="+packageRoot+string(os.PathListSeparator)+os.Getenv("PATH"), "TAUTH_ROLLOUT_SOURCE="+source, "TMPDIR="+extractionRoot)
+	assertCleanup := func() {
+		t.Helper()
+		entries, err := os.ReadDir(extractionRoot)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("extraction directory retained: %v %v", entries, err)
+		}
+	}
 	imagePath := filepath.Join(releaseRoot, "image.oci.tar")
 	image, err := os.Create(imagePath)
 	if err != nil {
@@ -87,10 +167,24 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := exec.Command(rollout, root, gateway)
-	command.Env = append(os.Environ(), "TAUTH_ROLLOUT_CLI_FIXTURE=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+t.TempDir())
+	command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+t.TempDir())
 	output, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "fixture: cutover input preflight reached") || !strings.Contains(string(output), "cutover.input_preflight:") {
 		t.Fatalf("rollout did not consume the current release: %v\n%s", err, output)
+	}
+	assertCleanup()
+	for _, scenario := range []struct{ name, environment string }{
+		{"missing", "TAUTH_ROLLOUT_MISSING=deployment/rollout/application-subjects.yml"},
+		{"duplicate", "TAUTH_ROLLOUT_EXTRA_ENTRY=deployment/rollout/inputs.yml"},
+		{"unexpected", "TAUTH_ROLLOUT_EXTRA_ENTRY=../unexpected"},
+	} {
+		command = exec.Command(rollout, root, gateway)
+		command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", scenario.environment, "TAUTH_ROLLOUT_IMAGE=")
+		output, err = command.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "cutover.image_payload:") || strings.Contains(string(output), "fixture phase:") || strings.Contains(string(output), "input preflight reached") || strings.Contains(string(output), "app-plan-deploy") {
+			t.Fatalf("%s payload reached remote work: %v %s", scenario.name, err, output)
+		}
+		assertCleanup()
 	}
 	operatorRoot := t.TempDir()
 	if output, err := exec.Command("mkdir", "-p", filepath.Join(root, ".mprlab/deploy")).CombinedOutput(); err != nil {
@@ -103,7 +197,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	command = exec.Command(rollout, root, gateway)
-	command.Env = append(os.Environ(), "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot, "TAUTH_TENANT_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot, "TAUTH_TENANT_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	output, err = command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("full rollout failed: %v\n%s", err, output)
@@ -116,40 +210,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatalf("independent migration phase absent or out of order: %s", output)
 	}
 
-}
-
-func captureRepositoryRolloutInputs(t *testing.T, destination string) {
-	t.Helper()
-	repositoryRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		t.Fatalf("locate repository: %v", err)
-	}
-	// Use a disposable index to capture the next source tree, including local edits,
-	// while applying the real ignore rules and leaving the user's index unchanged.
-	indexPath := filepath.Join(t.TempDir(), "index")
-	git := func(arguments ...string) *exec.Cmd {
-		command := exec.Command("git", arguments...)
-		command.Dir = strings.TrimSpace(string(repositoryRoot))
-		command.Env = append(os.Environ(), "GIT_INDEX_FILE="+indexPath)
-		return command
-	}
-	for _, arguments := range [][]string{
-		{"read-tree", "HEAD"},
-		{"add", "--all", "--", ":/deployment/migrations", ":/deployment/rollout"},
-	} {
-		if output, err := git(arguments...).CombinedOutput(); err != nil {
-			t.Fatalf("capture repository inputs: %v\n%s", err, output)
-		}
-	}
-	paths, err := git("ls-files", "-z", "--full-name", "--", ":/deployment/migrations/*.json", ":/deployment/rollout/*.yml").Output()
-	if err != nil {
-		t.Fatalf("list release inputs: %v", err)
-	}
-	command := git("checkout-index", "--prefix="+destination+string(filepath.Separator), "--stdin", "-z")
-	command.Stdin = bytes.NewReader(paths)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("extract release inputs: %v\n%s", err, output)
-	}
+	assertCleanup()
 }
 
 func TestPersistentServerKeyPreparation(t *testing.T) {
