@@ -166,6 +166,42 @@ func TestPublicFixtureCLI(t *testing.T) {
 	if !bytes.Equal(databaseBefore, databaseAfter) {
 		t.Fatal("rejected existing output changed the database")
 	}
+	for _, suffix := range []string{"#fragment", "?query", "%", "%23fragment", "%3Fquery", "%2Fchild"} {
+		t.Run("output-path-"+suffix, func(t *testing.T) {
+			guardPath := filepath.Join(scratch, "guard.db")
+			guard, err := os.Create(guardPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := guard.Write(databaseBefore); err != nil {
+				t.Fatal(err)
+			}
+			if err := guard.Close(); err != nil {
+				t.Fatal(err)
+			}
+			for index, destination := range []string{guardPath + suffix, filepath.Join(guardPath+suffix, "prepared")} {
+				if index == 1 {
+					if err := os.Mkdir(filepath.Dir(destination), os.ModePerm); err != nil {
+						t.Fatal(err)
+					}
+				}
+				output, err := invoke(encoded, destination)
+				if err == nil || !strings.Contains(string(output), "output directory path must not contain #, ?, or %") {
+					t.Errorf("unsafe path %q: expected path rejection, got %v\n%s", destination, err, output)
+				}
+				if _, err := os.Stat(destination); !os.IsNotExist(err) {
+					t.Errorf("rejected path left output at %q: %v", destination, err)
+				}
+				after, err := os.ReadFile(guardPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(databaseBefore, after) {
+					t.Fatal("rejected output path changed the neighboring database")
+				}
+			}
+		})
+	}
 	for _, scenario := range []string{"unknown", "schema", "test-only", "remote-origin", "reserved-tenant", "reserved-app", "reserved-app-spaces", "missing-provider", "invalid-lifetime", "trailing"} {
 		t.Run(scenario, func(t *testing.T) {
 			var invalid map[string]any
