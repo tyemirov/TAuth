@@ -2,6 +2,7 @@
 
 const STORAGE_KEY = "tauth.console.palette";
 const CHANGE_EVENT = "mpr-ui:theme-change";
+const STORAGE_ERROR_EVENT = "mpr-ui:theme-storage-error";
 const STORAGE_EVENT = "storage";
 const PAGE_SHOW_EVENT = "pageshow";
 const FOCUS_EVENT = "focus";
@@ -45,25 +46,31 @@ function readPalette() {
  */
 export function initializePalette(footer, reportError) {
   let currentMode = readPalette();
-  function applyPalette() {
+  let disposed = false;
+  function applyPalette(mode = currentMode) {
     footer.setAttribute(
       "theme-config",
       JSON.stringify({
         attribute: "data-mpr-theme",
         targets: ["document", "body"],
-        initialMode: currentMode,
+        initialMode: mode,
+        storageKey: STORAGE_KEY,
         modes: MODES,
       }),
     );
   }
   applyPalette();
 
-  function synchronizePalette() {
+  async function synchronizePalette() {
     try {
+      await customElements.whenDefined("mpr-footer");
+      if (disposed) return;
       const mode = readPalette();
       if (mode !== currentMode) {
+        applyPalette(mode);
+        const themeUI = /** @type {Window & {MPRUI: {configureTheme: (config: {initialMode: string}) => void}}} */ (/** @type {unknown} */ (window)).MPRUI;
+        themeUI.configureTheme({ initialMode: mode });
         currentMode = mode;
-        applyPalette();
       }
     } catch (error) {
       reportError(
@@ -87,28 +94,25 @@ export function initializePalette(footer, reportError) {
   }
 
   /** @param {Event} event */
-  function persistPalette(event) {
+  function paletteChanged(event) {
     const { mode } = /** @type {CustomEvent<{mode: string}>} */ (event).detail;
-    if (!MODES.some((candidate) => candidate.value === mode)) {
-      throw new Error("Selected color palette is invalid.");
-    }
-    if (mode === currentMode) return;
     currentMode = mode;
-    try {
-      localStorage.setItem(STORAGE_KEY, mode);
-    } catch (error) {
-      reportError(
-        new Error(`Color palette could not be stored: ${error.message}`),
-      );
-    }
   }
-  document.addEventListener(CHANGE_EVENT, persistPalette);
+  /** @param {Event} event */
+  function storageFailed(event) {
+    const { message } = /** @type {CustomEvent<{message: string}>} */ (event).detail;
+    reportError(new Error(`Color palette could not be stored: ${message}`));
+  }
+  document.addEventListener(CHANGE_EVENT, paletteChanged);
+  footer.addEventListener(STORAGE_ERROR_EVENT, storageFailed);
   window.addEventListener(STORAGE_EVENT, storageChanged);
   window.addEventListener(PAGE_SHOW_EVENT, synchronizePalette);
   window.addEventListener(FOCUS_EVENT, synchronizePalette);
   document.addEventListener(VISIBILITY_EVENT, visibilityChanged);
   return () => {
-    document.removeEventListener(CHANGE_EVENT, persistPalette);
+    disposed = true;
+    document.removeEventListener(CHANGE_EVENT, paletteChanged);
+    footer.removeEventListener(STORAGE_ERROR_EVENT, storageFailed);
     window.removeEventListener(STORAGE_EVENT, storageChanged);
     window.removeEventListener(PAGE_SHOW_EVENT, synchronizePalette);
     window.removeEventListener(FOCUS_EVENT, synchronizePalette);

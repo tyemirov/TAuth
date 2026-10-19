@@ -271,6 +271,7 @@ Configured administrators can view the account directory. Their tenant workspace
 `make deploy` runs the packaged migration for existing effective tenant configuration.
 The TAuth service does not expose an import command or select a migration owner.
 For internal operations and test tools, see the [deployment migration reference](docs/tenant-console-operations.md#deployment-data-migration).
+For isolated consumer tests, use the [test fixture tool](docs/test-fixture.md).
 The `tenants.import.yaml` examples describe migration input.
 The importer preserves existing tenant IDs, keys, cookies, providers, policies, users, and sessions.
 

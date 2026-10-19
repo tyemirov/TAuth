@@ -101,6 +101,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `test fixture`: Isolated synthetic data used to verify a public software interface.
+- `fixture declaration`: The versioned JSON input for the TAuth test fixture tool.
+- `validator export`: The independent tenant, signing key, and cookie configuration used by a backend validator.
+- `build identity`: The Go module and source revision information recorded in one executable.
+
 - `proxy trust`: A rule that permits a reverse proxy to supply the HTTPS scheme of a client request.
 
 - `public user ID`: The fixed tenant-scoped account identifier that TAuth supplies to applications and uses in session claims.

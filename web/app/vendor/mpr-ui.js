@@ -116,6 +116,7 @@
   var AUTH_DIAGNOSTICS_TARGET_INVALID_ERROR_CODE =
     "mpr-ui.auth_diagnostics.target_invalid";
   var AUTH_COMPONENT_TARGET_ATTRIBUTE = "auth-target";
+  var AUTH_OPTIONS_CHANGE_EVENT = "mpr-ui:auth:options-change";
   var PASSWORD_AUTH_MODE_ATTRIBUTE = "mode";
   var PASSWORD_AUTH_MODE_EVENT = "mpr-ui:password-auth:mode-change";
   var ACCOUNT_PANEL_ACTION_ATTRIBUTE = "action";
@@ -1651,8 +1652,6 @@
   var LEGACY_DSL_THEME_MODE_REPLACEMENT = '"theme-config" with "initialMode"';
   var LEGACY_DSL_SETTINGS_REPLACEMENT = '"settings"';
   var LEGACY_DSL_LINKS_REPLACEMENT = '"menu"';
-  var LEGACY_DSL_THEME_VARIANT_REPLACEMENT =
-    '"themeToggle.variant" or "theme-switcher"';
   var HORIZONTAL_LINKS_ALIGNMENT_ERROR_CODE =
     "mpr-ui.horizontal-links.invalid_alignment";
   var HORIZONTAL_LINKS_CONFIG_ERROR_CODE = "mpr-ui.horizontal-links.invalid_config";
@@ -1867,6 +1866,7 @@
     "privacy-link-hidden": "privacyLinkHidden",
     "privacy-modal-content": "privacyModalContent",
     "theme-config": "themeToggle",
+    "theme-control": "themeControl",
     "theme-switcher": "themeSwitcher",
     menu: "menu",
     sticky: "sticky",
@@ -1881,6 +1881,7 @@
   var FOOTER_SLOT_NAMES = Object.freeze(["menu-prefix", "legal"]);
   var DROPDOWN_ATTRIBUTE_NAMES = Object.freeze(["menu"]);
   var THEME_TOGGLE_ATTRIBUTE_NAMES = Object.freeze([
+    "theme-control",
     "variant",
     "label",
     "aria-label",
@@ -1892,6 +1893,7 @@
   ]);
   var LOGIN_BUTTON_ATTRIBUTE_NAMES = Object.freeze([
     AUTH_CONFIG_ATTRIBUTE,
+    AUTH_COMPONENT_TARGET_ATTRIBUTE,
     "button-text",
     "button-theme",
     "button-size",
@@ -2080,9 +2082,11 @@
       );
     }
     var options = {};
-    var variant = hostElement.getAttribute("variant");
-    if (variant) {
-      options.variant = variant;
+    if (hostElement.hasAttribute("variant")) {
+      throw createThemeControlError("variant is obsolete; use theme-control");
+    }
+    if (hostElement.hasAttribute("theme-control")) {
+      options.themeControl = parseThemeControlAttribute(hostElement.getAttribute("theme-control"));
     }
     var label = hostElement.getAttribute("label");
     if (label) {
@@ -2110,9 +2114,10 @@
     }
     var themeConfig = {};
     var themeAttr = hostElement.getAttribute("theme-config");
-    if (themeAttr) {
-      themeConfig = parseJsonValue(themeAttr, {});
+    if (themeAttr !== null) {
+      themeConfig = parseThemeConfigAttribute(themeAttr);
     }
+    rejectThemeSelectorOptions(themeConfig);
     if (Object.keys(themeConfig).length) {
       options.theme = themeConfig;
     }
@@ -2266,7 +2271,7 @@
     if (hasAttributeValue(hostElement, AUTH_CONFIG_ATTRIBUTE)) {
       externalOptions.auth = parseAuthConfigAttribute(hostElement);
     }
-    return deepMergeOptions({}, datasetOptions, externalOptions);
+    return deepMergeOptions({ themeToggle: {} }, datasetOptions, externalOptions);
   }
 
   function buildFooterOptionsFromAttributes(hostElement) {
@@ -3570,6 +3575,143 @@
   }
 
   var DEFAULT_THEME_ATTRIBUTE = "data-mpr-theme";
+  var DEFAULT_THEME_STORAGE_KEY = "mpr-ui:theme";
+  var THEME_STORAGE_OPERATIONS = Object.freeze({ READ: "read", WRITE: "write", REMOVE: "remove" });
+  var THEME_STORAGE_ERROR = "mpr-ui.theme.storage_failed";
+  var THEME_STORAGE_ERROR_EVENT = "mpr-ui:theme-storage-error";
+  var THEME_STORAGE_REJECTION = "mpr-ui.theme.stored_mode_rejected";
+  var THEME_CONFIG_KEYS = Object.freeze([
+    "attribute", "targets", "modes", "mode", "initialMode", "storageKey", "control",
+  ]);
+
+  var THEME_CONTROL_ERROR = "mpr-ui.theme-control.invalid_config";
+  var THEME_CONTROL_ERROR_EVENT = "mpr-ui:theme-control-error";
+  var THEME_CONTROL_KINDS = Object.freeze({ SWITCH: "switch", QUADRANT: "quadrant", CYCLE: "cycle" });
+  var THEME_CONTROL_KEYS = Object.freeze({
+    [THEME_CONTROL_KINDS.SWITCH]: Object.freeze(["off", "on"]),
+    [THEME_CONTROL_KINDS.QUADRANT]: Object.freeze(["topLeft", "topRight", "bottomLeft", "bottomRight"]),
+  });
+
+  function createThemeControlError(message) {
+    var error = /** @type {MprUiError} */ (new Error(THEME_CONTROL_ERROR + ": " + message));
+    error.code = THEME_CONTROL_ERROR;
+    return error;
+  }
+
+  function rejectThemeSelectorOptions(options) {
+    ["variant", "themeSwitcher"].forEach(function rejectSelector(key) {
+      if (Object.prototype.hasOwnProperty.call(options || {}, key)) {
+        throw createThemeControlError(key + " is obsolete; use theme-control");
+      }
+    });
+  }
+
+  function parseThemeControlAttribute(value) {
+    try {
+      return JSON.parse(value);
+    } catch (_error) {
+      throw createThemeControlError("theme-control must be valid JSON");
+    }
+  }
+
+  function parseThemeConfigAttribute(value) {
+    var config = parseThemeControlAttribute(value);
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw createThemeControlError("theme-config must be an object");
+    }
+    rejectThemeSelectorOptions(config);
+    return config;
+  }
+
+  /** Validates a complete control declaration against the application mode catalog. */
+  function normalizeThemeControl(input, modes) {
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        Object.keys(input).length !== 2 || !Object.prototype.hasOwnProperty.call(input, "kind") ||
+        !Object.prototype.hasOwnProperty.call(input, "choices")) {
+      throw createThemeControlError("control requires only kind and choices");
+    }
+    var kind = input.kind;
+    if (Object.values(THEME_CONTROL_KINDS).indexOf(kind) === -1) {
+      throw createThemeControlError("unknown control kind");
+    }
+    var choices;
+    var values;
+    if (kind === THEME_CONTROL_KINDS.CYCLE) {
+      if (!Array.isArray(input.choices) || !input.choices.length) {
+        throw createThemeControlError("cycle requires a nonempty choices list");
+      }
+      choices = input.choices.slice();
+      values = choices;
+    } else {
+      var keys = THEME_CONTROL_KEYS[kind];
+      if (!input.choices || typeof input.choices !== "object" || Array.isArray(input.choices) ||
+          Object.keys(input.choices).length !== keys.length ||
+          keys.some(function missingChoice(key) { return !Object.prototype.hasOwnProperty.call(input.choices, key); })) {
+        throw createThemeControlError(kind + " requires choices " + keys.join(", "));
+      }
+      choices = {};
+      values = keys.map(function copyChoice(key) {
+        choices[key] = input.choices[key];
+        return choices[key];
+      });
+    }
+    if (values.some(function invalidChoice(value) { return typeof value !== "string" || !value.trim() || value !== value.trim(); }) ||
+        new Set(values).size !== values.length) {
+      throw createThemeControlError("choices must be distinct nonempty mode references");
+    }
+    var modeValues = modes.map(function modeValue(mode) { return mode.value; });
+    if (values.length !== modeValues.length || values.some(function unknownMode(value) { return modeValues.indexOf(value) === -1; })) {
+      throw createThemeControlError("choices must cover the complete mode catalog");
+    }
+    return Object.freeze({ kind: kind, choices: Object.freeze(choices) });
+  }
+
+  function themeControlValues(control) {
+    return control.kind === THEME_CONTROL_KINDS.CYCLE
+      ? control.choices.slice()
+      : THEME_CONTROL_KEYS[control.kind].map(function choiceValue(key) { return control.choices[key]; });
+  }
+
+  function reportThemeControlError(host, error, rejectedDeclaration) {
+    host.__mprThemeControlRejected = rejectedDeclaration !== false;
+    host.setAttribute("data-mpr-theme-control-error", THEME_CONTROL_ERROR);
+    logError(THEME_CONTROL_ERROR, error.message);
+    dispatchEvent(host, THEME_CONTROL_ERROR_EVENT, { code: THEME_CONTROL_ERROR, message: error.message });
+  }
+
+  /** Validates the app-specific local storage key at the configuration boundary. */
+  function normalizeThemeStorageKey(storageKey) {
+    if (typeof storageKey !== "string" || !storageKey.trim()) {
+      throw new Error("Theme storageKey must be a nonempty string");
+    }
+    return storageKey.trim();
+  }
+
+  /** Performs theme persistence I/O in the browser that owns the page. */
+  function accessThemeStorage(operation, storageKey, modeValue) {
+    if (!global.document || !global.document.defaultView) {
+      return null;
+    }
+    try {
+      var storage = global.document.defaultView.localStorage;
+      if (operation === THEME_STORAGE_OPERATIONS.READ) {
+        return storage.getItem(storageKey);
+      }
+      if (operation === THEME_STORAGE_OPERATIONS.REMOVE) {
+        storage.removeItem(storageKey);
+      } else {
+        storage.setItem(storageKey, modeValue);
+      }
+      return null;
+    } catch (error) {
+      var storageError = /** @type {MprUiError} */ (new Error(
+        THEME_STORAGE_ERROR + ": " + operation + " theme key " + storageKey,
+        { cause: error },
+      ));
+      storageError.code = THEME_STORAGE_ERROR;
+      throw storageError;
+    }
+  }
   var DEFAULT_THEME_TARGETS = Object.freeze(["document", "body"]);
   var DEFAULT_THEME_MODES = Object.freeze([
     Object.freeze({
@@ -3710,9 +3852,10 @@
   }
 
   function normalizeThemeModes(candidateModes) {
-    var list = Array.isArray(candidateModes) && candidateModes.length
-      ? candidateModes
-      : DEFAULT_THEME_MODES;
+    if (candidateModes !== undefined && (!Array.isArray(candidateModes) || !candidateModes.length)) {
+      throw createThemeControlError("modes must be a nonempty list");
+    }
+    var list = candidateModes === undefined ? DEFAULT_THEME_MODES : candidateModes;
     var normalized = [];
     var seen = Object.create(null);
     for (var index = 0; index < list.length; index += 1) {
@@ -3726,7 +3869,7 @@
         modeValue = "";
       }
       if (!modeValue || seen[modeValue]) {
-        continue;
+        throw createThemeControlError("modes must have distinct nonempty values");
       }
       seen[modeValue] = true;
       var attributeValue =
@@ -3780,6 +3923,8 @@
         targets: DEFAULT_THEME_TARGETS.slice(),
         modes: DEFAULT_THEME_MODES,
         initialMode: null,
+        storageKey: DEFAULT_THEME_STORAGE_KEY,
+        control: null,
       },
       partialConfig || {},
     );
@@ -3787,6 +3932,7 @@
       typeof config.attribute === "string" && config.attribute.trim()
         ? config.attribute.trim()
         : DEFAULT_THEME_ATTRIBUTE;
+    config.storageKey = normalizeThemeStorageKey(config.storageKey);
     config.targets = normalizeThemeTargets(config.targets);
     config.modes = normalizeThemeModes(config.modes);
     var normalizedInitial = null;
@@ -3886,15 +4032,17 @@
 
   var themeManager = (function createThemeManager() {
     var currentConfig = normalizeThemeConfig({});
+    var controlDeclarations = new Map();
+    var applicationControlOwner = {};
     var allModeClasses = collectThemeClassNames(currentConfig.modes);
     var allDatasetKeys = collectThemeDatasetKeys(currentConfig.modes);
     var listeners = [];
     var currentMode = currentConfig.modes[0].value;
     var resolvedTargets = resolveThemeTargets(currentConfig.targets);
 
-    function getModeIndex(modeValue) {
-      for (var index = 0; index < currentConfig.modes.length; index += 1) {
-        if (currentConfig.modes[index].value === modeValue) {
+    function getModeIndex(modes, modeValue) {
+      for (var index = 0; index < modes.length; index += 1) {
+        if (modes[index].value === modeValue) {
           return index;
         }
       }
@@ -3903,13 +4051,13 @@
 
     if (
       currentConfig.initialMode &&
-      getModeIndex(currentConfig.initialMode) !== -1
+      getModeIndex(currentConfig.modes, currentConfig.initialMode) !== -1
     ) {
       currentMode = currentConfig.initialMode;
     }
 
     function applyMode(modeValue) {
-      var modeIndex = getModeIndex(modeValue);
+      var modeIndex = getModeIndex(currentConfig.modes, modeValue);
       if (modeIndex === -1) {
         modeIndex = 0;
         modeValue = currentConfig.modes[0].value;
@@ -3959,14 +4107,28 @@
 
     function notifyListeners(source) {
       var detail = { mode: currentMode, source: source || null };
-      for (var index = 0; index < listeners.length; index += 1) {
-        try {
-          listeners[index](detail);
-        } catch (_error) {}
-      }
+      listeners.slice().forEach(function notifyThemeListener(listener) {
+        try { listener(detail); }
+        catch (error) { logError("mpr-ui.theme.listener_failed", error.message); }
+      });
       if (global.document) {
         dispatchEvent(global.document, "mpr-ui:theme-change", detail);
       }
+    }
+
+    function readStoredMode(config, rejectUnknown) {
+      var storedMode = accessThemeStorage(THEME_STORAGE_OPERATIONS.READ, config.storageKey);
+      if (storedMode === null) {
+        return null;
+      }
+      if (getModeIndex(config.modes, storedMode) !== -1) {
+        return storedMode;
+      }
+      if (rejectUnknown) {
+        accessThemeStorage(THEME_STORAGE_OPERATIONS.REMOVE, config.storageKey);
+        logError(THEME_STORAGE_REJECTION, "Unknown mode for theme key " + config.storageKey);
+      }
+      return null;
     }
 
     function ensureInitialMode() {
@@ -3977,57 +4139,108 @@
       var initialValue = global.document.documentElement.getAttribute(
         currentConfig.attribute,
       );
-      if (initialValue && getModeIndex(initialValue) !== -1) {
+      if (initialValue && getModeIndex(currentConfig.modes, initialValue) !== -1) {
         currentMode = initialValue;
+      }
+      var storedMode = readStoredMode(currentConfig, false);
+      if (storedMode !== null) {
+        currentMode = storedMode;
       }
       applyMode(currentMode);
     }
 
-    function configure(partialConfig) {
+    function configure(partialConfig, controlOwner, replaceDeclaration) {
       if (!partialConfig || typeof partialConfig !== "object") {
         return {
           attribute: currentConfig.attribute,
           targets: currentConfig.targets.slice(),
           modes: currentConfig.modes.slice(),
+          storageKey: currentConfig.storageKey,
+          control: currentConfig.control,
         };
       }
+      rejectThemeSelectorOptions(partialConfig);
+      var previousControl = currentConfig.control;
+      var previousMode = currentMode;
+      var previousModes = currentConfig.modes;
+      var nextConfig = Object.assign({}, currentConfig);
+      var nextMode = currentMode;
       var normalized = normalizeThemeConfig(partialConfig);
       if (Object.prototype.hasOwnProperty.call(partialConfig, "attribute")) {
-        currentConfig.attribute = normalized.attribute;
+        nextConfig.attribute = normalized.attribute;
       }
       if (Object.prototype.hasOwnProperty.call(partialConfig, "targets")) {
         var mergedTargets = DEFAULT_THEME_TARGETS.concat(normalized.targets);
-        currentConfig.targets = dedupeTargets(mergedTargets);
-        resolvedTargets = resolveThemeTargets(currentConfig.targets);
-      }
-      if (!resolvedTargets || !resolvedTargets.length) {
-        resolvedTargets = resolveThemeTargets(currentConfig.targets);
+        nextConfig.targets = dedupeTargets(mergedTargets);
       }
       if (Object.prototype.hasOwnProperty.call(partialConfig, "modes")) {
-        currentConfig.modes = normalized.modes;
+        nextConfig.modes = normalized.modes;
       }
       if (
         Object.prototype.hasOwnProperty.call(partialConfig, "mode") ||
         Object.prototype.hasOwnProperty.call(partialConfig, "initialMode")
       ) {
-        currentConfig.initialMode = normalized.initialMode;
+        nextConfig.initialMode = normalized.initialMode;
         if (
           normalized.initialMode &&
-          getModeIndex(normalized.initialMode) !== -1
+          getModeIndex(nextConfig.modes, normalized.initialMode) !== -1
         ) {
-          currentMode = normalized.initialMode;
+          nextMode = normalized.initialMode;
         }
       }
-      allModeClasses = collectThemeClassNames(currentConfig.modes);
-      allDatasetKeys = collectThemeDatasetKeys(currentConfig.modes);
-      if (getModeIndex(currentMode) === -1) {
-        currentMode = currentConfig.modes[0].value;
+      if (partialConfig.storageKey !== undefined) {
+        nextConfig.storageKey = normalized.storageKey;
       }
+      var nextDeclarations = new Map(controlDeclarations);
+      var declarationOwner = controlOwner || applicationControlOwner;
+      if (Object.prototype.hasOwnProperty.call(partialConfig, "control")) {
+        nextDeclarations.set(declarationOwner, normalizeThemeControl(partialConfig.control, nextConfig.modes));
+      } else if (replaceDeclaration) {
+        nextDeclarations.delete(declarationOwner);
+      }
+      var nextControl = null;
+      nextDeclarations.forEach(function validateDeclaration(declaration) {
+        var normalizedControl = normalizeThemeControl(declaration, nextConfig.modes);
+        if (nextControl && JSON.stringify(nextControl) !== JSON.stringify(normalizedControl)) {
+          throw createThemeControlError("explicit control declarations disagree");
+        }
+        nextControl = normalizedControl;
+      });
+      if (!nextControl && currentConfig.control) {
+        nextControl = normalizeThemeControl(currentConfig.control, nextConfig.modes);
+      }
+      nextConfig.control = nextControl;
+      var nextTargets = resolveThemeTargets(nextConfig.targets);
+      var storedMode = readStoredMode(nextConfig, Object.prototype.hasOwnProperty.call(partialConfig, "modes"));
+      if (storedMode !== null) {
+        nextMode = storedMode;
+      } else if (nextConfig.storageKey !== currentConfig.storageKey) {
+        nextMode = nextConfig.initialMode && getModeIndex(nextConfig.modes, nextConfig.initialMode) !== -1
+          ? nextConfig.initialMode
+          : nextConfig.modes[0].value;
+      }
+      var nextModeClasses = collectThemeClassNames(nextConfig.modes);
+      var nextDatasetKeys = collectThemeDatasetKeys(nextConfig.modes);
+      if (getModeIndex(nextConfig.modes, nextMode) === -1) {
+        nextMode = nextConfig.modes[0].value;
+      }
+      controlDeclarations = nextDeclarations;
+      currentConfig = nextConfig;
+      currentMode = nextMode;
+      resolvedTargets = nextTargets;
+      allModeClasses = nextModeClasses;
+      allDatasetKeys = nextDatasetKeys;
       applyMode(currentMode);
+      if (currentMode !== previousMode || currentConfig.modes !== previousModes ||
+          JSON.stringify(currentConfig.control) !== JSON.stringify(previousControl)) {
+        notifyListeners("configure");
+      }
       return {
         attribute: currentConfig.attribute,
         targets: currentConfig.targets.slice(),
         modes: currentConfig.modes.slice(),
+        storageKey: currentConfig.storageKey,
+        control: currentConfig.control,
       };
     }
 
@@ -4039,11 +4252,12 @@
       if (!trimmed) {
         return currentMode;
       }
-      var modeIndex = getModeIndex(trimmed);
+      var modeIndex = getModeIndex(currentConfig.modes, trimmed);
       var resolvedMode =
         modeIndex === -1
           ? currentConfig.modes[0].value
           : currentConfig.modes[modeIndex].value;
+      accessThemeStorage(THEME_STORAGE_OPERATIONS.WRITE, currentConfig.storageKey, resolvedMode);
       if (resolvedMode === currentMode) {
         notifyListeners(source);
         return currentMode;
@@ -4080,10 +4294,12 @@
       setMode: setMode,
       getMode: getMode,
       on: on,
+      releaseControl: function releaseControl(owner) { controlDeclarations.delete(owner); },
     };
   })();
 
   function normalizeThemeToggleCore(rawConfig, defaults) {
+    rejectThemeSelectorOptions(rawConfig);
     var baseline = deepMergeOptions({}, defaults || {}, rawConfig || {});
     var enabled =
       baseline.enabled === undefined ? true : Boolean(baseline.enabled);
@@ -4098,7 +4314,9 @@
         ? baseline.attribute.trim()
         : DEFAULT_THEME_ATTRIBUTE;
     var targets = normalizeThemeTargets(baseline.targets);
-    var modes = normalizeThemeModes(baseline.modes);
+    var modes = baseline.modes === undefined
+      ? themeManager.configure(null).modes
+      : normalizeThemeModes(baseline.modes);
     var initialMode = null;
     if (typeof baseline.mode === "string" && baseline.mode.trim()) {
       initialMode = baseline.mode.trim();
@@ -4108,7 +4326,17 @@
     ) {
       initialMode = baseline.initialMode.trim();
     }
+    var managerConfig = {};
+    THEME_CONFIG_KEYS.forEach(function copyThemeConfigKey(key) {
+      if (Object.prototype.hasOwnProperty.call(rawConfig || {}, key)) {
+        managerConfig[key] = rawConfig[key];
+      }
+    });
+    if (managerConfig.storageKey !== undefined) {
+      managerConfig.storageKey = normalizeThemeStorageKey(managerConfig.storageKey);
+    }
     return {
+      managerConfig: managerConfig,
       enabled: enabled,
       ariaLabel: ariaLabel,
       attribute: attribute,
@@ -4142,90 +4370,6 @@
       }
     }
     return -1;
-  }
-
-  function resolveThemeModePolarity(mode) {
-    if (!mode) {
-      return null;
-    }
-    var candidate = "";
-    if (typeof mode === "string") {
-      candidate = mode;
-    } else if (typeof mode === "object") {
-      if (typeof mode.attributeValue === "string" && mode.attributeValue.trim()) {
-        candidate = mode.attributeValue;
-      } else if (typeof mode.value === "string" && mode.value.trim()) {
-        candidate = mode.value;
-      }
-    }
-    if (!candidate) {
-      return null;
-    }
-    var normalized = String(candidate).trim().toLowerCase();
-    if (!normalized) {
-      return null;
-    }
-    if (normalized.indexOf("dark") === 0 || normalized.lastIndexOf("dark") === normalized.length - 4) {
-      return "dark";
-    }
-    if (normalized.indexOf("light") === 0 || normalized.lastIndexOf("light") === normalized.length - 5) {
-      return "light";
-    }
-    if (
-      normalized.indexOf("-dark") !== -1 ||
-      normalized.indexOf("dark-") !== -1 ||
-      normalized.indexOf("_dark") !== -1
-    ) {
-      return "dark";
-    }
-    if (
-      normalized.indexOf("-light") !== -1 ||
-      normalized.indexOf("light-") !== -1 ||
-      normalized.indexOf("_light") !== -1
-    ) {
-      return "light";
-    }
-    return null;
-  }
-
-  function deriveBinaryThemeToggleModes(candidateModes) {
-    var modes = Array.isArray(candidateModes) && candidateModes.length
-      ? candidateModes.slice()
-      : DEFAULT_THEME_MODES.slice();
-    var binary = [];
-    var seen = Object.create(null);
-
-    for (var index = 0; index < modes.length; index += 1) {
-      var mode = modes[index];
-      var polarity = resolveThemeModePolarity(mode);
-      if (!polarity || seen[polarity]) {
-        continue;
-      }
-      binary.push(mode);
-      seen[polarity] = true;
-      if (binary.length === 2) {
-        break;
-      }
-    }
-
-    if (binary.length === 2) {
-      return binary;
-    }
-
-    if (!binary.length && modes.length) {
-      binary.push(modes[0]);
-    }
-
-    for (var fillIndex = 0; fillIndex < modes.length; fillIndex += 1) {
-      if (binary.length === 2) {
-        break;
-      }
-      if (binary.indexOf(modes[fillIndex]) === -1) {
-        binary.push(modes[fillIndex]);
-      }
-    }
-
-    return binary;
   }
 
   function resolveNextThemeToggleMode(modes, currentValue) {
@@ -4263,6 +4407,7 @@
       baseline.icons && typeof baseline.icons === "object" ? baseline.icons : {};
     return {
       enabled: baseline.enabled !== false,
+      control: baseline.control,
       variant:
         baseline.variant === "button"
           ? "button"
@@ -4416,7 +4561,7 @@
     var iconElement = hostElement.querySelector(
       '[data-mpr-theme-toggle="icon"]',
     );
-    var variant = config.variant || "switch";
+    var variant = config.variant;
     if (typeof hostElement.setAttribute === "function") {
       hostElement.setAttribute("data-mpr-theme-toggle-variant", variant);
     }
@@ -4444,25 +4589,28 @@
     if (!controlElement) {
       return function noopMissingControl() {};
     }
+    controlElement.setAttribute("data-mpr-theme-control-kind", config.control.kind);
     var normalizedModes = Array.isArray(config.modes) && config.modes.length
       ? config.modes.slice()
       : DEFAULT_THEME_MODES.slice();
-    var currentModes = variant === "switch"
-      ? deriveBinaryThemeToggleModes(normalizedModes)
-      : normalizedModes;
-    var squareModeValues = variant === "square"
-      ? currentModes
-          .slice(0, THEME_TOGGLE_SQUARE_POSITIONS.length)
-          .map(function extractModeValue(mode) {
-            return mode.value;
-          })
-      : [];
-    if (variant === "square") {
-      for (var index = 0; index < squareQuads.length; index += 1) {
-        var hasMode = squareModeValues[index] !== undefined;
-        squareQuads[index].setAttribute("data-quad-enabled", hasMode ? "true" : "false");
+    var currentModes = [];
+    var squareModeValues = [];
+
+    function updateModeCatalog(modes) {
+      normalizedModes = modes;
+      currentModes = themeControlValues(config.control).map(function resolveChoice(value) {
+        return modes[getThemeToggleModeIndex(modes, value)];
+      });
+      squareModeValues = variant === "square" ? themeControlValues(config.control) : [];
+      if (variant === "square") {
+        for (var index = 0; index < squareQuads.length; index += 1) {
+          var hasMode = squareModeValues[index] !== undefined;
+          squareQuads[index].setAttribute("data-quad-enabled", hasMode ? "true" : "false");
+        }
       }
     }
+
+    updateModeCatalog(normalizedModes);
 
     var travelTimeout = null;
     var rafId = null;
@@ -4561,8 +4709,7 @@
       }
       var squareIndex = squareModeValues.indexOf(resolvedModeValue);
       if (squareIndex === -1) {
-        squareIndex = 0;
-        resolvedModeValue = squareModeValues[0];
+        throw createThemeControlError("active mode is absent from quadrant choices");
       }
       var position =
         THEME_TOGGLE_SQUARE_POSITIONS[squareIndex] ||
@@ -4598,18 +4745,16 @@
     }
 
     function syncToggleUi(modeValue) {
-      var modeIndex = getThemeToggleModeIndex(currentModes, modeValue);
-      var resolvedMode = modeIndex === -1 && currentModes.length ? currentModes[0].value : modeValue;
-      if (modeIndex === -1 && currentModes.length) {
+      var displayModes = variant === "switch" ? normalizedModes : currentModes;
+      var modeIndex = getThemeToggleModeIndex(displayModes, modeValue);
+      var resolvedMode = modeIndex === -1 && displayModes.length ? displayModes[0].value : modeValue;
+      if (modeIndex === -1 && displayModes.length) {
         modeIndex = 0;
       }
       hostElement.setAttribute("data-mpr-theme-mode", resolvedMode);
       controlElement.setAttribute("data-mpr-theme-mode", resolvedMode);
       if (variant === "button") {
-        controlElement.setAttribute(
-          "aria-pressed",
-          modeIndex === 1 ? "true" : "false",
-        );
+        controlElement.setAttribute("aria-label", config.ariaLabel + " — " + resolvedMode);
         if (iconElement) {
           var iconSymbol = config.icons.unknown;
           if (resolvedMode === "light") {
@@ -4625,36 +4770,33 @@
         syncSquareUi(resolvedMode);
         return;
       }
-      var checked = modeIndex > 0;
+      var checked = resolvedMode === config.control.choices.on;
       controlElement.checked = checked;
       controlElement.setAttribute("aria-checked", checked ? "true" : "false");
     }
 
     function resolveNextSwitchMode(currentValue) {
-      if (variant !== "switch") {
-        return resolveNextThemeToggleMode(currentModes, currentValue);
-      }
-      var currentIndex = getThemeToggleModeIndex(currentModes, currentValue);
-      if (currentIndex !== -1) {
-        return resolveNextThemeToggleMode(currentModes, currentValue);
-      }
-      var normalizedIndex = getThemeToggleModeIndex(normalizedModes, currentValue);
-      if (normalizedIndex === -1) {
-        return currentModes.length ? currentModes[0].value : currentValue;
-      }
-      var activeMode = normalizedModes[normalizedIndex];
-      var activePolarity = resolveThemeModePolarity(activeMode);
-      if (!activePolarity) {
-        return resolveNextThemeToggleMode(currentModes, currentValue);
-      }
-      var targetPolarity = activePolarity === "dark" ? "light" : "dark";
-      for (var modeIndex = 0; modeIndex < currentModes.length; modeIndex += 1) {
-        var candidatePolarity = resolveThemeModePolarity(currentModes[modeIndex]);
-        if (candidatePolarity === targetPolarity) {
-          return currentModes[modeIndex].value;
-        }
+      if (variant === "switch") {
+        return currentValue === config.control.choices.off
+          ? config.control.choices.on : config.control.choices.off;
       }
       return resolveNextThemeToggleMode(currentModes, currentValue);
+    }
+
+    function applySelectedMode(modeValue, source) {
+      try {
+        themeManager.setMode(modeValue, source);
+      } catch (error) {
+        if (error.code !== THEME_STORAGE_ERROR) {
+          throw error;
+        }
+        syncToggleUi(themeManager.getMode());
+        logError(THEME_STORAGE_ERROR, error.message);
+        dispatchEvent(hostElement, THEME_STORAGE_ERROR_EVENT, {
+          code: THEME_STORAGE_ERROR,
+          message: error.message,
+        });
+      }
     }
 
     function handleActivation(eventObject) {
@@ -4666,21 +4808,14 @@
         eventObject.preventDefault();
       }
       var nextMode = resolveNextSwitchMode(themeManager.getMode());
-      themeManager.setMode(nextMode, config.source || "theme-toggle");
+      applySelectedMode(nextMode, config.source || "theme-toggle");
     }
 
     function selectSquareMode(index, sourceSuffix) {
       if (variant !== "square" || !squareModeValues.length) {
         return;
       }
-      var clampedIndex = index;
-      if (clampedIndex < 0) {
-        clampedIndex = 0;
-      }
-      if (clampedIndex >= squareModeValues.length) {
-        clampedIndex = squareModeValues.length - 1;
-      }
-      var targetModeValue = squareModeValues[clampedIndex];
+      var targetModeValue = squareModeValues[index];
       if (!targetModeValue) {
         return;
       }
@@ -4688,7 +4823,7 @@
       if (sourceSuffix) {
         sourceLabel += sourceSuffix;
       }
-      themeManager.setMode(targetModeValue, sourceLabel);
+      applySelectedMode(targetModeValue, sourceLabel);
     }
 
     function resolveQuadrantIndex(eventObject) {
@@ -4720,12 +4855,6 @@
         candidateIndex = 2;
       } else {
         candidateIndex = 3;
-      }
-      if (candidateIndex >= squareModeValues.length) {
-        candidateIndex = squareModeValues.length - 1;
-      }
-      if (candidateIndex < 0) {
-        return null;
       }
       return candidateIndex;
     }
@@ -4779,26 +4908,28 @@
       }
     }
 
+    function handleToggleKey(event) {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        handleActivation(event);
+      }
+    }
+
     if (variant === "square") {
       controlElement.addEventListener("click", handleSquarePointer);
       controlElement.addEventListener("keydown", handleSquareKey);
     } else {
       controlElement.addEventListener("click", handleActivation);
       if (variant === "switch") {
-        controlElement.addEventListener("keydown", function handleToggleKey(event) {
-          if (!event || typeof event.key !== "string") {
-            return;
-          }
-          if (event.key === " " || event.key === "Enter") {
-            handleActivation(event);
-          }
-        });
+        controlElement.addEventListener("keydown", handleToggleKey);
       }
     }
 
     syncToggleUi(themeManager.getMode());
     var unsubscribe = themeManager.on(function handleTheme(detail) {
-      syncToggleUi(detail.mode);
+      if (detail.source !== "configure") {
+        syncToggleUi(detail.mode);
+      }
     });
     return function cleanupThemeToggle() {
       if (rafId !== null && ownerWindow && typeof ownerWindow.cancelAnimationFrame === "function") {
@@ -4820,78 +4951,76 @@
           controlElement.removeEventListener("keydown", handleSquareKey);
         } else {
           controlElement.removeEventListener("click", handleActivation);
+          if (variant === "switch") { controlElement.removeEventListener("keydown", handleToggleKey); }
         }
       }
       unsubscribe();
     };
   }
-function normalizeStandaloneThemeToggleOptions(rawOptions) {
-    var base =
-      rawOptions && typeof rawOptions === "object" ? rawOptions : {};
-    var themeInput =
-      base && typeof base.theme === "object" ? base.theme : {};
-    var themeConfig = normalizeThemeToggleCore(themeInput, {
-      enabled:
-        base.enabled === undefined ? true : Boolean(base.enabled),
-      ariaLabel:
-        typeof base.ariaLabel === "string" && base.ariaLabel.trim()
-          ? base.ariaLabel.trim()
-          : "Toggle theme",
+  function normalizeStandaloneThemeToggleOptions(rawOptions) {
+    var base = rawOptions || {};
+    rejectThemeSelectorOptions(base);
+    var theme = normalizeThemeToggleCore(base.theme || {}, { enabled: true, ariaLabel: base.ariaLabel || "Toggle theme" });
+    if (Object.prototype.hasOwnProperty.call(base, "themeControl")) {
+      if (Object.prototype.hasOwnProperty.call(theme.managerConfig, "control") &&
+          JSON.stringify(normalizeThemeControl(theme.managerConfig.control, theme.modes)) !==
+          JSON.stringify(normalizeThemeControl(base.themeControl, theme.modes))) {
+        throw createThemeControlError("theme-control disagrees with theme-config.control");
+      }
+      theme.managerConfig.control = base.themeControl;
+    }
+    return { component: base, theme: theme };
+  }
+
+  /** Keeps a control view synchronized with the validated application definition. */
+  function createThemeControlView(hostElement, displayOptions, required) {
+    var options = displayOptions;
+    var cleanup = null;
+    function render() {
+      var snapshot = themeManager.configure(null);
+      if (cleanup) { cleanup(); cleanup = null; }
+      if (!snapshot.control) {
+        hostElement.innerHTML = "";
+        hostElement.removeAttribute("data-mpr-theme-control-kind");
+        hostElement.removeAttribute("data-mpr-theme-toggle-variant");
+        if (required) {
+          reportThemeControlError(hostElement, createThemeControlError("a complete theme-control declaration is required"), false);
+        }
+        return;
+      }
+      if (!hostElement.__mprThemeControlRejected) {
+        hostElement.removeAttribute("data-mpr-theme-control-error");
+      }
+      var variant = snapshot.control.kind === THEME_CONTROL_KINDS.QUADRANT ? "square"
+        : snapshot.control.kind === THEME_CONTROL_KINDS.CYCLE ? "button" : "switch";
+      var config = normalizeThemeToggleDisplayOptions(Object.assign({}, options, {
+        variant: variant, control: snapshot.control, modes: snapshot.modes,
+      }));
+      config.control = snapshot.control;
+      cleanup = initializeThemeToggle(hostElement, config);
+    }
+    var unsubscribe = themeManager.on(function updateSharedControl(detail) {
+      if (detail.source === "configure") { render(); }
     });
-    var displayConfig = normalizeThemeToggleDisplayOptions(
-      Object.assign({}, base, {
-        ariaLabel: themeConfig.ariaLabel,
-        modes: themeConfig.modes,
-      }),
-    );
+    render();
     return {
-      component: displayConfig,
-      theme: themeConfig,
+      update: function update(nextOptions) { options = nextOptions; render(); },
+      destroy: function destroy() { unsubscribe(); if (cleanup) { cleanup(); } },
     };
   }
 
-  function mountThemeToggleComponent(hostElement, normalizedOptions, configureTheme, sourceLabel) {
-    var toggleCleanup = null;
-
-    function applyOptions(nextNormalized, label) {
-      var effectiveLabel = label || "theme-toggle";
-      if (configureTheme && nextNormalized.theme) {
-        themeManager.configure({
-          attribute: nextNormalized.theme.attribute,
-          targets: nextNormalized.theme.targets,
-          modes: nextNormalized.theme.modes,
-        });
-        if (
-          nextNormalized.theme.initialMode &&
-          nextNormalized.theme.initialMode !== themeManager.getMode()
-        ) {
-          themeManager.setMode(
-            nextNormalized.theme.initialMode,
-            effectiveLabel + ":init",
-          );
-        }
-      }
-      var displayOptions = deepMergeOptions({}, nextNormalized.component);
-      if (nextNormalized.theme && nextNormalized.theme.modes) {
-        displayOptions.modes = nextNormalized.theme.modes;
-      }
-      if (toggleCleanup) {
-        toggleCleanup();
-      }
-      toggleCleanup = initializeThemeToggle(hostElement, displayOptions);
-    }
-
-    applyOptions(normalizedOptions, sourceLabel || "theme-toggle");
-
+  function mountThemeToggleComponent(hostElement, normalizedOptions) {
+    var controlOwner = {};
+    themeManager.configure(normalizedOptions.theme.managerConfig, controlOwner, true);
+    var view = createThemeControlView(hostElement, normalizedOptions.component, true);
     return {
-      update: function update(nextNormalized, label) {
-        applyOptions(nextNormalized, label || "theme-toggle");
+      update: function update(nextNormalized) {
+        themeManager.configure(nextNormalized.theme.managerConfig, controlOwner, true);
+        view.update(nextNormalized.component);
       },
       destroy: function destroy() {
-        if (toggleCleanup) {
-          toggleCleanup();
-          toggleCleanup = null;
-        }
+        view.destroy();
+        themeManager.releaseControl(controlOwner);
       },
     };
   }
@@ -4931,8 +5060,8 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       options.settings = options.settings || {};
       options.settings.enabled = String(datasetSettingsFlag).toLowerCase() === "true";
     }
-    if (dataset.themeToggle) {
-      options.themeToggle = parseJsonValue(dataset.themeToggle, {});
+    if (dataset.themeToggle !== undefined) {
+      options.themeToggle = parseThemeConfigAttribute(dataset.themeToggle);
     }
     if (dataset.signOutLabel) {
       options.signOutLabel = dataset.signOutLabel;
@@ -6318,6 +6447,7 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       hasCompletedInitialBootstrap = false;
       markUnauthenticated({ emit: false });
       bootstrapSession();
+      dispatchEvent(rootElement, AUTH_OPTIONS_CHANGE_EVENT, {});
     }
 
     function destroy() {
@@ -7333,11 +7463,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       HEADER_DEFAULTS.settings,
       options.settings || {},
     );
-    var themeSource = deepMergeOptions(
-      {},
-      HEADER_DEFAULTS.themeToggle,
-      options.themeToggle || {},
-    );
 
     var stickyValue = HEADER_DEFAULTS.sticky;
     if (Object.prototype.hasOwnProperty.call(options, "sticky")) {
@@ -7396,12 +7521,13 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       enabled: true,
       ariaLabel: "Toggle theme",
     };
-    var themeNormalized = normalizeThemeToggleCore(themeSource, themeDefaults);
+    var themeNormalized = normalizeThemeToggleCore(options.themeToggle || {}, themeDefaults);
     if (
       typeof options.initialTheme === "string" &&
       !themeNormalized.initialMode
     ) {
       themeNormalized.initialMode = options.initialTheme.trim();
+      themeNormalized.managerConfig.initialMode = themeNormalized.initialMode;
     }
 
     var brandLabel =
@@ -7457,6 +7583,7 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
             : HEADER_DEFAULTS.settings.label,
       },
       themeToggle: {
+        managerConfig: themeNormalized.managerConfig,
         attribute: themeNormalized.attribute,
         targets: themeNormalized.targets,
         modes: themeNormalized.modes,
@@ -8478,6 +8605,8 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     );
     var options = normalizeHeaderOptions(combinedOptions);
     var cleanupHandlers = [];
+    var controlOwner = {};
+    themeManager.configure(options.themeToggle.managerConfig, controlOwner, true);
     ensureHeaderStyles(global.document || (global.window && global.window.document));
 
     var elements = mountHeaderDom(hostElement, options, !userMenuElement);
@@ -8499,14 +8628,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     var signInRedirectPending = false;
     var signInRedirectTarget = "";
     var isDestroyed = false;
-
-    var headerThemeConfig = options.themeToggle;
-
-    themeManager.configure({
-      attribute: headerThemeConfig.attribute,
-      targets: headerThemeConfig.targets,
-      modes: headerThemeConfig.modes,
-    });
 
     function updateThemeHost(modeValue) {
       hostElement.setAttribute("data-mpr-theme-mode", modeValue);
@@ -8616,12 +8737,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       elements.root.classList.add(HEADER_ROOT_CLASS + "--no-auth");
     }
 
-    if (
-      headerThemeConfig.initialMode &&
-      headerThemeConfig.initialMode !== themeManager.getMode()
-    ) {
-      themeManager.setMode(headerThemeConfig.initialMode, "header:init");
-    }
 
     mountProviderActions();
     updateThemeHost(themeManager.getMode());
@@ -8815,48 +8930,42 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
 
     return {
       update: function update(nextOptions) {
-        latestExternalOptions = deepMergeOptions(
+        var nextExternalOptions = deepMergeOptions(
           {},
           latestExternalOptions,
           nextOptions || {},
         );
+        if (Object.prototype.hasOwnProperty.call(nextOptions || {}, "themeToggle")) {
+          nextExternalOptions.themeToggle = deepMergeOptions({}, nextOptions.themeToggle);
+        }
         var updatedDatasetOptions = readHeaderOptionsFromDataset(hostElement);
         var updatedCombined = deepMergeOptions(
           {},
           updatedDatasetOptions,
-          latestExternalOptions,
+          nextExternalOptions,
         );
-        options = normalizeHeaderOptions(updatedCombined);
+        var nextNormalizedOptions = normalizeHeaderOptions(updatedCombined);
         if (
-          options.auth &&
+          nextNormalizedOptions.auth &&
           authController &&
           authController.state &&
           authController.state.options &&
-          authController.state.options.tenantId !== options.auth.tenantId
+          authController.state.options.tenantId !== nextNormalizedOptions.auth.tenantId
         ) {
           throw createAuthTenantIdChangeError(
             authController.state.options.tenantId,
-            options.auth.tenantId,
+            nextNormalizedOptions.auth.tenantId,
           );
         }
-        headerThemeConfig = options.themeToggle;
+        themeManager.configure(nextNormalizedOptions.themeToggle.managerConfig, controlOwner, true);
+        latestExternalOptions = nextExternalOptions;
+        options = nextNormalizedOptions;
         applyHeaderOptions(hostElement, elements, options);
         if (!options.settings.enabled && settingsModalController) {
           settingsModalController.close();
         }
         if (settingsModalController) {
           settingsModalController.updateLabel(options.settings.label);
-        }
-        themeManager.configure({
-          attribute: headerThemeConfig.attribute,
-          targets: headerThemeConfig.targets,
-          modes: headerThemeConfig.modes,
-        });
-        if (
-          headerThemeConfig.initialMode &&
-          headerThemeConfig.initialMode !== themeManager.getMode()
-        ) {
-          themeManager.setMode(headerThemeConfig.initialMode, "header:update");
         }
         if (options.auth && !authController) {
           authController = createAuthHeader(hostElement, options.auth);
@@ -8897,6 +9006,7 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       },
       destroy: function destroy() {
         isDestroyed = true;
+        themeManager.releaseControl(controlOwner);
         cleanupHandlers.forEach(function invoke(handler) {
           if (typeof handler === "function") {
             handler();
@@ -14450,7 +14560,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     });
   }
 
-  var FOOTER_THEME_SWITCHER_ERROR_CODE = "mpr-ui.footer.theme-switcher";
   var FOOTER_ROOT_CLASS = "mpr-footer";
   var FOOTER_SMALL_CLASS = FOOTER_ROOT_CLASS + "--small";
 
@@ -14473,7 +14582,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     privacyModalContent: "",
     themeToggle: Object.freeze({
       enabled: false,
-      variant: "",
       label: "Build by Marco Polo Research Lab",
       wrapperClass: "mpr-footer__theme-toggle",
       inputClass: "mpr-footer__theme-checkbox",
@@ -14538,98 +14646,10 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
   }
 
   function normalizeFooterThemeToggle(themeToggleInput) {
-    if (
-      themeToggleInput &&
-      typeof themeToggleInput === "object" &&
-      Object.prototype.hasOwnProperty.call(themeToggleInput, "themeSwitcher")
-    ) {
-      logLegacyConfig(
-        "<mpr-footer>",
-        "themeToggle.themeSwitcher",
-        LEGACY_DSL_THEME_VARIANT_REPLACEMENT,
-      );
-    }
-    var hasExplicitEnabled =
-      themeToggleInput &&
-      typeof themeToggleInput === "object" &&
-      Object.prototype.hasOwnProperty.call(themeToggleInput, "enabled");
-    var mergedToggle = mergeFooterObjects(
-      {},
-      FOOTER_DEFAULTS.themeToggle,
-      themeToggleInput || {},
-    );
-    var variantSource = "";
-    if (
-      typeof mergedToggle.variant === "string" &&
-      mergedToggle.variant.trim()
-    ) {
-      variantSource = mergedToggle.variant.trim();
-    }
-    var normalizedVariant = "";
-    var invalidVariant = false;
-    if (variantSource) {
-      var variantValue = variantSource.toLowerCase();
-      if (variantValue === "toggle" || variantValue === "switch") {
-        normalizedVariant = "switch";
-      } else if (variantValue === "button") {
-        normalizedVariant = "button";
-      } else if (variantValue === "square") {
-        normalizedVariant = "square";
-      } else {
-        logError(
-          FOOTER_THEME_SWITCHER_ERROR_CODE,
-          'Unsupported theme-switcher value "' + variantSource + '"',
-        );
-        invalidVariant = true;
-      }
-    }
-    var enabledValue = hasExplicitEnabled
-      ? Boolean(mergedToggle.enabled)
-      : Boolean(normalizedVariant);
-    if (invalidVariant) {
-      normalizedVariant = "";
-      enabledValue = false;
-    } else if (!normalizedVariant && enabledValue) {
-      normalizedVariant = "switch";
-    }
-    if (invalidVariant) {
-      enabledValue = false;
-    }
-    if (variantSource && !normalizedVariant) {
-      enabledValue = false;
-    }
-    mergedToggle.enabled = enabledValue;
-    mergedToggle.variant = normalizedVariant;
-    var core = normalizeThemeToggleCore(mergedToggle, {
-      enabled: FOOTER_DEFAULTS.themeToggle.enabled,
-      ariaLabel: FOOTER_DEFAULTS.themeToggle.ariaLabel,
-    });
-    var labelValue =
-      typeof mergedToggle.label === "string" && mergedToggle.label.trim()
-        ? mergedToggle.label.trim()
-        : FOOTER_DEFAULTS.themeToggle.label;
-    return {
-      enabled: core.enabled,
-      label: labelValue,
-      wrapperClass:
-        mergedToggle.wrapperClass || FOOTER_DEFAULTS.themeToggle.wrapperClass,
-      inputClass:
-        mergedToggle.inputClass || FOOTER_DEFAULTS.themeToggle.inputClass,
-      dataTheme:
-        typeof mergedToggle.dataTheme === "string"
-          ? mergedToggle.dataTheme
-          : FOOTER_DEFAULTS.themeToggle.dataTheme,
-      inputId:
-        typeof mergedToggle.inputId === "string"
-          ? mergedToggle.inputId
-          : FOOTER_DEFAULTS.themeToggle.inputId,
-      ariaLabel: core.ariaLabel,
-      variant: normalizedVariant,
-      attribute: core.attribute,
-      targets: core.targets,
-      modes: core.modes,
-      initialMode: core.initialMode,
-    };
+    rejectThemeSelectorOptions(themeToggleInput);
+    var merged = mergeFooterObjects({}, FOOTER_DEFAULTS.themeToggle, themeToggleInput || {});
+    var core = normalizeThemeToggleCore(themeToggleInput || {}, { enabled: true, ariaLabel: merged.ariaLabel });
+    return Object.assign({}, merged, core, { inputClass: merged.inputClass });
   }
 
   function normalizeFooterConfig() {
@@ -14647,8 +14667,21 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
           return candidate.themeToggle;
         }
         return current;
-      }, mergedConfig.themeToggle),
+      }, {}),
     );
+    providedConfigs.forEach(function validateFooterSelector(candidate) {
+      if (candidate && Object.prototype.hasOwnProperty.call(candidate, "themeSwitcher")) {
+        throw createThemeControlError("themeSwitcher is obsolete; use themeControl");
+      }
+    });
+    if (Object.prototype.hasOwnProperty.call(mergedConfig, "themeControl")) {
+      if (Object.prototype.hasOwnProperty.call(mergedConfig.themeToggle.managerConfig, "control") &&
+          JSON.stringify(normalizeThemeControl(mergedConfig.themeControl, mergedConfig.themeToggle.modes)) !==
+          JSON.stringify(normalizeThemeControl(mergedConfig.themeToggle.managerConfig.control, mergedConfig.themeToggle.modes))) {
+        throw createThemeControlError("theme-control disagrees with theme-config.control");
+      }
+      mergedConfig.themeToggle.managerConfig.control = mergedConfig.themeControl;
+    }
     var resolvedMenu = providedConfigs.reduce(function reduceFooterMenu(current, candidate) {
       if (
         candidate &&
@@ -14770,37 +14803,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
         }
       });
     }
-  }
-
-  function resolveFooterThemeModes(themeToggleConfig) {
-    var config = themeToggleConfig && typeof themeToggleConfig === "object"
-      ? themeToggleConfig
-      : {};
-    var candidateModes = Array.isArray(config.modes) && config.modes.length
-      ? config.modes
-      : DEFAULT_THEME_MODES;
-    var modes = normalizeThemeModes(candidateModes);
-    var attribute =
-      typeof config.attribute === "string" && config.attribute.trim()
-        ? config.attribute.trim()
-        : DEFAULT_THEME_ATTRIBUTE;
-    var candidateTargets =
-      Array.isArray(config.targets) && config.targets.length
-        ? config.targets
-        : DEFAULT_THEME_TARGETS;
-    var targets = normalizeThemeTargets(candidateTargets);
-    var initialMode = null;
-    if (typeof config.mode === "string" && config.mode.trim()) {
-      initialMode = config.mode.trim();
-    } else if (typeof config.initialMode === "string" && config.initialMode.trim()) {
-      initialMode = config.initialMode.trim();
-    }
-    return {
-      modes: modes,
-      attribute: attribute,
-      targets: targets,
-      initialMode: initialMode,
-    };
   }
 
   function setFooterClass(targetElement, className) {
@@ -15318,23 +15320,14 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     if (dataset.privacyModalContent) {
       options.privacyModalContent = dataset.privacyModalContent;
     }
-    if (dataset.themeToggle) {
-      options.themeToggle = parseJsonValue(dataset.themeToggle, {});
+    if (dataset.themeToggle !== undefined) {
+      options.themeToggle = parseThemeConfigAttribute(dataset.themeToggle);
     }
-    var themeSwitcherValue = dataset.themeSwitcher;
-    if (
-      !themeSwitcherValue &&
-      rootElement &&
-      typeof rootElement.getAttribute === "function"
-    ) {
-      var attributeValue = rootElement.getAttribute("theme-switcher");
-      if (attributeValue) {
-        themeSwitcherValue = attributeValue;
-      }
+    if (dataset.themeSwitcher !== undefined || rootElement.hasAttribute && rootElement.hasAttribute("theme-switcher")) {
+      throw createThemeControlError("theme-switcher is obsolete; use theme-control");
     }
-    if (themeSwitcherValue) {
-      options.themeToggle = options.themeToggle || {};
-      options.themeToggle.variant = themeSwitcherValue;
+    if (dataset.themeControl !== undefined) {
+      options.themeControl = parseThemeControlAttribute(dataset.themeControl);
     }
     if (dataset.menu !== undefined) {
       options.menu = parseDropdownMenuValue(dataset.menu);
@@ -15513,11 +15506,14 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
       config: normalizeFooterConfig(startingOptions),
       $el: null,
       cleanupHandlers: [],
+      themeControlOwner: {},
       hostBaseClassTokens: [],
       $dispatch: null,
       init: function init(userOptions) {
         var datasetOptions = this.$el ? readFooterOptionsFromDataset(this.$el) : {};
-        this.config = normalizeFooterConfig(startingOptions, datasetOptions, userOptions);
+        var nextConfig = normalizeFooterConfig(userOptions === undefined ? startingOptions : {}, datasetOptions, userOptions);
+        themeManager.configure(nextConfig.themeToggle.managerConfig, this.themeControlOwner, true);
+        this.config = nextConfig;
 
         ensureFooterStyles(global.document || (global.window && global.window.document));
 
@@ -15528,18 +15524,6 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
         });
         this.cleanupHandlers = [];
 
-        var footerTheme = this.config.themeToggle;
-        themeManager.configure({
-          attribute: footerTheme.attribute,
-          targets: footerTheme.targets,
-          modes: footerTheme.modes,
-        });
-        if (
-          footerTheme.initialMode &&
-          footerTheme.initialMode !== themeManager.getMode()
-        ) {
-          themeManager.setMode(footerTheme.initialMode, "footer:init");
-        }
 
         if (!this.$el) {
           return;
@@ -15599,10 +15583,8 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
         var toggleHost = footerQuery(footerRoot, '[data-mpr-footer="theme-toggle"]');
         if (toggleHost) {
           var footerToggleConfig = buildFooterThemeToggleConfig(this.config);
-          var themeCleanup = initializeThemeToggle(toggleHost, footerToggleConfig);
-          if (typeof themeCleanup === "function") {
-            this.cleanupHandlers.push(themeCleanup);
-          }
+          var themeView = createThemeControlView(toggleHost, footerToggleConfig, false);
+          this.cleanupHandlers.push(function cleanupFooterThemeView() { themeView.destroy(); });
         }
 
         var stickySpacerElement =
@@ -15619,6 +15601,7 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
         }
       },
       destroy: function destroy() {
+        themeManager.releaseControl(this.themeControlOwner);
         this.cleanupHandlers.forEach(function callCleanup(callback) {
           if (typeof callback === "function") {
             callback();
@@ -15669,14 +15652,13 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
     var controller = mountThemeToggleComponent(
       host,
       normalized,
-      true,
-      "theme-toggle:init",
     );
     return {
       update: function update(nextOptions) {
-        latestOptions = deepMergeOptions({}, latestOptions, nextOptions || {});
-        var normalizedNext = normalizeStandaloneThemeToggleOptions(latestOptions);
-        controller.update(normalizedNext, "theme-toggle:update");
+        var candidateOptions = deepMergeOptions({}, nextOptions || {});
+        var normalizedNext = normalizeStandaloneThemeToggleOptions(candidateOptions);
+        controller.update(normalizedNext);
+        latestOptions = candidateOptions;
       },
       destroy: function destroy() {
         controller.destroy();
@@ -15997,13 +15979,21 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
           }
           this.removeAttribute("data-mpr-auth-error");
           var userMenuElement = this.__headerUserMenuElement;
-          if (this.__headerController) {
-            this.__headerController.update(options);
-          } else {
-            this.__headerController = createSiteHeaderController(this, options, {
-              userMenuElement: userMenuElement,
-            });
+          try {
+            if (this.__headerController) {
+              this.__headerController.update(options);
+            } else {
+              this.__headerController = createSiteHeaderController(this, options, {
+                userMenuElement: userMenuElement,
+              });
+            }
+          } catch (error) {
+            if (error.code !== THEME_CONTROL_ERROR) { throw error; }
+            reportThemeControlError(this, error);
+            return;
           }
+          this.__mprThemeControlRejected = false;
+          this.removeAttribute("data-mpr-theme-control-error");
           if (this.__headerSlots) {
             var elements = resolveHeaderElements(this);
             applyHeaderSlotContent(this.__headerSlots, elements);
@@ -16056,46 +16046,27 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
           if (!this.__mprConnected) {
             return;
           }
-          var options;
           try {
-            options = buildFooterOptionsFromAttributes(this);
+            var options = buildFooterOptionsFromAttributes(this);
+            if (this.__footerController) { this.__footerController.update(options); }
+            else { this.__footerController = createFooterController(this, options); }
+            this.removeAttribute("data-mpr-footer-error");
+            this.removeAttribute("data-mpr-theme-control-error");
+            if (this.__footerSlots) { applyFooterSlotContent(this.__footerSlots, this); }
           } catch (error) {
-            var errorObject = /** @type {MprUiError} */ (error);
-            var errorCode = errorObject && errorObject.code
-              ? errorObject.code
-              : DROPDOWN_ERROR_CODES.VALUE_INVALID;
-            if (
-              this.__footerController &&
-              typeof this.__footerController.destroy === "function"
-            ) {
-              this.__footerController.destroy();
-            }
-            this.__footerController = null;
+            var errorCode = error.code || DROPDOWN_ERROR_CODES.VALUE_INVALID;
             this.setAttribute("data-mpr-footer-error", errorCode);
-            this.innerHTML = "";
-            logError(
-              errorCode,
-              errorObject && errorObject.message
-                ? errorObject.message
-                : String(error),
-            );
-            dispatchEvent(this, "mpr-footer:error", {
-              code: errorCode,
-              message:
-                errorObject && errorObject.message
-                  ? errorObject.message
-                  : String(error),
-            });
-            return;
-          }
-          this.removeAttribute("data-mpr-footer-error");
-          if (this.__footerController) {
-            this.__footerController.update(options);
-          } else {
-            this.__footerController = createFooterController(this, options);
-          }
-          if (this.__footerSlots) {
-            applyFooterSlotContent(this.__footerSlots, this);
+            if (errorCode === THEME_CONTROL_ERROR) {
+              reportThemeControlError(this, error);
+            } else {
+              if (errorCode !== THEME_STORAGE_ERROR) {
+                if (this.__footerController) { this.__footerController.destroy(); }
+                this.__footerController = null;
+                this.innerHTML = "";
+              }
+              logError(errorCode, error.message);
+            }
+            dispatchEvent(this, "mpr-footer:error", { code: errorCode, message: error.message });
           }
         }
       };
@@ -16131,12 +16102,17 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
           if (!this.__mprConnected) {
             return;
           }
-          var options = buildThemeToggleOptionsFromAttributes(this);
-          if (this.__themeToggleController) {
-            this.__themeToggleController.update(options);
-          } else {
-            this.__themeToggleController =
-              createThemeToggleController(this, options);
+          try {
+            var options = buildThemeToggleOptionsFromAttributes(this);
+            if (this.__themeToggleController) { this.__themeToggleController.update(options); }
+            else { this.__themeToggleController = createThemeToggleController(this, options); }
+            if (themeManager.configure(null).control) {
+              this.__mprThemeControlRejected = false;
+              this.removeAttribute("data-mpr-theme-control-error");
+            }
+          } catch (error) {
+            if (error.code === THEME_CONTROL_ERROR) { reportThemeControlError(this, error); }
+            else { throw error; }
           }
         }
       };
@@ -17166,6 +17142,9 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
         constructor() {
           super();
           this.__authController = null;
+          this.__ownsAuthController = false;
+          this.__authOptionsEventTarget = null;
+          this.__authOptionsEventHandler = this.__handleAuthOptionsChange.bind(this);
           this.__providerActionsCleanup = null;
           this.__providerActionsHost = null;
         }
@@ -17183,11 +17162,31 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
             this.__providerActionsCleanup();
             this.__providerActionsCleanup = null;
           }
-          if (this.__authController && typeof this.__authController.destroy === "function") {
+          this.__releaseAuthController();
+          this.__providerActionsHost = null;
+        }
+        __releaseAuthController() {
+          if (this.__authOptionsEventTarget) {
+            this.__authOptionsEventTarget.removeEventListener(
+              AUTH_OPTIONS_CHANGE_EVENT,
+              this.__authOptionsEventHandler,
+            );
+            this.__authOptionsEventTarget = null;
+          }
+          if (
+            this.__ownsAuthController &&
+            this.__authController &&
+            typeof this.__authController.destroy === "function"
+          ) {
             this.__authController.destroy();
           }
           this.__authController = null;
-          this.__providerActionsHost = null;
+          this.__ownsAuthController = false;
+        }
+        __handleAuthOptionsChange(event) {
+          if (event.target === this.__authOptionsEventTarget) {
+            this.__renderLoginButton();
+          }
         }
         __renderLoginButton() {
           if (!this.__mprConnected) {
@@ -17206,20 +17205,32 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
           }
           this.__providerActionsHost = container;
           var authOptions;
+          var sharedController = null;
           try {
-            authOptions = buildLoginAuthOptionsFromAttributes(this);
+            if (this.hasAttribute(AUTH_COMPONENT_TARGET_ATTRIBUTE)) {
+              if (!this.getAttribute(AUTH_COMPONENT_TARGET_ATTRIBUTE).trim()) {
+                throw createAuthComponentError(
+                  "mpr-ui.auth_component.target_required",
+                  "auth-target must reference an auth owner",
+                );
+              }
+              sharedController = resolveAuthComponentController(this);
+              if (sharedController === this.__authController && this.__ownsAuthController) {
+                throw createAuthComponentError(
+                  "mpr-ui.auth_component.target_invalid",
+                  "auth-target must reference another auth owner",
+                );
+              }
+              authOptions = sharedController.state.options;
+            } else {
+              authOptions = buildLoginAuthOptionsFromAttributes(this);
+            }
           } catch (error) {
             if (this.__providerActionsCleanup) {
               this.__providerActionsCleanup();
               this.__providerActionsCleanup = null;
             }
-            if (
-              this.__authController &&
-              typeof this.__authController.destroy === "function"
-            ) {
-              this.__authController.destroy();
-            }
-            this.__authController = null;
+            this.__releaseAuthController();
             clearNodeContents(container);
             this.setAttribute(
               "data-mpr-auth-error",
@@ -17236,6 +17247,25 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
             });
             return;
           }
+          if (this.__providerActionsCleanup) {
+            this.__providerActionsCleanup();
+            this.__providerActionsCleanup = null;
+          }
+          if (sharedController) {
+            if (this.__authController !== sharedController) {
+              this.__releaseAuthController();
+              this.__authController = sharedController;
+            }
+            if (!this.__authOptionsEventTarget) {
+              this.__authOptionsEventTarget = sharedController.host;
+              this.__authOptionsEventTarget.addEventListener(
+                AUTH_OPTIONS_CHANGE_EVENT,
+                this.__authOptionsEventHandler,
+              );
+            }
+          } else if (!this.__ownsAuthController) {
+            this.__releaseAuthController();
+          }
           var tenantId = normalizeTenantId(authOptions.tenantId);
           var currentTenantId =
             this.__authController &&
@@ -17243,17 +17273,14 @@ function normalizeStandaloneThemeToggleOptions(rawOptions) {
             this.__authController.state.options
               ? normalizeTenantId(this.__authController.state.options.tenantId)
               : null;
-          if (currentTenantId && currentTenantId !== tenantId) {
+          if (this.__ownsAuthController && currentTenantId && currentTenantId !== tenantId) {
             throw createAuthTenantIdChangeError(currentTenantId, tenantId);
           }
-          if (this.__authController && typeof this.__authController.updateOptions === "function") {
+          if (this.__ownsAuthController && typeof this.__authController.updateOptions === "function") {
             this.__authController.updateOptions(authOptions);
           } else if (!this.__authController) {
             this.__authController = createAuthHeader(this, authOptions);
-          }
-          if (this.__providerActionsCleanup) {
-            this.__providerActionsCleanup();
-            this.__providerActionsCleanup = null;
+            this.__ownsAuthController = true;
           }
           var loginElement = this;
           var buttonOptions = buildLoginButtonDisplayOptions(loginElement);
