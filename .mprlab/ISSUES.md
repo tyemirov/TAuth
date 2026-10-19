@@ -5,6 +5,22 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B136] (P2) Reject fixture output paths with URL delimiters.
+  Goal: Fixture preparation cannot change a database outside its new output directory.
+  Evidence: A path with `#`, `?`, or `%` can select a different database during URL conversion.
+  Requirements:
+  - Reject these characters in the absolute output path before database access.
+  - Keep an existing database unchanged when the output path is rejected.
+  - Add public CLI tests for delimiters in the output directory name and its parent path.
+  Validation:
+  The public CLI regression failed before the code change.
+  The CLI now rejects literal and encoded delimiters before directory creation or database access.
+  The regression verifies rejection in the output directory name and its existing parent path.
+  Rejected paths leave no output directory and keep the neighboring database unchanged.
+  `CI=1 make test-test-fixture-cli </dev/null` and final `CI=1 make ci </dev/null` passed.
+  Independent review found no remaining defects.
+  Files: `cmd/testfixture/main.go`, `tests/testfixture/fixture_test.go`, and `docs/test-fixture.md`.
+
 - [x] [B135] (P1) Preserve the console color palette after header updates.
   Goal: Header updates keep the current palette and all four palette selections.
   Evidence: A header label change reset the shared catalog to `dark` and `light`.
