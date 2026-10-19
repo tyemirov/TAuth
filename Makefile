@@ -13,7 +13,7 @@ test-local-lifecycle:
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment test-managed-proxy-trust
+ci: format lint test-go test-test-fixture-runtime test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment test-managed-proxy-trust
 
 .PHONY: test-proxy-trust test-managed-proxy-trust
 test-proxy-trust:
@@ -26,10 +26,10 @@ test-managed-proxy-trust:
 up down:
 	bash local/stack.sh $@
 
-format:
+format: format-test-fixture
 	$(GO) fmt ./...
 
-lint:
+lint: lint-test-fixture
 	@command -v $(STATICCHECK) >/dev/null 2>&1 || { echo 'staticcheck is required (install via `go install honnef.co/go/tools/cmd/staticcheck@latest`)'; exit 1; }
 	@command -v $(INEFFASSIGN) >/dev/null 2>&1 || { echo 'ineffassign is required (install via `go install github.com/gordonklaus/ineffassign@latest`)'; exit 1; }
 	$(GO) vet -tags $(GO_TAGS) ./...
@@ -178,3 +178,27 @@ test-authkit:
 format-application-subject:
 	$(GO) fmt ./internal/authkit ./internal/web
 	gofmt -w cmd/server/main.go
+
+TEST_FIXTURE_OUTPUT ?= .cache/tauth-test-fixture
+.PHONY: build-test-fixture test-test-fixture test-test-fixture-cli
+build-test-fixture:
+	mkdir -p "$(dir $(TEST_FIXTURE_OUTPUT))"
+	CGO_ENABLED=0 $(GO) build -tags tauth_testfixture -o "$(TEST_FIXTURE_OUTPUT)" ./cmd/testfixture
+
+test-test-fixture-cli:
+	$(GO) test ./tests/testfixture -count=1 -v
+
+test-test-fixture: test-test-fixture-cli test-test-fixture-runtime
+
+.PHONY: test-test-fixture-runtime
+test-test-fixture-runtime:
+	bash tests/test-fixture-runtime.sh
+
+.PHONY: format-test-fixture lint-test-fixture
+format-test-fixture:
+	GOFLAGS="-tags=tauth_testfixture" $(GO) fmt ./cmd/testfixture ./tests/testfixture
+
+lint-test-fixture:
+	$(GO) vet -tags "$(GO_TAGS),tauth_testfixture" ./cmd/testfixture
+	$(STATICCHECK) -tags "$(GO_TAGS),tauth_testfixture" ./cmd/testfixture
+	GOFLAGS="-tags=$(GO_TAGS),tauth_testfixture" $(INEFFASSIGN) ./cmd/testfixture
