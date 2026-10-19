@@ -91,6 +91,9 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve output directory: %w", err)
 	}
+	if strings.ContainsAny(directory, "#?%") {
+		return errors.New("output directory path must not contain #, ?, or %")
+	}
 	if _, err := os.Lstat(directory); err == nil {
 		return errors.New("output directory already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
