@@ -144,6 +144,7 @@ const (
 	errorCodeDuplicateNativeAppleID      = "tenant.duplicate_native_apple_client_id"
 	errorCodeAppleOAuthDisabled          = "tenant.apple_oauth_disabled"
 	errorCodeInvalidAppleClientID        = "tenant.invalid_apple_client_id"
+	errorCodeInvalidAppleEventAudience   = "tenant.invalid_apple_notification_audience"
 	errorCodeInvalidAppleTeamID          = "tenant.invalid_apple_team_id"
 	errorCodeInvalidAppleKeyID           = "tenant.invalid_apple_key_id"
 	errorCodeInvalidApplePrivateKey      = "tenant.invalid_apple_private_key"
@@ -198,6 +199,7 @@ const (
 
 var tenantIDRegex = regexp.MustCompile(tenantIDPattern)
 var nativeGooglePlatformRegex = regexp.MustCompile(nativeGooglePlatformPattern)
+var appleEventAudienceRegex = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[.][a-z][a-z0-9]*)+$`)
 
 // LoadConfig reads and validates tenants from the provided YAML file path.
 func LoadConfig(path string) (Config, error) {
@@ -936,6 +938,10 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 		}
 		return AppleOAuth{}, nil
 	}
+	notificationAudience := strings.TrimSpace(raw.NotificationAudience)
+	if notificationAudience != "" && !appleEventAudienceRegex.MatchString(notificationAudience) {
+		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleEventAudience, tenantID)
+	}
 	clientID := strings.TrimSpace(raw.ClientID)
 	if clientID == "" {
 		return AppleOAuth{}, fmt.Errorf("%w: %s tenant=%s", ErrInvalidTenantConfig, errorCodeInvalidAppleClientID, tenantID)
@@ -980,7 +986,7 @@ func parseAppleOAuth(raw FileAppleOAuth, tenantID TenantID, allowInsecureHTTP bo
 		enabled:               true,
 		clientID:              clientID,
 		nativeClientIDs:       nativeClientIDs,
-		notificationAudience:  strings.TrimSpace(raw.NotificationAudience),
+		notificationAudience:  notificationAudience,
 		teamID:                teamID,
 		keyID:                 keyID,
 		privateKey:            privateKey,

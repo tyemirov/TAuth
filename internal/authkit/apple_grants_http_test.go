@@ -345,6 +345,7 @@ func TestAppleErasureVerifiedNotificationHTTP(t *testing.T) {
 		{"signature", func(jwt.MapClaims, map[string]any) {}, badKey, 401},
 		{"issuer", func(c jwt.MapClaims, e map[string]any) { c["iss"] = "https://other.example" }, key, 401},
 		{"audience", func(c jwt.MapClaims, e map[string]any) { c["aud"] = "other-primary" }, key, 401},
+		{"multiple audiences", func(c jwt.MapClaims, e map[string]any) { c["aud"] = []string{"com.example.primary", "other-primary"} }, key, 401},
 		{"subject", func(c jwt.MapClaims, e map[string]any) { e["sub"] = "other-subject" }, key, 204},
 		{"stale", func(c jwt.MapClaims, e map[string]any) { e["event_time"] = time.Now().Add(-time.Minute).Unix() }, key, 204},
 		{"same-second", func(c jwt.MapClaims, e map[string]any) { e["event_time"] = time.Now().Unix() }, key, 204},

@@ -25,6 +25,17 @@ type appleNotification struct {
 func mountAppleNotifications(router gin.IRouter, registry TenantRegistry, accounts *DatabaseUserStore) {
 	router.POST(AppleNotificationPath, func(request *gin.Context) {
 		request.Header("Cache-Control", "no-store")
+		enabled := false
+		for _, candidate := range registry.configs {
+			if candidate.AppleOAuth.Enabled && candidate.AppleOAuth.NotificationAudience != "" {
+				enabled = true
+				break
+			}
+		}
+		if !enabled {
+			request.AbortWithStatus(http.StatusNotFound)
+			return
+		}
 		var inbound struct {
 			Payload string `json:"payload"`
 		}
@@ -37,10 +48,6 @@ func mountAppleNotifications(router gin.IRouter, registry TenantRegistry, accoun
 		var extra json.RawMessage
 		if err := decoder.Decode(&extra); err != io.EOF {
 			request.AbortWithStatus(http.StatusBadRequest)
-			return
-		}
-		if accounts == nil || accounts.providerGrantCipher == nil {
-			request.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
 		if len(inbound.Payload) == 0 || len(inbound.Payload) > 65536 {
@@ -67,6 +74,10 @@ func mountAppleNotifications(router gin.IRouter, registry TenantRegistry, accoun
 		}
 		if matches != 1 {
 			request.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		if accounts == nil || accounts.providerGrantCipher == nil {
+			request.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
 		event, err := verifyAppleNotification(request.Request.Context(), config.AppleOAuth, inbound.Payload, accounts.now().UTC())

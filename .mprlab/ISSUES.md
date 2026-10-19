@@ -60,24 +60,18 @@ Planning and recurring entries stay in this tracker with unresolved work.
   Publication and production deployment remain pending.
   Files: `web/app/palette.js`, `web/app/index.html`, `web/app/vendor/`, and `tests/console-workspace.browser.cjs`.
 
-- [x] [B134] (P1) Accept an optional Apple notification audience during deployment.
-  Goal: Deploy Apple login when notifications are disabled.
-  Evidence: The deployment config renderer rejected an empty `notification_audience` from Gateway.
-  Requirements:
-  - Accept an omitted or empty `notification_audience` with notifications disabled.
-  - Keep Apple login enabled for both tenant resource kinds.
-  - Pass a configured audience to the tenant configuration.
-  - Reject unknown Apple configuration fields.
-  Validation:
-  The CLI regression test reproduced the unknown-field error before the production code change.
-  The corrected CLI and tenant projection passed all audience cases for both tenant resource kinds.
-  The renderer CLI suite and final `make ci` passed, including local browser and container tests.
-  Independent review found no remaining defects.
-  Review correction removed an incomplete palette regression from this Apple change.
-  The palette defect remains in MPR UI B080, GitHub issue #238.
-  Final `make ci` passed after the review correction.
-  Release, publication, and production deployment remain pending.
-  Files: `internal/deploymentconfig/render.go`, `cmd/server/service_renderer_apple_test.go`, and `.mprlab/ISSUES.md`.
+- [x] [B134] (P1) Preserve Apple login during deployment.
+  Goal: Keep Apple login enabled for both tenant resource kinds.
+  Resolution: Apple server events use one optional advanced setting.
+  Normal deployment does not require this feature.
+  An absent or empty value disables event processing before external effects.
+  The endpoint returns `404` when no tenant enables the feature.
+  Explicit account deletion and outbound Apple token revocation remain independent.
+  Validation: Public CLI and HTTP regressions cover omitted, empty, explicit, malformed, disabled, and mixed tenant configurations.
+  The HTTP and CLI regressions failed before the code changes.
+  Gateway artifact acceptance passed through the real renderer, service validator, and tenant projection.
+  Final `CI=1 make ci </dev/null` and whitespace checks passed.
+  Production publication and deployment remain separate operations.
 
 - [x] [B133] (P1) Show session key export without a customer API origin.
   Goal: Owners can export the session key for each active tenant.
