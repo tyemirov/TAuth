@@ -89,6 +89,8 @@ The tool does not accept a database URL, an overwrite option, or production impo
 Run the executable with closed standard input.
 The output parent directory must exist.
 The output directory must not exist.
+The absolute output path must not contain `#`, `?`, or `%`.
+This restriction prevents URL conversion from selecting a different database.
 
 ```sh
 CI=1 /absolute/path/tauth-test-fixture \
@@ -97,6 +99,7 @@ CI=1 /absolute/path/tauth-test-fixture \
 ```
 
 An existing output directory causes an error before database access.
+A prohibited output path causes an error before directory creation or database access.
 A rejected declaration creates no output directory.
 A failed preparation removes its incomplete output.
 The tool generates fresh encryption material for each successful preparation.
