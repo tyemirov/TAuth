@@ -5,6 +5,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B135] (P1) Preserve the console color palette after header updates.
+  Goal: Header updates keep the current palette and all four palette selections.
+  Evidence: A header label change reset the shared catalog to `dark` and `light`.
+  Requirements:
+  - Use the explicit quadrant control with four named selections.
+  - Use `tauth.console.palette` as the single palette storage key.
+  - Keep automatic synchronization after storage, focus, visibility, and page restoration events.
+  - If a write fails, keep the active palette and show the storage error.
+  Validation:
+  The Chromium regression reproduced the catalog reset before production changes.
+  The current MPR UI candidate passed the header regression with the actual TAuth palette initializer before the asset copy.
+  Automated Chromium passed pointer selection, keyboard selection, reload, header updates, page synchronization, and storage failure recovery.
+  The test verifies one canonical write per selection and no write during synchronization.
+  Additional Chromium regressions reproduced a failed synchronization retry and an update after palette cleanup.
+  The corrections keep the cache unchanged after a failed update and stop delayed updates after cleanup.
+  Final `CI=1 make ci </dev/null` passed after both corrections.
+  Independent review found no remaining defects.
+  Publication and production deployment remain pending.
+  Files: `web/app/palette.js`, `web/app/index.html`, `web/app/vendor/`, and `tests/console-workspace.browser.cjs`.
+
 - [x] [B134] (P1) Accept an optional Apple notification audience during deployment.
   Goal: Deploy Apple login when notifications are disabled.
   Evidence: The deployment config renderer rejected an empty `notification_audience` from Gateway.
@@ -819,6 +839,31 @@ The issue notes below distinguish existing repairs, test results, and remaining 
   Provide a CLI command that reads `config.yaml` and prints a focused, actionable report (and stable error codes) for common “can’t authenticate” issues: origin not configured/unknown, ambiguous origins requiring tenant override, CORS allowlist missing the frontend origin, cookie scope collisions, cookie_domain/localhost pitfalls, missing/incorrect `enable_tenant_header_override` for shared-origin clients, and JWT validation parameters to sync with downstream services (issuer, session cookie name, tenant signing key fingerprints). Include a dedicated check/hint for issuer mismatch with common downstream validators (e.g. expecting `mprlab-auth` vs TAuth issuer `tauth`).
 
 ## Features
+
+- [x] [F020] (P1) Export an isolated application fixture for integration tests.
+  Goal: Consumer tests can run the current database-backed TAuth service without production enrollment.
+  Requirements:
+  - Build a separate test-only executable with an explicit build tag.
+  - Accept a strict fixture declaration with loopback origins and explicit provider settings.
+  - Create a fresh encrypted store with a synthetic owner, App, and active application tenant.
+  - Export service-only configuration and the independent validator configuration.
+  - Reject an existing output directory before database access.
+  - Keep the tool outside the production service and image.
+  Validation: Verify the public CLI, rejected inputs, authorization, source-built service startup, restart, and final `make ci`.
+  Result:
+  The public CLI regression failed because the fixture command did not exist.
+  Tagged lint and CLI acceptance passed after implementation.
+  The tests verify strict input rejection, encrypted secrets, validator authorization, and existing-data preservation.
+  The source-built production image accepted the actual application tenant before and after restart.
+  Final `CI=1 make ci </dev/null` passed with exit status 0.
+  The independent source review found no actionable runtime or isolation defect.
+  The independent evidence review accepted the TAuth CI, immutable executable, and current-image consumer smoke test.
+  The immutable host artifact and its SHA-256 were supplied explicitly to Prompts.
+  Artifact SHA-256: `b49b7ccba90cfecd40ae449b6fd522fadacbcfcc62467ae535bd1e2cb3d9ba4a`.
+  Build identity: Go 1.27.1, `darwin/arm64`, `CGO_ENABLED=0`, source `51dca75b93da` with local changes.
+  Publication remains pending. Hosted `@latest` acquisition requires publication of F020 first.
+  Files: `cmd/testfixture/main.go`, `tests/testfixture/fixture_test.go`, `tests/test-fixture-runtime.sh`, `Makefile`, `docs/test-fixture.md`, `README.md`, and `.mprlab/TERMINOLOGY.md`.
+
 
 - [x] [F019] (P1) {F002,B125} Remove Apple access during account erasure.
   Goal:
