@@ -39,7 +39,7 @@ paths:
   /auth/apple/notifications:
     post:
       operationId: acceptAppleNotification
-      description: Verify an Apple event with the explicit notification audience and record its durable receipt.
+      description: Process an explicitly enabled Apple event and record its durable receipt.
       requestBody:
         required: true
         content:
@@ -52,6 +52,7 @@ paths:
                 payload: {type: string, maxLength: 65536}
       responses:
         "204": {description: The verified event was processed. Stale or ambiguous events cannot complete erasure.}
+        "404": {description: No tenant enables Apple server events. No provider request or database access occurs.}
         "400": {description: Invalid JSON or notification size.}
         "401": {description: Invalid signature, issuer, audience, or event data.}
         "503": {description: Notification persistence is unavailable.}

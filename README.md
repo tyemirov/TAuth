@@ -782,19 +782,7 @@ Local removal does not count as provider revocation.
 Accounts without stored Apple grants still get local account removal.
 Their Apple entry becomes `manual_action_required`.
 Use [Apple's manual revocation instructions](https://support.apple.com/en-us/102571) to remove the app authorization.
-The operation does not claim provider completion without a verified Apple notification.
-
-Configure `apple_oauth.notification_audience` with the exact primary App ID for the Apple group.
-The value is optional. An empty value disables notification acceptance for that tenant.
-Register `/auth/apple/notifications` as the server notification endpoint in Apple Developer.
-Verify the primary App ID and provider registration separately from local tests.
-The endpoint accepts JSON `{"payload":"SIGNED_APPLE_NOTIFICATION"}` without a session cookie.
-It verifies the Apple signature, issuer, explicit audience, event subject, and event time.
-Only `consent-revoked` and `account-deleted` can confirm provider revocation.
-Email events cannot complete erasure.
-Each event must be later than the operation and each applicable grant generation, measured in whole seconds.
-Same-second events keep the operation pending because their order is ambiguous.
-Durable event receipts prevent repeated events from completing another operation.
+Manual provider revocation can remain pending.
 An ordinary Apple login cannot bypass an incomplete operation fence.
 
 These provider rules follow [Apple TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).

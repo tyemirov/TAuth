@@ -14,7 +14,7 @@ import (
 
 func TestConsoleRendererOptionalAppleNotifications(t *testing.T) {
 	const audienceField = "notification_audience"
-	const configuredAudience = "com.example.browser-demo.primary"
+	const configuredAudience = "com.example.browserdemo.primary"
 	for _, resourceKind := range []string{"tauth_tenant", "tauth_github_tenant"} {
 		t.Run(resourceKind, func(t *testing.T) {
 			for _, scenario := range []struct {
@@ -25,6 +25,10 @@ func TestConsoleRendererOptionalAppleNotifications(t *testing.T) {
 			}{
 				{name: "omitted", appleSettings: map[string]any{}},
 				{name: "empty", appleSettings: map[string]any{audienceField: ""}},
+				{name: "whitespace", appleSettings: map[string]any{audienceField: "  "}},
+				{name: "malformed", appleSettings: map[string]any{audienceField: "https://apple.example.test"}, expectedError: "tenant.invalid_apple_notification_audience"},
+				{name: "invalid separator", appleSettings: map[string]any{audienceField: "com..example"}, expectedError: "tenant.invalid_apple_notification_audience"},
+				{name: "inner whitespace", appleSettings: map[string]any{audienceField: "com.example app"}, expectedError: "tenant.invalid_apple_notification_audience"},
 				{name: "configured", appleSettings: map[string]any{audienceField: configuredAudience}, expectedAudience: configuredAudience},
 				{name: "unknown field", appleSettings: map[string]any{"unexpected_notification_setting": true}, expectedError: `unknown field "unexpected_notification_setting"`},
 			} {
