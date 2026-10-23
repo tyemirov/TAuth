@@ -344,10 +344,19 @@ func selectedImage(root string) (string, string, error) {
 		lifecycle = filepath.Join(root, lifecycle)
 	}
 	var current struct {
-		Release struct {
-			Version   string                                        `json:"version"`
-			Artifacts []struct{ ID, Kind, Path, Repository string } `json:"artifacts"`
+		Preparation      string `json:"preparation"`
+		PublicationState string `json:"publication_state"`
+		Release          struct {
+			Version   string `json:"version"`
+			Artifacts []struct {
+				ID, Kind, Repository, Tag string
+				ResourceID                string `json:"resource_id"`
+			} `json:"artifacts"`
 		} `json:"release"`
+		Publication struct {
+			Version            string                                           `json:"version"`
+			PublishedArtifacts map[string][]struct{ ID, Kind, Identity string } `json:"published_artifacts"`
+		} `json:"publication"`
 	}
 	payload, err := os.ReadFile(filepath.Join(lifecycle, "current-release.json"))
 	if err != nil {
@@ -359,39 +368,41 @@ func selectedImage(root string) (string, string, error) {
 	if !strings.HasPrefix(current.Release.Version, "v") || strings.ContainsAny(current.Release.Version, "/\\") {
 		return "", "", errors.New("cutover.release_selection_invalid")
 	}
+	if current.Preparation != "sealed" || current.PublicationState != "published" || current.Publication.Version != current.Release.Version {
+		return "", "", errors.New("cutover.publication_invalid")
+	}
 	releaseRoot := filepath.Join(lifecycle, "releases", current.Release.Version)
+	repository, tag := "", ""
+	artifactCount := 0
 	for _, artifact := range current.Release.Artifacts {
-		if artifact.ID != "tauth-image" || artifact.Kind != "container_image" {
+		if artifact.ResourceID != "runtime" || artifact.ID != "tauth-image" || artifact.Kind != "container_image" {
 			continue
 		}
-		if filepath.IsAbs(artifact.Path) || strings.Contains(artifact.Path, "..") {
-			return "", "", errors.New("cutover.artifact_path_invalid")
-		}
-		file, err := os.Open(filepath.Join(releaseRoot, artifact.Path))
-		if err != nil {
-			return "", "", err
-		}
-		defer file.Close()
-		archive := tar.NewReader(file)
-		for {
-			header, err := archive.Next()
-			if err != nil {
-				return "", "", fmt.Errorf("cutover.oci_index: %w", err)
-			}
-			if header.Name != "index.json" {
-				continue
-			}
-			var index struct {
-				Manifests []struct{ Digest string } `json:"manifests"`
-			}
-			if err = json.NewDecoder(io.LimitReader(archive, 1024*1024)).Decode(&index); err != nil {
-				return "", "", err
-			}
-			if len(index.Manifests) != 1 || !strings.HasPrefix(index.Manifests[0].Digest, "sha256:") || len(index.Manifests[0].Digest) != 71 {
-				return "", "", errors.New("cutover.oci_identity_invalid")
-			}
-			return artifact.Repository + "@" + index.Manifests[0].Digest, releaseRoot, nil
+		artifactCount++
+		repository, tag = artifact.Repository, artifact.Tag
+	}
+	if artifactCount > 1 {
+		return "", "", errors.New("cutover.image_ambiguous")
+	}
+	if artifactCount == 0 {
+		return "", "", errors.New("cutover.image_absent")
+	}
+	identity := ""
+	publishedCount := 0
+	for _, artifact := range current.Publication.PublishedArtifacts["runtime"] {
+		if artifact.ID == "tauth-image" && artifact.Kind == "container_image" {
+			publishedCount++
+			identity = artifact.Identity
 		}
 	}
-	return "", "", errors.New("cutover.image_absent")
+	if publishedCount > 1 {
+		return "", "", errors.New("cutover.image_ambiguous")
+	}
+	if publishedCount == 0 {
+		return "", "", errors.New("cutover.image_absent")
+	}
+	if repository == "" || tag == "" || identity != repository+":"+tag {
+		return "", "", errors.New("cutover.image_identity_invalid")
+	}
+	return identity, releaseRoot, nil
 }

@@ -5,6 +5,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B138] (P1) Select the published image for deployment file extraction.
+  Goal: Read the deployment files from the current published service image.
+  Evidence: Deployment of v2.2.20 selected a local OCI archive reference that GHCR could not resolve.
+  The current publication receipt names the versioned image `ghcr.io/tyemirov/tauth:2.2.20`.
+  Requirements:
+  - Select the service image from the current publication record.
+  - Reject unpublished releases, version conflicts, and invalid service image records before Docker or remote operations.
+  - Keep migration order, completion receipts, private inputs, and retained data unchanged.
+  Resolution: Deployment selects the unique published service image for the current sealed release.
+  It verifies the resource, image identifier, repository, tag, and publication version before extraction.
+  Validation:
+  The public CLI regression reproduced the archive-reference error before the code change.
+  Invalid publication records fail before Docker extraction or remote work.
+  The existing file extraction, cleanup, and migration-order checks pass.
+  `CI=1 make test-deployment-migration </dev/null` and final `CI=1 make ci </dev/null` passed.
+  Independent review found no actionable issues.
+  The real release receipt and retained data did not change.
+  Production deployment remains pending.
+  Files: `deployment/rollout/main.go`, `deployment/rollout/main_test.go`, `docs/tenant-console-operations.md`, and `.mprlab/ISSUES.md`.
+
 - [x] [B137] (P1) Read deployment plans from the published service image.
   Goal: Deploy current release artifacts without the retired release inputs directory.
   Evidence: Deployment of v2.2.19 failed before remote operations because its migration plan was absent from that directory.
