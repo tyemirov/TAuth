@@ -28,7 +28,11 @@ The tenant migration identifier is `20260930-tenant-console`.
 Its public input is `deployment/migrations/20260930-tenant-console.json`.
 The service image contains the migration executable, three JSON plans, and four rollout playbooks.
 These files are in `/usr/local/share/tauth/deployment/`.
-Deployment copies only these seven files from the exact published image digest into a temporary directory.
+The current publication receipt selects the versioned service image.
+Deployment accepts only a sealed release and a completed publication for the same version.
+The selected image must match the release resource, identifier, repository, and tag.
+Deployment rejects ambiguous service image entries before extraction.
+Deployment copies only these seven files from that image into a temporary directory.
 It validates the full file set before private input preparation or remote operations.
 A missing file stops deployment.
 Deployment removes the temporary directory after success or failure.
