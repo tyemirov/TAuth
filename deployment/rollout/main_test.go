@@ -23,8 +23,58 @@ func init() {
 	case "rollout-fixture":
 		main()
 	case "mprlab-gateway":
+
+		if expected := os.Getenv("TAUTH_ROLLOUT_EXPECTED_CHILD_KEY"); expected != "" && os.Args[1] != "version" && os.Args[1] != "private-environment-operation" {
+			if os.Getenv("TAUTH_TENANT_ENCRYPTION_KEY") != expected {
+				panic("Gateway child lost the validated captured encryption key")
+			}
+			marker, err := os.OpenFile(os.Getenv("TAUTH_ROLLOUT_CHILD_PHASES"), os.O_WRONLY|os.O_APPEND, 0)
+			if err != nil {
+				panic(err)
+			}
+			if _, err = fmt.Fprintln(marker, os.Args[1]); err != nil {
+				panic(err)
+			}
+			if err = marker.Close(); err != nil {
+				panic(err)
+			}
+		}
+		if raw := os.Getenv("TAUTH_ROLLOUT_MANAGEMENT_EXPECTED"); raw != "" {
+			var expected map[string]string
+			if err := json.Unmarshal([]byte(raw), &expected); err != nil {
+				panic(err)
+			}
+			for _, name := range []string{"MPRLAB_TAUTH_MANAGEMENT_URL", "MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"} {
+				actual, present := os.LookupEnv(name)
+				value, wanted := expected[name]
+				if present != wanted || actual != value {
+					panic("rollout manufactured or changed undeclared management input: " + name)
+				}
+			}
+		}
 		if os.Args[1] == "version" {
 			fmt.Println(`{"version":"fixture","source_commit":"fixture","platform":"fixture","lifecycle_contract":4}`)
+		} else if os.Args[1] == "private-environment-operation" {
+			var request struct {
+				Root string   `json:"root"`
+				Keys []string `json:"keys"`
+			}
+			if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
+				panic(err)
+			}
+			if request.Root != os.Getenv("TAUTH_ROLLOUT_APPLICATION_ROOT") || len(request.Keys) != 1 || request.Keys[0] != "TAUTH_TENANT_ENCRYPTION_KEY" {
+				panic("unexpected private request")
+			}
+			if os.Getenv("MPRLAB_GATEWAY_EXECUTABLE") != os.Args[0] {
+				panic("missing Gateway authority")
+			}
+			values := map[string]string{}
+			if os.Getenv("TAUTH_ROLLOUT_CAPTURED_MISSING") != "1" {
+				values["TAUTH_TENANT_ENCRYPTION_KEY"] = os.Getenv("TAUTH_ROLLOUT_CAPTURED_KEY")
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(values); err != nil {
+				panic(err)
+			}
 		} else if os.Args[1] == "bootstrap-run" {
 			if len(os.Args) < 8 || os.Args[2] != "--repo-root" || os.Args[3] != os.Getenv("TAUTH_ROLLOUT_APPLICATION_ROOT") || os.Args[4] != "--operation" || os.Args[5] != "app-deploy" || os.Args[6] != "--" {
 				panic("unexpected captured rollout invocation: " + strings.Join(os.Args[1:], " "))
@@ -121,6 +171,11 @@ func init() {
 		if plan := request["tauth_cutover_plan"]; plan != "" {
 			assertPayload(plan, filepath.Join(os.Getenv("TAUTH_ROLLOUT_SOURCE"), "deployment/migrations", filepath.Base(plan)))
 		}
+		if recovered := os.Getenv("TAUTH_ROLLOUT_RECOVERED_KEY"); recovered != "" && filepath.Base(playbook) == "inputs.yml" {
+			if err := writeFile(request["tauth_recovered_key"], []byte(recovered)); err != nil {
+				panic(err)
+			}
+		}
 		if os.Getenv("TAUTH_ROLLOUT_ALL_PHASES") == "1" {
 			fmt.Println("fixture phase:", strings.Join(os.Args[1:], " "))
 		} else {
@@ -164,7 +219,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	extractionRoot := t.TempDir()
-	environment := append(os.Environ(), "PATH="+packageRoot+string(os.PathListSeparator)+os.Getenv("PATH"), "TAUTH_ROLLOUT_SOURCE="+source, "TAUTH_ROLLOUT_APPLICATION_ROOT="+root, "TMPDIR="+extractionRoot)
+	environment := append(os.Environ(), "PATH="+packageRoot+string(os.PathListSeparator)+os.Getenv("PATH"), "TAUTH_ROLLOUT_SOURCE="+source, "TAUTH_ROLLOUT_APPLICATION_ROOT="+root, "TMPDIR="+extractionRoot, "TAUTH_ROLLOUT_CAPTURED_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	assertCleanup := func() {
 		t.Helper()
 		entries, err := os.ReadDir(extractionRoot)
@@ -256,17 +311,141 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	if output, err := exec.Command("mkdir", "-p", filepath.Join(root, ".mprlab/deploy")).CombinedOutput(); err != nil {
 		t.Fatalf("create fixture directory: %v %s", err, output)
 	}
-	if err = writeFile(filepath.Join(root, ".mprlab/deploy/.env"), nil); err != nil {
+	selectedPrivate := "# existing fixture key remains unchanged\nEXISTING='preserved'\nTAUTH_TENANT_ENCRYPTION_KEY='" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)) + "'\n"
+	if err = writeFile(filepath.Join(root, ".mprlab/deploy/.env"), []byte(selectedPrivate)); err != nil {
 		t.Fatal(err)
 	}
 	if err = writeFile(filepath.Join(operatorRoot, "private.env"), nil); err != nil {
 		t.Fatal(err)
 	}
+	privatePath := filepath.Join(root, ".mprlab/deploy/.env")
+	privateBefore, err := os.ReadFile(privatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct{ name, captured, recovered, missing, diagnostic string }{
+		{"absent", "", "", "1", "cutover.encryption_key_required"},
+		{"empty", "", "", "", "cutover.encryption_key_required"},
+		{"malformed", "malformed-synthetic-key", "", "", "cutover.encryption_key_invalid"},
+		{"wrong-length", base64.StdEncoding.EncodeToString([]byte("synthetic")), "", "", "cutover.encryption_key_invalid"},
+		{"remote-cannot-supply-missing", "", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "1", "cutover.encryption_key_required"},
+		{"matching-existing", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "", ""},
+		{"conflicting-existing", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)), "", "cutover.persistent_key_conflict"},
+		{"invalid-existing-reference", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "malformed-reference", "", "cutover.persistent_key_conflict"},
+	} {
+		t.Run("existing-key/"+scenario.name, func(t *testing.T) {
+			dockerCall := filepath.Join(t.TempDir(), "docker-call")
+			command := exec.Command(rollout, root, gateway)
+			command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot,
+				"TAUTH_TENANT_ENCRYPTION_KEY=ambient-value-must-not-replace-capture", "TAUTH_ROLLOUT_CAPTURED_KEY="+scenario.captured,
+				"TAUTH_ROLLOUT_CAPTURED_MISSING="+scenario.missing, "TAUTH_ROLLOUT_RECOVERED_KEY="+scenario.recovered,
+				"TAUTH_ROLLOUT_DOCKER_CALL_MARKER="+dockerCall)
+			output, commandErr := command.CombinedOutput()
+			if scenario.diagnostic == "" {
+				if commandErr != nil || !strings.Contains(string(output), "fixture gateway: app-deploy") {
+					t.Fatalf("existing key rollout failed: %v\n%s", commandErr, output)
+				}
+			} else if commandErr == nil || !strings.Contains(string(output), scenario.diagnostic) {
+				t.Fatalf("existing key contract: expected %s: %v\n%s", scenario.diagnostic, commandErr, output)
+			}
+			if scenario.diagnostic == "cutover.encryption_key_required" || scenario.diagnostic == "cutover.encryption_key_invalid" {
+				if _, err := os.ReadFile(dockerCall); !os.IsNotExist(err) {
+					t.Fatalf("invalid captured key reached image extraction: %v", err)
+				}
+				if strings.Contains(string(output), "fixture gateway:") || strings.Contains(string(output), "fixture phase:") {
+					t.Fatalf("invalid captured key reached provider or migration work: %s", output)
+				}
+			}
+			if scenario.diagnostic != "" && strings.Contains(string(output), "/deployment/rollout/cutover.yml") {
+				t.Fatalf("invalid key reached database cutover: %s", output)
+			}
+			privateAfter, err := os.ReadFile(privatePath)
+			if err != nil || !bytes.Equal(privateBefore, privateAfter) {
+				t.Fatalf("rollout changed selected private key input: %v", err)
+			}
+			for _, secret := range []string{scenario.captured, scenario.recovered, "ambient-value-must-not-replace-capture"} {
+				if secret != "" && strings.Contains(string(output), secret) {
+					t.Fatal("rollout diagnostics exposed a synthetic key")
+				}
+			}
+			assertCleanup()
+		})
+	}
+	for _, scenario := range []struct {
+		name                 string
+		privateFile, ambient bool
+	}{
+		{"absent-file-absent-inputs", false, false},
+		{"unchanged-file-absent-inputs", true, false},
+		{"absent-file-hostile-inputs", false, true},
+		{"unchanged-file-hostile-inputs", true, true},
+	} {
+		t.Run("operator-inputs/"+scenario.name, func(t *testing.T) {
+			operator := t.TempDir()
+			privatePath := filepath.Join(operator, "private.env")
+			before := []byte("exit 94\n# fixture operator inputs remain untouched\n")
+			if scenario.privateFile {
+				if err := writeFile(privatePath, before); err != nil {
+					t.Fatal(err)
+				}
+			}
+			expected := map[string]string{}
+			if scenario.ambient {
+				expected["MPRLAB_TAUTH_MANAGEMENT_URL"] = "https://hostile-fixture.invalid"
+				expected["MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"] = "hostile-fixture-credentials"
+			}
+			command := exec.Command(rollout, root, gateway)
+			for _, assignment := range environment {
+				name, _, _ := strings.Cut(assignment, "=")
+				if name != "MPRLAB_TAUTH_MANAGEMENT_URL" && name != "MPRLAB_TAUTH_PROVISIONING_CREDENTIALS" {
+					command.Env = append(command.Env, assignment)
+				}
+			}
+			encoded, err := json.Marshal(expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command.Env = append(command.Env, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operator, "TAUTH_ROLLOUT_MANAGEMENT_EXPECTED="+string(encoded))
+			for name, value := range expected {
+				command.Env = append(command.Env, name+"="+value)
+			}
+			output, commandErr := command.CombinedOutput()
+			if commandErr != nil || !strings.Contains(string(output), "fixture gateway: app-deploy") {
+				t.Fatalf("rollout depended on undeclared operator inputs: %v\n%s", commandErr, output)
+			}
+			after, readErr := os.ReadFile(privatePath)
+			if scenario.privateFile {
+				if readErr != nil || !bytes.Equal(before, after) {
+					t.Fatalf("rollout changed operator private inputs: %v", readErr)
+				}
+			} else if !os.IsNotExist(readErr) {
+				t.Fatalf("rollout created operator private inputs: %v", readErr)
+			}
+			for _, secret := range expected {
+				if strings.Contains(string(output), secret) {
+					t.Fatal("rollout exposed synthetic management inputs")
+				}
+			}
+			assertCleanup()
+		})
+	}
+	childPhases := filepath.Join(t.TempDir(), "gateway-child-phases")
+	if err := writeFile(childPhases, nil); err != nil {
+		t.Fatal(err)
+	}
 	command = exec.Command(rollout, root, gateway)
-	command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot, "TAUTH_TENANT_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_ALL_PHASES=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+operatorRoot, "TAUTH_TENANT_ENCRYPTION_KEY=ambient-value-must-not-replace-capture", "TAUTH_ROLLOUT_CAPTURED_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "TAUTH_ROLLOUT_EXPECTED_CHILD_KEY="+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "TAUTH_ROLLOUT_CHILD_PHASES="+childPhases)
 	output, err = command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("full rollout failed: %v\n%s", err, output)
+	}
+	observedPhases, readErr := os.ReadFile(childPhases)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	expectedPhases := "app-plan-publish\nbootstrap-run\napp-plan-deploy\nbootstrap-run\nbootstrap-run\nbootstrap-run\napp-deploy\n"
+	if string(observedPhases) != expectedPhases {
+		t.Fatalf("captured key was not passed to every Gateway child: %s", observedPhases)
 	}
 	inputPhase := strings.Index(string(output), "/deployment/rollout/inputs.yml")
 	oldPhase := strings.Index(string(output), "/deployment/rollout/cutover.yml")
@@ -278,49 +457,4 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	}
 
 	assertCleanup()
-}
-
-func TestPersistentServerKeyPreparation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "private.env")
-	if err := writeFile(path, []byte("EXISTING='preserved'\n")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TAUTH_TENANT_ENCRYPTION_KEY", "")
-	key, err := prepareKey(path, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(key) != 32 {
-		t.Fatal("wrong key length")
-	}
-	encoded := base64.StdEncoding.EncodeToString(key)
-	again, err := prepareKey(path, encoded, encoded)
-	if err != nil || !bytes.Equal(again, key) {
-		t.Fatal("key changed", err)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(content), "TAUTH_TENANT_ENCRYPTION_KEY=") != 1 || !strings.Contains(string(content), "EXISTING='preserved'") {
-		t.Fatal("private input overwritten")
-	}
-	recoveredPath := filepath.Join(t.TempDir(), "private.env")
-	if err = writeFile(recoveredPath, nil); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := prepareKey(recoveredPath, "", encoded)
-	if err != nil || !bytes.Equal(recovered, key) {
-		t.Fatal("remote key not recovered", err)
-	}
-	if _, err = prepareKey(path, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)), encoded); err == nil {
-		t.Fatal("key conflict accepted")
-	}
-	if _, err = prepareKey(recoveredPath, "", "malformed"); err == nil {
-		t.Fatal("invalid recovery key accepted")
-	}
-	content, err = os.ReadFile(recoveredPath)
-	if err != nil || strings.Contains(string(content), "malformed") {
-		t.Fatal("invalid recovery key persisted", err)
-	}
 }

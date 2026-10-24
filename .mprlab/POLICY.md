@@ -95,7 +95,7 @@ This is a binding product principle for every user interface.
 - Keep `make release && make publish && make deploy` as the complete production application procedure.
 - Make `make release` validate source, package migrations, and seal all release artifacts.
 - Make `make publish` publish the sealed artifacts without a rebuild.
-- Make `make deploy` prepare private inputs and run pending timestamped migrations automatically.
+- Make `make deploy` validate captured private inputs and run pending timestamped migrations automatically.
 - Keep application migration policy in this repository and resource convergence in the installed Gateway runtime.
 - Give each migration one fixed timestamp identifier and a durable completion receipt.
 - Back up the database and stop its writers before a data cutover.
@@ -103,7 +103,10 @@ This is a binding product principle for every user interface.
 - Skip a completed migration during every subsequent deployment.
 - Resume incomplete deployment work through `make deploy` without reversing committed data.
 - Never require a separate production migration, bootstrap, credential-generation, or key-generation command.
-- Generate a missing server encryption key automatically before the first encrypted database initialization.
+- Require the existing server encryption key through the selected manifest inputs before production rollout.
+- Stop before release validation, image extraction, or remote operations when the key is missing or invalid.
+- Compare the captured key with each existing remote key reference before migrations.
+- Keep the selected private key input unchanged during production rollout.
 - Keep that key across releases, deployments, restarts, and database recovery.
 - Keep server encryption keys private. Never supply them to application clients.
 - Keep existing client credentials and tenant session keys during a migration.
@@ -148,15 +151,28 @@ Apply this section to deployment or publication work for a browser frontend.
 Apply this gate when the selected task requires credentials.
 
 - Identify each required environment variable from the active command and repository contract.
-- Inspect the process environment before you request a login.
-- Inspect repository private environment files before you report a credential blocker.
-- Include ignored `.env`, `.env.*`, and `*.env` files in the authorized repository roots.
 - Treat tracked example and sample environment files as documentation only.
 - Search only for exact variable names. Do not print, copy, or record secret values.
-- When a command declares one repository environment file as its input, clear
-  its owned process variables and source only that file.
-- Use the command's standard environment lookup. Do not add a credential parser
-  or another input channel.
+
+For selected-manifest lifecycle commands:
+
+- Use the selected manifest as the sole lifecycle input authority.
+- Keep `environment_file` optional. Declare each selected file explicitly in the manifest.
+- Use process values before file values for declared environment references.
+- Resolve declared inputs once at the selected manifest boundary.
+- Pass captured inputs to child operations.
+- Use captured values downstream without reading private environment files again.
+- Diagnose missing credentials only through declared process references and the explicitly selected file.
+
+For other commands:
+
+- Use the active command's documented credential sources and standard environment lookup.
+- Diagnose missing credentials only through those declared sources.
+- Do not add a credential parser or another input channel.
+
+For each command:
+
+- Inspect its declared sources before you request a login or report a credential blocker.
 - When available, use a non-mutating authentication command to verify the discovered value.
 - Request new credentials only after each authorized existing input fails verification.
 - Report a credential blocker only after you complete this gate.
