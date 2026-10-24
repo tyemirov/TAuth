@@ -15,7 +15,7 @@ make release && make publish && make deploy
 
 `make release` validates source and packages the service, website, and separate migration executable.
 `make publish` publishes the sealed release artifacts without a rebuild.
-`make deploy` prepares private inputs, runs pending timestamped migrations, and runs resource convergence through the captured Gateway package.
+`make deploy` validates captured private inputs, runs pending timestamped migrations, and runs resource convergence through the captured Gateway package.
 
 A one-off migration is a timestamped migration that runs automatically once within `make deploy`.
 It is not a separate operator command.
@@ -33,19 +33,18 @@ Deployment accepts only a sealed release and a completed publication for the sam
 The selected image must match the release resource, identifier, repository, and tag.
 Deployment rejects ambiguous service image entries before extraction.
 Deployment copies only these seven files from that image into a temporary directory.
-It validates the full file set before private input preparation or remote operations.
+It validates the full file set before remote operations.
 A missing file stops deployment.
 Deployment removes the temporary directory after success or failure.
 
 Deployment performs these operations automatically:
 
-1. Validate the sealed release and verify host access.
-2. Read the existing server encryption key or create the initial key.
-3. Keep that key in the canonical private application input and its remote recovery reference.
-4. Prepare App-scoped Gateway credentials in the canonical private operator input.
-5. Validate the published artifacts and complete native deployment planning.
-6. Read the durable migration receipt.
-7. If the receipt is missing:
+1. Capture the existing server encryption key from the selected manifest inputs.
+2. Validate the sealed release and verify host access.
+3. Compare the captured key with any existing remote key reference.
+4. Validate the published artifacts and complete native deployment planning.
+5. Read the durable migration receipt.
+6. If the receipt is missing:
    - Make a copy of the stored host configuration.
    - Reject active containers from other services that use the database volume.
    - Stop any active TAuth containers that use the database volume.
@@ -54,9 +53,9 @@ Deployment performs these operations automatically:
    - Apply the migration to a private database candidate.
    - Keep the existing verified Google identity, tenant settings, client keys, and application data.
    - Commit the candidate database and completion receipt together.
-8. Apply the pending console client correction described below.
-9. Apply the pending public user ID migration described below.
-10. Reconcile the service and verify its health through Gateway.
+7. Apply the pending console client correction described below.
+8. Apply the pending public user ID migration described below.
+9. Reconcile the service and verify its health through Gateway.
 
 The migration reads `state/tauth/config.tauth.yml` from the host runtime root.
 It can run when no TAuth container is present.
@@ -133,9 +132,14 @@ Caddy sets `X-Forwarded-Proto` from its client connection scheme.
 TAuth requires one exact `https` value from the configured peer.
 Standalone deployments can configure explicit `server.trusted_proxy_cidrs` for proxies with fixed addresses.
 
-The production deployment supplies `server.tenant_encryption_key` through `TAUTH_TENANT_ENCRYPTION_KEY`.
-Deployment creates its 32 random bytes automatically when no existing key is present.
-Deployment preserves the key in private service configuration and its remote recovery reference.
+The production deployment supplies `server.tenant_encryption_key` through the captured `TAUTH_TENANT_ENCRYPTION_KEY` input.
+The selected manifest must declare the existing base64-encoded 32-byte key through `inputs`.
+A missing or invalid key stops rollout before release validation, image extraction, or remote operations.
+A different existing remote key reference stops rollout before database migration.
+Deployment keeps the selected private key input unchanged.
+The same captured key supplies every migration and final resource convergence.
+Gateway selects all deployment inputs through the manifest.
+Rollout keeps operator private files unchanged.
 The service uses AES-256-GCM for stored secret values.
 Each application secret binds its ciphertext to the tenant, secret ID, purpose, and encryption key ID.
 

@@ -5,7 +5,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,23 +19,13 @@ import (
 	"github.com/tyemirov/tauth/deployment/migrations"
 )
 
+const encryptionKeyEnvironment = "TAUTH_TENANT_ENCRYPTION_KEY"
+
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-}
-
-func execute(ctx context.Context, executable string, args ...string) error {
-	command := exec.CommandContext(ctx, executable, args...)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	return command.Run()
-}
-
-func executeAnsible(ctx context.Context, gateway, root, ansible string, args ...string) error {
-	arguments := []string{"bootstrap-run", "--repo-root", root, "--operation", "app-deploy", "--", ansible}
-	return execute(ctx, gateway, append(arguments, args...)...)
 }
 
 func run(ctx context.Context, args []string) error {
@@ -83,8 +72,33 @@ func run(ctx context.Context, args []string) error {
 	if err = os.Setenv("ANSIBLE_CONFIG", filepath.Join(packageRoot, "runtime/deploy/ansible/ansible.cfg")); err != nil {
 		return err
 	}
+	encodedKey, err := capturedEncryptionKey(ctx, native, root)
+	if err != nil {
+		return err
+	}
+	key, err := validateExistingKey(encodedKey, "")
+	if err != nil {
+		return err
+	}
+	childEnvironment := make([]string, 0, len(os.Environ())+1)
+	for _, assignment := range os.Environ() {
+		if !strings.HasPrefix(assignment, encryptionKeyEnvironment+"=") {
+			childEnvironment = append(childEnvironment, assignment)
+		}
+	}
+	childEnvironment = append(childEnvironment, encryptionKeyEnvironment+"="+encodedKey)
+	runGateway := func(arguments ...string) error {
+		command := exec.CommandContext(ctx, native, arguments...)
+		command.Env = childEnvironment
+		command.Stdout, command.Stderr = os.Stdout, os.Stderr
+		return command.Run()
+	}
+	runAnsible := func(ansible string, arguments ...string) error {
+		bootstrap := []string{"bootstrap-run", "--repo-root", root, "--operation", "app-deploy", "--", ansible}
+		return runGateway(append(bootstrap, arguments...)...)
+	}
 	// Every phase uses this captured runtime package, including source and release validation.
-	if err := execute(ctx, native, "app-plan-publish", "--app-root", root); err != nil {
+	if err := runGateway("app-plan-publish", "--app-root", root); err != nil {
 		return fmt.Errorf("cutover.release_preflight: %w", err)
 	}
 	operatorRoot := os.Getenv("MPRLAB_GATEWAY_OPERATOR_ROOT")
@@ -112,8 +126,7 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("cutover.image_payload: %w", err)
 	}
 	planPath := filepath.Join(localRoot, "deployment/migrations/"+migrations.CutoverID+".json")
-	plan, err := migrations.LoadCutoverPlan(planPath)
-	if err != nil {
+	if _, err = migrations.LoadCutoverPlan(planPath); err != nil {
 		return fmt.Errorf("cutover.sealed_plan: %w", err)
 	}
 	consolePlanPath := filepath.Join(localRoot, "deployment/migrations/"+migrations.ConsoleGoogleClientID+".json")
@@ -133,7 +146,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(inputsPath, payload); err != nil {
 		return err
 	}
-	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
+	if err = runAnsible(ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
 		return fmt.Errorf("cutover.input_preflight: %w", err)
 	}
 	recoveredKey := ""
@@ -142,15 +155,12 @@ func run(ctx context.Context, args []string) error {
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return readErr
 	}
-	key, err := prepareKey(filepath.Join(root, ".mprlab/deploy/.env"), os.Getenv("TAUTH_TENANT_ENCRYPTION_KEY"), recoveredKey)
+	_, err = validateExistingKey(encodedKey, recoveredKey)
 	if err != nil {
 		return err
 	}
-	if err = prepareGatewayInputs(operatorRoot, plan, key); err != nil {
-		return err
-	}
 	// Native deployment planning verifies published artifacts, placements, SSH, sudo, and all private bindings before writers stop.
-	if err = execute(ctx, native, "app-plan-deploy", "--app-root", root); err != nil {
+	if err = runGateway("app-plan-deploy", "--app-root", root); err != nil {
 		return fmt.Errorf("cutover.deployment_preflight: %w", err)
 	}
 	keyFile := filepath.Join(localRoot, "key")
@@ -166,7 +176,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = runAnsible(ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("cutover.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = consolePlanPath
@@ -178,7 +188,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = runAnsible(ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("console_client.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = subjectPlanPath
@@ -190,10 +200,10 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = runAnsible(ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("application_subjects.migration_failed: %w", err)
 	}
-	return execute(ctx, native, "app-deploy", "--app-root", root)
+	return runGateway("app-deploy", "--app-root", root)
 }
 
 var deploymentPayloadPaths = []string{
@@ -256,74 +266,42 @@ func extractDeploymentPayload(ctx context.Context, image, destination string) er
 	return nil
 }
 
-func prepareKey(path, encoded, recovered string) ([]byte, error) {
-	if encoded != "" && recovered != "" && encoded != recovered {
-		return nil, errors.New("cutover.persistent_key_conflict")
+func capturedEncryptionKey(ctx context.Context, gateway, root string) (string, error) {
+	request, err := json.Marshal(struct {
+		Root string   `json:"root"`
+		Keys []string `json:"keys"`
+	}{root, []string{encryptionKeyEnvironment}})
+	if err != nil {
+		return "", err
 	}
-	missing := encoded == ""
-	if missing {
-		encoded = recovered
-		if encoded == "" {
-			key := make([]byte, 32)
-			if _, err := rand.Read(key); err != nil {
-				return nil, err
-			}
-			encoded = base64.StdEncoding.EncodeToString(key)
-		}
+	command := exec.CommandContext(ctx, gateway, "private-environment-operation")
+	command.Env = append(os.Environ(), "MPRLAB_GATEWAY_EXECUTABLE="+gateway)
+	command.Stdin = bytes.NewReader(request)
+	var diagnostic bytes.Buffer
+	command.Stderr = &diagnostic
+	payload, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("cutover.captured_key: %w: %s", err, strings.TrimSpace(diagnostic.String()))
+	}
+	var values map[string]string
+	if err := json.Unmarshal(payload, &values); err != nil {
+		return "", fmt.Errorf("cutover.captured_key: invalid Gateway response: %w", err)
+	}
+	return values[encryptionKeyEnvironment], nil
+}
+
+func validateExistingKey(encoded, recovered string) ([]byte, error) {
+	if encoded == "" {
+		return nil, errors.New("cutover.encryption_key_required")
+	}
+	if recovered != "" && encoded != recovered {
+		return nil, errors.New("cutover.persistent_key_conflict")
 	}
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(key) != 32 {
 		return nil, errors.New("cutover.encryption_key_invalid")
 	}
-	if missing {
-		if err := appendEnvironment(path, "TAUTH_TENANT_ENCRYPTION_KEY", encoded); err != nil {
-			return nil, err
-		}
-	}
-	if err = os.Setenv("TAUTH_TENANT_ENCRYPTION_KEY", encoded); err != nil {
-		return nil, err
-	}
 	return key, nil
-}
-
-func prepareGatewayInputs(root string, plan migrations.CutoverPlan, key []byte) error {
-	values := map[string]string{"MPRLAB_TAUTH_MANAGEMENT_URL": plan.ManagementURL}
-	credentials, err := json.Marshal(plan.CredentialMap(key))
-	if err != nil {
-		return err
-	}
-	values["MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"] = string(credentials)
-	for _, name := range []string{"MPRLAB_TAUTH_MANAGEMENT_URL", "MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"} {
-		if os.Getenv(name) == "" {
-			if err = appendEnvironment(filepath.Join(root, "private.env"), name, values[name]); err != nil {
-				return err
-			}
-			if err = os.Setenv(name, values[name]); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func appendEnvironment(path, name, value string) error {
-	// Generated values contain no shell quotes. The command uses normal shell environment lookup on its next invocation.
-	if strings.ContainsAny(value, "'\n\r") {
-		return errors.New("cutover.generated_environment_invalid")
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
-	if err != nil {
-		return fmt.Errorf("cutover.private_input_absent: %w", err)
-	}
-	_, err = fmt.Fprintf(file, "\n%s='%s'\n", name, value)
-	if err == nil {
-		err = file.Sync()
-	}
-	closeErr := file.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
 }
 
 func writeFile(path string, payload []byte) error {

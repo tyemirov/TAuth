@@ -33,12 +33,15 @@ int main(int argc, char **argv) {
     for (int index = 1; index < argc; index++) printf("arg=%s\n", argv[index]);
     const char *operator_root = getenv("MPRLAB_GATEWAY_OPERATOR_ROOT");
     printf("operator=%s\n", operator_root == NULL ? "" : operator_root);
-    if (argc > 1 && strcmp(argv[1], "run") == 0) {
-        printf("key=%s\n", getenv("TAUTH_TENANT_ENCRYPTION_KEY"));
-        printf("management=%s\n", getenv("MPRLAB_TAUTH_MANAGEMENT_URL"));
-        printf("credentials=%s\n", getenv("MPRLAB_TAUTH_PROVISIONING_CREDENTIALS"));
-        printf("sudo=%s\n", getenv("DEPLOY_SUDO_PASSWORD_FIXTURE"));
-        if (getenv("DEPLOY_SUDO_PASSWORD_INHERITED") != NULL) return 43;
+    if (getenv("TEST_GATEWAY_VERIFY_CAPTURE") != NULL) {
+        const char *names[] = {"TAUTH_TENANT_ENCRYPTION_KEY", "MPRLAB_TAUTH_MANAGEMENT_URL", "MPRLAB_TAUTH_PROVISIONING_CREDENTIALS", "DEPLOY_SUDO_PASSWORD_INHERITED"};
+        const char *expected[] = {"inherited-key", "inherited-url", "inherited-map", "inherited-sudo"};
+        for (int index = 0; index < 4; index++) {
+            const char *actual = getenv(names[index]);
+            if (actual == NULL || strcmp(actual, expected[index]) != 0) return 43;
+        }
+        if (getenv("DEPLOY_SUDO_PASSWORD_FIXTURE") != NULL) return 43;
+        printf("capture-inputs=unchanged\n");
     }
     if (getenv("TEST_GATEWAY_FAILURE") != NULL) {
         fprintf(stderr, "gateway fixture failure\n");
@@ -48,7 +51,7 @@ int main(int argc, char **argv) {
 }
 C
 cc "$fixture_root/gateway.c" -o "$runtime_bin/mprlab-gateway"
-unset MPRLAB_GATEWAY_EXECUTABLE MAKEFLAGS MFLAGS TEST_GATEWAY_FAILURE
+unset MPRLAB_GATEWAY_EXECUTABLE MAKEFLAGS MFLAGS MAKEOVERRIDES TEST_GATEWAY_FAILURE TEST_GATEWAY_VERIFY_CAPTURE DEPLOY_SUDO_PASSWORD_FIXTURE
 export MPRLAB_GATEWAY_OPERATOR_ROOT="$fixture_root/operator with spaces"
 
 for operation in release publish; do
@@ -97,17 +100,40 @@ for operation in release publish; do
 done
 
 mkdir -p "$MPRLAB_GATEWAY_OPERATOR_ROOT"
-printf "TAUTH_TENANT_ENCRYPTION_KEY='canonical-key'\n" > "$application_root/.mprlab/deploy/.env"
-printf "MPRLAB_TAUTH_MANAGEMENT_URL='https://fixture.invalid'\nMPRLAB_TAUTH_PROVISIONING_CREDENTIALS='canonical-map'\nDEPLOY_SUDO_PASSWORD_FIXTURE='canonical-sudo'\n" > "$MPRLAB_GATEWAY_OPERATOR_ROOT/private.env"
-expected="$(printf 'cwd=%s\narg=run\narg=./deployment/rollout\narg=%s\narg=%s\noperator=%s\nkey=canonical-key\nmanagement=https://fixture.invalid\ncredentials=canonical-map\nsudo=canonical-sudo' "$application_root" "$application_root" "$runtime_bin/mprlab-gateway" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
-actual="$(TAUTH_TENANT_ENCRYPTION_KEY=inherited-key MPRLAB_TAUTH_MANAGEMENT_URL=inherited-url \
-  MPRLAB_TAUTH_PROVISIONING_CREDENTIALS=inherited-map DEPLOY_SUDO_PASSWORD_INHERITED=inherited-sudo \
-  PATH="$runtime_bin:$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy \
-  "GO=$runtime_bin/mprlab-gateway" "MPRLAB_GATEWAY_EXECUTABLE=$runtime_bin/mprlab-gateway")"
-if [ "$actual" != "$expected" ]; then printf 'Unexpected deployment boundary\n%s\n' "$actual" >&2; exit 1; fi
+printf 'exit 91\n' > "$application_root/.mprlab/deploy/.env"
+printf 'exit 92\n' > "$MPRLAB_GATEWAY_OPERATOR_ROOT/private.env"
+for selection in path explicit; do
+  arguments=()
+  gateway_selection=mprlab-gateway
+  command_path="$runtime_bin:$tools_bin"
+  if [ "$selection" = explicit ]; then
+    arguments+=("MPRLAB_GATEWAY_EXECUTABLE=$runtime_bin/mprlab-gateway")
+    command_path="$tools_bin"
+    gateway_selection="$runtime_bin/mprlab-gateway"
+  fi
+expected="$(printf 'cwd=%s\narg=bootstrap-run\narg=--repo-root\narg=%s\narg=--operation\narg=app-deploy\narg=--\narg=%s\narg=run\narg=./deployment/rollout\narg=%s\narg=%s\noperator=%s\ncapture-inputs=unchanged' \
+  "$application_root" "$application_root" "$runtime_bin/mprlab-gateway" "$application_root" "$gateway_selection" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
+  actual="$(TEST_GATEWAY_VERIFY_CAPTURE=1 TAUTH_TENANT_ENCRYPTION_KEY=inherited-key MPRLAB_TAUTH_MANAGEMENT_URL=inherited-url \
+    MPRLAB_TAUTH_PROVISIONING_CREDENTIALS=inherited-map DEPLOY_SUDO_PASSWORD_INHERITED=inherited-sudo \
+    PATH="$command_path" "$make_command" --no-print-directory -s -C "$application_root" deploy \
+    "GO=$runtime_bin/mprlab-gateway" "${arguments[@]}")"
+  if [ "$actual" != "$expected" ]; then printf 'Unexpected deployment capture boundary (%s)\n%s\n' "$selection" "$actual" >&2; exit 1; fi
+
+  arguments=()
+  if [ "$selection" = explicit ]; then
+    arguments+=("MPRLAB_GATEWAY_EXECUTABLE=$fixture_root/missing runtime")
+  fi
+  status=0
+  PATH="$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy "${arguments[@]}" > "$fixture_root/deploy-missing.log" 2>&1 || status=$?
+  [ "$status" -eq 2 ]
+  grep -F 'Gateway runtime is unavailable:' "$fixture_root/deploy-missing.log" >/dev/null
+  if grep -F 'arg=' "$fixture_root/deploy-missing.log"; then exit 1; fi
+done
 status=0
-PATH="$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy > "$fixture_root/deploy-missing.log" 2>&1 || status=$?
+TEST_GATEWAY_FAILURE=1 PATH="$runtime_bin:$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" deploy \
+  "GO=$runtime_bin/mprlab-gateway" > "$fixture_root/deploy-failure.log" 2>&1 || status=$?
 [ "$status" -eq 2 ]
-grep -F 'Gateway runtime is unavailable:' "$fixture_root/deploy-missing.log" >/dev/null
+grep -F 'gateway fixture failure' "$fixture_root/deploy-failure.log" >/dev/null
+grep -F 'Error 42' "$fixture_root/deploy-failure.log" >/dev/null
 
 printf 'Installed Gateway Make integration passed.\n'

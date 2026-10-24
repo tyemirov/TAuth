@@ -5,6 +5,26 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B140] (P0) Preserve the captured existing key throughout production rollout.
+  Goal: Use one validated existing encryption key for migrations and final deployment.
+  Evidence: Rollout reads implicit private files and can generate inputs after the manifest requires an existing key.
+  Nested Gateway phases can read a changed key after the original capture.
+  Requirements:
+  - Require the existing key through the selected manifest before release validation, image extraction, or remote operations.
+  - Preserve remote key-conflict checks, client credentials, migration data, backups, and completion receipts.
+  - Supply the same captured key to every child phase and keep private input files unchanged.
+  Resolution: The deployment wrapper selects inputs through Gateway capture.
+  Rollout validates the existing key and supplies it to all seven child Gateway commands.
+  The obsolete operator-input generator and private-file writer are removed.
+  The policy records the operator's explicit existing-key decision.
+  Validation:
+  Public rollout CLI regressions cover missing, invalid, conflicting, and captured keys.
+  Native wrapper checks preserve the captured key after a selected-file change.
+  Real container and native Ansible checks preserve migration data, credentials, receipts, and writer checks.
+  Full `CI=1 make ci </dev/null` passed in 183.424 seconds.
+  Independent source review found no remaining blocker.
+  This change awaits publication and deployment.
+
 - [x] [B139] (P0) Declare private deployment inputs in the manifest.
   Goal: Supply application values and host credentials through the resolved Gateway manifest.
   Evidence: The manifest binds private outputs but declares no private inputs or host credential references.
