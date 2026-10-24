@@ -4,6 +4,7 @@ F020 supplies a separate executable for consumer integration tests.
 The executable creates an isolated encrypted store through TAuth-owned APIs.
 It creates a synthetic owner, App, and active application tenant.
 It also creates a separate reserved console tenant.
+An optional `accounts` mapping creates synthetic active or disabled application accounts.
 The production service and image do not contain this executable or a fixture command.
 
 ## Build and delivery
@@ -24,24 +25,18 @@ Use an absolute path to an immutable candidate artifact.
 Record its SHA-256 and build identity before consumer validation.
 Do not infer a sibling checkout or search `PATH` for another executable.
 
-A hosted pipeline must acquire a declared fixture artifact before it starts consumer CI.
-This task does not publish the executable.
-A currently published module or `@latest` image must not be assumed to contain F020.
-After F020 publication, use the declared `@latest` acquisition input:
+The selected manifest declares separate test fixture binaries for `linux/amd64` and `darwin/arm64`.
+The GitHub Release assets are `tauth-test-fixture-linux-amd64.tar.gz` and `tauth-test-fixture-darwin-arm64.tar.gz`.
+Each archive contains `tauth-test-fixture`.
+The production image remains separate from these test artifacts.
 
-```sh
-fixture_tools="$(pwd)/.cache/test-tools"
-mkdir -p "$fixture_tools"
-CI=1 GOBIN="$fixture_tools" go install -tags=tauth_testfixture \
-  github.com/tyemirov/tauth/cmd/testfixture@latest </dev/null
-export TAUTH_TEST_FIXTURE_BIN="$fixture_tools/testfixture"
-```
+Acquire the artifact from an explicit published TAuth version before consumer CI.
+Verify the candidate fixture against the selected ordinary service image.
+Keep local candidate validation and published artifact acceptance as separate results.
+The consumer must not read a sibling source checkout or select another executable automatically.
 
-Go installation names this executable `testfixture`.
-The local Make target names its artifact `tauth-test-fixture`.
-The explicit absolute path is the consumer interface.
-Until `@latest` contains F020, this acquisition command cannot supply the tool.
-Do not invoke publication as part of fixture preparation.
+Use the declared GitHub Release artifact.
+Publication remains a separate lifecycle operation.
 
 ## Fixture declaration
 
@@ -72,7 +67,29 @@ Its signing key is synthetic test data.
 }
 ```
 
-All displayed fields are required.
+The displayed fields are required.
+The optional `accounts` mapping uses this additional shape:
+
+```json
+"accounts": {
+  "writer": {
+    "subject": "fixture-writer",
+    "email": "writer@example.com",
+    "display_name": "Writer",
+    "avatar_url": "https://example.com/avatar.png",
+    "state": "active"
+  }
+}
+```
+
+Each account field is required.
+Account aliases use lowercase letters, digits, and hyphens.
+Each provider subject must be unique and start with `fixture-`.
+Email addresses must use `example.com` or `.invalid` domains.
+Avatar URLs must use HTTPS and the same reserved domains.
+The state must be `active` or `disabled`.
+The tool uses the canonical provider account and disable operations.
+The receipt maps each alias to its public user ID, profile, roles, and state.
 Unknown fields, multiple JSON documents, empty values, and outer whitespace cause an error.
 The application and tenant IDs must differ from `tauth-console`.
 The origin must use HTTP or HTTPS with `localhost` or a literal loopback IP address.
@@ -144,6 +161,8 @@ It verifies the actual application tenant's nonce and an existing-store restart.
 The consumer must separately verify compatibility with its selected service image and record that image's digest.
 
 The fixture tool does not enroll a production owner or issue browser sessions.
+The consumer can sign synthetic sessions with the declared key and the receipt public user ID.
+The real service accepts an active account and rejects disabled or unknown accounts.
 A nonce response proves active tenant configuration, not Google authentication.
 The backend authorization test uses synthetic signed claims.
 These checks do not prove live provider connectivity or a completed Google login.

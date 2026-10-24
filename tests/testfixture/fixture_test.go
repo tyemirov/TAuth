@@ -41,6 +41,8 @@ func TestPublicFixtureCLI(t *testing.T) {
 		t.Fatalf("public fixture build: %v\n%s", err, output)
 	}
 	request := map[string]any{"schema": "tauth.test-fixture.v1", "test_only": true, "app_id": "fixture-app", "server": map[string]any{"listen_addr": ":8081"}, "tenant": map[string]any{"id": "fixture-application", "display_name": "Fixture application", "origin": "http://localhost:32123", "google_web_client_id": "fixture-web.apps.googleusercontent.com", "google_native_client_id": "fixture-native.apps.googleusercontent.com", "jwt_signing_key": "synthetic-fixture-signing-key", "session_cookie_name": "fixture_session", "refresh_cookie_name": "fixture_refresh", "session_ttl": "30m", "refresh_ttl": "720h", "nonce_ttl": "10m"}}
+	request["accounts"] = map[string]any{"writer": map[string]any{"subject": "fixture-writer", "email": "writer@example.com", "display_name": "Writer Block Test", "avatar_url": "https://example.com/avatar.png", "state": "active"}, "disabled": map[string]any{"subject": "fixture-disabled", "email": "disabled@example.com", "display_name": "Disabled writer", "avatar_url": "https://example.com/avatar.png", "state": "disabled"}}
+
 	invoke := func(input []byte, outputDir string) ([]byte, error) {
 		t.Helper()
 		inputPath := filepath.Join(scratch, "input.json")
@@ -152,6 +154,41 @@ func TestPublicFixtureCLI(t *testing.T) {
 	if receiptFields["schema"] != "tauth.test-fixture.v1" || receiptFields["app_id"] != "fixture-app" || receiptFields["tenant_id"] != row.ID || receiptFields["mount_path"] != "/tauth-fixture" || receiptFields["build_identity"] == "" || receiptFields["input_sha256"] == "" {
 		t.Fatalf("receipt identity is incomplete: %v", receiptFields)
 	}
+	accounts := receiptFields["accounts"].(map[string]any)
+	for _, alias := range []string{"writer", "disabled"} {
+		account := accounts[alias].(map[string]any)
+		if account["user_id"] == "" || account["user_id"] == nil {
+			t.Fatalf("fixture account lacks a user ID: %v", account)
+		}
+	}
+
+	t.Run("omitted-accounts", func(t *testing.T) {
+		var withoutAccounts map[string]any
+		if err := json.Unmarshal(encoded, &withoutAccounts); err != nil {
+			t.Fatal(err)
+		}
+		delete(withoutAccounts, "accounts")
+		input, err := json.Marshal(withoutAccounts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		destination := filepath.Join(scratch, "without-accounts")
+		if output, err := invoke(input, destination); err != nil {
+			t.Fatalf("prepare fixture without optional accounts: %v\n%s", err, output)
+		}
+		output, err := os.ReadFile(filepath.Join(destination, "receipt.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt map[string]any
+		if err := json.Unmarshal(output, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if len(receipt["accounts"].(map[string]any)) != 0 {
+			t.Fatal("omitted accounts created application users")
+		}
+	})
+
 	databaseBefore, err := os.ReadFile(filepath.Join(outputDir, "tauth.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -202,12 +239,34 @@ func TestPublicFixtureCLI(t *testing.T) {
 			}
 		})
 	}
-	for _, scenario := range []string{"unknown", "schema", "test-only", "remote-origin", "reserved-tenant", "reserved-app", "reserved-app-spaces", "missing-provider", "invalid-lifetime", "trailing"} {
+	for _, scenario := range []string{"unknown", "schema", "test-only", "remote-origin", "reserved-tenant", "reserved-app", "reserved-app-spaces", "missing-provider", "invalid-lifetime", "account-unknown", "account-empty", "account-subject", "account-duplicate", "account-email", "account-avatar", "account-state", "account-alias", "trailing"} {
 		t.Run(scenario, func(t *testing.T) {
 			var invalid map[string]any
 			json.Unmarshal(encoded, &invalid)
 			tenant := invalid["tenant"].(map[string]any)
 			switch scenario {
+			case "account-unknown", "account-empty", "account-subject", "account-duplicate", "account-email", "account-avatar", "account-state", "account-alias":
+				accounts := invalid["accounts"].(map[string]any)
+				account := accounts["writer"].(map[string]any)
+				switch scenario {
+				case "account-unknown":
+					account["token"] = "unowned"
+				case "account-empty":
+					account["display_name"] = " "
+				case "account-subject":
+					account["subject"] = "production-provider-id"
+				case "account-duplicate":
+					accounts["disabled"].(map[string]any)["subject"] = account["subject"]
+				case "account-email":
+					account["email"] = "person@production.example"
+				case "account-avatar":
+					account["avatar_url"] = "https://production.example/avatar.png"
+				case "account-state":
+					account["state"] = "pending"
+				case "account-alias":
+					accounts[" "] = account
+				}
+
 			case "unknown":
 				invalid["database_url"] = "sqlite:///unowned.db"
 			case "schema":

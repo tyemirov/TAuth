@@ -158,6 +158,8 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		"caddy_route/public-api",
 		"compose_project/runtime",
 		"github_pages/browser-helper",
+		"github_release_binary/test-fixture-darwin-arm64",
+		"github_release_binary/test-fixture-linux-amd64",
 		"health_check/public-health",
 		"private_values/oauth-private",
 		"runtime_capability/http",

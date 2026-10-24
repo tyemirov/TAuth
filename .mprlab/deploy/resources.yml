@@ -79,6 +79,30 @@ mprlab_resources:
       '0': make
       '1': ci
   resources:
+    test-fixture-linux-amd64:
+      kind: github_release_binary
+      repository: tyemirov/TAuth
+      build:
+        system: go
+        package: ./cmd/testfixture
+        binary: tauth-test-fixture
+        environment:
+          CGO_ENABLED: "0"
+          GOFLAGS: -tags=tauth_testfixture
+        platforms:
+          - linux/amd64
+    test-fixture-darwin-arm64:
+      kind: github_release_binary
+      repository: tyemirov/TAuth
+      build:
+        system: go
+        package: ./cmd/testfixture
+        binary: tauth-test-fixture
+        environment:
+          CGO_ENABLED: "0"
+          GOFLAGS: -tags=tauth_testfixture
+        platforms:
+          - darwin/arm64
     oauth-private:
       kind: private_values
       bindings:
