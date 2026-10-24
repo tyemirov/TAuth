@@ -27,7 +27,10 @@ Do not infer a sibling checkout or search `PATH` for another executable.
 
 The selected manifest declares separate test fixture binaries for `linux/amd64` and `darwin/arm64`.
 The GitHub Release assets are `tauth-test-fixture-linux-amd64.tar.gz` and `tauth-test-fixture-darwin-arm64.tar.gz`.
-Each archive contains `tauth-test-fixture`.
+Each archive must contain exactly one `tauth-test-fixture` entry.
+Host metadata must be absent.
+Inspect raw tar entries before consumer acceptance.
+Preserve immutable published assets. Publish archive corrections under a new version.
 The production image remains separate from these test artifacts.
 
 Acquire the artifact from an explicit published TAuth version before consumer CI.
