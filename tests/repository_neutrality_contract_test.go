@@ -47,8 +47,21 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		resourceKeys = append(resourceKeys, resourceKey)
 	}
 	slices.Sort(resourceKeys)
-	if !slices.Equal(resourceKeys, []string{"ci", "defaults", "operations", "owner", "release", "resources"}) {
+	if !slices.Equal(resourceKeys, []string{"ci", "defaults", "environment_file", "hosts", "inputs", "operations", "owner", "release", "resources"}) {
 		t.Fatalf("application resource manifest root is not the exact versionless contract: %#v", resourceKeys)
+	}
+	if stringField(t, resourcesDocument, "environment_file") != ".mprlab/deploy/.env" {
+		t.Fatal("application environment input must select the explicit private file")
+	}
+	inputs := mappingField(t, resourcesDocument, "inputs")
+	for key, raw := range inputs {
+		if raw != "${"+key+"}" {
+			t.Fatalf("private input %s must reference its named environment value", key)
+		}
+	}
+	host := mappingField(t, mappingField(t, resourcesDocument, "hosts"), "tutosh")
+	if key := stringField(t, host, "ansible_become_password"); inputs[key] == nil {
+		t.Fatal("selected host authentication must reference a declared private input")
 	}
 	ciPolicy := mappingField(t, resourcesDocument, "ci")
 	command := mappingField(t, ciPolicy, "command")
@@ -122,6 +135,14 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		resource, resourceAvailable := resourceValue.(map[string]any)
 		if !resourceAvailable {
 			t.Fatalf("application resource is not a mapping: %#v", resourceValue)
+		}
+		if resource["kind"] == "private_values" {
+			for output, rawKey := range mappingField(t, resource, "bindings") {
+				key, valid := rawKey.(string)
+				if !valid || inputs[key] == nil {
+					t.Fatalf("private output %s/%s must select a declared input", resourceID, output)
+				}
+			}
 		}
 		resourceIdentity := stringField(t, resource, "kind") + "/" + resourceID
 		resourceIdentities = append(resourceIdentities, resourceIdentity)
