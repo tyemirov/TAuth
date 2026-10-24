@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +25,25 @@ func init() {
 	case "mprlab-gateway":
 		if os.Args[1] == "version" {
 			fmt.Println(`{"version":"fixture","source_commit":"fixture","platform":"fixture","lifecycle_contract":4}`)
+		} else if os.Args[1] == "bootstrap-run" {
+			if len(os.Args) < 8 || os.Args[2] != "--repo-root" || os.Args[3] != os.Getenv("TAUTH_ROLLOUT_APPLICATION_ROOT") || os.Args[4] != "--operation" || os.Args[5] != "app-deploy" || os.Args[6] != "--" {
+				panic("unexpected captured rollout invocation: " + strings.Join(os.Args[1:], " "))
+			}
+			packageRoot := filepath.Dir(filepath.Dir(filepath.Dir(os.Args[0])))
+			if os.Args[7] != filepath.Join(packageRoot, "toolchain/bin/ansible-playbook") {
+				panic("rollout did not select packaged Ansible")
+			}
+			fmt.Println("fixture bootstrap:", strings.Join(os.Args[7:], " "))
+			command := exec.Command(os.Args[7], os.Args[8:]...)
+			command.Env = append(os.Environ(), "TAUTH_ROLLOUT_BOOTSTRAP=1")
+			command.Stdout, command.Stderr = os.Stdout, os.Stderr
+			if err := command.Run(); err != nil {
+				var failure *exec.ExitError
+				if errors.As(err, &failure) {
+					os.Exit(failure.ExitCode())
+				}
+				panic(err)
+			}
 		} else {
 			fmt.Println("fixture gateway:", strings.Join(os.Args[1:], " "))
 		}
@@ -73,6 +93,10 @@ func init() {
 			panic(err)
 		}
 	case "ansible-playbook":
+		if os.Getenv("TAUTH_ROLLOUT_BOOTSTRAP") != "1" {
+			fmt.Fprintln(os.Stderr, "fixture: Ansible requires captured Gateway bootstrap")
+			os.Exit(98)
+		}
 		playbook := os.Args[3]
 		source := filepath.Join(os.Getenv("TAUTH_ROLLOUT_SOURCE"), "deployment/rollout", filepath.Base(playbook))
 		assertPayload := func(actual, expected string) {
@@ -140,7 +164,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	extractionRoot := t.TempDir()
-	environment := append(os.Environ(), "PATH="+packageRoot+string(os.PathListSeparator)+os.Getenv("PATH"), "TAUTH_ROLLOUT_SOURCE="+source, "TMPDIR="+extractionRoot)
+	environment := append(os.Environ(), "PATH="+packageRoot+string(os.PathListSeparator)+os.Getenv("PATH"), "TAUTH_ROLLOUT_SOURCE="+source, "TAUTH_ROLLOUT_APPLICATION_ROOT="+root, "TMPDIR="+extractionRoot)
 	assertCleanup := func() {
 		t.Helper()
 		entries, err := os.ReadDir(extractionRoot)
@@ -211,7 +235,7 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	command := exec.Command(rollout, root, gateway)
 	command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "MPRLAB_GATEWAY_OPERATOR_ROOT="+t.TempDir())
 	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "fixture: cutover input preflight reached") || !strings.Contains(string(output), "cutover.input_preflight:") {
+	if err == nil || !strings.Contains(string(output), "fixture: cutover input preflight reached") || !strings.Contains(string(output), "cutover.input_preflight:") || !strings.Contains(string(output), "exit status 7") {
 		t.Fatalf("rollout did not consume the current release: %v\n%s", err, output)
 	}
 	assertCleanup()
@@ -244,11 +268,12 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("full rollout failed: %v\n%s", err, output)
 	}
+	inputPhase := strings.Index(string(output), "/deployment/rollout/inputs.yml")
 	oldPhase := strings.Index(string(output), "/deployment/rollout/cutover.yml")
 	newPhase := strings.Index(string(output), "/deployment/rollout/console-google-client.yml")
 	subjectPhase := strings.Index(string(output), "/deployment/rollout/application-subjects.yml")
 	deployPhase := strings.Index(string(output), "fixture gateway: app-deploy")
-	if oldPhase < 0 || newPhase <= oldPhase || subjectPhase <= newPhase || deployPhase <= subjectPhase {
+	if strings.Count(string(output), "fixture bootstrap:") != 4 || inputPhase < 0 || oldPhase <= inputPhase || newPhase <= oldPhase || subjectPhase <= newPhase || deployPhase <= subjectPhase {
 		t.Fatalf("independent migration phase absent or out of order: %s", output)
 	}
 

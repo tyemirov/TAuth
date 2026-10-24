@@ -5,6 +5,28 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B139] (P0) Declare private deployment inputs in the manifest.
+  Goal: Supply application values and host credentials through the resolved Gateway manifest.
+  Evidence: The manifest binds private outputs but declares no private inputs or host credential references.
+  The current Gateway contract requires these declarations before lifecycle operations.
+  Requirements:
+  - Select the existing application environment file with an explicit path.
+  - Declare the application keys and selected host credential as private inputs.
+  - Keep existing private values and deployed application data.
+  - Bind the selected host authentication to its declared input key.
+  - Run migration playbooks through the installed Gateway capture.
+  Validation:
+  Run the application checks and verify the manifest through the installed Gateway.
+  Verify capture with native local Ansible and preserve rollout phase order and failures.
+  Resolution: The manifest selects the application environment file and declares private inputs and host references.
+  All four migration phases use the installed Gateway capture.
+  The public CLI tests verify phase order and native failures.
+  Native local Ansible tests verify host isolation and private diagnostic output.
+  Full `CI=1 make ci </dev/null` passed with installed Gateway v7.0.0.
+  Independent review found no actionable defects.
+  Deployment operation: Production activation remains pending in the current delivery task.
+  Verify its selected version and public health through the native lifecycle receipts and live endpoints.
+
 - [x] [B138] (P1) Select the published image for deployment file extraction.
   Goal: Read the deployment files from the current published service image.
   Evidence: Deployment of v2.2.20 selected a local OCI archive reference that GHCR could not resolve.

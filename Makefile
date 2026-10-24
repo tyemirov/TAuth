@@ -13,7 +13,7 @@ test-local-lifecycle:
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-test-fixture-runtime test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-automatic-deployment test-managed-proxy-trust
+ci: format lint test-go test-test-fixture-runtime test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-captured-rollout test-automatic-deployment test-managed-proxy-trust
 
 .PHONY: test-proxy-trust test-managed-proxy-trust
 test-proxy-trust:
@@ -95,6 +95,10 @@ verify-js:
 
 test-deployment-config-renderer:
 	bash tests/deployment-config-renderer.sh
+
+.PHONY: test-captured-rollout
+test-captured-rollout:
+	bash tests/captured-rollout.sh
 
 .PHONY: test-installed-gateway
 test-installed-gateway:

@@ -1,6 +1,14 @@
 ---
 mprlab_resources:
   owner: tauth
+  environment_file: .mprlab/deploy/.env
+  inputs:
+    TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64: ${TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64}
+    TAUTH_TENANT_ENCRYPTION_KEY: ${TAUTH_TENANT_ENCRYPTION_KEY}
+    DEPLOY_SUDO_PASSWORD_TUTOSH: ${DEPLOY_SUDO_PASSWORD_TUTOSH}
+  hosts:
+    tutosh:
+      ansible_become_password: DEPLOY_SUDO_PASSWORD_TUTOSH
   release:
     scheme: semver
   defaults:

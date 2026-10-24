@@ -34,6 +34,11 @@ func execute(ctx context.Context, executable string, args ...string) error {
 	return command.Run()
 }
 
+func executeAnsible(ctx context.Context, gateway, root, ansible string, args ...string) error {
+	arguments := []string{"bootstrap-run", "--repo-root", root, "--operation", "app-deploy", "--", ansible}
+	return execute(ctx, gateway, append(arguments, args...)...)
+}
+
 func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errors.New("usage: rollout APPLICATION_ROOT GATEWAY_EXECUTABLE")
@@ -128,7 +133,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(inputsPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
+	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/inputs.yml"), "--extra-vars", "@"+inputsPath); err != nil {
 		return fmt.Errorf("cutover.input_preflight: %w", err)
 	}
 	recoveredKey := ""
@@ -161,7 +166,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/cutover.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("cutover.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = consolePlanPath
@@ -173,7 +178,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/console-google-client.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("console_client.migration_failed: %w", err)
 	}
 	variables["tauth_cutover_plan"] = subjectPlanPath
@@ -185,7 +190,7 @@ func run(ctx context.Context, args []string) error {
 	if err = writeFile(variablesPath, payload); err != nil {
 		return err
 	}
-	if err = execute(ctx, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
+	if err = executeAnsible(ctx, native, root, ansible, "-i", filepath.Join(operatorRoot, "inventory/hosts.yml"), filepath.Join(localRoot, "deployment/rollout/application-subjects.yml"), "--extra-vars", "@"+variablesPath); err != nil {
 		return fmt.Errorf("application_subjects.migration_failed: %w", err)
 	}
 	return execute(ctx, native, "app-deploy", "--app-root", root)
