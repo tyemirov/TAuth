@@ -176,8 +176,8 @@ func TestBuildSQLiteDSNRejectsFileHost(t *testing.T) {
 	if buildErr != nil {
 		t.Fatalf("unexpected error for triple slash absolute path: %v", buildErr)
 	}
-	if dsn != "/data/alt.db" {
-		t.Fatalf("expected /data/alt.db, got %s", dsn)
+	if dsn != "file:/data/alt.db" {
+		t.Fatalf("expected file:/data/alt.db, got %s", dsn)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestBuildSQLiteDSNCoversOpaqueAndHostPathVariants(t *testing.T) {
 	if hostErr != nil {
 		t.Fatalf("unexpected error building host dsn: %v", hostErr)
 	}
-	if hostDSN != "localhost/tmp/test.db" {
+	if hostDSN != "file:localhost/tmp/test.db" {
 		t.Fatalf("unexpected host dsn: %s", hostDSN)
 	}
 

@@ -179,6 +179,7 @@ func (login *GitHubLogin) start(response http.ResponseWriter, request *http.Requ
 	transaction.StateHash, transaction.BrowserHash, transaction.Verifier = stateHash, browserHash, verifier
 	transaction.CreatedAtUnix, transaction.ExpiresAtUnix = now.Unix(), now.Add(githubTransactionTTL).Unix()
 	if err := login.transactions.create(request.Context(), transaction); err != nil {
+		logAuthWarning("auth.github.start", err, zap.String("tenant", tenantID), zap.String("stage", "transaction_create"), zap.String("correlation_id", stateHash[:16]))
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrGitHubStoreFull) {
 			status = http.StatusTooManyRequests
@@ -214,6 +215,8 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		status, code := http.StatusInternalServerError, "store_failure"
 		if errors.Is(err, ErrGitHubStateInvalid) {
 			status, code = http.StatusBadRequest, "invalid_state"
+		} else {
+			logAuthWarning("auth.github.callback", err, zap.String("stage", "transaction_claim"), zap.String("correlation_id", hashOpaque(state)[:16]), zap.String("result", code))
 		}
 		githubError(response, status, code)
 		return
@@ -235,7 +238,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 	if transaction.Operation == githubAccountLink {
 		profile, err := login.sessions.accountStore.ResolveAccountProfile(request.Context(), transaction.TenantID, transaction.AccountID)
 		if err != nil {
-			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
+			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure", zap.String("stage", "account_resolve"), zap.Error(err))
 			return
 		}
 		if profile.State != accountStateActive {
@@ -278,12 +281,12 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 		case errors.Is(err, ErrAccountDisabled), errors.Is(err, ErrAccountNotActive):
 			status, code = http.StatusForbidden, errorAccountDisabled
 		}
-		login.failure(response, request, transaction, status, code)
+		login.failure(response, request, transaction, status, code, zap.String("stage", "profile"), zap.Error(err))
 		return
 	}
 	active, activeErr := login.sessions.ActiveUser(request.Context(), transaction.TenantID, profile.applicationUserID)
 	if activeErr != nil {
-		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
+		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure", zap.String("stage", "active_user"), zap.Error(activeErr))
 		return
 	}
 	if !active {
@@ -292,7 +295,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 	}
 	if config.GitHubOAuth.CredentialKey() != "" {
 		if err := login.sessions.saveGitHubCredential(request.Context(), transaction.TenantID, profile.applicationUserID, authentication.credential); err != nil {
-			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
+			login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure", zap.String("stage", "credential_save"), zap.Error(err))
 			return
 		}
 	}
@@ -301,7 +304,7 @@ func (login *GitHubLogin) callback(response http.ResponseWriter, request *http.R
 			login.failure(response, request, transaction, http.StatusTooManyRequests, errorTransientCapacity)
 			return
 		}
-		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure")
+		login.failure(response, request, transaction, http.StatusInternalServerError, "store_failure", zap.String("stage", "session_write"), zap.Error(err))
 		return
 	}
 	if transaction.PopupOrigin != "" {
@@ -352,8 +355,9 @@ func (sessions *OAuthBrowserSessions) githubApplicationProfile(ctx context.Conte
 	}
 }
 
-func (login *GitHubLogin) failure(response http.ResponseWriter, request *http.Request, transaction githubTransaction, status int, code string) {
-	logAuthWarning("auth.github.callback", nil, zap.String("tenant", transaction.TenantID), zap.String("operation", string(transaction.Operation)), zap.String("correlation_id", transaction.StateHash[:16]), zap.String("code", code))
+func (login *GitHubLogin) failure(response http.ResponseWriter, request *http.Request, transaction githubTransaction, status int, code string, diagnostic ...zap.Field) {
+	fields := []zap.Field{zap.String("tenant", transaction.TenantID), zap.String("operation", string(transaction.Operation)), zap.String("correlation_id", transaction.StateHash[:16]), zap.String("result", code)}
+	logAuthWarning("auth.github.callback", nil, append(fields, diagnostic...)...)
 	if transaction.PopupOrigin != "" {
 		githubPopup(response, transaction, code)
 		return

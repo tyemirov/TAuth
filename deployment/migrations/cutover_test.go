@@ -385,6 +385,21 @@ func TestAutomaticDeploymentFixture(t *testing.T) {
     allow_insecure_http: true
 `))
 	save("service.yaml", []byte("server:\n  listen_addr: ':8080'\n  database_url: sqlite:///data/tauth.db\n  tenant_encryption_key: "+key+"\n  enable_cors: true\n  cors_allowed_origins: [https://accounts.google.com]\n  cors_allowed_origin_exceptions: [https://accounts.google.com]\n  enable_tenant_header_override: true\n"))
+	// The shell fixture copies this database file after the test exits.
+	// Flush its committed WAL content before exporting that single-file snapshot.
+	db, err := authkit.OpenControlDatabase(context.Background(), "sqlite://"+database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var checkpoint struct{ Busy, Log, Checkpointed int }
+	if err := db.Raw("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&checkpoint).Error; err != nil || checkpoint.Busy != 0 {
+		t.Fatalf("fixture snapshot checkpoint: %+v %v", checkpoint, err)
+	}
 }
 
 func TestAutomaticProductionSnapshotCutover(t *testing.T) {

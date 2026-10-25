@@ -61,7 +61,8 @@
           - --network=none
           - --entrypoint=/usr/local/bin/tauth-migrate
           - --mount
-          - "type=volume,src={{ tauth_cutover_volume }},dst=/data,readonly"
+          # SQLite mode=ro protects data; WAL readers need writable sidecars.
+          - "type=volume,src={{ tauth_cutover_volume }},dst=/data"
           - --mount
           - "{{ tauth_cutover_mount }}"
           - "{{ tauth_cutover_image }}"

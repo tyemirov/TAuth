@@ -10,6 +10,11 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## MPR Lab Technical Nouns
 
+- `SQLite`: The embedded SQL database used by persistent service stores.
+- `journal mode`: The SQLite method for transaction commits and recovery.
+- `WAL`: SQLite write-ahead logging, which records committed changes before the database file changes.
+- `checkpoint`: Copy committed SQLite changes from the WAL file to the database file.
+
 - `emulator`: Software that reproduces a device runtime for application tests.
 - `physical device`: Hardware used to run an application or do a device test.
 - `simulator`: Software that models a device environment for application tests.

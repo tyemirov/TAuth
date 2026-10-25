@@ -316,6 +316,14 @@ Credential routes require this transport contract before they read credentials o
 The explicit tenant `allow_insecure_http` setting disables the tenant HTTPS requirement. Use this setting for development. OAuth local HTTP requires its loopback issuer and a loopback connection peer.
 
 The database URL and base64 encryption key are required. The decoded key must contain 32 bytes.
+Writable SQLite stores use write-ahead logging (WAL).
+This mode permits authentication writes while other service connections read the same database.
+Database diagnostics keep the selected journal mode unchanged.
+Conflicting `journal_mode` URL options stop writable store initialization.
+SQLite URLs preserve `mode=ro` through the driver URI.
+Migration status checks use this read-only connection and permit SQLite sidecar writes on the database volume.
+Use a SQLite backup operation that produces a consistent snapshot.
+For a file copy, stop writers and successfully checkpoint the database first.
 The service rejects missing console bootstrap data and incorrect encryption keys.
 The database can contain the console tenant with no application tenants.
 
