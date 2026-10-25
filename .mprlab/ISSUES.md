@@ -5,6 +5,37 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B141] (P1) Permit GitHub login during concurrent SQLite reads.
+  Goal: Complete GitHub login while other service connections read the shared database.
+  Evidence: Production nonce operations report `SQLITE_BUSY`.
+  Production uses the `delete` journal mode.
+  The GitHub callback returns `store_failure` after five seconds without the underlying error.
+  A public HTTP regression reproduces this response with a concurrent database reader.
+  The production lock owner remains unknown.
+  Requirements:
+  - Use WAL when writable SQLite stores initialize.
+  - Keep diagnostic reads and connectivity checks unchanged.
+  - Preserve callback consumption, replay rejection, and concurrent login behavior.
+  - Record the storage stage and underlying error without credentials.
+  - Keep bounded failures when another connection holds the writer lock.
+  - Preserve SQLite URI options and enforce `mode=ro` for migration status reads.
+  - Permit SQLite sidecar writes for WAL status reads without database writes.
+  Validation:
+  Verify shared-reader login, writer contention, recovery, and safe diagnostics through HTTP.
+  Run the GitHub tests, database diagnostics, migration checks, and full CI.
+  Resolution: Writable stores initialize WAL and reject conflicting journal options.
+  SQLite file URIs preserve `mode=ro`. Migration status reads permit WAL sidecars while SQL remains read-only.
+  GitHub failure logs retain the storage stage, original error, and hashed correlation identifier.
+  The deployment fixture checkpoints committed WAL data before export.
+  Validation: The held-reader HTTP regression reproduced the failure before the fix and passed after it.
+  Writer contention, recovery, safe diagnostics, SQL read-only enforcement, and database diagnostic checks passed.
+  Final GitHub HTTP tests with race detection and GitHub OAuth tests passed.
+  Full `CI=1 make ci` passed after authorized local Docker and storage recovery.
+  Independent source review found no remaining critical defects.
+  Production status: TAuth publication and deployment remain pending.
+  Fresh IssuesMD authorization succeeded against the existing production version.
+  The production lock owner remains unknown.
+
 - [x] [B140] (P0) Preserve the captured existing key throughout production rollout.
   Goal: Use one validated existing encryption key for migrations and final deployment.
   Evidence: Rollout reads implicit private files and can generate inputs after the manifest requires an existing key.

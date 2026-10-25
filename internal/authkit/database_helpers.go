@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 
 	sqliteDialector "github.com/glebarez/sqlite"
@@ -105,6 +106,15 @@ func openDatabase(requestContext context.Context, databaseURL string, errorPrefi
 	if resolveError != nil {
 		return nil, "", resolveError
 	}
+	if driverLabel == "sqlite" && len(models) > 0 {
+		parsed, _ := url.Parse(databaseURL) // resolveDialector already validated the URL.
+		for _, pragma := range parsed.Query()["_pragma"] {
+			canonical := strings.ToLower(strings.Join(strings.Fields(pragma), ""))
+			if strings.Contains(canonical, "journal_mode") && canonical != "journal_mode(wal)" && canonical != "journal_mode=wal" {
+				return nil, "", fmt.Errorf("%s.journal_mode: conflicting SQLite journal pragma", errorPrefix)
+			}
+		}
+	}
 	databaseHandle, openError := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -112,6 +122,22 @@ func openDatabase(requestContext context.Context, databaseURL string, errorPrefi
 		return nil, "", fmt.Errorf("%s.open.%s: %w", errorPrefix, driverLabel, openError)
 	}
 	if len(models) > 0 {
+		// Initialize writable stores in WAL mode so independent service pools can
+		// commit authentication writes while another pool holds a read snapshot.
+		// Connectivity checks and diagnostic opens do not change journal mode.
+		if driverLabel == "sqlite" {
+			pool, err := databaseHandle.DB()
+			if err != nil {
+				return nil, "", fmt.Errorf("%s.journal_mode: %w", errorPrefix, err)
+			}
+			var journalMode string
+			if err := databaseHandle.WithContext(requestContext).Raw("PRAGMA journal_mode=WAL").Scan(&journalMode).Error; err != nil {
+				return nil, "", fmt.Errorf("%s.journal_mode: %w", errorPrefix, errors.Join(err, pool.Close()))
+			}
+			if journalMode != "wal" && journalMode != "memory" {
+				return nil, "", errors.Join(fmt.Errorf("%s.journal_mode: require wal, got %s", errorPrefix, journalMode), pool.Close())
+			}
+		}
 		if errorPrefix == refreshStoreErrorPrefix || errorPrefix == nonceStoreErrorPrefix || errorPrefix == githubStoreErrorPrefix {
 			models = append(models, &transientCapacityLock{})
 		}
@@ -207,11 +233,16 @@ func buildSQLiteDSN(parsed *url.URL) (string, error) {
 	if builder.Len() == 0 {
 		return "", errSQLiteEmptyPath
 	}
-	if parsed.RawQuery != "" {
-		builder.WriteString("?")
-		builder.WriteString(parsed.RawQuery)
+	dsn := builder.String()
+	if !strings.HasPrefix(dsn, "file:") {
+		// SQLite URI options, including mode=ro, require the file: prefix.
+		// Escape path delimiters before adding the caller's query options.
+		dsn = "file:" + (&url.URL{Path: path.Clean(dsn)}).EscapedPath()
 	}
-	return builder.String(), nil
+	if parsed.RawQuery != "" {
+		dsn += "?" + parsed.RawQuery
+	}
+	return dsn, nil
 }
 
 func ensureSchemaVersion(requestContext context.Context, databaseHandle *gorm.DB, errorPrefix string, driverLabel string, models ...interface{}) error {

@@ -21,6 +21,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tyemirov/tauth/internal/tenants"
 	"github.com/tyemirov/tauth/internal/web"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestGitHubHTTPStart(t *testing.T) {
@@ -126,7 +128,13 @@ func newGitHubHTTPFixture(t *testing.T, database bool, accountManaged bool) *git
 			t.Fatal(err)
 		}
 	}
-	nonces := NewMemoryNonceStore(time.Minute)
+	var nonces NonceStore = NewMemoryNonceStore(time.Minute)
+	if database {
+		nonces, err = NewDatabaseNonceStore(context.Background(), databaseURL, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	sessions := NewOAuthBrowserSessions(registry, users, refresh, nonces, passwords)
 	login, err := NewGitHubLogin(sessions, transactions, NewGitHubProvider(provider), nil)
 	if err != nil {
@@ -477,6 +485,9 @@ func (store githubFailingUsers) UpsertAccountUser(context.Context, string, strin
 func TestGitHubHTTPPersistenceFailures(t *testing.T) {
 	for _, scenario := range []string{"profile", "refresh", "transaction"} {
 		t.Run(scenario, func(t *testing.T) {
+			core, observed := observer.New(zap.WarnLevel)
+			ProvideLogger(zap.New(core))
+			t.Cleanup(func() { ProvideLogger(nil) })
 			fixture := newGitHubHTTPFixture(t, true, true)
 			callback := fixture.callbackURL(t, "")
 			switch scenario {
@@ -498,9 +509,99 @@ func TestGitHubHTTPPersistenceFailures(t *testing.T) {
 			if status != 500 || !strings.Contains(body, "store_failure") {
 				t.Fatalf("failure status=%d body=%s", status, body)
 			}
+			warnings := observed.FilterField(zap.String("code", "auth.github.callback")).All()
+			if len(warnings) != 1 || warnings[0].ContextMap()["error"] == nil || warnings[0].ContextMap()["stage"] == nil {
+				t.Fatalf("missing callback storage diagnostic: %+v", warnings)
+			}
+			parsed, _ := url.Parse(callback)
+			for _, secret := range []string{parsed.Query().Get("state"), parsed.Query().Get("code"), "test-secret"} {
+				if secret != "" && strings.Contains(fmt.Sprint(warnings), secret) {
+					t.Fatal("callback diagnostic disclosed a credential")
+				}
+			}
 			status, _ = githubHTTPResponse(t, fixture.client, fixture.server.URL+"/auth/session")
 			if status != 204 {
 				t.Fatalf("failure issued session: %d", status)
+			}
+		})
+	}
+}
+
+func TestGitHubHTTPCallbackWithSharedDatabaseReader(t *testing.T) {
+	fixture := newGitHubHTTPFixture(t, true, true)
+	callback := fixture.callbackURL(t, "")
+	// The service opens separate pools for user, OAuth, nonce, and GitHub stores.
+	// Hold a real reader in the user pool while the callback writes through the others.
+	database := fixture.users.(*DatabaseUserStore)
+	reader := database.db.Begin()
+	if reader.Error != nil {
+		t.Fatal(reader.Error)
+	}
+	t.Cleanup(func() { reader.Rollback() })
+	var count int64
+	if err := reader.Raw("SELECT count(*) FROM github_login_transactions").Scan(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one pending GitHub transaction, got %d", count)
+	}
+	status, body := githubHTTPResponse(t, fixture.client, callback)
+	if status != http.StatusSeeOther {
+		t.Fatalf("callback blocked by shared reader: status=%d body=%s", status, body)
+	}
+	status, _ = githubHTTPResponse(t, fixture.client, fixture.server.URL+"/auth/session")
+	if status != http.StatusOK {
+		t.Fatalf("callback did not issue a session: %d", status)
+	}
+	status, _ = githubHTTPResponse(t, fixture.client, callback)
+	if status != http.StatusBadRequest {
+		t.Fatalf("callback replay accepted: %d", status)
+	}
+}
+
+func TestGitHubHTTPSharedDatabaseWriterFailure(t *testing.T) {
+	for _, stage := range []string{"transaction_create", "transaction_claim"} {
+		t.Run(stage, func(t *testing.T) {
+			fixture := newGitHubHTTPFixture(t, true, true)
+			callback := fixture.callbackURL(t, "")
+			core, observed := observer.New(zap.WarnLevel)
+			ProvideLogger(zap.New(core))
+			t.Cleanup(func() { ProvideLogger(nil) })
+			transactions := fixture.login.transactions.(*databaseGitHubTransactions)
+			pool, err := transactions.db.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool.SetMaxOpenConns(1)
+			if err := transactions.db.Exec("PRAGMA busy_timeout=50").Error; err != nil {
+				t.Fatal(err)
+			}
+			writer := fixture.users.(*DatabaseUserStore).db.Begin()
+			if writer.Error != nil {
+				t.Fatal(writer.Error)
+			}
+			t.Cleanup(func() { writer.Rollback() })
+			if err := writer.Exec("UPDATE auth_transient_capacity_locks SET category=category").Error; err != nil {
+				t.Fatal(err)
+			}
+			target := callback
+			if stage == "transaction_create" {
+				target = fixture.server.URL + tenants.GitHubStartPath + "?tenant_id=github&return_to=" + url.QueryEscape("https://app.example.com/done")
+			}
+			started := time.Now()
+			status, body := githubHTTPResponse(t, fixture.client, target)
+			if status != http.StatusInternalServerError || !strings.Contains(body, "store_failure") || time.Since(started) > 3*time.Second {
+				t.Fatalf("writer contention response: status=%d body=%s", status, body)
+			}
+			warnings := observed.FilterField(zap.String("stage", stage)).All()
+			if len(warnings) != 1 || !strings.Contains(fmt.Sprint(warnings[0].ContextMap()["error"]), "SQLITE_BUSY") {
+				t.Fatalf("missing writer contention diagnostic: %+v", warnings)
+			}
+			if err := writer.Rollback().Error; err != nil {
+				t.Fatal(err)
+			}
+			if status, body := githubHTTPResponse(t, fixture.client, callback); status != http.StatusSeeOther {
+				t.Fatalf("callback did not recover after writer released: %d %s", status, body)
 			}
 		})
 	}
