@@ -18,262 +18,151 @@ const deployManifestRelativePath = ".mprlab/deploy/resources.yml"
 
 func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
-	manifestPath := filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath))
-	manifestDocument, readErr := os.ReadFile(manifestPath)
-	if readErr != nil {
-		t.Fatalf("read application resource manifest: %v", readErr)
+	manifestDocument, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(deployManifestRelativePath)))
+	if err != nil {
+		t.Fatal(err)
 	}
-
 	var document map[string]any
-	if unmarshalErr := yaml.Unmarshal(manifestDocument, &document); unmarshalErr != nil {
-		t.Fatalf("decode application resource manifest: %v", unmarshalErr)
+	if err := yaml.Unmarshal(manifestDocument, &document); err != nil {
+		t.Fatal(err)
 	}
 	if len(document) != 1 {
-		t.Fatalf("application resource manifest must have one document root: %#v", document)
+		t.Fatal("application manifest must have one document root")
 	}
-	resourcesDocument, available := document["mprlab_resources"].(map[string]any)
-	if !available {
-		t.Fatalf("application resource manifest has no mprlab_resources mapping: %#v", document)
+	root := mappingField(t, document, "mprlab_resources")
+	if root["owner"] != "tauth" || mappingField(t, root, "release")["scheme"] != "semver" {
+		t.Fatal("application owner or release policy changed")
 	}
-	if owner, available := resourcesDocument["owner"].(string); !available || owner != "tauth" {
-		t.Fatalf("application resource manifest has unexpected owner: %#v", resourcesDocument["owner"])
+	keys := make([]string, 0, len(root))
+	for key := range root {
+		keys = append(keys, key)
 	}
-	releasePolicy, available := resourcesDocument["release"].(map[string]any)
-	if !available || len(releasePolicy) != 1 || stringField(t, releasePolicy, "scheme") != "semver" {
-		t.Fatalf("application resource manifest has unexpected release policy: %#v", resourcesDocument["release"])
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{"artifacts", "environment", "lifecycle", "owner", "publications", "release", "targets"}) {
+		t.Fatalf("selected manifest is not the current versionless contract: %v", keys)
 	}
-	resourceKeys := make([]string, 0, len(resourcesDocument))
-	for resourceKey := range resourcesDocument {
-		resourceKeys = append(resourceKeys, resourceKey)
+	environment := mappingField(t, root, "environment")
+	if environment["source"] != ".mprlab/deploy/.env" {
+		t.Fatal("application must select its explicit private source")
 	}
-	slices.Sort(resourceKeys)
-	if !slices.Equal(resourceKeys, []string{"ci", "defaults", "environment_file", "hosts", "inputs", "operations", "owner", "release", "resources"}) {
-		t.Fatalf("application resource manifest root is not the exact versionless contract: %#v", resourceKeys)
+	inputs := map[string]string{}
+	for _, raw := range listField(t, environment, "private_inputs") {
+		input := raw.(map[string]any)
+		id, variable := stringField(t, input, "id"), stringField(t, input, "variable")
+		if inputs[id] != "" {
+			t.Fatalf("duplicate private input %s", id)
+		}
+		inputs[id] = variable
 	}
-	if stringField(t, resourcesDocument, "environment_file") != ".mprlab/deploy/.env" {
-		t.Fatal("application environment input must select the explicit private file")
+	targets := mappingField(t, root, "targets")
+	host := identifiedManifestEntry(t, listField(t, mappingField(t, targets, "access"), "hosts"), "host", "tutosh")
+	if inputs[stringField(t, mappingField(t, host, "elevation_password"), "input")] != "DEPLOY_SUDO_PASSWORD_TUTOSH" {
+		t.Fatal("host authentication lost its declared private input")
 	}
-	inputs := mappingField(t, resourcesDocument, "inputs")
-	for key, raw := range inputs {
-		if raw != "${"+key+"}" {
-			t.Fatalf("private input %s must reference its named environment value", key)
+	lifecycle := mappingField(t, root, "lifecycle")
+	ci := mappingField(t, lifecycle, "ci")
+	command := listField(t, ci, "command")
+	if ci["enabled"] != true || len(command) != 2 || command[0] != "make" || command[1] != "ci" {
+		t.Fatal("CI must enable ordered make ci")
+	}
+	timeouts := mappingField(t, mappingField(t, lifecycle, "defaults"), "timeouts")
+	for _, name := range []string{"startup", "completion", "readiness", "request", "shutdown"} {
+		if durationField(t, timeouts, name) <= 0 {
+			t.Fatalf("nonpositive %s timeout", name)
 		}
 	}
-	host := mappingField(t, mappingField(t, resourcesDocument, "hosts"), "tutosh")
-	if key := stringField(t, host, "ansible_become_password"); inputs[key] == nil {
-		t.Fatal("selected host authentication must reference a declared private input")
-	}
-	ciPolicy := mappingField(t, resourcesDocument, "ci")
-	command := mappingField(t, ciPolicy, "command")
-	if len(ciPolicy) != 2 || ciPolicy["enabled"] != true || len(command) != 2 || command["0"] != "make" || command["1"] != "ci" {
-		t.Fatalf("application CI must enable the ordered make ci command: %#v", ciPolicy)
-	}
-	defaults := mappingField(t, resourcesDocument, "defaults")
-	timeouts := mappingField(t, defaults, "timeouts")
-	if len(defaults) != 1 || len(timeouts) != 5 {
-		t.Fatalf("application default timeout shape is not canonical: %#v", defaults)
-	}
-	for _, field := range []string{"startup", "completion", "readiness", "request", "shutdown"} {
-		if durationField(t, timeouts, field) <= 0 {
-			t.Fatalf("application default timeout %s must be positive", field)
-		}
-	}
-	operations := mappingField(t, resourcesDocument, "operations")
-	expectedOperations := map[string][]string{
-		"ci":                           {"timeouts"},
-		"app-plan-release":             {"polling", "timeouts"},
-		"app-plan-publish":             {"polling", "timeouts"},
-		"app-plan-deploy":              {"polling", "timeouts"},
-		"app-release":                  {"polling", "timeouts"},
-		"app-publish":                  {"polling", "timeouts"},
-		"app-deploy":                   {"polling", "timeouts"},
-		"deployment.http-health":       {"polling"},
-		"deployment.resource.recovery": {"polling"},
-		"app_deploy.health.same_host":  {"polling"},
-		"app_deploy.pages.deployment_status_poll": {"polling"},
-	}
-	if len(operations) != len(expectedOperations) {
-		t.Fatalf("application operation policy has unexpected operations: %#v", operations)
-	}
-	for name, expectedFields := range expectedOperations {
-		policy := mappingField(t, operations, name)
-		fields := make([]string, 0, len(policy))
-		for field := range policy {
-			fields = append(fields, field)
-		}
-		slices.Sort(fields)
-		if !slices.Equal(fields, expectedFields) {
-			t.Fatalf("operation %s has unexpected policy fields: %#v", name, fields)
-		}
-		if slices.Contains(fields, "timeouts") {
-			overrides := mappingField(t, policy, "timeouts")
-			if len(overrides) != 1 || durationField(t, overrides, "completion") <= 0 {
-				t.Fatalf("operation %s must declare a positive completion timeout: %#v", name, overrides)
+	for _, raw := range listField(t, lifecycle, "operations") {
+		operation := raw.(map[string]any)
+		if rawTimeouts, ok := operation["timeouts"]; ok {
+			if durationField(t, rawTimeouts.(map[string]any), "completion") <= 0 {
+				t.Fatal("nonpositive operation timeout")
 			}
 		}
-		if slices.Contains(fields, "polling") {
-			polling := mappingField(t, policy, "polling")
-			initial := durationField(t, polling, "initial")
-			maximum := durationField(t, polling, "maximum")
-			increment := durationField(t, polling, "increment")
+		if rawPolling, ok := operation["polling"]; ok {
+			polling := rawPolling.(map[string]any)
+			initial, maximum, increment := durationField(t, polling, "initial"), durationField(t, polling, "maximum"), durationField(t, polling, "increment")
 			multiplier, multiplierOK := polling["multiplier"].(int)
-			attemptLimit, attemptLimitOK := polling["attempt_limit"].(int)
-			if len(polling) != 5 || initial <= 0 || maximum < initial || increment < 0 || !multiplierOK || multiplier < 1 || !attemptLimitOK || attemptLimit < 1 {
-				t.Fatalf("operation %s must declare finite positive polling: %#v", name, polling)
+			attempts, attemptsOK := polling["attempt_limit"].(int)
+			if initial <= 0 || maximum < initial || increment < 0 || !multiplierOK || multiplier < 1 || !attemptsOK || attempts < 1 {
+				t.Fatalf("invalid finite polling for %v", operation["name"])
 			}
 		}
 	}
+	artifacts := mappingField(t, root, "artifacts")
+	publications := mappingField(t, root, "publications")
+	image := identifiedManifestEntry(t, listField(t, mappingField(t, publications, "ghcr"), "images"), "id", "tauth-image")
+	if image["repository"] != "ghcr.io/tyemirov/tauth" {
+		t.Fatal("ordinary service image repository changed")
+	}
+	project := identifiedManifestEntry(t, listField(t, mappingField(t, targets, "docker_compose"), "projects"), "id", "runtime")
+	services := listField(t, project, "services")
+	if len(services) != 1 {
+		t.Fatal("TAuth must retain its one runtime service")
+	}
+	service := identifiedManifestEntry(t, services, "id", "tauth-api")
+	if mappingField(t, service, "image")["publication"] != "tauth-image" {
+		t.Fatal("TAuth runtime lost its image publication")
+	}
+	placement := mappingField(t, service, "placement")
+	if placement["group"] != "gateway" || placement["cardinality"] != "one" {
+		t.Fatal("TAuth placement changed")
+	}
+	volume := identifiedManifestEntry(t, listField(t, project, "volumes"), "id", "data")
+	if volume["name"] != "mprlab-nginx-gateway_tauth-data" || volume["retention"] != "retain" {
+		t.Fatal("TAuth persistent volume changed")
+	}
+	asset := identifiedManifestEntry(t, listField(t, service, "assets"), "target", "/config/config.yml")
+	if asset["secret"] != "tauth-native-config" {
+		t.Fatal("TAuth must use its retained native configuration file")
+	}
+	endpoints := listField(t, service, "endpoints")
+	for id, name := range map[string]string{"http": "tauth.http", "oauth": "tauth.oauth", "tenants": "tauth.tenants"} {
+		endpoint := identifiedManifestEntry(t, endpoints, "id", id)
+		if endpoint["name"] != name || mappingField(t, endpoint, "health")["path"] != "/health" {
+			t.Fatalf("ordinary TAuth endpoint %s changed", id)
+		}
+	}
+	site := identifiedManifestEntry(t, listField(t, mappingField(t, targets, "github_pages"), "sites"), "id", "browser-helper")
+	if site["publication"] != "browser-helper" || site["url"] != "https://tauth.mprlab.com/" {
+		t.Fatal("browser-helper serving destination changed")
+	}
+	publishedSite := identifiedManifestEntry(t, listField(t, mappingField(t, publications, "github_pages"), "sites"), "id", "browser-helper")
+	if publishedSite["repository"] != "tyemirov/tauth" || publishedSite["branch"] != "gh-pages" || publishedSite["domain"] != "tauth.mprlab.com" || mappingField(t, publishedSite, "marker")["path"] != "/.mprlab-release.json" {
+		t.Fatal("browser-helper publication destination changed")
+	}
+	web := identifiedManifestEntry(t, listField(t, artifacts, "web_bundles"), "id", "browser-helper")
+	source := mappingField(t, web, "source")
+	if source["kind"] != "container" || source["context"] != "." || source["dockerfile"] != "docker/pages/Dockerfile" || source["target"] != "pages" {
+		t.Fatal("browser-helper build source changed")
+	}
+	for _, platform := range []string{"darwin-arm64", "linux-amd64"} {
+		binary := identifiedManifestEntry(t, listField(t, artifacts, "binaries"), "id", "retention-audit-"+platform)
+		build := mappingField(t, binary, "build")
+		if build["binary"] != "tauth-retention-audit" || build["package"] != "./cmd/retentionaudit" {
+			t.Fatal("retention auditor must remain a separate binary")
+		}
+	}
+}
 
-	resources, available := resourcesDocument["resources"].(map[string]any)
-	if !available {
-		t.Fatalf("application resource manifest has no resources map: %#v", resourcesDocument["resources"])
+func listField(t *testing.T, document map[string]any, name string) []any {
+	t.Helper()
+	value, ok := document[name].([]any)
+	if !ok {
+		t.Fatalf("manifest field %s is not a list", name)
 	}
-	resourceIdentities := make([]string, 0, len(resources))
-	var runtimeProject map[string]any
-	var browserHelperPages map[string]any
-	for resourceID, resourceValue := range resources {
-		resource, resourceAvailable := resourceValue.(map[string]any)
-		if !resourceAvailable {
-			t.Fatalf("application resource is not a mapping: %#v", resourceValue)
-		}
-		if resource["kind"] == "private_values" {
-			for output, rawKey := range mappingField(t, resource, "bindings") {
-				key, valid := rawKey.(string)
-				if !valid || inputs[key] == nil {
-					t.Fatalf("private output %s/%s must select a declared input", resourceID, output)
-				}
-			}
-		}
-		resourceIdentity := stringField(t, resource, "kind") + "/" + resourceID
-		resourceIdentities = append(resourceIdentities, resourceIdentity)
-		if resourceIdentity == "compose_project/runtime" {
-			runtimeProject = resource
-		}
-		if resourceIdentity == "github_pages/browser-helper" {
-			browserHelperPages = resource
-		}
-	}
-	slices.Sort(resourceIdentities)
-	expectedResourceIdentities := []string{
-		"caddy_route/public-api",
-		"compose_project/runtime",
-		"github_pages/browser-helper",
-		"github_release_binary/test-fixture-darwin-arm64",
-		"github_release_binary/test-fixture-linux-amd64",
-		"health_check/public-health",
-		"private_values/oauth-private",
-		"runtime_capability/http",
-		"runtime_capability/oauth",
-		"runtime_capability/tenants",
-		"tauth_authorization_server/oauth-server",
-	}
-	if !slices.Equal(resourceIdentities, expectedResourceIdentities) {
-		t.Fatalf("application resource identities do not match the TAuth lifecycle: %#v", resourceIdentities)
-	}
-	if runtimeProject == nil {
-		t.Fatal("application resource manifest has no runtime Compose project")
-	}
-	if browserHelperPages == nil {
-		t.Fatal("application resource manifest has no canonical browser-helper Pages resource")
-	}
-	for fieldName, expectedValue := range map[string]string{
-		"repository": "tyemirov/tauth",
-		"branch":     "gh-pages",
-		"domain":     "tauth.mprlab.com",
-		"url":        "https://tauth.mprlab.com/",
-	} {
-		if actualValue := stringField(t, browserHelperPages, fieldName); actualValue != expectedValue {
-			t.Fatalf("browser-helper Pages %s mismatch: got %q want %q", fieldName, actualValue, expectedValue)
-		}
-	}
-	pagesSource, available := browserHelperPages["source"].(map[string]any)
-	if !available || len(pagesSource) != 4 ||
-		stringField(t, pagesSource, "kind") != "container" ||
-		stringField(t, pagesSource, "context") != "." ||
-		stringField(t, pagesSource, "dockerfile") != "docker/pages/Dockerfile" ||
-		stringField(t, pagesSource, "target") != "pages" {
-		t.Fatalf("browser-helper Pages source is not the exact site artifact: %#v", browserHelperPages["source"])
-	}
-	pagesVerification, available := browserHelperPages["verification"].(map[string]any)
-	if !available || len(pagesVerification) != 1 || stringField(t, pagesVerification, "path") != "/.mprlab-release.json" {
-		t.Fatalf("browser-helper Pages verification is not canonical: %#v", browserHelperPages["verification"])
-	}
-	if _, available := runtimeProject["placement"]; available {
-		t.Fatalf("runtime Compose project retains obsolete project placement: %#v", runtimeProject["placement"])
-	}
-	if _, available := runtimeProject["profiles"]; available {
-		t.Fatalf("runtime Compose project retains obsolete profiles: %#v", runtimeProject["profiles"])
-	}
-	services, available := runtimeProject["services"].(map[string]any)
-	if !available || len(services) != 1 {
-		t.Fatalf("runtime Compose project must declare exactly one service: %#v", runtimeProject["services"])
-	}
-	runtimeService, available := services["tauth-api"].(map[string]any)
-	if !available {
-		t.Fatalf("runtime Compose service is not a mapping: %#v", services["tauth-api"])
-	}
-	placement, available := runtimeService["placement"].(map[string]any)
-	if !available || len(placement) != 2 {
-		t.Fatalf("runtime Compose service must declare exact placement: %#v", runtimeService["placement"])
-	}
-	if group := stringField(t, placement, "group"); group != "gateway" {
-		t.Fatalf("runtime Compose service has unexpected placement group: %q", group)
-	}
-	if cardinality := stringField(t, placement, "cardinality"); cardinality != "one" {
-		t.Fatalf("runtime Compose service has unexpected placement cardinality: %q", cardinality)
-	}
-	if _, available := runtimeService["environment_files"]; available {
-		t.Fatalf("runtime Compose service retains obsolete environment files: %#v", runtimeService["environment_files"])
-	}
-	retiredServices, available := runtimeProject["retired_services"].(map[string]any)
-	if !available || len(retiredServices) != 1 {
-		t.Fatalf("runtime Compose project must retire exactly one service: %#v", runtimeProject["retired_services"])
-	}
-	retiredService, available := retiredServices["mprlab-nginx-gateway/tauth-api"].(map[string]any)
-	if !available || len(retiredService) != 0 {
-		t.Fatalf("service retirement must use its project/service key and an empty body: %#v", retiredServices)
-	}
+	return value
+}
 
-	manifestText := string(manifestDocument)
-	if strings.Contains(manifestText, "\n          visibility:") {
-		t.Fatal("application image retains removed visibility field")
-	}
-	for _, requiredContract := range []string{
-		"managed: tauth.config",
-		"name: mprlab-nginx-gateway_tauth-data",
-		"name: tauth.http",
-		"name: tauth.tenants",
-		"name: tauth.oauth",
-		"alias: tauth-api",
-		"alias: tauth-tenants",
-		"alias: tauth-oauth",
-		"hostname: tauth-api.mprlab.com",
-		"url: https://tauth-api.mprlab.com/health",
-	} {
-		if !strings.Contains(manifestText, requiredContract) {
-			t.Errorf("application resource manifest is missing %q", requiredContract)
+func identifiedManifestEntry(t *testing.T, entries []any, field, identity string) map[string]any {
+	t.Helper()
+	for _, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if ok && entry[field] == identity {
+			return entry
 		}
 	}
-	if healthPathCount := strings.Count(manifestText, "path: /health"); healthPathCount != 4 {
-		t.Errorf("application resource manifest must use /health at four backend readiness boundaries, got %d", healthPathCount)
-	}
-	for _, obsoleteContract := range []string{
-		"schema_version:",
-		"dependencies:",
-		"profiles:",
-		"environment_files:",
-		"make_workflow",
-		"ansible_task_bundle",
-		"dispatch_target:",
-		"directory:",
-		"hostname: tauth.mprlab.com",
-		"path: /tauth.js",
-		"url: https://tauth-api.mprlab.com/tauth.js",
-	} {
-		if strings.Contains(manifestText, obsoleteContract) {
-			t.Errorf("application resource manifest retains obsolete contract %q", obsoleteContract)
-		}
-	}
+	t.Fatalf("manifest entry %s=%s is absent", field, identity)
+	return nil
 }
 
 func TestAPIImageExcludesBrowserHelper(t *testing.T) {

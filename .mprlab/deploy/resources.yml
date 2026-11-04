@@ -1,269 +1,334 @@
----
 mprlab_resources:
-  owner: tauth
-  environment_file: .mprlab/deploy/.env
-  inputs:
-    TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64: ${TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64}
-    TAUTH_TENANT_ENCRYPTION_KEY: ${TAUTH_TENANT_ENCRYPTION_KEY}
-    DEPLOY_SUDO_PASSWORD_TUTOSH: ${DEPLOY_SUDO_PASSWORD_TUTOSH}
-  hosts:
-    tutosh:
-      ansible_become_password: DEPLOY_SUDO_PASSWORD_TUTOSH
-  release:
-    scheme: semver
-  defaults:
-    timeouts:
-      startup: 30s
-      completion: 2m
-      readiness: 2m
-      request: 15s
-      shutdown: 5s
-  operations:
-    ci:
-      timeouts:
-        completion: 350s
-    app-plan-release: &plan-policy
-      timeouts:
-        completion: 2m
-      polling: &provider-polling
-        initial: 2s
-        maximum: 10s
-        increment: 1s
-        multiplier: 2
-        attempt_limit: 4
-    app-plan-publish: *plan-policy
-    app-plan-deploy: *plan-policy
-    app-release:
-      timeouts:
-        completion: 30m
-      polling: *provider-polling
-    app-publish:
-      timeouts:
-        completion: 4h
-      polling: *provider-polling
-    app-deploy:
-      timeouts:
-        completion: 20m
-      polling: *provider-polling
-    deployment.http-health:
-      polling:
-        initial: 1s
-        maximum: 1s
-        increment: 0s
-        multiplier: 1
-        attempt_limit: 3
-    deployment.resource.recovery:
-      polling:
-        initial: 1s
-        maximum: 1s
-        increment: 0s
-        multiplier: 1
-        attempt_limit: 3
-    app_deploy.health.same_host:
-      polling:
-        initial: 15s
-        maximum: 30s
-        increment: 0s
-        multiplier: 2
-        attempt_limit: 3
-    app_deploy.pages.deployment_status_poll:
-      polling:
-        initial: 1s
-        maximum: 10s
-        increment: 0s
-        multiplier: 2
-        attempt_limit: 120
-  ci:
-    enabled: true
-    command:
-      '0': make
-      '1': ci
-  resources:
-    test-fixture-linux-amd64:
-      kind: github_release_binary
-      repository: tyemirov/TAuth
-      build:
-        system: go
-        package: ./cmd/testfixture
+  artifacts:
+    binaries:
+    - build:
         binary: tauth-test-fixture
         environment:
-          CGO_ENABLED: "0"
-          GOFLAGS: -tags=tauth_testfixture
-        platforms:
-          - linux/amd64
-    test-fixture-darwin-arm64:
-      kind: github_release_binary
-      repository: tyemirov/TAuth
-      build:
-        system: go
+        - name: CGO_ENABLED
+          value: '0'
+        - name: GOFLAGS
+          value: -tags=tauth_testfixture
         package: ./cmd/testfixture
+        platforms:
+        - darwin/arm64
+        system: go
+      id: test-fixture-darwin-arm64
+    - build:
         binary: tauth-test-fixture
         environment:
-          CGO_ENABLED: "0"
-          GOFLAGS: -tags=tauth_testfixture
+        - name: CGO_ENABLED
+          value: '0'
+        - name: GOFLAGS
+          value: -tags=tauth_testfixture
+        package: ./cmd/testfixture
         platforms:
-          - darwin/arm64
-    oauth-private:
-      kind: private_values
-      bindings:
-        oauth-signing-key: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
-        tenant-encryption-key: TAUTH_TENANT_ENCRYPTION_KEY
-    runtime:
-      kind: compose_project
-      retired_services:
-        mprlab-nginx-gateway/tauth-api: {}
-      images:
-        tauth-image:
-          repository: ghcr.io/tyemirov/tauth
-          build:
-            context: .
-            dockerfile: Dockerfile
-            platforms:
-            - linux/amd64
-            - linux/arm64
-      services:
-        tauth-api:
-          image: tauth-image
-          placement:
-            group: gateway
-            cardinality: one
-          command:
-            '0': --config=/config/config.yml
-          environment:
-            TAUTH_TENANT_ENCRYPTION_KEY:
-              resource: oauth-private
-              output: tenant-encryption-key
-            TAUTH_TRUSTED_PROXY_HOSTS:
-              value: mprlab-caddy
-            TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT:
-              value: 1s
-          assets:
-            /config/config.yml:
-              managed: tauth.config
-              mode: '0600'
-          mounts:
-            /data:
-              volume: data
-              read_only: false
-          ports:
-            '8080': {}
-          readiness:
-            protocol: http
-            port: 8080
-            path: /health
-            expected_status: 200
-      volumes:
-        data:
-          name: mprlab-nginx-gateway_tauth-data
-          retention: retain
-    http:
-      kind: runtime_capability
-      name: tauth.http
-      version: 1
-      project: runtime
-      service: tauth-api
-      endpoint:
-        scope: same_host
-        scheme: http
-        alias: tauth-api
-        port: 8080
-      health:
-        protocol: http
-        path: /health
-        expected_status: 200
-    tenants:
-      kind: runtime_capability
-      name: tauth.tenants
-      version: 1
-      project: runtime
-      service: tauth-api
-      endpoint:
-        scope: same_host
-        scheme: http
-        alias: tauth-tenants
-        port: 8080
-      health:
-        protocol: http
-        path: /health
-        expected_status: 200
-    oauth:
-      kind: runtime_capability
-      name: tauth.oauth
-      version: 1
-      project: runtime
-      service: tauth-api
-      endpoint:
-        scope: same_host
-        scheme: http
-        alias: tauth-oauth
-        port: 8080
-      health:
-        protocol: http
-        path: /health
-        expected_status: 200
-    oauth-server:
-      kind: tauth_authorization_server
-      capability: tauth.oauth
-      version: 1
-      server:
-        issuer: https://tauth-api.mprlab.com
-        authorization_endpoint: https://tauth-api.mprlab.com/oauth/authorize
-        token_endpoint: https://tauth-api.mprlab.com/oauth/token
-        revocation_endpoint: https://tauth-api.mprlab.com/oauth/revoke
-        jwks_uri: https://tauth-api.mprlab.com/oauth/jwks
-        login_endpoint: https://tauth-api.mprlab.com/oauth/login
-        consent_endpoint: https://tauth-api.mprlab.com/oauth/consent
-        authorization_request_ttl: 5m
-        authorization_code_ttl: 1m
-        active_signing_key_id: oauth-2026-08
-        signing_keys:
-          oauth-2026-08:
-            private_key:
-              resource: oauth-private
-              output: oauth-signing-key
-        client_metadata:
-          request_timeout: 3s
-          maximum_bytes: 5120
-          minimum_cache_ttl: 1m
-          maximum_cache_ttl: 1h
-    public-api:
-      kind: caddy_route
-      hostname: tauth-api.mprlab.com
-      listener: https
-      handlers:
-        default:
-          path_prefix: /
-          upstream: tauth.http
-          transport:
-            protocol: http
-            dial_timeout_seconds: 10
-            response_header_timeout_seconds: 30
-            read_timeout_seconds: 80
-      tls:
-        mode: automatic
-      access:
-        trusted_networks:
-        - 127.0.0.1/32
-        - 172.19.0.0/16
-        - 192.168.1.158/32
-        rate_limit:
-          events: 300
-          window_seconds: 10
-    public-health:
-      kind: health_check
-      protocol: http
-      url: https://tauth-api.mprlab.com/health
-      expected_status: 200
-    browser-helper:
-      kind: github_pages
-      repository: tyemirov/tauth
-      branch: gh-pages
-      domain: tauth.mprlab.com
-      url: https://tauth.mprlab.com/
+        - linux/amd64
+        system: go
+      id: test-fixture-linux-amd64
+    - id: retention-audit-darwin-arm64
+      build:
+        system: go
+        package: ./cmd/retentionaudit
+        binary: tauth-retention-audit
+        platforms:
+        - darwin/arm64
+        environment:
+        - name: CGO_ENABLED
+          value: '0'
+    - id: retention-audit-linux-amd64
+      build:
+        system: go
+        package: ./cmd/retentionaudit
+        binary: tauth-retention-audit
+        platforms:
+        - linux/amd64
+        environment:
+        - name: CGO_ENABLED
+          value: '0'
+    container_images:
+    - build:
+        context: .
+        dockerfile: Dockerfile
+        platforms:
+        - linux/amd64
+        - linux/arm64
+      id: tauth-image
+    web_bundles:
+    - format: directory
+      id: browser-helper
       source:
-        kind: container
         context: .
         dockerfile: docker/pages/Dockerfile
+        kind: container
         target: pages
-      verification:
-        path: /.mprlab-release.json
+  environment:
+    private_inputs:
+    - id: deploy-sudo-password-tutosh
+      variable: DEPLOY_SUDO_PASSWORD_TUTOSH
+    - id: tauth-oauth-es256-private-key-base64
+      variable: TAUTH_OAUTH_ES256_PRIVATE_KEY_BASE64
+    - id: tauth-tenant-encryption-key
+      variable: TAUTH_TENANT_ENCRYPTION_KEY
+    source: .mprlab/deploy/.env
+  lifecycle:
+    ci:
+      command:
+      - make
+      - ci
+      enabled: true
+    defaults:
+      timeouts:
+        completion: 2m
+        readiness: 2m
+        request: 15s
+        shutdown: 5s
+        startup: 30s
+    observations:
+      http:
+      - expected_status: 200
+        id: public-health
+        protocol: http
+        url: https://tauth-api.mprlab.com/health
+    operations:
+    - name: app-deploy
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 20m
+    - name: app-plan-deploy
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 2m
+    - name: app-plan-publish
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 2m
+    - name: app-plan-release
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 2m
+    - name: app-publish
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 4h
+    - name: app-release
+      polling:
+        attempt_limit: 4
+        increment: 1s
+        initial: 2s
+        maximum: 10s
+        multiplier: 2
+      timeouts:
+        completion: 30m
+    - name: app_deploy.health.same_host
+      polling:
+        attempt_limit: 3
+        increment: 0s
+        initial: 15s
+        maximum: 30s
+        multiplier: 2
+    - name: app_deploy.pages.deployment_status_poll
+      polling:
+        attempt_limit: 120
+        increment: 0s
+        initial: 1s
+        maximum: 10s
+        multiplier: 2
+    - name: ci
+      timeouts:
+        completion: 350s
+    - name: deployment.http-health
+      polling:
+        attempt_limit: 3
+        increment: 0s
+        initial: 1s
+        maximum: 1s
+        multiplier: 1
+    - name: deployment.resource.recovery
+      polling:
+        attempt_limit: 3
+        increment: 0s
+        initial: 1s
+        maximum: 1s
+        multiplier: 1
+    private_inputs:
+      operations: []
+  owner: tauth
+  publications:
+    ghcr:
+      images:
+      - artifact: tauth-image
+        id: tauth-image
+        repository: ghcr.io/tyemirov/tauth
+    github_pages:
+      sites:
+      - artifact: browser-helper
+        branch: gh-pages
+        domain: tauth.mprlab.com
+        id: browser-helper
+        marker:
+          path: /.mprlab-release.json
+        repository: tyemirov/tauth
+    github_releases:
+      binaries:
+      - artifact: test-fixture-darwin-arm64
+        id: test-fixture-darwin-arm64
+        repository: tyemirov/TAuth
+      - artifact: test-fixture-linux-amd64
+        id: test-fixture-linux-amd64
+        repository: tyemirov/TAuth
+      - id: retention-audit-darwin-arm64
+        artifact: retention-audit-darwin-arm64
+        repository: tyemirov/TAuth
+      - id: retention-audit-linux-amd64
+        artifact: retention-audit-linux-amd64
+        repository: tyemirov/TAuth
+  release:
+    scheme: semver
+  targets:
+    access:
+      hosts:
+      - elevation_password:
+          input: deploy-sudo-password-tutosh
+        host: tutosh
+    docker_compose:
+      projects:
+      - id: runtime
+        retired_services:
+        - project: mprlab-nginx-gateway
+          service: tauth-api
+        services:
+        - assets:
+          - mode: '0600'
+            secret: tauth-native-config
+            target: /config/config.yml
+          command:
+          - --config=/config/config.yml
+          endpoints:
+          - endpoint:
+              alias: tauth-api
+              port: 8080
+              scheme: http
+              scope: same_host
+            health:
+              expected_status: 200
+              path: /health
+              protocol: http
+            id: http
+            name: tauth.http
+            version: 1
+          - endpoint:
+              alias: tauth-oauth
+              port: 8080
+              scheme: http
+              scope: same_host
+            health:
+              expected_status: 200
+              path: /health
+              protocol: http
+            id: oauth
+            name: tauth.oauth
+            version: 1
+          - endpoint:
+              alias: tauth-tenants
+              port: 8080
+              scheme: http
+              scope: same_host
+            health:
+              expected_status: 200
+              path: /health
+              protocol: http
+            id: tenants
+            name: tauth.tenants
+            version: 1
+          - endpoint:
+              alias: runtime-tauth-api-readiness
+              port: 8080
+              scheme: http
+              scope: same_host
+            health:
+              expected_status: 200
+              path: /health
+              protocol: http
+            id: readiness
+            name: tauth.readiness.runtime.tauth-api
+            version: 1
+          environment:
+          - input: tauth-tenant-encryption-key
+            name: TAUTH_TENANT_ENCRYPTION_KEY
+          - name: TAUTH_TRUSTED_PROXY_HOSTS
+            value: mprlab-caddy
+          - name: TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT
+            value: 1s
+          id: tauth-api
+          image:
+            publication: tauth-image
+          mounts:
+          - read_only: false
+            target: /data
+            volume: data
+          placement:
+            cardinality: one
+            group: gateway
+          ports:
+          - container_port: 8080
+          readiness:
+            endpoint: readiness
+        volumes:
+        - id: data
+          name: mprlab-nginx-gateway_tauth-data
+          retention: retain
+    github_pages:
+      sites:
+      - id: browser-helper
+        publication: browser-helper
+        url: https://tauth.mprlab.com/
+    ingress:
+      caddy:
+        routes:
+        - access:
+            rate_limit:
+              events: 300
+              window_seconds: 10
+            trusted_networks:
+            - 127.0.0.1/32
+            - 172.19.0.0/16
+            - 192.168.1.158/32
+          handlers:
+          - id: default
+            path_prefix: /
+            transport:
+              dial_timeout_seconds: 10
+              protocol: http
+              read_timeout_seconds: 80
+              response_header_timeout_seconds: 30
+            upstream: tauth.http
+          hostname: tauth-api.mprlab.com
+          id: public-api
+          listener: https
+          tls:
+            mode: automatic

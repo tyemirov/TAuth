@@ -126,29 +126,47 @@ func TestManagedProxyTrustManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	var manifest struct {
-		Resources struct {
-			Resources map[string]struct {
-				Bindings map[string]string `yaml:"bindings"`
-				Services map[string]struct {
-					Environment map[string]struct {
-						Value string `yaml:"value"`
-					} `yaml:"environment"`
-				} `yaml:"services"`
-			} `yaml:"resources"`
+		Declarations struct {
+			Environment struct {
+				PrivateInputs []struct {
+					Variable string `yaml:"variable"`
+				} `yaml:"private_inputs"`
+			} `yaml:"environment"`
+			Targets struct {
+				DockerCompose struct {
+					Projects []struct {
+						ID       string `yaml:"id"`
+						Services []struct {
+							ID          string `yaml:"id"`
+							Environment []struct {
+								Name  string `yaml:"name"`
+								Value string `yaml:"value"`
+							} `yaml:"environment"`
+						} `yaml:"services"`
+					} `yaml:"projects"`
+				} `yaml:"docker_compose"`
+			} `yaml:"targets"`
 		} `yaml:"mprlab_resources"`
 	}
 	if err := yaml.Unmarshal(payload, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	for _, resource := range manifest.Resources.Resources {
-		for _, binding := range resource.Bindings {
-			if binding == "TAUTH_TRUSTED_PROXY_CIDRS" || binding == "TAUTH_TRUSTED_PROXY_HOSTS" {
-				t.Fatal("proxy trust still requires a private operator input")
+	for _, input := range manifest.Declarations.Environment.PrivateInputs {
+		if input.Variable == "TAUTH_TRUSTED_PROXY_CIDRS" || input.Variable == "TAUTH_TRUSTED_PROXY_HOSTS" {
+			t.Fatal("proxy trust still requires a private operator input")
+		}
+	}
+	environment := map[string]string{}
+	for _, project := range manifest.Declarations.Targets.DockerCompose.Projects {
+		for _, service := range project.Services {
+			if project.ID == "runtime" && service.ID == "tauth-api" {
+				for _, assignment := range service.Environment {
+					environment[assignment.Name] = assignment.Value
+				}
 			}
 		}
 	}
-	environment := manifest.Resources.Resources["runtime"].Services["tauth-api"].Environment
-	if environment["TAUTH_TRUSTED_PROXY_HOSTS"].Value != "mprlab-caddy" || environment["TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT"].Value != "1s" {
+	if environment["TAUTH_TRUSTED_PROXY_HOSTS"] != "mprlab-caddy" || environment["TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT"] != "1s" {
 		t.Fatal("deployment does not configure managed proxy identity and bounded resolution")
 	}
 	if _, exists := environment["TAUTH_TRUSTED_PROXY_CIDRS"]; exists {

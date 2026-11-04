@@ -962,6 +962,26 @@ The issue notes below distinguish existing repairs, test results, and remaining 
 
 ## Features
 
+- [x] [F021] (P0) Verify retained authentication data during an ownership handoff.
+  Goal: Supply a service-owned read-only audit for a bounded authority transfer.
+  Requirements:
+  - Capture consistent private evidence for existing tenants, accounts, keys, configuration, and sessions.
+  - Bind each capture to its handoff, acquisition, service, storage, and audit artifact.
+  - Permit new records and qualified session expiry or rotation.
+  - Reject unexplained data loss, key changes, and incomplete session lineage.
+  - Keep the existing service image, credentials, and database unchanged.
+  Validation: Verify the public CLI, concurrent writes, rejected inputs, retained sessions, and database preservation.
+  Implementation: The standalone tool supplies private capture, verification, and native binding resolution.
+  The public CLI tests cover active and disabled accounts, retained data, expiry, rotation, revocation, and rejected bindings.
+  Source contract: The selected manifest uses the current Gateway catalogs and explicit identity lists.
+  Existing runtime declarations and the production image remain unchanged by the audit operation.
+  Repository and rollout tests use the current manifest and explicit provider capture scope.
+  Validation: The public CLI passed 18 scenarios with retained data and native capture digests.
+  The complete native CI passed after the source contract tests were updated.
+  Native cleanup reported zero retained test resources.
+  Independent source review found no audit publication blocker.
+  Publication and production use remain separate operations.
+
 - [x] [F020] (P1) Export an isolated application fixture for integration tests.
   Goal: Consumer tests can run the current database-backed TAuth service without production enrollment.
   Requirements:
