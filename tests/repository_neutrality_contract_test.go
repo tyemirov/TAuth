@@ -112,7 +112,7 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 		t.Fatal("TAuth persistent volume changed")
 	}
 	asset := identifiedManifestEntry(t, listField(t, service, "assets"), "target", "/config/config.yml")
-	if asset["secret"] != "tauth-native-config" {
+	if asset["secret"] != "tauth.native-config" {
 		t.Fatal("TAuth must use its retained native configuration file")
 	}
 	endpoints := listField(t, service, "endpoints")
