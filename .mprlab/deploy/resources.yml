@@ -224,7 +224,7 @@ mprlab_resources:
         services:
         - assets:
           - mode: '0600'
-            secret: tauth-native-config
+            secret: tauth.native-config
             target: /config/config.yml
           command:
           - --config=/config/config.yml
