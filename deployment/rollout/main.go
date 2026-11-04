@@ -268,9 +268,10 @@ func extractDeploymentPayload(ctx context.Context, image, destination string) er
 
 func capturedEncryptionKey(ctx context.Context, gateway, root string) (string, error) {
 	request, err := json.Marshal(struct {
-		Root string   `json:"root"`
-		Keys []string `json:"keys"`
-	}{root, []string{encryptionKeyEnvironment}})
+		Root  string   `json:"root"`
+		Keys  []string `json:"keys"`
+		Scope string   `json:"scope"`
+	}{Root: root, Keys: []string{encryptionKeyEnvironment}, Scope: "provider"})
 	if err != nil {
 		return "", err
 	}

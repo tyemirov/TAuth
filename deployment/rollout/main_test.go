@@ -56,13 +56,14 @@ func init() {
 			fmt.Println(`{"version":"fixture","source_commit":"fixture","platform":"fixture","lifecycle_contract":4}`)
 		} else if os.Args[1] == "private-environment-operation" {
 			var request struct {
-				Root string   `json:"root"`
-				Keys []string `json:"keys"`
+				Root  string   `json:"root"`
+				Keys  []string `json:"keys"`
+				Scope string   `json:"scope"`
 			}
 			if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 				panic(err)
 			}
-			if request.Root != os.Getenv("TAUTH_ROLLOUT_APPLICATION_ROOT") || len(request.Keys) != 1 || request.Keys[0] != "TAUTH_TENANT_ENCRYPTION_KEY" {
+			if request.Root != os.Getenv("TAUTH_ROLLOUT_APPLICATION_ROOT") || request.Scope != "provider" || len(request.Keys) != 1 || request.Keys[0] != "TAUTH_TENANT_ENCRYPTION_KEY" {
 				panic("unexpected private request")
 			}
 			if os.Getenv("MPRLAB_GATEWAY_EXECUTABLE") != os.Args[0] {

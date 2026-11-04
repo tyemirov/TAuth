@@ -106,6 +106,13 @@ Give each term one meaning. Use the same term for the same concept in all docume
 
 ## Repository Technical Nouns
 
+- `retention audit`: A read-only comparison that verifies stored authentication data during an ownership handoff.
+- `audit frame`: A private sealed observation of database schema, opaque record identities, and record fingerprints.
+- `native binding`: The identities that connect an audit frame to one handoff, service, artifact, and storage location.
+- `session lineage`: The stored relationships between tokens in a refresh-token family.
+- `HMAC`: A keyed message authentication code.
+- `record fingerprint`: A keyed cryptographic digest of one stored record.
+
 - `test fixture`: Isolated synthetic data used to verify a public software interface.
 - `fixture declaration`: The versioned JSON input for the TAuth test fixture tool.
 - `validator export`: The independent tenant, signing key, and cookie configuration used by a backend validator.

@@ -114,30 +114,30 @@ This is a binding product principle for every user interface.
 
 ## Selected Manifest Contract
 
-Apply this section when the task changes or validates a selected application manifest.
+The operator approved the v8 source cutover for this application.
+This cutover preserves existing provider data and the permanent state-v1 contract.
 
 - Keep the selected application manifest versionless.
-- Keep `owner`, `release`, and `resources` as the current baseline fields.
-- Apply the B607 execution policy contract before the general extension rules below.
-- Declare CI and execution policy in `.mprlab/deploy/resources.yml`.
+- Keep `owner`, `release`, and `lifecycle` as the required baseline fields.
+- Use the fixed `artifacts`, `publications`, and `targets` catalogs.
+- Use explicit identity lists and ordered command lists.
+- Declare CI and execution policy in the selected manifest's `lifecycle` field.
 - Enable CI with the `make ci` command.
 - Declare positive startup, completion, readiness, request, and shutdown timeouts.
 - Declare finite polling for provider observations without a reliable event source.
-- Keep execution policy outside Gateway defaults, separate files, CLI options, and environment overrides.
-- After this cutover, each later gateway must accept every manifest that an earlier versionless gateway accepted.
-- Keep each accepted field name, type, requirement, and function.
-- A field added to an existing shape must be optional.
-- A field added to an existing shape must have one canonical default.
-- Normalize that default before manifest identity calculation.
-- Add a resource kind only with one closed shape.
-- Reject unknown fields and `schema_version`.
+- Keep execution policy outside separate files, CLI options, and environment overrides.
+- Preserve each accepted field name, type, requirement, and function after this cutover.
+- Give each new optional field one canonical default or manifest inheritance rule.
+- Normalize defaults and inheritance before manifest identity calculation.
+- Add a declaration kind only with one closed shape.
+- Reject obsolete root collection shapes, unknown fields, and `schema_version`.
 
 ## Static Website Hosting
 
 Apply this section to deployment or publication work for a browser frontend.
 
 - Use GitHub Pages as the production host for each deployable browser frontend.
-- Declare the browser frontend with a `github_pages` resource in `.mprlab/deploy/resources.yml`.
+- Declare the browser frontend with a `targets.github_pages.sites[]` declaration in `.mprlab/deploy/resources.yml`.
 - Use `gh-pages` as the publication branch.
 - The GitHub Pages repository can differ from the application repository.
 - Keep API and service routes on hostnames that differ from the website hostname.
@@ -157,7 +157,7 @@ Apply this gate when the selected task requires credentials.
 For selected-manifest lifecycle commands:
 
 - Use the selected manifest as the sole lifecycle input authority.
-- Keep `environment_file` optional. Declare each selected file explicitly in the manifest.
+- Keep `environment.source` optional. Declare each selected file explicitly in the manifest.
 - Use process values before file values for declared environment references.
 - Resolve declared inputs once at the selected manifest boundary.
 - Pass captured inputs to child operations.

@@ -184,6 +184,19 @@ format-application-subject:
 	gofmt -w cmd/server/main.go
 
 TEST_FIXTURE_OUTPUT ?= .cache/tauth-test-fixture
+RETENTION_AUDIT_OUTPUT ?= .cache/tauth-retention-audit
+.PHONY: build-retention-audit test-retention-audit
+build-retention-audit:
+	mkdir -p "$(dir $(RETENTION_AUDIT_OUTPUT))"
+	CGO_ENABLED=0 $(GO) build -o "$(RETENTION_AUDIT_OUTPUT)" ./cmd/retentionaudit
+
+test-retention-audit:
+	$(GO) test ./tests/retentionaudit -count=1 -v
+
+.PHONY: test-repository-contract
+test-repository-contract:
+	$(GO) test ./tests -run '^TestRepositoryOwnsVersionlessApplicationResources$$' -count=1
+
 .PHONY: build-test-fixture test-test-fixture test-test-fixture-cli
 build-test-fixture:
 	mkdir -p "$(dir $(TEST_FIXTURE_OUTPUT))"

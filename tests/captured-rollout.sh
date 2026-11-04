@@ -26,14 +26,21 @@ import yaml
 source, application, fixture = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
 document = yaml.safe_load(source.read_text())
 root = document['mprlab_resources']
-root.pop('environment_file', None)
-root['inputs'] = {name: 'synthetic-unused-input' for name in root.get('inputs', {})}
-root['inputs'].update({'CAPTURED_FIRST_PASSWORD': 'synthetic-first-host-value', 'CAPTURED_SECOND_PASSWORD': 'synthetic-second-host-value'})
-root['hosts'] = {
-    'fixture-first': {'ansible_become_password': 'CAPTURED_FIRST_PASSWORD'},
-    'fixture-second': {'ansible_become_password': 'CAPTURED_SECOND_PASSWORD'},
-}
-root['ci'] = {'enabled': False}
+environment = root['environment']
+environment.pop('source', None)
+environment['private_inputs'] = [
+    {'id': entry['id'], 'value': 'synthetic-unused-input'}
+    for entry in environment['private_inputs']
+]
+environment['private_inputs'].extend([
+    {'id': 'captured-first-password', 'value': 'synthetic-first-host-value'},
+    {'id': 'captured-second-password', 'value': 'synthetic-second-host-value'},
+])
+root['targets']['access'] = {'hosts': [
+    {'host': 'fixture-first', 'elevation_password': {'input': 'captured-first-password'}},
+    {'host': 'fixture-second', 'elevation_password': {'input': 'captured-second-password'}},
+]}
+root['lifecycle']['ci'] = {'enabled': False}
 (application / '.mprlab/deploy/resources.yml').write_text(yaml.safe_dump(document, sort_keys=False))
 (fixture / 'inventory.json').write_text(json.dumps({'all': {'hosts': {
     name: {'ansible_connection': 'local'}
@@ -91,7 +98,7 @@ document = yaml.safe_load(manifest.read_text())
 (application / 'run').write_text('''import json, os, subprocess, sys
 from pathlib import Path
 os.environ["MPRLAB_GATEWAY_EXECUTABLE"] = sys.argv[3]
-request = json.dumps({"root": sys.argv[2], "keys": ["TAUTH_TENANT_ENCRYPTION_KEY"]})
+request = json.dumps({"root": sys.argv[2], "keys": ["TAUTH_TENANT_ENCRYPTION_KEY"], "scope": "provider"})
 result = subprocess.run([sys.argv[3], "private-environment-operation"], input=request, text=True, capture_output=True)
 if result.returncode:
     sys.stderr.write(result.stderr)
@@ -103,7 +110,7 @@ if os.environ.get("VERIFY_NESTED_CAPTURE") == "1":
     (root / "config/selected.env").write_text("TAUTH_TENANT_ENCRYPTION_KEY=changed-file-value-after-capture\\n")
     nested = root / "verify-nested.py"
     nested.write_text("import json, os, subprocess, sys\\n"
-                      "request = json.dumps({'root': sys.argv[1], 'keys': ['TAUTH_TENANT_ENCRYPTION_KEY']})\\n"
+                      "request = json.dumps({'root': sys.argv[1], 'keys': ['TAUTH_TENANT_ENCRYPTION_KEY'], 'scope': 'provider'})\\n"
                       "result = subprocess.run([sys.argv[2], 'private-environment-operation'], input=request, text=True, capture_output=True)\\n"
                       "assert result.returncode == 0, result.stderr\\n"
                       "assert json.loads(result.stdout)['TAUTH_TENANT_ENCRYPTION_KEY'] == os.environ['EXPECTED_WRAPPER_INPUT'], 'nested capture changed the key'\\n"
@@ -128,13 +135,16 @@ for name, selection, ambient, file_value, diagnostic in [
     ('process-precedence', 'config/selected.env', 'synthetic-process-value', 'synthetic-file-value', None),
     ('nested-key-stability', 'config/selected.env', None, 'synthetic-file-value', None),
     ('missing-reference', None, None, None, 'undefined environment reference TAUTH_TENANT_ENCRYPTION_KEY'),
-    ('missing-selected-file', 'config/missing.env', 'synthetic-process-value', None, 'manifest.environment_file'),
+    ('missing-selected-file', 'config/missing.env', 'synthetic-process-value', None, 'manifest.environment.source'),
 ]:
     selected = document['mprlab_resources']
-    selected.pop('environment_file', None)
-    selected['inputs']['TAUTH_TENANT_ENCRYPTION_KEY'] = '${TAUTH_TENANT_ENCRYPTION_KEY}'
+    selected_environment = selected['environment']
+    selected_environment.pop('source', None)
+    private_inputs = selected_environment['private_inputs']
+    private_inputs[:] = [entry for entry in private_inputs if entry['id'] != 'tauth-tenant-encryption-key']
+    private_inputs.append({'id': 'tauth-tenant-encryption-key', 'variable': 'TAUTH_TENANT_ENCRYPTION_KEY'})
     if selection is not None:
-        selected['environment_file'] = selection
+        selected_environment['source'] = selection
     if file_value is not None:
         path = application / selection
         path.parent.mkdir(parents=True, exist_ok=True)
