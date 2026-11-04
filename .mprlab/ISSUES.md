@@ -5,6 +5,22 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B142] (P0) Select the current published image for automatic deployment.
+  Goal: Start the sealed migrations with the image from the selected release.
+  Evidence: Release and publication of v2.2.25 passed. Deployment then failed with `cutover.image_absent` before remote operations.
+  Cause: The rollout reader still required obsolete resource artifacts and publication keys.
+  Requirements:
+  - Use the current declaration metadata and sealed GHCR publication envelope.
+  - Require agreement with the published image and selected release version.
+  - Reject absent, ambiguous, or conflicting selections before Docker and host operations.
+  - Preserve migration order, credentials, retained storage, and existing data.
+  Resolution: A separate receipt reader joins the prepared artifact, publication envelope, and provider result.
+  The reader accepts only the current contract.
+  Validation: The public rollout CLI reproduced the current-receipt failure before the correction.
+  Current receipts pass. Incorrect identities, envelopes, declarations, duplicate images, and obsolete metadata fail before Docker operations.
+  `CI=1 make ci </dev/null` passed, including native Ansible migrations, retained sessions, and managed proxy checks.
+  Production retry remains separate.
+
 - [x] [B141] (P1) Permit GitHub login during concurrent SQLite reads.
   Goal: Complete GitHub login while other service connections read the shared database.
   Evidence: Production nonce operations report `SQLITE_BUSY`.
