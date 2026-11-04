@@ -228,41 +228,50 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 			t.Fatalf("extraction directory retained: %v %v", entries, err)
 		}
 	}
-	imagePath := filepath.Join(releaseRoot, "image.oci.tar")
-	image, err := os.Create(imagePath)
-	if err != nil {
+	current := `{"schema_version":1,"preparation":"sealed","publication_state":"published","release":{"schema_version":5,"version":"v1.2.3","artifacts":[{"catalog":"artifact","declaration_id":"tauth-image","id":"prepare","kind":"container_image","path":"artifacts/tauth-image/content.json"},{"catalog":"publication","declaration_id":"tauth-image","id":"prepare","kind":"ghcr_image","path":"publications/tauth-image/publication.json"}]},"publication":{"schema_version":3,"version":"v1.2.3","published_artifacts":{"tauth-image":[{"id":"image","kind":"container_image","identity":"ghcr.io/example/auth:1.2.3"}]}}}`
+	publicationRoot := filepath.Join(releaseRoot, "publications/tauth-image")
+	if output, err := exec.Command("mkdir", "-p", publicationRoot).CombinedOutput(); err != nil {
+		t.Fatalf("create publication: %v %s", err, output)
+	}
+	publication := `{"result":{"schema_version":1,"owner":"tauth","publication":"tauth-image","artifact":"tauth-image","family":"ghcr_image","version":"v1.2.3","destination":{"repository":"ghcr.io/example/auth"},"files":[{"id":"image","path":"image.oci.tar","size":1}]},"intent":{"family":"ghcr_image"}}`
+	if err = writeFile(filepath.Join(publicationRoot, "publication.json"), []byte(publication)); err != nil {
 		t.Fatal(err)
 	}
-	archive := tar.NewWriter(image)
-	index := []byte(`{"manifests":[{"digest":"sha256:` + strings.Repeat("a", 64) + `"}]}`)
-	if err = archive.WriteHeader(&tar.Header{Name: "index.json", Size: int64(len(index))}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = archive.Write(index); err != nil {
-		t.Fatal(err)
-	}
-	if err = archive.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err = image.Close(); err != nil {
-		t.Fatal(err)
-	}
-	current := `{"schema_version":1,"preparation":"sealed","publication_state":"published","release":{"version":"v1.2.3","artifacts":[{"id":"tauth-image","resource_id":"runtime","kind":"container_image","path":"image.oci.tar","repository":"ghcr.io/example/auth","tag":"1.2.3"}]},"publication":{"version":"v1.2.3","published_artifacts":{"runtime":[{"id":"tauth-image","kind":"container_image","identity":"ghcr.io/example/auth:1.2.3"}]}}}`
 	if err = writeFile(filepath.Join(lifecycle, "current-release.json"), []byte(current)); err != nil {
 		t.Fatal(err)
+	}
+	assertRejected := func(diagnostic string) {
+		t.Helper()
+		dockerCall := filepath.Join(t.TempDir(), "docker-call")
+		command := exec.Command(rollout, root, gateway)
+		command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_DOCKER_CALL_MARKER="+dockerCall)
+		output, err := command.CombinedOutput()
+		if _, markerErr := os.ReadFile(dockerCall); !os.IsNotExist(markerErr) {
+			t.Fatalf("Docker was invoked for an invalid publication: %v\n%s", markerErr, output)
+		}
+		if err == nil || !strings.Contains(string(output), diagnostic) || strings.Contains(string(output), "unexpected image extraction") || strings.Contains(string(output), "input preflight reached") || strings.Contains(string(output), "app-plan-deploy") {
+			t.Fatalf("invalid publication reached image or remote work: %v\n%s", err, output)
+		}
+		assertCleanup()
 	}
 	for _, scenario := range []struct {
 		name, old, replacement, diagnostic string
 	}{
 		{"unsealed", `"preparation":"sealed"`, `"preparation":"prepared"`, "cutover.publication_invalid"},
 		{"unpublished", `"publication_state":"published"`, `"publication_state":"pending"`, "cutover.publication_invalid"},
-		{"version-conflict", `"publication":{"version":"v1.2.3"`, `"publication":{"version":"v1.2.2"`, "cutover.publication_invalid"},
-		{"wrong-resource", `"resource_id":"runtime"`, `"resource_id":"other-runtime"`, "cutover.image_absent"},
-		{"missing-runtime", `"published_artifacts":{"runtime":[`, `"published_artifacts":{"other-runtime":[`, "cutover.image_absent"},
-		{"missing-image", `"id":"tauth-image","kind":"container_image","identity"`, `"id":"other-image","kind":"container_image","identity"`, "cutover.image_absent"},
+		{"version-conflict", `"publication":{"schema_version":3,"version":"v1.2.3"`, `"publication":{"schema_version":3,"version":"v1.2.2"`, "cutover.publication_invalid"},
+		{"wrong-declaration", `"declaration_id":"tauth-image"`, `"declaration_id":"other-image"`, "cutover.image_absent"},
+		{"missing-publication", `"published_artifacts":{"tauth-image":[`, `"published_artifacts":{"other-publication":[`, "cutover.image_absent"},
+		{"missing-image", `"id":"image","kind":"container_image","identity"`, `"id":"other-image","kind":"container_image","identity"`, "cutover.image_absent"},
 		{"wrong-kind", `"kind":"container_image","identity"`, `"kind":"github_pages_version","identity"`, "cutover.image_absent"},
 		{"wrong-identity", `"identity":"ghcr.io/example/auth:1.2.3"`, `"identity":"ghcr.io/example/auth:1.2.2"`, "cutover.image_identity_invalid"},
-		{"duplicate-image", `"runtime":[`, `"runtime":[{"id":"tauth-image","kind":"container_image","identity":"ghcr.io/example/auth:1.2.3"},`, "cutover.image_ambiguous"},
+		{"wrong-artifact-catalog", `"catalog":"artifact"`, `"catalog":"publication"`, "cutover.image_absent"},
+		{"wrong-publication-kind", `"kind":"ghcr_image"`, `"kind":"container_image"`, "cutover.image_absent"},
+		{"obsolete-resource-metadata", `"catalog":"artifact","declaration_id":"tauth-image","id":"prepare"`, `"resource_id":"runtime","id":"tauth-image"`, "cutover.image_absent"},
+		{"duplicate-preparation", `"artifacts":[`, `"artifacts":[{"catalog":"artifact","declaration_id":"tauth-image","id":"prepare","kind":"container_image"},`, "cutover.image_ambiguous"},
+		{"duplicate-publication", `"artifacts":[`, `"artifacts":[{"catalog":"publication","declaration_id":"tauth-image","id":"prepare","kind":"ghcr_image"},`, "cutover.image_ambiguous"},
+		{"escaping-envelope-path", `"path":"publications/tauth-image/publication.json"`, `"path":"../publication.json"`, "cutover.publication_invalid"},
+		{"duplicate-image", `"tauth-image":[`, `"tauth-image":[{"id":"image","kind":"container_image","identity":"ghcr.io/example/auth:1.2.3"},`, "cutover.image_ambiguous"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			invalid := strings.Replace(current, scenario.old, scenario.replacement, 1)
@@ -272,20 +281,33 @@ func TestRolloutCurrentReleaseCLI(t *testing.T) {
 			if err := writeFile(filepath.Join(lifecycle, "current-release.json"), []byte(invalid)); err != nil {
 				t.Fatal(err)
 			}
-			dockerCall := filepath.Join(t.TempDir(), "docker-call")
-			command := exec.Command(rollout, root, gateway)
-			command.Env = append(environment, "TAUTH_ROLLOUT_CLI_FIXTURE=1", "TAUTH_ROLLOUT_DOCKER_CALL_MARKER="+dockerCall)
-			output, err := command.CombinedOutput()
-			if _, markerErr := os.ReadFile(dockerCall); !os.IsNotExist(markerErr) {
-				t.Fatalf("Docker was invoked for an invalid publication: %v\n%s", markerErr, output)
-			}
-			if err == nil || !strings.Contains(string(output), scenario.diagnostic) || strings.Contains(string(output), "unexpected image extraction") || strings.Contains(string(output), "input preflight reached") || strings.Contains(string(output), "app-plan-deploy") {
-				t.Fatalf("invalid publication reached image or remote work: %v\n%s", err, output)
-			}
-			assertCleanup()
+			assertRejected(scenario.diagnostic)
 		})
 	}
 	if err = writeFile(filepath.Join(lifecycle, "current-release.json"), []byte(current)); err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct{ name, old, replacement string }{
+		{"envelope-version", `"version":"v1.2.3"`, `"version":"v1.2.2"`},
+		{"envelope-schema", `"schema_version":1`, `"schema_version":2`},
+		{"envelope-owner", `"owner":"tauth"`, `"owner":"other"`},
+		{"envelope-publication", `"publication":"tauth-image"`, `"publication":"other"`},
+		{"envelope-artifact", `"artifact":"tauth-image"`, `"artifact":"other"`},
+		{"envelope-family", `"family":"ghcr_image"`, `"family":"github_pages"`},
+		{"envelope-repository", `"repository":"ghcr.io/example/auth"`, `"repository":""`},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			invalid := strings.Replace(publication, scenario.old, scenario.replacement, 1)
+			if invalid == publication {
+				t.Fatal("publication envelope fixture was not changed")
+			}
+			if err = writeFile(filepath.Join(publicationRoot, "publication.json"), []byte(invalid)); err != nil {
+				t.Fatal(err)
+			}
+			assertRejected("cutover.publication_invalid")
+		})
+	}
+	if err = writeFile(filepath.Join(publicationRoot, "publication.json"), []byte(publication)); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command(rollout, root, gateway)
