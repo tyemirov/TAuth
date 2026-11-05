@@ -5,7 +5,7 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
-- [-] [B143] (P0) Remove completed deployment cutover inputs.
+- [x] [B143] (P0) Remove completed deployment cutover inputs.
   Goal: Deploy the current declaration and retain the existing database.
   Evidence: The production database records completion of all three timestamped cutovers.
   Requirements:
@@ -20,7 +20,13 @@ Planning and recurring entries stay in this tracker with unresolved work.
   The database fixture passed. The source-built container preserved the active account and sessions across restart.
   Full CI is not selected for this operation. Changed-prose checks passed.
   Governor reported only the existing local up/down inspection limits.
-  Production publication and deployment remain in progress.
+  Production: `make release && make publish && make deploy` completed for v2.2.27 with Gateway v8.1.2.
+  Public API health and website version checks returned HTTP 200.
+  The retained volume still contains 53 accounts, 53 account identities, 21 tenants, 22 configurations, and 22 tenant secrets.
+  OAuth refresh-token count remained 339. Refresh-token count increased from 1,631 to 1,632.
+  The current encryption key matched all retired copies before their removal.
+  Nine obsolete server input files in two unmounted directories were physically removed without database writes.
+  Changed files: Makefile, Dockerfile, completed migration files, deployment runner and playbooks, deployment tests, manifest, policy, README, and console operations documentation.
 
 - [x] [B142] (P0) Select the current published image for automatic deployment.
   Goal: Start the sealed migrations with the image from the selected release.
