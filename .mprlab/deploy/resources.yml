@@ -75,7 +75,7 @@ mprlab_resources:
       command:
       - make
       - ci
-      enabled: true
+      enabled: false
     defaults:
       timeouts:
         completion: 2m

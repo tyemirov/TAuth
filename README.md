@@ -179,20 +179,15 @@ The complete MPR Lab application procedure is:
 make release && make publish && make deploy
 ```
 
-`make release` validates source and packages the service, website, and migration executable.
+`make release` packages the service and website.
 `make publish` publishes those sealed artifacts.
-`make deploy` prepares private server inputs, runs pending timestamped migrations, and reconciles the service through Gateway.
-A one-off migration runs automatically once within deployment.
-Its durable receipt prevents another run during later deployments.
-No separate migration, console bootstrap, credential generation, or encryption-key command is required.
+`make deploy` calls the installed Gateway with the selected application root.
+The selected `resources.yml` supplies the deployment specification.
+The existing retained database volume contains tenant settings, users, keys, and sessions.
 
-The `20260930-tenant-console` migration captures the stopped service configuration and backs up the database.
-It preserves existing tenant settings, client keys, users, and sessions.
-It imports the Apps and binds their owner to the existing verified Google identity.
-The separate `20261005-console-google-client` migration corrects the console Google client without changing tenant ownership or keys.
-Deployment creates the server encryption key automatically and preserves it in private deployment inputs.
-This server key never goes to application clients.
-See the [production command contract](docs/tenant-console-operations.md#production-command-contract) for the migration and recovery boundaries.
+Keep the existing server encryption key in the declared private input source.
+The completed timestamped cutover tools and their separate plans are removed.
+The service continues to apply its current database schema migrations at startup.
 
 TAuth reads service settings from YAML and tenant configuration from its persistent owner database.
 The operator owns service secrets, routing, and deployment orchestration. This repository ships the generic service, configuration schema,

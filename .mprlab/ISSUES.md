@@ -5,6 +5,23 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [-] [B143] (P0) Remove completed deployment cutover inputs.
+  Goal: Deploy the current declaration and retain the existing database.
+  Evidence: The production database records completion of all three timestamped cutovers.
+  Requirements:
+  - Remove the completed cutover plans, runner, executable, and deployment readers.
+  - Call the installed Gateway directly from `make deploy`.
+  - Preserve database records, tenant keys, and the server encryption key.
+  - Keep the current service schema migrations and isolated test fixture.
+  Resolution: `make deploy` calls the installed Gateway directly.
+  Completed cutover plans, the separate executable, rollout playbooks, and their readers are removed.
+  Current schema migrations and the isolated fixture remain available.
+  Validation: The direct-deployment regression failed before the correction and passed after it.
+  The database fixture passed. The source-built container preserved the active account and sessions across restart.
+  Full CI is not selected for this operation. Changed-prose checks passed.
+  Governor reported only the existing local up/down inspection limits.
+  Production publication and deployment remain in progress.
+
 - [x] [B142] (P0) Select the current published image for automatic deployment.
   Goal: Start the sealed migrations with the image from the selected release.
   Evidence: Release and publication of v2.2.25 passed. Deployment then failed with `cutover.image_absent` before remote operations.
