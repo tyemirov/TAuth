@@ -13,7 +13,7 @@ test-local-lifecycle:
 
 .PHONY: ci format lint test-go test-js test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime
 
-ci: format lint test-go test-test-fixture-runtime test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-captured-rollout test-automatic-deployment test-managed-proxy-trust
+ci: format lint test-go test-test-fixture-runtime test-js verify-js test-console-browser test-console-pages test-installed-gateway test-deployment-config-renderer test-empty-tenant-bootstrap-runtime test-oauth-provider-bootstrap-runtime test-local-lifecycle test-managed-proxy-trust
 
 .PHONY: test-proxy-trust test-managed-proxy-trust
 test-proxy-trust:
@@ -96,10 +96,6 @@ verify-js:
 test-deployment-config-renderer:
 	bash tests/deployment-config-renderer.sh
 
-.PHONY: test-captured-rollout
-test-captured-rollout:
-	bash tests/captured-rollout.sh
-
 .PHONY: test-installed-gateway
 test-installed-gateway:
 	bash tests/installed-gateway.sh
@@ -114,7 +110,7 @@ MPRLAB_GATEWAY_EXECUTABLE ?= mprlab-gateway
 
 .PHONY: release publish deploy
 
-release publish:
+release publish deploy:
 	@application_root="$$(git rev-parse --show-toplevel)"; \
 	if ! command -v "$(MPRLAB_GATEWAY_EXECUTABLE)" >/dev/null 2>&1; then \
 		printf 'Gateway runtime is unavailable: %s. Install a released runtime and add its command directory to PATH.\n' \
@@ -122,10 +118,6 @@ release publish:
 		exit 2; \
 	fi; \
 	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" "app-$@" --app-root "$${application_root}"
-
-deploy:
-	@application_root="$$(git rev-parse --show-toplevel)"; \
-	exec bash "$${application_root}/deployment/deploy.sh" "$${application_root}" "$(MPRLAB_GATEWAY_EXECUTABLE)" "$(GO)"
 
 .PHONY: test-apple-callback-cors
 test-apple-callback-cors:
@@ -154,21 +146,6 @@ run-tenant-app:
 .PHONY: test-customer-app
 test-customer-app:
 	$(GO) test ./internal/customerapp -count=1
-
-.PHONY: test-deployment-migration test-automatic-deployment deployment-migration
-test-deployment-migration:
-	$(GO) test ./deployment/... -count=1
-
-test-automatic-deployment:
-	bash tests/automatic-deployment.sh
-
-deployment-migration:
-	$(GO) run ./deployment/tenantownership $(MIGRATION_ARGS)
-
-MIGRATION_OUTPUT ?= .cache/tenant-ownership
-.PHONY: build-deployment-migration
-build-deployment-migration:
-	CGO_ENABLED=0 $(GO) build -o "$(MIGRATION_OUTPUT)" ./deployment/tenantownership
 
 .PHONY: test-application-subject
 test-application-subject:

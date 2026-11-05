@@ -12,7 +12,6 @@ git_command="$(command -v git)"
 mkdir -p "$application_root" "$runtime_bin" "$tools_bin"
 cp "$repository_root/Makefile" "$application_root/Makefile"
 mkdir -p "$application_root/deployment" "$application_root/.mprlab/deploy"
-cp "$repository_root/deployment/deploy.sh" "$application_root/deployment/deploy.sh"
 git -C "$application_root" init --quiet
 application_root="$(cd "$application_root" && pwd -P)"
 ln -s "$git_command" "$tools_bin/git"
@@ -111,8 +110,8 @@ for selection in path explicit; do
     command_path="$tools_bin"
     gateway_selection="$runtime_bin/mprlab-gateway"
   fi
-expected="$(printf 'cwd=%s\narg=bootstrap-run\narg=--repo-root\narg=%s\narg=--operation\narg=app-deploy\narg=--\narg=%s\narg=run\narg=./deployment/rollout\narg=%s\narg=%s\noperator=%s\ncapture-inputs=unchanged' \
-  "$application_root" "$application_root" "$runtime_bin/mprlab-gateway" "$application_root" "$gateway_selection" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
+expected="$(printf 'cwd=%s\narg=app-deploy\narg=--app-root\narg=%s\noperator=%s\ncapture-inputs=unchanged' \
+  "$application_root" "$application_root" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
   actual="$(TEST_GATEWAY_VERIFY_CAPTURE=1 TAUTH_TENANT_ENCRYPTION_KEY=inherited-key MPRLAB_TAUTH_MANAGEMENT_URL=inherited-url \
     MPRLAB_TAUTH_PROVISIONING_CREDENTIALS=inherited-map DEPLOY_SUDO_PASSWORD_INHERITED=inherited-sudo \
     PATH="$command_path" "$make_command" --no-print-directory -s -C "$application_root" deploy \

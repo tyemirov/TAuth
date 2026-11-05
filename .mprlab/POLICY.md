@@ -92,25 +92,17 @@ This is a binding product principle for every user interface.
 
 ## Application Deployment Contract
 
-- Keep `make release && make publish && make deploy` as the complete production application procedure.
-- Make `make release` validate source, package migrations, and seal all release artifacts.
-- Make `make publish` publish the sealed artifacts without a rebuild.
-- Make `make deploy` validate captured private inputs and run pending timestamped migrations automatically.
-- Keep application migration policy in this repository and resource convergence in the installed Gateway runtime.
-- Give each migration one fixed timestamp identifier and a durable completion receipt.
-- Back up the database and stop its writers before a data cutover.
-- Commit migration data and its completion receipt together.
-- Skip a completed migration during every subsequent deployment.
-- Resume incomplete deployment work through `make deploy` without reversing committed data.
-- Never require a separate production migration, bootstrap, credential-generation, or key-generation command.
-- Require the existing server encryption key through the selected manifest inputs before production rollout.
-- Stop before release validation, image extraction, or remote operations when the key is missing or invalid.
-- Compare the captured key with each existing remote key reference before migrations.
-- Keep the selected private key input unchanged during production rollout.
-- Keep that key across releases, deployments, restarts, and database recovery.
-- Keep server encryption keys private. Never supply them to application clients.
-- Keep existing client credentials and tenant session keys during a migration.
-- Use “one-off migration” to mean a timestamped migration that runs automatically once within deployment.
+- Keep `make release && make publish && make deploy` as the production application procedure.
+- Seal release artifacts and publish them without a rebuild.
+- Call the installed Gateway directly from `make deploy`.
+- Use the selected `resources.yml` as the only deployment specification.
+- Preserve existing database records, client credentials, tenant session keys, and the server encryption key.
+- Keep the retained database volume across application versions and restarts.
+- Capture private inputs once through the selected manifest.
+- Let the service apply its current database schema migrations at startup.
+- Remove completed deployment cutover plans, executables, and readers.
+- Do not require a separate migration, ownership, credential-generation, or key-generation command.
+- Keep server encryption keys private and outside application clients.
 
 ## Selected Manifest Contract
 
@@ -122,7 +114,7 @@ This cutover preserves existing provider data and the permanent state-v1 contrac
 - Use the fixed `artifacts`, `publications`, and `targets` catalogs.
 - Use explicit identity lists and ordered command lists.
 - Declare CI and execution policy in the selected manifest's `lifecycle` field.
-- Enable CI with the `make ci` command.
+- Declare the CI command and its enabled state in the selected manifest.
 - Declare positive startup, completion, readiness, request, and shutdown timeouts.
 - Declare finite polling for provider observations without a reliable event source.
 - Keep execution policy outside separate files, CLI options, and environment overrides.

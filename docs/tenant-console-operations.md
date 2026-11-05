@@ -13,109 +13,21 @@ Use the complete application procedure:
 make release && make publish && make deploy
 ```
 
-`make release` validates source and packages the service, website, and separate migration executable.
-`make publish` publishes the sealed release artifacts without a rebuild.
-`make deploy` validates captured private inputs, runs pending timestamped migrations, and runs resource convergence through the captured Gateway package.
+`make release` packages the current service and website.
+`make publish` publishes the sealed artifacts without a rebuild.
+`make deploy` calls the installed Gateway with the application root.
+The selected `resources.yml` supplies the complete deployment specification.
 
-A one-off migration is a timestamped migration that runs automatically once within `make deploy`.
-It is not a separate operator command.
-The completion receipt prevents another run during a later deployment.
-The migration executable remains separate from normal service startup.
-The internal migration commands below are development and diagnostic tools.
-They are not production operator prerequisites.
+Declared private inputs supply the existing server encryption key.
+The current manifest retains the existing database volume.
+The service applies current schema migrations during startup.
 
-The tenant migration identifier is `20260930-tenant-console`.
-Its public input is `deployment/migrations/20260930-tenant-console.json`.
-The service image contains the migration executable, three JSON plans, and four rollout playbooks.
-These files are in `/usr/local/share/tauth/deployment/`.
-The current publication receipt selects the versioned service image.
-Deployment accepts only a sealed release and a completed publication for the same version.
-The selected image must match the release resource, identifier, repository, and tag.
-Deployment rejects ambiguous service image entries before extraction.
-Deployment copies only these seven files from that image into a temporary directory.
-It validates the full file set before remote operations.
-A missing file stops deployment.
-Deployment removes the temporary directory after success or failure.
-
-Deployment performs these operations automatically:
-
-1. Capture the existing server encryption key from the selected manifest inputs.
-2. Validate the sealed release and verify host access.
-3. Compare the captured key with any existing remote key reference.
-4. Validate the published artifacts and complete native deployment planning.
-5. Read the durable migration receipt.
-6. If the receipt is missing:
-   - Make a copy of the stored host configuration.
-   - Reject active containers from other services that use the database volume.
-   - Stop any active TAuth containers that use the database volume.
-   - Make sure that no active containers use the database volume.
-   - Back up the stopped database through SQLite.
-   - Apply the migration to a private database candidate.
-   - Keep the existing verified Google identity, tenant settings, client keys, and application data.
-   - Commit the candidate database and completion receipt together.
-7. Apply the pending console client correction described below.
-8. Apply the pending public user ID migration described below.
-9. Reconcile the service and verify its health through Gateway.
-
-The migration reads `state/tauth/config.tauth.yml` from the host runtime root.
-It can run when no TAuth container is present.
-
-The migration requires one distinct Google subject from the selected existing account identities.
-Email addresses select the source records. A verified provider binding establishes the identity.
-The migration does not infer email aliases or grant ownership from an email address alone.
-
-A failure before the database replacement leaves the original database unchanged and its writer stopped.
-Correct the reported failure and repeat `make deploy`.
-A failure after migration does not reverse committed data.
-The next deployment skips the completed migration and resumes resource convergence.
-
-The server encryption key protects database configuration with AES-256-GCM.
-The tenant console change introduced this key. The previous file-backed runtime did not require it.
+The three production deployment cutovers are completed.
+Their separate plans, executable, and rollout playbooks are removed.
+Deployment does not read the former generated tenant configuration or a separate migration plan.
+The database retains existing tenants, users, credentials, signing keys, and sessions.
+Keep the server encryption key across application versions and restarts.
 Clients never receive this key.
-Deployment preserves existing client credentials and tenant session keys.
-
-## Production console client correction
-
-B124 adds the separate `20261005-console-google-client` migration.
-The original tenant migration and its completion receipt remain unchanged.
-The new sealed plan identifies the console origin, expected current client, and authorized replacement client.
-The replacement is the existing TAuth Google client that authorizes `https://tauth.mprlab.com`.
-
-Deployment checks the new receipt independently of the tenant migration receipt.
-A pending correction stops the authorized database writers and rejects other active writers.
-It backs up the stopped database and changes the console client in a private candidate.
-The candidate contains the corrected configuration and its completion receipt before atomic publication.
-All tenant settings, accounts, owner bindings, and encryption keys remain unchanged.
-
-An unexpected current client, origin, plan, or key rejects the correction.
-A replacement client without the matching receipt also rejects the correction.
-An interruption before candidate publication leaves the original database unchanged.
-The next deployment creates a fresh candidate from the database backup.
-A completed retry reads its receipt and leaves the running service active.
-Verify Google sign-in and the migrated tenant list after deployment completes.
-
-## Public user ID migration
-
-B125 adds the separate `20261006-application-subjects` migration.
-Deployment runs it after the tenant and console client migrations, before service convergence.
-Each migration retains its own completion receipt.
-
-The public user ID remains fixed when account-management capabilities change.
-The migration stores this ID separately from the internal opaque account ID.
-It preserves existing public IDs, account states, provider bindings, profile overrides, roles, and refresh ownership.
-Existing provider-derived profiles receive internal accounts through their exact provider bindings.
-Email alone does not establish an account association.
-
-A pending migration stops the authorized writers, backs up the database, and applies the change to a private candidate.
-The canonical data and completion receipt commit together before atomic database publication.
-Conflicting public IDs or provider mappings reject the candidate and leave the original database unchanged.
-A completed retry reads its receipt and leaves the running service active.
-The normal service refuses an existing database that requires this migration.
-
-The migration preserves current opaque internal account IDs.
-It rejects obsolete internal account IDs and ambiguous historical account associations.
-It cannot recover an earlier public ID that is absent from persisted data.
-See the [application subject contract](application-subjects.md) for the identity rules and validation scope.
 
 ## Service inputs
 
