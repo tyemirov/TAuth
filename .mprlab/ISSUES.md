@@ -5,6 +5,17 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B144] (P1) Enable the required lifecycle CI command.
+  Goal: Run the declared CI command before release preparation.
+  Evidence: Baseline `make ci` failed because the manifest disables lifecycle CI.
+  Requirements:
+  - Enable the existing `make ci` command in the selected manifest.
+  - Preserve the command and execution policy.
+  Resolution: The selected manifest enables the existing `make ci` command.
+  Validation: The repository contract test and full `make ci` passed.
+  Governor reports existing guide differences and local up/down inspection limits.
+  Changed files: `.mprlab/deploy/resources.yml` and `.mprlab/ISSUES.md`.
+
 - [x] [B143] (P0) Remove completed deployment cutover inputs.
   Goal: Deploy the current declaration and retain the existing database.
   Evidence: The production database records completion of all three timestamped cutovers.
