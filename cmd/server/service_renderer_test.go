@@ -166,7 +166,7 @@ func TestManagedProxyTrustManifest(t *testing.T) {
 			}
 		}
 	}
-	if environment["TAUTH_TRUSTED_PROXY_HOSTS"] != "mprlab-caddy" || environment["TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT"] != "1s" {
+	if environment["TAUTH_TRUSTED_PROXY_HOSTS"] != "caddy" || environment["TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT"] != "1s" {
 		t.Fatal("deployment does not configure managed proxy identity and bounded resolution")
 	}
 	if _, exists := environment["TAUTH_TRUSTED_PROXY_CIDRS"]; exists {

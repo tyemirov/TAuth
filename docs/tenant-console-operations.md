@@ -32,7 +32,7 @@ Clients never receive this key.
 ## Service inputs
 
 Set `server.database_url` to the persistent database URL.
-Gateway supplies `TAUTH_TRUSTED_PROXY_HOSTS=mprlab-caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the managed manifest.
+Gateway supplies `TAUTH_TRUSTED_PROXY_HOSTS=caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the managed manifest.
 The generated service configuration reads these values through `server.trusted_proxy_hosts` and `server.trusted_proxy_lookup_timeout`.
 Private proxy inputs and operator-managed container addresses are not necessary.
 TAuth resolves the stable proxy name for each forwarded HTTPS request and verifies the actual connection peer.

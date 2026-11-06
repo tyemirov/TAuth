@@ -75,7 +75,7 @@ mprlab_resources:
       command:
       - make
       - ci
-      enabled: false
+      enabled: true
     defaults:
       timeouts:
         completion: 2m
@@ -281,7 +281,7 @@ mprlab_resources:
           - input: tauth-tenant-encryption-key
             name: TAUTH_TENANT_ENCRYPTION_KEY
           - name: TAUTH_TRUSTED_PROXY_HOSTS
-            value: mprlab-caddy
+            value: caddy
           - name: TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT
             value: 1s
           id: tauth-api

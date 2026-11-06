@@ -6,6 +6,16 @@ readonly network_name="tauth-managed-proxy-trust-$$"
 readonly caddy_image="caddy:2.10.2-alpine"
 readonly client_image="curlimages/curl:8.12.1"
 readonly origin="https://proxy-trust.example.invalid"
+trusted_proxy_host="$(awk '
+  $1 == "-" && $2 == "name:" && $3 == "TAUTH_TRUSTED_PROXY_HOSTS" {
+    getline
+    if (NF != 2 || $1 != "value:" || $2 !~ /^[a-z0-9]+([.-][a-z0-9]+)*$/) exit 1
+    print $2
+    found++
+  }
+  END { if (found != 1) exit 1 }
+' .mprlab/deploy/resources.yml)"
+readonly trusted_proxy_host
 readonly encryption_key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 readonly readiness_attempt_count=100
 
@@ -90,7 +100,7 @@ read -r first_proxy_address second_proxy_address <<<"$proxy_addresses"
 service_id="$(docker run --detach --network "$network_id" --network-alias tauth \
   --publish 127.0.0.1::8080 \
   --env "TAUTH_TENANT_ENCRYPTION_KEY=$encryption_key" \
-  --env TAUTH_TRUSTED_PROXY_HOSTS=mprlab-caddy \
+  --env "TAUTH_TRUSTED_PROXY_HOSTS=$trusted_proxy_host" \
   --env TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s \
   --mount "type=bind,src=$test_root/config.yaml,dst=/config/config.yaml,readonly" \
   --mount "type=bind,src=$test_root/data,dst=/data" \
@@ -121,7 +131,7 @@ https://localhost {
 }
 EOF
 start_proxy() {
-  proxy_id="$(docker run --detach --network "$network_id" --network-alias mprlab-caddy \
+  proxy_id="$(docker run --detach --network "$network_id" --network-alias caddy \
     --ip "$1" --publish 127.0.0.1::443 \
     --mount "type=bind,src=$test_root/Caddyfile,dst=/etc/caddy/Caddyfile,readonly" \
     "$caddy_image")"

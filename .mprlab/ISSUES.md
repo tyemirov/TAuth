@@ -5,6 +5,37 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [ ] [B145] (P0) Use the current reverse proxy hostname.
+  Goal: Permit Google sign-in through the production HTTPS proxy.
+  Evidence: The HTTPS nonce endpoint returns `400` with `https_required`.
+  TAuth cannot resolve `mprlab-caddy`. The shared network supplies the proxy alias `caddy`.
+  Requirements:
+  - Select `caddy` as the trusted proxy hostname.
+  - Use the selected manifest value in the real proxy integration test.
+  - Preserve peer verification and rejection of forged HTTPS headers.
+  - Deploy the correction and verify Google sign-in in iRoom.
+  Resolution: The manifest selects the shared network alias `caddy`.
+  The real proxy test reads the selected hostname and uses the actual proxy alias.
+  Deployment documentation and the YAML contract test use the current hostname.
+  Validation: The HTTP regression returned `https_required` before the correction and passed after it.
+  Focused proxy tests and full `make ci` passed.
+  Independent source review found no blocking defect.
+  Changed prose has no mechanical findings. Governor reports existing guide differences and local up/down inspection limits.
+  Production deployment and Google sign-in acceptance remain pending.
+  Changed files: `.mprlab/deploy/resources.yml`, `tests/managed-proxy-trust.sh`, and `cmd/server/service_renderer_test.go`.
+  Documentation: `README.md`, `docs/tenant-console-operations.md`, and `.mprlab/ISSUES.md`.
+
+- [x] [B144] (P1) Enable the required lifecycle CI command.
+  Goal: Run the declared CI command before release preparation.
+  Evidence: Baseline `make ci` failed because the manifest disables lifecycle CI.
+  Requirements:
+  - Enable the existing `make ci` command in the selected manifest.
+  - Preserve the command and execution policy.
+  Resolution: The selected manifest enables the existing `make ci` command.
+  Validation: The repository contract test and full `make ci` passed.
+  Governor reports existing guide differences and local up/down inspection limits.
+  Changed files: `.mprlab/deploy/resources.yml` and `.mprlab/ISSUES.md`.
+
 - [x] [B143] (P0) Remove completed deployment cutover inputs.
   Goal: Deploy the current declaration and retain the existing database.
   Evidence: The production database records completion of all three timestamped cutovers.
