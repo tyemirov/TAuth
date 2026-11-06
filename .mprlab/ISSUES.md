@@ -5,6 +5,22 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [ ] [B146] (P0) Declare the shared Caddy configuration policy.
+  Goal: Deploy TAuth with the current shared Caddy provider.
+  Evidence: Deployment rejects `tauth/public-api` with `deployment_graph.configuration_policy_conflict`.
+  The deployed Caddy provider uses a different execution policy from the TAuth route.
+  Requirements:
+  - Declare the provider policy on the `public-api` route.
+  - Preserve execution policies for other TAuth targets.
+  - Preserve the deployed Caddy provider and retained application data.
+  Resolution: The route declares the deployed provider policy through one `app-deploy` operation.
+  Validation: The exact Gateway v8.1.9 policy API accepts the manifest.
+  The route policy digest equals the deployed Caddy provider digest.
+  The TAuth runtime policy digest is unchanged.
+  Governor reports existing guide differences and local up/down inspection limits.
+  Deployment and Google sign-in acceptance remain pending.
+  Changed files: `.mprlab/deploy/resources.yml` and `.mprlab/ISSUES.md`.
+
 - [ ] [B145] (P0) Use the current reverse proxy hostname.
   Goal: Permit Google sign-in through the production HTTPS proxy.
   Evidence: The HTTPS nonce endpoint returns `400` with `https_required`.
@@ -21,7 +37,9 @@ Planning and recurring entries stay in this tracker with unresolved work.
   Focused proxy tests and full `make ci` passed.
   Independent source review found no blocking defect.
   Changed prose has no mechanical findings. Governor reports existing guide differences and local up/down inspection limits.
-  Production deployment and Google sign-in acceptance remain pending.
+  Production: v2.2.29 was sealed and published after release CI passed.
+  Deployment stopped before runtime changes because of B146.
+  Google sign-in acceptance remains pending.
   Changed files: `.mprlab/deploy/resources.yml`, `tests/managed-proxy-trust.sh`, and `cmd/server/service_renderer_test.go`.
   Documentation: `README.md`, `docs/tenant-console-operations.md`, and `.mprlab/ISSUES.md`.
 

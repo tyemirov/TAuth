@@ -329,6 +329,20 @@ mprlab_resources:
             upstream: tauth.http
           hostname: tauth-api.mprlab.com
           id: public-api
+          operations:
+          - name: app-deploy
+            polling:
+              attempt_limit: 200
+              increment: 1s
+              initial: 1s
+              maximum: 10s
+              multiplier: 2
+            timeouts:
+              completion: 30m
+              readiness: 5m
+              request: 30s
+              shutdown: 30s
+              startup: 1m
           listener: https
           tls:
             mode: automatic
