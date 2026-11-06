@@ -5,41 +5,73 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
-- [ ] [B146] (P0) Declare the shared Caddy configuration policy.
+- [x] [B147] (P1) Update the host Compose plugin for Caddy configuration.
+  Goal: Run the required native Caddy configuration command on tutosh.
+  Evidence: Compose 2.20.1 rejected `--no-env-resolution` during service configuration.
+  Requirements:
+  - Verify the official plugin checksum before activation.
+  - Verify the candidate with the existing Docker Engine.
+  - Preserve the existing Docker entrypoint and application data.
+  - Complete the same sealed deployment after the plugin update.
+
+  Resolution: The existing plugin entrypoint now uses official Docker Compose 2.40.3.
+  Docker Engine remains version 24.0.2.
+  The original plugin is retained at `/volume1/docker/mprlab-runtime/tooling-backups/docker-compose-before-tauth-20261106`.
+
+  Validation: The downloaded SHA-256 matched the official release asset digest.
+  Candidate and active plugin config checks accepted every required flag.
+  Read-only Compose inspection succeeded against the existing Engine.
+  The v2.2.30 deployment completed with status `0` after the update.
+
+  Changed files: `.mprlab/ISSUES.md` and server `/usr/local/lib/docker/cli-plugins/docker-compose` on tutosh.
+
+- [x] [B146] (P0) Declare the shared Caddy configuration policy.
   Goal: Deploy TAuth with the current shared Caddy provider.
-  Evidence: Deployment rejects `tauth/public-api` with `deployment_graph.configuration_policy_conflict`.
-  The deployed Caddy provider uses a different execution policy from the TAuth route.
+  Evidence: Deployment rejected `tauth/public-api` with `deployment_graph.configuration_policy_conflict`.
+  The deployed Caddy provider uses a different execution policy from the original TAuth route.
   Requirements:
   - Declare the provider policy on the `public-api` route.
   - Preserve execution policies for other TAuth targets.
   - Preserve the deployed Caddy provider and retained application data.
+
   Resolution: The route declares the deployed provider policy through one `app-deploy` operation.
-  Validation: The exact Gateway v8.1.9 policy API accepts the manifest.
+  The exact Gateway v8.1.9 policy API accepts the manifest.
   The route policy digest equals the deployed Caddy provider digest.
   The TAuth runtime policy digest is unchanged.
+
+  Validation: Release CI passed for v2.2.30.
+  After B147, `make deploy` completed with status `0` for the same sealed release.
+  Gateway recorded generation 34 at revision 673 with every resource outcome verified.
+  Public health and the website version check passed.
+  Independent source review found no blocking issue.
   Governor reports existing guide differences and local up/down inspection limits.
-  Deployment and Google sign-in acceptance remain pending.
+
   Changed files: `.mprlab/deploy/resources.yml` and `.mprlab/ISSUES.md`.
 
-- [ ] [B145] (P0) Use the current reverse proxy hostname.
+- [x] [B145] (P0) Use the current reverse proxy hostname.
   Goal: Permit Google sign-in through the production HTTPS proxy.
-  Evidence: The HTTPS nonce endpoint returns `400` with `https_required`.
-  TAuth cannot resolve `mprlab-caddy`. The shared network supplies the proxy alias `caddy`.
+  Evidence: The HTTPS nonce endpoint returned `400` with `https_required`.
+  TAuth could not resolve `mprlab-caddy`. The shared network supplies the proxy alias `caddy`.
   Requirements:
   - Select `caddy` as the trusted proxy hostname.
   - Use the selected manifest value in the real proxy integration test.
   - Preserve peer verification and rejection of forged HTTPS headers.
   - Deploy the correction and verify Google sign-in in iRoom.
-  Resolution: The manifest selects the shared network alias `caddy`.
+
+  Resolution: The manifest selects `caddy`.
   The real proxy test reads the selected hostname and uses the actual proxy alias.
   Deployment documentation and the YAML contract test use the current hostname.
+
   Validation: The HTTP regression returned `https_required` before the correction and passed after it.
-  Focused proxy tests and full `make ci` passed.
-  Independent source review found no blocking defect.
+  Focused proxy tests, full `make ci`, hosted PR checks, and independent source review passed.
   Changed prose has no mechanical findings. Governor reports existing guide differences and local up/down inspection limits.
-  Production: v2.2.29 was sealed and published after release CI passed.
-  Deployment stopped before runtime changes because of B146.
-  Google sign-in acceptance remains pending.
+
+  Production: Release, publication, and deployment completed for v2.2.30 on 2026-11-06 after B146 and B147.
+  Both API nonce endpoints returned `200` with the correct CORS origin.
+  Google sign-in opened the authenticated Candidates workspace in Chrome.
+  The server recorded `POST /auth/google` with status `200`.
+  The existing `mprlab-nginx-gateway_tauth-data` volume remains attached.
+
   Changed files: `.mprlab/deploy/resources.yml`, `tests/managed-proxy-trust.sh`, and `cmd/server/service_renderer_test.go`.
   Documentation: `README.md`, `docs/tenant-console-operations.md`, and `.mprlab/ISSUES.md`.
 
