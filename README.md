@@ -198,8 +198,8 @@ The operator keeps inventory and private config under `MPRLAB_GATEWAY_OPERATOR_R
 The default operator root is `$HOME/.config/mprlab-gateway`.
 The TAuth artifact converts the declared TAuth resources to its native config.
 
-Gateway supplies reverse proxy trust automatically through the stable `mprlab-caddy` Docker DNS name.
-The managed service receives `TAUTH_TRUSTED_PROXY_HOSTS=mprlab-caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the manifest.
+Gateway supplies reverse proxy trust automatically through the stable `caddy` Docker DNS name.
+The managed service receives `TAUTH_TRUSTED_PROXY_HOSTS=caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the manifest.
 Private proxy inputs and container IP addresses are not necessary.
 TAuth compares the connection peer with the DNS response for each forwarded HTTPS request.
 A TAuth restart is not necessary after proxy replacement.
