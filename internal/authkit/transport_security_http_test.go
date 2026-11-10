@@ -47,7 +47,11 @@ func TestCredentialRoutesRejectForgedTransport(t *testing.T) {
 				if readErr != nil {
 					t.Fatal(readErr)
 				}
-				if !strings.Contains(string(body), `"error":"https_required"`) {
+				if route.Method == http.MethodHead {
+					if len(body) != 0 {
+						t.Errorf("%s: HEAD returned a body", signal)
+					}
+				} else if !strings.Contains(string(body), `"error":"https_required"`) {
 					t.Errorf("%s: expected transport error, got %s", signal, body)
 				}
 				response.Body.Close()

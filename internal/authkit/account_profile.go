@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -33,6 +34,41 @@ func NewAccountDisplayName(raw string) (AccountDisplayName, error) {
 }
 
 func mountAccountProfileRoute(group *gin.RouterGroup, registry TenantRegistry, accounts AccountManagementStore, users UserStore) {
+	read := func(request *gin.Context) {
+		request.Header("Cache-Control", "no-store")
+		tenantID, resolved := resolveTenantIDRequired(request, registry)
+		if !resolved {
+			request.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if accounts == nil {
+			request.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		claims := request.MustGet("auth_claims").(*JwtCustomClaims)
+		profile, err := accounts.ResolveAccountForUser(request.Request.Context(), tenantID, claims.GetUserID())
+		if err != nil {
+			writeAccountError(request, err)
+			return
+		}
+		identities, err := accounts.AccountIdentities(request.Request.Context(), tenantID, profile.AccountID)
+		if err != nil {
+			writeAccountError(request, err)
+			return
+		}
+		methods := make([]string, 0, len(identities))
+		seen := make(map[string]bool)
+		for _, identity := range identities {
+			if !seen[identity.Provider] {
+				methods = append(methods, identity.Provider)
+				seen[identity.Provider] = true
+			}
+		}
+		sort.Strings(methods)
+		request.JSON(http.StatusOK, gin.H{"user_id": profile.UserID, "sign_in_methods": methods, "password_management_enabled": registry.Config(tenantID).AccountManagementEnabled})
+	}
+	group.GET("", read)
+	group.HEAD("", read)
 	group.PATCH("", func(request *gin.Context) {
 		request.Header("Cache-Control", "no-store")
 		tenantID, _, accountID, store, ok := currentAccountContext(request, registry, accounts)
