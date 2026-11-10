@@ -61,7 +61,7 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `mobile store artifact`: A signed `.ipa` or `.aab` file for store publication.
 - `native toolchain`: The platform tools that build and sign a mobile store artifact.
 - `payload`: Structured data that crosses a system boundary.
-- `Pinguin`: The MPR Lab notification service that queues email and SMS delivery.
+- `Pingwin`: The MPR Lab notification service that queues email and SMS delivery.
 - `PDF`: A file that uses the Portable Document Format.
 - `PRD`: A product requirement document.
 - `producing agent`: The agent that creates or changes technical prose.
@@ -105,6 +105,22 @@ Give each term one meaning. Use the same term for the same concept in all docume
 - `migration snapshot`: A fixed collection of effective configuration values for a bounded data migration.
 
 ## Repository Technical Nouns
+
+- `TAuth`: The authentication service and resource authorization server in this repository.
+- `identity provider`: An external service that verifies a user's identity.
+- `provider subject`: The account identifier that an identity provider issues.
+- `session cookie`: The HttpOnly cookie that contains a signed tenant session credential.
+- `refresh cookie`: The HttpOnly cookie that contains an opaque credential for session renewal.
+- `HttpOnly`: The cookie attribute that prevents JavaScript access to a cookie value.
+- `SameSite`: The cookie attribute that controls transmission with requests from another cookie site.
+- `Secure`: The cookie attribute that requires HTTPS for transmission outside permitted local browser behavior.
+- `PKCS8`: The private-key format accepted for the configured signing keys.
+- `PKIX`: The public-key format accepted for OAuth verification keys.
+- `ES256`: The ECDSA P-256 and SHA-256 algorithm used for OAuth access-token signatures.
+- `PostgreSQL`: The external SQL database that TAuth can use for persistent stores.
+- `DSN`: The connection string that selects a database and its connection settings.
+- `OpenSSL`: The command-line tool that generates local keys for the development stack.
+- `curl`: The command-line HTTP client used for local startup checks.
 
 - `retention audit`: A read-only comparison that verifies stored authentication data during an ownership handoff.
 - `audit frame`: A private sealed observation of database schema, opaque record identities, and record fingerprints.
@@ -231,6 +247,14 @@ Use the simple present, simple past, simple future, imperative, or infinitive fo
 - `Apple notification`: A signed Apple event that reports an account or consent change.
 
 ## Repository Technical Verbs
+
+- `issue`: Create a credential or token and give it to its authorized recipient.
+- `rotate`: Replace a refresh credential with its successor during an accepted exchange.
+- `revoke`: Remove the authorization that a credential or grant provides.
+- `sign`: Produce a cryptographic signature for a token.
+- `enroll`: Create an owner account from a verified console identity.
+- `bootstrap`: Store the initial reserved console configuration.
+- `provision`: Create or configure tenant resources through the authenticated management contract.
 
 - `resolve`: Get the network addresses of a configured hostname from its DNS response.
 - `trust`: Accept the HTTPS scheme from a configured reverse proxy after connection peer verification.

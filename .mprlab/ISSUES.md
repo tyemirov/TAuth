@@ -853,6 +853,40 @@ The issue notes below distinguish existing repairs, test results, and remaining 
 
 ## Improvements
 
+- [x] [I224] (P1) Rewrite the README and organize detailed integration guides.
+  Goal:
+  Give application teams a concise introduction and current setup instructions.
+  Requirements:
+  - State the product value, capabilities, integration paths, operating limits, and license.
+  - Move detailed configuration, deployment, request limits, and account operations into task guides.
+  - Preserve current provider rules, numeric limits, identity boundaries, and revocation qualifications.
+  - Correct obsolete cutover procedures and linked application setup instructions.
+  - Preserve existing working changes.
+  Validation:
+  - Verify moved claims against the complete candidate document set.
+  - Verify local links, anchors, command names, and changed prose.
+  - Obtain independent semantic and architecture reviews.
+  Resolution:
+  Rewrote the README around product value, capabilities, architecture, local startup, integration, operating limits, documentation, and licensing.
+  Moved detailed configuration, deployment, request limits, and account operations into four task guides.
+  Corrected the linked setup procedures, cookie conditions, native Apple payload, identity examples, and license.
+  Removed obsolete cutover commands and kept durable historical results.
+  Validation:
+  Local links, anchors, documented command names, numeric limits, and retained YAML examples passed inspection.
+  New and changed prose passed the mechanical language check against the verified official reference.
+
+  Unchanged supporting prose retains 71 existing mechanical findings.
+  Independent semantic and architecture review passed for 125 source units.
+  The mechanical revision check and document release gate passed.
+
+  Documentation-only acceptance used document checks.
+  Application CI was outside this change.
+  Governor reported existing guide differences and Makefile inspection limits.
+  Existing application source edits remained unchanged.
+  Changed files:
+  `README.md`, `docs/service-configuration.md`, `docs/deployment.md`, `docs/authentication-limits.md`, `docs/account-lifecycle.md`,
+  `docs/usage.md`, `docs/tenant-console-operations.md`, `examples/tenant-app/README.md`, `.mprlab/TERMINOLOGY.md`, and `.mprlab/ISSUES.md`.
+
 - [x] [I223] (P1) Establish managed proxy trust without private container addresses.
   Goal:
   Let deployment establish reverse proxy trust without operator-managed IP addresses.
