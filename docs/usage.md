@@ -1,8 +1,10 @@
 # TAuth Usage Guide
 
-This document is the authoritative guide for operators and front‑end teams integrating against a TAuth deployment. It explains how to run the service, how sessions work, and how to connect a browser application using either the provided helper script or direct HTTP calls.
-
-For a deep dive into internal architecture and implementation details, see `ARCHITECTURE.md`. For confident‑programming and refactor policies, see `POLICY.md` and `docs/refactor-plan.md`.
+This guide defines browser, native, and OAuth client integration with TAuth.
+Use the [configuration reference](service-configuration.md) for fields and diagnostics.
+Use the [deployment guide](deployment.md) for startup, transport, and storage.
+The [architecture](../ARCHITECTURE.md) describes internal components.
+The [repository policy](../.mprlab/POLICY.md) defines development requirements.
 
 ---
 
@@ -11,16 +13,25 @@ For a deep dive into internal architecture and implementation details, see `ARCH
 TAuth sits between identity providers and your product UI:
 
 - Verifies Google ID tokens issued by Google OAuth Web clients and optional Desktop/installed-app clients.
-- Completes Sign in with Apple authorization-code redirects and validates Apple ID tokens.
+- Completes Apple and GitHub authorization-code redirects and validates provider identities.
 - Verifies tenant-managed email/password credentials when `password_auth.enabled` is configured.
 - Manages first-party accounts when `account_management.enabled` is configured, including signup, email verification, reset, password change, provider linking, unlinking, and disablement.
 - Mints short‑lived access cookies and long‑lived refresh cookies.
 - Rotates refresh tokens on every refresh call and revokes them on logout.
-- Exposes a small HTTP API for zero-token-in-JavaScript sessions; GitHub Pages publishes the browser helper only at `https://tauth.mprlab.com/tauth.js`.
+- Issues HttpOnly session cookies. GitHub Pages publishes the helper at `https://tauth.mprlab.com/tauth.js`.
 - Optionally acts as an OAuth 2.1 authorization server for declared first-party protected resources.
-- Does not authorize Google or Apple APIs, MFA/passkeys, organization membership, public profile editing, or third-party token custody.
+- Permits display-name changes and durable account erasure through the [account lifecycle API](account-lifecycle.md).
+- Stores encrypted Apple refresh grants for revocation. GitHub identity retrieval does not retain provider tokens.
 
-Once TAuth is running for a given registrable domain, any app on that domain (or its subdomains) can rely on the `HttpOnly` session cookies instead of storing tokens in `localStorage` or JavaScript memory.
+Application data and resource permissions remain application responsibilities.
+Google and Apple API authorization, MFA, passkeys, and organization membership are outside the current TAuth contract.
+Cross-tenant shared identity and single sign-on remain under investigation in P001.
+
+Cookie scope and browser site rules control which application requests can carry a session.
+The [customer API example](../examples/tenant-app/README.md) uses host-only cookies on the customer API.
+TAuth session credentials remain in HttpOnly cookies.
+Google credentials pass through the login callback.
+The helper stores only non-secret restore hints in `localStorage`.
 
 ---
 
@@ -28,66 +39,28 @@ Once TAuth is running for a given registrable domain, any app on that domain (or
 
 ### 2.1 Binary layout
 
-The `tauth` binary lives under `cmd/server` in this repository. You can:
-
-- Build it directly with Go (e.g. `go build ./cmd/server`), or
- - Use the provided Docker setup in `examples/tauth-demo` for a local stack.
-
-The binary reads service settings from YAML and active tenant revisions from the database.
-Use `tauth --config=/path/to/service.yaml` or `TAUTH_CONFIG_FILE` to select the service file.
-Complete [console bootstrap and tenant import](tenant-console-operations.md) before normal startup.
+The service source is `cmd/server`.
+The [local stack](deployment.md#local-development) builds the service through Docker.
+The binary accepts `--config=/path/to/service.yaml` or `TAUTH_CONFIG_FILE` for service-file selection.
+Active tenant revisions come from the bootstrapped database.
 
 ### 2.2 Core configuration
 
-The service YAML contains the server settings below. It rejects the `tenants` field.
-
-| Key | Purpose | Example |
-| --- | --- | --- |
-| `listen_addr` | HTTP listen address | `:8080` |
-| `database_url` | Refresh store DSN | `sqlite:///data/tauth.db` |
-| `enable_cors` | Enable CORS for cross-origin UIs | `true` / `false` |
-| `cors_allowed_origins` | Allowed origins when CORS is enabled (include your UI origins *and* `https://accounts.google.com`) | `["https://app.example.com","https://accounts.google.com"]` |
-| `cors_allowed_origin_exceptions` | Allowed non-tenant origins that may appear in `cors_allowed_origins` | `["https://accounts.google.com"]` |
-| `enable_tenant_header_override` | Allow explicit tenant selection for shared origins and non-browser clients | `true` / `false` |
-| `tenant_encryption_key` | Base64 encoding of a 32-byte service encryption key | Service secret input |
-
-Key notes:
-
-- **TLS and cookies**: In production, terminate TLS at the load balancer or the service so cookies can be marked `Secure`. Each tenant defines its own `cookie_domain`; use that field (e.g. `.example.com`) to share cookies across subdomains. Leave the field blank to emit host-only cookies during `localhost` development (browsers reject `Domain=localhost`).
-- **Database URL**: For SQLite, use triple‑slash absolute paths (`sqlite:///data/tauth.db`). Host‑based forms such as `sqlite://file:/data/tauth.db` are rejected. For Postgres, use a standard DSN (`postgres://user:pass@host:5432/dbname?sslmode=disable`).
-- **CORS**: Leave `enable_cors` set to `false` when UI and API share the same origin. Enable it only when your UI is on a different origin (for example, Vite dev server) and set `cors_allowed_origins` explicitly. If you include non-tenant origins (for example `https://accounts.google.com`), also list them under `cors_allowed_origin_exceptions` so validation permits them.
-- **Shared origins**: If multiple tenants run on the same machine, add each distinct frontend origin (`http://localhost:8000`, `http://localhost:4173`, …) to the tenant’s `tenant_origins` so TAuth can resolve the tenant from the request `Origin` header. Only enable `enable_tenant_header_override` (and send `X-TAuth-Tenant`) when tenants intentionally share the exact same origin or when non-browser clients omit `Origin`.
-- **Per-tenant signing keys**: Each tenant block must declare a `jwt_signing_key`. TAuth uses that HS256 secret exclusively for the tenant’s cookies, so rotate keys per tenant instead of relying on a global fallback.
-- **Password credentials**: Set `password_auth.enabled: true` inside a tenant and seed `users` with normalized email addresses plus bcrypt `password_hash` values. Literal bcrypt hashes beginning with `$2a$`, `$2b$`, or `$2y$` are preserved during config expansion; `${PASSWORD_HASH}` placeholders still expand when you want to keep hashes outside the file. Startup seeding removes stored password credentials that are no longer present in `password_auth.users`.
-- **Apple OAuth**: Set `apple_oauth.enabled: true` to expose the browser Apple endpoints. Add native iOS App IDs under `native_client_ids` to expose the native Apple endpoints. Enabled providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and registered HTTPS callback URI.
-- **Account management**: Set `account_management.enabled: true` to permit account operations.
-  Persistent identity remains independent of this setting. See the [stable application user ID contract](application-subjects.md).
-- **Challenge delivery**: Account management requires `email_delivery`. Challenge tokens are sent only through the configured email channel.
-- **Local HTTP mode**: Setting `allow_insecure_http: true` on a tenant drops the `Secure` flag and downgrades cookies to `SameSite=Lax` so browsers keep them over HTTP even while CORS is enabled. This only works when your dev UI also runs on `http://localhost` (same host, different port); switching hosts such as `127.0.0.1` will make the browser treat the request as cross-site and block the cookies.
-- **OAuth issuer**: The optional root `oauth` block sets one HTTPS issuer and the exact public endpoint URLs. It sets pending-request and code lifetimes. It also sets ES256 P-256 signing keys, the active key ID, and bounded Client ID Metadata Document fetch limits. The active key entry requires PKCS8 private material. Retired key entries use PKIX `public_key` or `public_key_base64` verification material until their access tokens expire. Enable a tenant `oauth` block at the same time. Each OAuth tenant must configure Google, GitHub, or password authentication for the TAuth login page.
-- **OAuth persistence**: TAuth requires a persistent database for requests, authorization codes, consent grants, and refresh sessions.
+Use the [service and tenant reference](service-configuration.md) for YAML fields, provider settings, tenant resolution, and diagnostics.
 
 ### 2.3 Hosted deployment
 
-Use the [console operations runbook](tenant-console-operations.md) for service configuration, bootstrap, enrollment, and tenant import.
-The runtime requires the database URL and encryption key.
-Keep the encryption key in service secret configuration.
-The database contains tenant keys, provider configuration, origins, cookie settings, and account policy.
+Use the [deployment guide](deployment.md#production-lifecycle) for the production lifecycle and standalone startup.
+The database URL and retained server encryption key are required.
+The [console runbook](tenant-console-operations.md#bootstrap-order) defines standalone console bootstrap and owner enrollment.
 
 ### 2.4 Local Docker Compose
 
-The Compose examples keep service settings in `config.yaml` and migration input in `tenants.import.yaml`.
-Supply the console inputs from `examples/console-bootstrap.yaml.example` through the private local environment.
-
-1. Run `docker compose run --rm tauth console-bootstrap --tenant-file /config/console-bootstrap.yaml`.
-2. Run `docker compose up --build`.
-3. Authenticate the destination owner through the reserved console tenant.
-4. Stop TAuth and run the separate [deployment migration](tenant-console-operations.md#deployment-data-migration) against the retained database.
-5. Restart TAuth to load the imported active configuration.
-6. Remove the application tenant environment inputs after verification.
-
-The named `tauth_data` volume contains the persistent database.
-The local frontend remains separate from production GitHub Pages publication.
+Run `make up` from the repository root.
+Open `http://localhost:8081/app/` for the console.
+The API uses `http://localhost:8082`.
+Run `make down` to stop the stack and retain its data.
+The [local guide](deployment.md#local-development) defines keys, client selection, and software checks.
 
 ### 2.5 Preflight validation (pre-start)
 
@@ -108,16 +81,9 @@ The preflight builder is generalized under `github.com/tyemirov/utils/preflight`
 
 ### 2.6 MPR Lab lifecycle
 
-The MPR Lab lifecycle uses the installed `mprlab-gateway` command.
-Make sure that the command is on `PATH`.
-Use `MPRLAB_GATEWAY_EXECUTABLE` to select an explicit installed command path.
-Run `make release && make publish && make deploy` from the TAuth repository root as the operator.
-Each command passes this Git root through `--app-root`.
-Gateway reads `.mprlab/deploy/resources.yml` and assembles the shared TAuth tenant configuration from application contributions.
-Gateway owns release receipts, publication, and remote convergence.
-The operator keeps inventory and private config under `MPRLAB_GATEWAY_OPERATOR_ROOT`.
-The default operator root is `$HOME/.config/mprlab-gateway`.
-TAuth carries no production lifecycle implementation.
+Use the [production lifecycle](deployment.md#production-lifecycle) for release, publication, and deployment.
+The installed Gateway reads the selected manifest and owns those operations.
+Tenant configuration goes through the authenticated management API.
 
 ---
 
@@ -157,7 +123,7 @@ New passwords require valid UTF-8, at least 15 Unicode code points, and at most 
 Signup, reset, password change, and password link use this policy.
 JSON and OAuth login share progressive delays and request budgets.
 A delayed login returns HTTP 429 with the remaining `Retry-After` seconds, rounded up.
-See the [password policy](../README.md#authentication-request-limits) for the schedule and limits.
+See the [password policy](authentication-limits.md) for the schedule and limits.
 
 - `exchangePasswordCredential({ email, password })` – exchanges a tenant-managed password credential for cookies and updates the profile.
 - `signupPasswordCredential({ email, password, displayName, avatarUrl })` – starts account signup and returns the accepted verification challenge metadata.
@@ -175,6 +141,8 @@ See the [password policy](../README.md#authentication-request-limits) for the sc
 For backend services written in Go, use the `pkg/sessionvalidator` package described in section 6.8 to validate `app_session` cookies.
 
 ### 4.1 Loading the helper
+
+The published helper uses the repository source `web/tauth.js`.
 
 On your product site, include the canonical GitHub Pages asset:
 
@@ -212,7 +180,7 @@ Behaviour:
 - With the default `bootstrapMode: "restore-if-hinted"`, a first anonymous visit calls `onUnauthenticated()` without making `/me` or `/auth/refresh` requests.
 - After a successful login, profile restore, or refresh, the helper writes a non-secret restore hint keyed by `baseUrl` and tenant id.
 - When that hint exists, startup calls `GET /auth/session`. The endpoint returns profile JSON for valid or refresh-restored cookies and `204 No Content` for anonymous/expired browsers without browser-visible 401s.
-- `bootstrapMode: "eager"` preserves the legacy probe-first behavior. `bootstrapMode: "passive"` always starts anonymous and never restores on load.
+- `bootstrapMode: "eager"` checks the session on each initialization. `bootstrapMode: "passive"` always starts anonymous and never restores on load.
 - `204` from `/auth/session` clears the restore hint. `403`, `404`, network failures, and `5xx` responses call `onAuthError(error)`.
 - The `profile` object matches the `/me` response (see section 6.4).
 
@@ -307,7 +275,45 @@ The required sequence for custom clients is:
 
 > You must fetch a fresh nonce for every sign‑in attempt. TAuth invalidates a nonce as soon as it is used.
 
-When using `tauth.js` or the mpr‑ui header component, this flow is handled internally; you only need to surface the Google button and configure your client ID.
+The helper supplies `requestNonce()` and `exchangeGoogleCredential()`.
+Your page must initialize Google Identity Services and render its button.
+The console Integration tab supplies a complete page for this sequence.
+See the [customer example](../examples/tenant-app/README.md#prepare-the-tenant) for its proxy and backend setup.
+
+For direct integration, use this sequence after both scripts load:
+
+```javascript
+await initAuthClient({ baseUrl: "https://auth.example.com", tenantId: "demo" });
+const nonce = await requestNonce();
+google.accounts.id.initialize({
+  client_id: "YOUR_GOOGLE_WEB_CLIENT_ID",
+  nonce,
+  ux_mode: "popup",
+  callback: async response => {
+    await exchangeGoogleCredential({
+      credential: response.credential,
+      nonceToken: nonce,
+    });
+  },
+});
+google.accounts.id.renderButton(document.getElementById("googleSignIn"), {
+  type: "standard",
+});
+```
+
+Each subsequent login attempt requires a fresh nonce and Google initialization.
+The Google popup flow requires authorized JavaScript origins, not a redirect callback URL.
+
+For manual browser verification:
+
+1. Open the browser network tools before login.
+2. Confirm that `POST /auth/nonce` completes before the Google popup opens.
+3. Complete Google sign-in.
+4. Confirm that `POST /auth/google` returns HTTP 200.
+5. Inspect the configured session and refresh cookie names, domain, paths, and transport attributes.
+6. Request `/me` with credentials and confirm the signed-in profile.
+
+For the customer API example, do these checks against its API origin.
 
 ### 5.3 Native installed-app flow (system browser + PKCE)
 
@@ -319,6 +325,10 @@ Native apps such as PromptDew must not embed Google sign-in in a web view. Inste
 4. Exchange the authorization code directly with Google and extract the returned `id_token`.
 5. Call `POST /auth/google/native` with `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }`.
 6. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
+
+Desktop clients can use a configured callback such as `http://127.0.0.1:<port>/oauth/google/callback`.
+Mobile clients can use configured custom schemes or HTTPS app links.
+For this Google exchange, authorization codes and Google refresh tokens stay outside TAuth.
 
 This path validates the `id_token` against the tenant’s optional `google_native_client_id` and/or `google_native_clients` entries. If native clients are absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. If a requested platform is absent, they return `404` with `error: "native_google_platform_not_configured"`. Native client IDs must be unique across tenants.
 
@@ -363,7 +373,10 @@ Obtain a fresh nonce for each authorization.
 
 ### 5.4 Sign in with Apple
 
-Apple login is a browser redirect flow. TAuth owns the state, nonce, Apple client-secret JWT, token exchange, and session issuance:
+The Apple callback accepts cross-origin form navigation without CORS response headers.
+Ordinary API routes retain the tenant CORS allowlist.
+
+Apple login is a browser redirect flow. TAuth owns the state, nonce, Apple ES256 client-secret JWT, token exchange, and session issuance:
 
 ```yaml
 apple_oauth:
@@ -393,6 +406,8 @@ For custom links, call `getAppleLoginUrl()` and assign the returned URL to your 
 
 The server redirects the browser to Apple with `response_type=code`, `response_mode=form_post`, `scope=openid email name`, a signed state JWT, and a nonce stored in TAuth. Apple returns an authorization code to `/auth/apple/callback`; TAuth exchanges it at Apple’s token endpoint, validates the returned ID token against Apple JWKS, checks the nonce, enforces `allowed_users`, and mints the same `app_session` / `app_refresh` cookies as Google and password login. When state contains a validated `return_to`, the callback responds with `303 See Other` to that product URL after setting cookies; otherwise it returns the profile JSON directly. `startAppleLogin()` records the restore hint before leaving the product page so the returned page restores through `/auth/session`. Apple access tokens are not exposed to JavaScript or stored by TAuth.
 
+TAuth stores encrypted Apple refresh grants for provider revocation before it issues a session.
+
 Native iOS integrations use the operating-system Apple sign-in control:
 
 Set `enable_tenant_header_override: true` because native requests do not send a browser `Origin`.
@@ -400,7 +415,7 @@ Set `enable_tenant_header_override: true` because native requests do not send a 
 1. Call `GET /auth/apple/native/config` with `X-TAuth-Tenant`.
 2. Call `POST /auth/nonce` with the same tenant header.
 3. Pass the returned nonce to the Apple authorization request.
-4. Post the Apple identity token, nonce, and available credential full name to `/auth/apple/native`.
+4. Post the Apple ID token, authorization code, nonce, and available name to `/auth/apple/native`.
 5. Keep the returned TAuth cookies in the native cookie jar.
 
 An Expo iOS client uses `expo-apple-authentication` for steps 3 and 4:
@@ -415,8 +430,8 @@ const credential = await AppleAuthentication.signInAsync({
     AppleAuthentication.AppleAuthenticationScope.EMAIL,
   ],
 });
-if (credential.identityToken === null) {
-  throw new Error("Apple did not return an identity token");
+if (credential.identityToken === null || credential.authorizationCode === null) {
+  throw new Error("Apple did not return the required identity token and authorization code");
 }
 
 const response = await fetch(`${tauthBaseUrl}/auth/apple/native`, {
@@ -428,6 +443,7 @@ const response = await fetch(`${tauthBaseUrl}/auth/apple/native`, {
   },
   body: JSON.stringify({
     apple_id_token: credential.identityToken,
+    authorization_code: credential.authorizationCode,
     nonce_token: nonce,
     full_name: credential.fullName === null ? null : {
       name_prefix: credential.fullName.namePrefix,
@@ -444,7 +460,12 @@ if (!response.ok) {
 }
 ```
 
-TAuth validates the native App ID audience, Apple issuer and signature, expiration, verified email, and exact nonce. It consumes the nonce once and applies the tenant allowlist and account-management policy.
+TAuth validates the native App ID audience, Apple issuer, signature, expiration, verified email, and exact nonce.
+It exchanges the authorization code with the exact native audience and without the browser callback URI.
+Both ID tokens must have the same subject, audience, and nonce.
+TAuth stores the encrypted refresh grant before it issues a session.
+It consumes the nonce once and applies the tenant allowlist and account-management policy.
+
 Apple returns `credential.fullName` only during the first authorization. Send all available components so TAuth can store the display name.
 
 ### 5.5 Email/password accounts
@@ -490,7 +511,7 @@ Or call `POST /auth/password/login` directly with `credentials: "include"`. The 
 
 Signup, reset, and password-link flows use tenant-specific, single-use challenge tokens. TAuth stores only challenge hashes.
 
-Account management requires the complete `email_delivery` block. TAuth sends each challenge link through Pinguin and puts the token in the URL fragment.
+Account management requires the complete `email_delivery` block. TAuth sends each challenge link through Pingwin and puts the token in the URL fragment.
 
 ```js
 await signupPasswordCredential({
@@ -623,7 +644,7 @@ Verifies a Google ID token and mints cookies.
   }
   ```
 
-- **Response**: `200 OK` with user profile JSON (see `/api/me` below). Sets `app_session` and `app_refresh` cookies.
+- **Response**: `200 OK` with user profile JSON (see `/me` below). Sets `app_session` and `app_refresh` cookies.
 
 Common failure cases:
 
@@ -726,6 +747,7 @@ Verifies an Apple ID token from the native iOS sign-in sheet and mints the stand
   ```json
   {
     "apple_id_token": "<identity_token_from_apple>",
+    "authorization_code": "<authorization_code_from_apple>",
     "nonce_token": "<nonce_from_/auth/nonce>",
     "full_name": {
       "name_prefix": "Dr.",
@@ -832,13 +854,13 @@ Starts a password signup when `account_management.enabled` and `account_manageme
   }
   ```
 
-  TAuth sends one Pinguin email that contains the public verification URL and a fragment token. Tests obtain tokens from an injected email sender.
+  TAuth sends one Pingwin email that contains the public verification URL and a fragment token. Tests obtain tokens from an injected email sender.
 
 - **Errors**:
   - `404` with `error: "account_management_not_configured"` when account management is disabled
   - `404` with `error: "password_signup_not_configured"` when public signup is disabled
   - `409` with `error: "account_exists"` when the password identity is already linked
-  - `502` with `error: "email_challenge_delivery_failed"` when Pinguin rejects the request
+  - `502` with `error: "email_challenge_delivery_failed"` when Pingwin rejects the request
   - `503` with `error: "email_verification_delivery_not_configured"` when server composition omitted the required sender
 
 ### 6.2g `POST /auth/password/verify-email`
@@ -865,7 +887,7 @@ Requests password recovery. The public response does not wait for account lookup
   { "email": "user@example.com" }
   ```
 
-- **Response**: `202 Accepted` with exactly `{"status":"accepted"}`. Eligible accounts receive reset links through Pinguin. Unknown accounts, throttled requests, full queues, and internal failures receive the same response. One reset per account is permitted each minute. An admitted recovery job replaces the previous challenge. See the [authentication request limits](../README.md#authentication-request-limits) for queue, source, and global limits.
+- **Response**: `202 Accepted` with exactly `{"status":"accepted"}`. Eligible accounts receive reset links through Pingwin. Unknown accounts, throttled requests, full queues, and internal failures receive the same response. One reset per account is permitted each minute. An admitted recovery job replaces the previous challenge. See the [authentication request limits](authentication-limits.md) for queue, source, and global limits.
 
 ### 6.2i `POST /auth/password/reset/complete`
 
@@ -885,13 +907,15 @@ Consumes a reset challenge, rotates the password hash, revokes existing account 
 
 ### 6.2j Authenticated account endpoints
 
+See [display-name changes and account erasure](account-lifecycle.md) for `PATCH` and `DELETE /auth/account`.
+
 All `/auth/account/*` endpoints require the current `app_session` cookie and the configured account-management capability.
 The server resolves the public session subject through its tenant-scoped stored relation to the internal opaque account ID.
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |
 | `POST` | `/auth/account/password/change` | `{ "current_password": "...", "new_password": "..." }` | `200` profile, refresh sessions revoked and reissued |
-| `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` metadata. Production sends the link through Pinguin. |
+| `POST` | `/auth/account/password/link/start` | `{ "email": "...", "password": "...", "display_name": "...", "avatar_url": "..." }` | `202` metadata. Production sends the link through Pingwin. |
 | `POST` | `/auth/account/password/link/verify` | `{ "token": "..." }` | `200` profile |
 | `POST` | `/auth/account/google/link` | `{ "google_id_token": "...", "nonce_token": "..." }` | `200` profile |
 | `POST` | `/auth/account/unlink` | `{ "provider": "password|google|apple", "provider_id": "..." }` | `200` profile, refresh sessions revoked and reissued |
@@ -913,27 +937,33 @@ when the OAuth issuer is disabled. Startup fails if this revocation cannot finis
 Returns the current browser session profile for startup/bootstrap without using 401 as an expected signed-out signal.
 
 - **Auth**: optional `app_session` and `app_refresh` cookies.
-- **Response**: `200 OK` with the same profile payload as `/api/me` when the session is valid or refresh-restorable. Sets rotated cookies if the refresh cookie restores the session.
+- **Response**: `200 OK` with the same profile payload as `/me` when the session is valid or refresh-restorable. Sets rotated cookies if the refresh cookie restores the session.
 - **Anonymous response**: `204 No Content` when no valid session can be restored.
 - **Errors**: `5xx` only for unexpected server/store failures.
 
-### 6.4 `GET /api/me`
+### 6.4 `GET /me`
 
 Returns the profile associated with the current session.
+The helper and customer API proxy use this route.
+The standalone service also exposes `/api/me` as a protected profile route.
 
 - **Auth**: requires a valid `app_session` cookie.
 - **Response**:
 
   ```json
   {
-    "user_id": "google:12345",
+    "user_id": "U6fYpCTyBv0qcDKw9d0o2g",
     "user_email": "user@example.com",
     "display": "Example User",
     "avatar_url": "https://lh3.googleusercontent.com/a/...",
     "roles": ["user"],
-    "expires": "2024-05-30T12:34:56.000Z"
+    "expires": "2026-11-10T12:34:56.000Z"
   }
   ```
+
+New accounts use opaque public user IDs.
+Existing persisted IDs can retain their earlier form.
+Applications can render the profile's `avatar_url` without parsing the user ID.
 
 - **Errors**: `401` when the access cookie is missing, expired, or invalid.
 
@@ -945,7 +975,7 @@ Rotates the refresh token and mints a new access cookie.
 - **Request body**: empty.
 - **Response**: `204 No Content` on success. Sets new `app_session` and `app_refresh` cookies.
 
-After a successful refresh, call `/api/me` again or rely on `tauth.js` to hydrate the profile.
+After a successful refresh, call `/me` again or rely on `tauth.js` to hydrate the profile.
 
 ### 6.6 `POST /auth/logout`
 
@@ -1100,7 +1130,7 @@ Using the shared validator keeps your services aligned with TAuth’s JWT format
 
 Use this checklist when integrating:
 
-- **401 from `/api/me` but refresh works** – Session cookie expired; ensure your client either uses `tauth.js` or calls `/auth/refresh` before retrying.
+- **401 from `/me` but refresh works** – Session cookie expired; ensure your client either uses `tauth.js` or calls `/auth/refresh` before retrying.
 - **401 from `/auth/refresh`** – Refresh cookie missing or revoked; treat as “signed out” and prompt the user to sign in again.
 - **No cookies set** – Verify:
   - The response comes from HTTPS (in production).
@@ -1126,8 +1156,75 @@ Use this checklist when integrating:
 - **Password login returns `account_not_active`** – Complete email verification before logging in with a newly created account.
 - **Unlink returns `last_identity`** – Link another login method before removing the current account's only identity.
 
-For more detailed operational guidance, refer to the troubleshooting section in `ARCHITECTURE.md`.
+For internal troubleshooting, see the [architecture guide](../ARCHITECTURE.md#11-troubleshooting-playbook).
 - When multiple tenants share the same origin, list each frontend origin under `tenant_origins` so TAuth can resolve the tenant from the `Origin` header. You can override the mapping by adding `data-tenant-id="tenant-id"` to the script tag (see 4.1) or by calling `setAuthTenantId("tenant-id")` before `initAuthClient(...)`. The helper only sends `X-TAuth-Tenant` when you opt into an explicit override.
+
+## GitHub login setup
+
+GitHub-only tenants need no Google or password provider. See [the GitHub example](../examples/github/tenants.import.yaml.example).
+
+1. Register a dedicated GitHub.com OAuth App for identity authentication.
+2. Set its callback URL to the configured TAuth URL, for example `https://auth.example.com/auth/github/callback`.
+3. Configure the tenant's `github_oauth` block.
+4. Add each product origin to `tenant_origins`.
+5. Run `tauth doctor --json service.yaml` after database bootstrap.
+6. Run `tauth --config service.yaml preflight`.
+
+```yaml
+github_oauth:
+  enabled: true
+  client_id: "${GITHUB_CLIENT_ID}"
+  client_secret: "${GITHUB_CLIENT_SECRET}"
+  redirect_uri: "https://auth.example.com/auth/github/callback"
+  scopes: [read:user, user:email]
+```
+
+An absent block disables GitHub login. The required scope set is `read:user user:email`, including when `scopes` is absent.
+TAuth rejects other scopes and configurable provider endpoints. GitHub Enterprise is outside this provider contract.
+
+TAuth requires one verified primary email from `/user/emails`. A private email is accepted.
+The current `allowed_users` rules apply to this email.
+
+After `initAuthClient`, connect a user control to one of these calls:
+
+```javascript
+await startGitHubLogin(); // Full-page login returns to the current page.
+await startGitHubLogin({ mode: "popup" });
+await startGitHubLogin({ mode: "popup", operation: "link" });
+const loginURL = getGitHubLoginUrl();
+```
+
+A link requires an active account session and fresh GitHub authentication.
+Matching emails never merge accounts. Existing account rules control unlinking and disablement.
+The browser helper restores the profile through `/auth/session` after completion.
+
+A popup `returnTo` must use the initiating page origin. The helper rejects another origin before authentication starts.
+OAuth login returns a TAuth completion document before navigation to consent. This step keeps Strict session cookies.
+
+Popup messages contain only status and correlation data. The helper checks the message origin and source window.
+
+A resource scope can request the verified GitHub identity:
+
+```yaml
+scopes:
+  - identifier: resource:use
+    display_name: Use the resource
+    description: Use this resource with your GitHub identity.
+    identity_providers: [github]
+```
+
+Consent describes this disclosure. Signed `provider_identities` records contain only `provider` and `provider_id`.
+The provider ID is the decimal GitHub user ID. Access without a disclosure scope contains no identity claim.
+
+TAuth checks the current identity at code exchange and refresh. Unlinking a required identity prevents refresh.
+Consent also records the disclosure policy. A change to that policy requires new consent.
+
+An issued access token can disclose the previous identity until its configured expiry.
+A Go resource reads `claims.ProviderIdentities` after `pkg/oauthvalidator` validates the token.
+
+The consuming application owns GitHub repository authorization and repository credentials.
+A TAuth identity claim grants no GitHub repository permission. TAuth keeps no GitHub provider token after identity retrieval.
+See [GitHub operations and errors](#github-login-operations) for transaction and error details.
 
 ## GitHub login operations
 

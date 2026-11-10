@@ -57,6 +57,45 @@ paths:
         "401": {description: Invalid signature, issuer, audience, or event data.}
         "503": {description: Notification persistence is unavailable.}
   /auth/account:
+    get:
+      operationId: readAccountSignInMethods
+      description: >-
+        Read the current sign-in methods of the authenticated tenant account.
+        The response contains no provider identifiers or credentials.
+        An unverified password link does not add a password method.
+      parameters:
+        - name: X-TAuth-Tenant
+          in: header
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The current account methods. The response uses Cache-Control no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [user_id, sign_in_methods, password_management_enabled]
+                properties:
+                  user_id: {type: string}
+                  password_management_enabled: {type: boolean}
+                  sign_in_methods:
+                    type: array
+                    uniqueItems: true
+                    items: {type: string, enum: [apple, github, google, password]}
+        "401": {description: The session is missing or invalid.}
+        "403": {description: The account is not active.}
+        "404": {description: Account management is disabled or the tenant account is missing.}
+        "500": {description: The account read failed.}
+    head:
+      operationId: readAccountSignInMethodsHeaders
+      responses:
+        "200": {description: The account metadata has no body. The response uses Cache-Control no-store.}
+        "401": {description: The session is missing or invalid.}
+        "403": {description: The account is not active.}
+        "404": {description: Account management is disabled or the tenant account is missing.}
+        "500": {description: The account read failed.}
     patch:
       operationId: correctAccountProfile
       description: >-

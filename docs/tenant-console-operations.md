@@ -7,57 +7,26 @@ Account linking and password routes are unavailable for this tenant.
 
 ## Production command contract
 
-Use the complete application procedure:
+Use the [deployment guide](deployment.md#production-lifecycle) for the current production procedure:
 
 ```sh
 make release && make publish && make deploy
 ```
 
-`make release` packages the current service and website.
-`make publish` publishes the sealed artifacts without a rebuild.
-`make deploy` calls the installed Gateway with the application root.
-The selected `resources.yml` supplies the complete deployment specification.
-
-Declared private inputs supply the existing server encryption key.
-The current manifest retains the existing database volume.
-The service applies current schema migrations during startup.
-
-The three production deployment cutovers are completed.
-Their separate plans, executable, and rollout playbooks are removed.
-Deployment does not read the former generated tenant configuration or a separate migration plan.
-The database retains existing tenants, users, credentials, signing keys, and sessions.
-Keep the server encryption key across application versions and restarts.
-Clients never receive this key.
+The selected manifest retains the database and existing server encryption key.
+The service applies current schema migrations at startup.
+The completed tenant, App, and application-subject cutovers require no separate executable or migration command.
 
 ## Service inputs
 
-Set `server.database_url` to the persistent database URL.
-Gateway supplies `TAUTH_TRUSTED_PROXY_HOSTS=caddy` and `TAUTH_TRUSTED_PROXY_LOOKUP_TIMEOUT=1s` from the managed manifest.
-The generated service configuration reads these values through `server.trusted_proxy_hosts` and `server.trusted_proxy_lookup_timeout`.
-Private proxy inputs and operator-managed container addresses are not necessary.
-TAuth resolves the stable proxy name for each forwarded HTTPS request and verifies the actual connection peer.
-DNS failures reject these requests and produce diagnostics.
-A TAuth restart is not necessary after proxy replacement.
+The [configuration reference](service-configuration.md) defines service fields.
+The [deployment guide](deployment.md#https-and-proxy-trust) defines proxy trust and database retention.
 
-Gateway and Docker administrators control the proxy alias and DNS configuration.
-Caddy sets `X-Forwarded-Proto` from its client connection scheme.
-TAuth requires one exact `https` value from the configured peer.
-Standalone deployments can configure explicit `server.trusted_proxy_cidrs` for proxies with fixed addresses.
-
-The production deployment supplies `server.tenant_encryption_key` through the captured `TAUTH_TENANT_ENCRYPTION_KEY` input.
-The selected manifest must declare the existing base64-encoded 32-byte key through `inputs`.
-A missing or invalid key stops rollout before release validation, image extraction, or remote operations.
-A different existing remote key reference stops rollout before database migration.
-Deployment keeps the selected private key input unchanged.
-The same captured key supplies every migration and final resource convergence.
-Gateway selects all deployment inputs through the manifest.
-Rollout keeps operator private files unchanged.
 The service uses AES-256-GCM for stored secret values.
 Each application secret binds its ciphertext to the tenant, secret ID, purpose, and encryption key ID.
-
 The console configuration is encrypted in the database.
-The database keeps owner accounts separate from application accounts.
-Each owner binding contains the session issuer, reserved console tenant ID, and authenticated subject.
+Owner accounts remain separate from application accounts.
+Each owner binding contains the issuer, reserved console tenant ID, and authenticated subject.
 The owner account ID remains the same after an email change.
 
 ## Bootstrap order
@@ -74,7 +43,7 @@ This section describes the standalone CLI for development and diagnostics.
 7. Start TAuth with the same service configuration.
 8. Authenticate through Google in the reserved console tenant.
 9. Send `PUT /api/management/owner-account` with the console session cookie.
-10. Record the returned owner account ID for the later import.
+10. Record the returned owner account ID for App administration and provisioning.
 
 ```yaml
 id: tauth-console
@@ -98,7 +67,7 @@ account_management:
     password_link_url: https://tauth.mprlab.com/app/link
 ```
 
-The current account configuration requires Pinguin settings. The console does not expose password or linking operations.
+The current account configuration requires Pingwin settings. The console does not expose password or linking operations.
 The bootstrap command resolves environment inputs before it stores the console configuration.
 Do not include the console tenant in the application tenant YAML.
 Keep the console cookie domain empty. This value creates host-only cookies on the API hostname.
@@ -192,168 +161,50 @@ The HTTP tests use a TLS listener, SQLite, and an injected Google validator.
 These tests do not prove live Google connectivity.
 Record live Google qualification separately from software acceptance.
 
-Production import and Gateway cutover are automatic parts of `make deploy`.
-Their evidence remains separate from release and publication records.
+Production deployment uses the current manifest and retained database.
+Deployment and live-provider evidence remain separate from release and publication records.
 
 ## App hierarchy migration
 
-This section describes the internal migration tool and its historical local use.
-Production assigns App membership inside the timestamped migration above.
+F017 established account → Apps → tenants as the ownership model.
+App membership is required.
+Each tenant and its App must have the same owner.
+Tenant settings, accounts, and sessions remain isolated within each App.
 
-F017 adds account → Apps → tenants as the current ownership model.
-App names identify containers. Tenant settings and authentication remain separate.
-Tenant rows contain the owner ID for scope checks. A composite foreign key requires the same owner as their App.
-App membership is required. The service rejects an unmigrated database at startup.
+The completed cutover preserved tenant IDs, states, revisions, keys, and authentication data.
+It stored a receipt and rejected changed mappings, duplicates, omissions, and cross-owner assignments.
+The cutover removed earlier POST receipts because their responses lacked App membership.
+Historical local assignments placed 22 tenants in 19 Apps.
+Kamu had two tenants. Prompt Bubbles had three.
 
-1. Stop all service writers and Gateway provisioning.
-2. Back up the complete database.
-3. Prepare an explicit JSON map of App IDs, names, tenant IDs, and credential assignments.
-4. Include every existing tenant and provisioning credential once.
-5. Assign each credential to the App that contains all its granted tenants.
-6. Before migration, revoke credentials that span multiple Apps. Create their replacements after migration.
-7. Rehearse the command against a database copy.
-8. Run the same command against the stopped deployment database.
-9. Compare tenant settings, encrypted values, users, identities, and sessions with the backup.
-10. Start the service and verify App navigation and tenant authentication.
-
-```json
-{
-  "apps": [{"id": "example", "name": "Example", "tenant_ids": ["example", "example-local"]}],
-  "credentials": {"credential-id": "example"}
-}
-```
-
-Use an empty `credentials` object when the database has no provisioning credentials.
-All tenants in one App must have the same existing owner.
-For an App without tenants, set `owner_account_id` to an existing owner and set `tenant_ids` to `[]`.
-Use this empty App for that owner's provisioning credentials when the owner has no tenants.
-For an App with tenants, `owner_account_id` is optional. When specified, it must match each tenant owner.
-Revoked credentials retain their historical grants but cannot authorize requests.
-The transaction rejects missing, duplicate, or cross-owner assignments.
-It preserves tenant IDs, states, revisions, keys, and authentication data.
-It removes old POST receipts because their responses lack App membership.
-The migration stores a receipt. An identical repeat makes no changes. A changed map is rejected.
-The service does not select groups or run this migration.
-
-```sh
-make deployment-migration MIGRATION_ARGS="--config service.yaml app-hierarchy --mapping app-groups.json"
-```
-
-The local map is `deployment/migrations/local-apps-20260928.json`.
-It assigns 22 tenants to 19 Apps. Kamu has two tenants. Prompt Bubbles has three tenants.
-The timestamped production plan contains the complete production assignments.
+B143 removed the completed cutover executable and deployment readers.
+The current service requires the canonical persisted ownership contract at startup.
 
 ## Deployment data migration
 
-Tenant migration is a one-off deployment routine outside normal application startup.
-The service has no import command, migration owner, first-owner rule, or personal account rule.
-The separate `deployment/tenantownership` executable uses GORM transactions and its Migrator API.
-The release includes this executable in the service image.
-`make deploy` invokes it before resource convergence. Normal service startup does not invoke it.
-GORM `AutoMigrate` creates the receipt schema. The deployment routine explicitly performs the data writes.
+The production tenant, App, and application-subject cutovers are completed.
+The current release contains no separate tenant-import executable or migration plan.
+The [production lifecycle](deployment.md#production-lifecycle) retains the database and applies current schema migrations at startup.
 
-The runtime rejects the `tenants` YAML field, including an empty array.
-Its database contains every active application tenant and the reserved console configuration.
-Tenant environment inputs have no effect after migration.
-The database and encryption key remain required service inputs.
+The tenant cutover preserved IDs, keys, cookies, providers, policies, lifetimes, users, identities, credentials, sessions, and OAuth grants.
+Tenant writes and the completion receipt committed together.
+An identical retry returned the receipt.
+Conflicting inputs failed without partial tenant writes.
 
-The timestamped migration removes `return_challenge_tokens` from the captured source before canonical validation.
-The current tenant contract rejects this obsolete field.
+The completion receipt stored a keyed source digest without secret values.
+Candidate databases protected the original data during failed operations.
+The destination owner was verified explicitly, without a first-owner or personal-email rule.
+The cutover also removed `console_bootstraps.initial_owner_id` and obsolete `return_challenge_tokens` inputs.
 
-The following operations describe internal migration work.
-The production command contract owns their automatic execution.
+B098 repaired inactive imported definitions through bounded cookie-name and tenant-header corrections.
+Those corrections preserved keys, providers, origins, ownership, and unrelated data.
+See the [dated local record](local-tenant-migration-2026-09-28.md) for historical evidence.
 
-1. Inventory every tenant from native configuration and each repository deployment manifest.
-2. Back up the production database and its encryption-key reference.
-3. Initialize the current schema and console configuration against a copy of that database.
-4. Read the existing verified Google identity and record the resulting console owner ID.
-5. Stop all TAuth writers and Gateway provisioning during the migration.
-6. Supply the frozen source and its referenced environment inputs to the separate migration executable.
-7. Inspect the source and compare all tenant IDs with the production inventory.
-8. Run the migration against the deployment database with the recorded owner ID.
-9. Save the receipt and compare tenant settings, owners, users, identities, and sessions with the backup.
-10. Start the database-only service and verify application login, refresh, logout, and protected requests.
-11. Resume Gateway provisioning with the matching F011 client.
-12. Remove the deployment migration routine and private source after all target databases complete the migration.
-
-```sh
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --inspect"
-make deployment-migration MIGRATION_ARGS="--config service.yaml --source tenants.import.yaml --import-id production-tenants --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
-```
-
-Deployment manifests can contain complete definitions absent from native tenant YAML files.
-Compare their declared tenant IDs with the destination inventory before an import.
-Use the selected repository's declared private inputs to resolve each contribution.
-Do not import incomplete definitions or replace an existing tenant with a duplicate definition.
-
-For a resolved Gateway contribution, use the canonical TAuth resolver to make a private snapshot:
-
-```sh
-.cache/tenant-ownership freeze-contribution --source private-contribution.json > private-snapshot.json
-make deployment-migration MIGRATION_ARGS="--config service.yaml --snapshot private-snapshot.json --import-id manifest-tenant --owner-id $OWNER_ID --app-id $APP_ID --app-name 'Application'"
-```
-
-The command validates the complete contribution and keeps literal secret values unchanged.
-It rejects incomplete inputs without a partial JSON snapshot.
-The snapshot is deployment data. The service does not read it.
-
-For sources with different environment inputs, freeze each source separately:
-
-```bash
-make build-deployment-migration
-.cache/tenant-ownership freeze-source --source tenants.import.yaml > private-snapshot.json
-```
-
-The snapshot contains credentials. Keep it outside version control and do not print it in logs.
-Supply each source's declared environment when you freeze it.
-A defined empty optional value is valid.
-An undefined referenced variable is an error.
-The snapshot preserves literal dollar signs without a second environment substitution.
-Use `--snapshot private-snapshot.json` instead of `--source` to read this format.
-
-An import must produce active tenants with a valid combined runtime configuration.
-Correct overlapping cookie names before import.
-Require explicit tenant IDs when application origins overlap.
-The importer rejects invalid configurations instead of storing inactive tenants.
-
-B098 repairs the previously imported inactive definitions through the separate deployment executable.
-The repair accepts a corrected JSON snapshot, the original import ID, a repair ID, and the existing owner ID.
-It permits cookie-name changes and a stricter tenant-header requirement only.
-It rejects changed keys, providers, origins, ownership, and previously edited tenants.
-The transaction validates all runtime settings before it commits revision 2 for each selected tenant.
-A repeated invocation with the same inputs returns the recorded receipt.
-The application runtime has no import-repair behavior.
-
-```sh
-make deployment-migration MIGRATION_ARGS="--config private-service.yaml repair-import --snapshot private-corrected.json --import-id original-import --repair-id corrected-import --owner-id OWNER_ID"
-```
-
-Stop database writers and make a backup before this operation.
-Rehearse against a database copy before the actual repair.
-Compare the settings and unrelated tables after the transaction.
-Restart the service and verify each tenant through its public authentication routes.
-See the [local migration record](local-tenant-migration-2026-09-28.md) for the local result.
-
-The production deployment uses the migration executable from the exact published service image.
-The repository-owned cutover runs through the installed Ansible toolchain before native Gateway convergence.
-No separate artifact transfer or migration command is required.
-
-The destination is an ordinary owner account. The migration does not grant administrator access.
-Select the operator's verified owner ID for this production transfer. Do not encode their email in application behavior.
-The transaction preserves effective keys, cookies, providers, policies, and lifetimes.
-It does not change application accounts, identities, refresh sessions, provider credentials, or OAuth grants.
-All tenant writes and the completion receipt commit together.
-An identical retry returns the receipt. A changed source, destination, or conflicting tenant ID fails without partial tenant writes.
-The receipt stores a keyed source digest and contains no secret values.
-
-The migration also removes the obsolete `console_bootstraps.initial_owner_id` field through GORM.
-For an installation with no application tenants to migrate, run only the schema cleanup:
-
-```sh
-make deployment-migration MIGRATION_ARGS="--config service.yaml cleanup-schema"
-```
-
-Production migration, publication, deployment, and live-provider qualification retain separate acceptance records.
+Runtime reads use encrypted database revisions without tenant environment expansion.
+The service rejects the `tenants` YAML field, including an empty array.
+New application tenants use the [management API](#tenant-management).
+Consumer tests use the [isolated fixture tool](test-fixture.md).
+The former import examples document historical data shapes only.
 
 ## Tenant management
 
@@ -456,10 +307,9 @@ Audit records contain resource identifiers, revisions, operations, results, and 
 
 ## Gateway provisioning and cutover
 
-F011 requires the Gateway client implemented by F017 in the primary Gateway repository.
-No released version is allocated by this source change.
-Before production cutover, record the released Gateway version that contains F017 and the B595 credential selection change.
-A Gateway release without that client cannot operate the database-only tenant contract.
+Gateway provisions tenants through the authenticated management API.
+Use an installed Gateway release that implements the selected manifest and current TAuth contribution contract.
+Record that exact release and the TAuth version with the deployment evidence.
 
 Create credentials through `/api/management/provisioning-credentials` with the owner cookie, console Origin, and CSRF header.
 Supply `app_id`, a name, permitted operations, explicit tenant IDs, and the `allow_create` grant.
@@ -483,7 +333,9 @@ If the service returns `management.mutation_rate_exceeded`, wait for the one-min
 Then repeat the unchanged operation.
 
 B106 passed the [installed release qualification](production-release-qualification-2026-09-30.md) with Gateway v5.0.0 and sealed TAuth v2.2.6.
-Production import runs within `make deploy`. Publication and live Google qualification retain separate evidence records.
+That dated record describes the earlier cutover.
+Current deployment uses the [production lifecycle](deployment.md#production-lifecycle).
+Publication and live Google qualification retain separate evidence records.
 
 Gateway sends an exclusive `provisioning` configuration object with the contribution and application generation.
 A machine request with the console shape or a null `provisioning` value returns `422`.
@@ -503,9 +355,9 @@ Loopback origins still control origin validation for each configuration write.
 Advanced Gateway integrations can retain their existing API topology without the console API-base field.
 Public console integration setup requires that field before it can produce complete settings.
 
-Use the [production command contract](#production-command-contract) for the cutover.
-Deployment creates the console, preserves the verified owner identity, imports the tenants, and prepares the scoped Gateway credentials automatically.
-Record migration, publication, deployment, and live-provider qualification results separately.
+Use the [production command contract](#production-command-contract) for deployment.
+Deployment retains existing console ownership, application tenants, and credentials.
+Record publication, deployment, and live-provider qualification results separately.
 
 The renderer now emits service settings with the database URL and encryption-key input.
 `validate-service-config` validates that artifact without database access.
@@ -719,7 +571,7 @@ Record these inputs before production work:
 | Console Google client | Client ID, exact JavaScript origin, and provider project reference. |
 | Service | Database URL reference, database backup, encryption-key reference, API origin, and one runtime instance. |
 | Destination owner | Verified Google identity, stable console subject, and resulting owner account ID. |
-| Import | Frozen source inventory, import ID, receipt, tenant count, and effective validator references. |
+| Retained data | Database backup, existing cutover receipts, tenant inventory, and validator references. |
 | Gateway credential | Secret-store reference, owner, operations, and tenant grants. |
 | Customer acceptance | Frontend origin, API origin, Google client, tenant ID, and backend release. |
 
@@ -727,17 +579,17 @@ The following list describes acceptance evidence. It is not an additional deploy
 Use the three production commands above to prepare, publish, and deploy the release.
 
 - Release evidence identifies the exact Gateway version, TAuth version, website artifact, and selected release marker.
-- Migration evidence identifies the backup, completion receipt, owner identity, imported inventory, and preserved tenant settings.
+- Retention evidence identifies the backup, existing receipts, owner identity, tenant inventory, and preserved tenant settings.
 - Deployment evidence identifies the database configuration, single runtime instance, health checks, and repeated resource convergence.
 - Website evidence identifies the `gh-pages` publication, public `/.mprlab-release.json` marker, API origin, and console bootstrap response.
 - Software acceptance covers isolated ownership, immediate tenant authentication, protected access, refresh, logout, cookie attributes, and denied origins.
 - Live Google qualification records provider connectivity and the destination owner's public console login separately.
 
-After all target databases complete the migration, remove its data-transfer code through a separate reviewed change.
-Keep the completion receipt and deployment status check.
+B143 removed the completed data-transfer tools.
+Existing completion receipts remain historical evidence.
 
 A failed check leaves the associated production record incomplete.
-Keep tenant changes frozen if the database cutover or Gateway verification fails.
+Keep tenant changes frozen if database retention or Gateway verification fails.
 Correct the current contract before retry. Do not restore runtime tenant YAML as a second configuration authority.
 
 ## September 27, 2026 local correction record
