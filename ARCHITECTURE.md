@@ -165,7 +165,7 @@ See the [stable application user ID contract](docs/application-subjects.md).
 1. Authenticate seeded password users through `POST /auth/password/login` and return their immutable public user IDs.
 2. Public signup is gated by `account_management.password_signup.enabled`.
 3. `POST /auth/password/signup` creates a pending account and a single-use email verification challenge. TAuth stores the password hash and challenge hash.
-4. TAuth sends the public verification link to Pinguin. Pinguin queues the email for the configured tenant.
+4. TAuth sends the public verification link to Pingwin. Pingwin queues the email for the configured tenant.
 5. Production responses do not contain the raw challenge token.
 6. `POST /auth/password/verify-email` consumes the challenge, activates the account, links the password identity, and mints the standard cookies.
 7. `POST /auth/password/reset/start` returns the same accepted response without waiting for account lookup or delivery. A bounded worker delivers challenges for eligible accounts.
@@ -490,8 +490,8 @@ Validation rules baked into the loader:
 - `password_auth.enabled` gates `/auth/password/login`. Each configured user requires a normalized email and a bcrypt hash.
 - `account_management.enabled` gates account operations. Persistent identity does not depend on this setting.
   Public signup also requires `password_signup.enabled`.
-- Production account management requires complete `email_delivery` settings. The Pinguin API key selects one notification tenant.
-- Account management requires email delivery. Pinguin messages carry single-use challenge URLs whose tokens are in URL fragments. HTTP responses contain no challenge tokens. Tests use an injected email sender.
+- Production account management requires complete `email_delivery` settings. The Pingwin API key selects one notification tenant.
+- Account management requires email delivery. Pingwin messages carry single-use challenge URLs whose tokens are in URL fragments. HTTP responses contain no challenge tokens. Tests use an injected email sender.
 - Each tenant requires a `jwt_signing_key`. The server rejects a missing key.
 - Cookie names are mandatory. Use a different name for each tenant that shares a cookie domain.
 - `nonce_ttl` defaults to `5m` when omitted; `allow_insecure_http` defaults to `false`.
