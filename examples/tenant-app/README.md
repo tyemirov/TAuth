@@ -9,15 +9,18 @@ The example rejects cross-site frontend and API pairs because its cookies use `S
 ## Prepare the tenant
 
 1. Open the TAuth workspace at `https://tauth.mprlab.com/app/`.
-2. Create a tenant or select an imported tenant.
-3. Set the Google Web client ID and exact frontend and API origins.
-4. Publish the DNS records shown in Domains.
-5. Verify both hostnames and activate the saved revision.
+2. Select an App or create one.
+3. Create a tenant or select an existing tenant.
+4. Set the Google Web client ID and exact frontend and API origins.
+5. Wait for valid configuration edits to apply automatically.
 6. Open Integration and save the complete Browser example as `index.html`.
 7. Publish that page through GitHub Pages at the configured frontend origin.
 8. Complete fresh Google authentication through Export session key.
 9. Install the displayed base64 key in the customer backend secret store.
 10. Close the export dialog.
+
+DNS ownership verification is optional evidence and does not control activation.
+A suspended tenant requires Resume tenant before authentication can continue.
 
 The generated page requests a nonce, initializes Google with that nonce, and exchanges the Google credential through the customer API.
 Its protected request uses `apiFetch` with the complete API URL.
