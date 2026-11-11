@@ -17,6 +17,8 @@
 - Added tenant-enabled email/password login via `POST /auth/password/login`, with bcrypt-hashed configured users, persistent credential storage, and the `exchangePasswordCredential` browser helper.
 
 ### Bug Fixes
+- Replaced the removed Gateway `app-deploy` CLI call with the `deploy` coordinator.
+- Exposed only `make deploy` and assigned its internal manifest policy a complete pipeline budget.
 - Required new consent when a resource scope changed its identity disclosure policy.
 - Added a TAuth completion document before OAuth consent to keep Strict session cookies after GitHub login.
 - Added the validated client return origin to the OAuth consent form policy.
