@@ -384,30 +384,36 @@ Each operator supplies service settings and secret configuration.
 The database owns tenant identities, origins, provider clients, cookie policy, and encrypted tenant secrets. The MPR Lab manifest names the image, retained data, tenant resources, public routes, and health contract.
 It contains no secret values or host paths.
 
-The complete production procedure is `make release && make publish && make deploy`.
-Release and publication delegate to the installed `mprlab-gateway` runtime with the selected Git root.
-Deployment first runs the repository-owned timestamped data cutover through the installed Ansible toolchain.
-It then delegates resource convergence to that same captured Gateway package.
-The published service image contains both the service and the separate migration executable.
-The `20260930-tenant-console` receipt records completed data changes.
-Later deployments read that receipt and skip the migration.
-The database candidate and receipt replace the stopped source database together.
-Deployment creates or recovers the private server encryption key automatically.
+The complete production command is `make deploy`.
+It calls the installed `mprlab-gateway deploy --app-root` coordinator with the selected application Git root.
+The coordinator completes missing preparation, publication, deployment, and verification for one selected version.
+Internal manifest phase policies retain the identifiers `app-release`, `app-publish`, and `app-deploy`.
+The root deployment budget covers the complete pipeline.
+
+The service image contains the ordinary TAuth executable.
+Completed cutover tools are removed. Their receipts remain historical evidence.
+The service applies current schema migrations at startup.
+Deployment retains the database and existing private server encryption key.
 Existing tenant keys and client credentials remain unchanged.
+
 `MPRLAB_GATEWAY_EXECUTABLE` selects an explicit installed command path.
 `MPRLAB_GATEWAY_OPERATOR_ROOT` selects the operator inventory and private config root.
 Its default is `$HOME/.config/mprlab-gateway`.
-Gateway-owned Ansible validates the `resources.yml` schema, resolves declared
-outputs, manages immutable lifecycle receipts, and performs convergence. The
-gateway sends complete TAuth contributions and output envelopes to
+
+Gateway validates and compiles the selected `resources.yml` before Ansible receives its captured projections.
+Gateway resolves declared outputs and manages lifecycle receipts.
+Gateway-owned Ansible performs resource convergence.
+Gateway sends complete TAuth contributions and output envelopes to
 `tauth render-deployment-config` through standard input. TAuth owns the strict
 render request, TAuth defaults, output-name resolution, native config assembly,
 and native validation. The command returns service configuration through standard output.
+
 Gateway sends tenant contributions through the scoped management API.
 Persisted contribution bindings protect console edits and preserve retry revisions.
-The production cutover requires the Gateway provisioning client from F011.
-TAuth owns data migration policy. Gateway owns resource convergence.
-The README defines the render request envelope. It does not define
+Gateway uses the current authenticated tenant provisioning API.
+TAuth owns application data migrations. Gateway owns resource convergence.
+
+The [deployment guide](docs/deployment.md#deployment-renderer-contract) defines the render request envelope. It does not define
 a second `resources.yml` schema.
 
 ### 5.1 Tenant import source
