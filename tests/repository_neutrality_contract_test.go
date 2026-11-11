@@ -88,6 +88,16 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 			}
 		}
 	}
+	operations := listField(t, lifecycle, "operations")
+	deployPolicy := identifiedManifestEntry(t, operations, "name", "app-deploy")
+	releasePolicy := identifiedManifestEntry(t, operations, "name", "app-release")
+	publishPolicy := identifiedManifestEntry(t, operations, "name", "app-publish")
+	ciPolicy := identifiedManifestEntry(t, operations, "name", "ci")
+	for _, operation := range operations {
+		if operation.(map[string]any)["name"] == "deploy" {
+			t.Fatal("CLI command names must not replace internal lifecycle policy names")
+		}
+	}
 	artifacts := mappingField(t, root, "artifacts")
 	publications := mappingField(t, root, "publications")
 	image := identifiedManifestEntry(t, listField(t, mappingField(t, publications, "ghcr"), "images"), "id", "tauth-image")
@@ -129,6 +139,15 @@ func TestRepositoryOwnsVersionlessApplicationResources(t *testing.T) {
 	publishedSite := identifiedManifestEntry(t, listField(t, mappingField(t, publications, "github_pages"), "sites"), "id", "browser-helper")
 	if publishedSite["repository"] != "tyemirov/tauth" || publishedSite["branch"] != "gh-pages" || publishedSite["domain"] != "tauth.mprlab.com" || mappingField(t, publishedSite, "marker")["path"] != "/.mprlab-release.json" {
 		t.Fatal("browser-helper publication destination changed")
+	}
+	route := identifiedManifestEntry(t, listField(t, mappingField(t, mappingField(t, targets, "ingress"), "caddy"), "routes"), "id", "public-api")
+	routePolicy := identifiedManifestEntry(t, listField(t, route, "operations"), "name", "app-deploy")
+	minimumPipelineBudget := durationField(t, mappingField(t, releasePolicy, "timeouts"), "completion") +
+		durationField(t, mappingField(t, publishPolicy, "timeouts"), "completion") +
+		durationField(t, mappingField(t, ciPolicy, "timeouts"), "completion") +
+		durationField(t, mappingField(t, routePolicy, "timeouts"), "completion")
+	if durationField(t, mappingField(t, deployPolicy, "timeouts"), "completion") < minimumPipelineBudget {
+		t.Fatal("deployment coordinator must cover the declared CI, preparation, publication, and route budgets")
 	}
 	web := identifiedManifestEntry(t, listField(t, artifacts, "web_bundles"), "id", "browser-helper")
 	source := mappingField(t, web, "source")
@@ -266,7 +285,7 @@ func TestDockerBuildContextsUseCanonicalIgnoreContract(t *testing.T) {
 	}
 }
 
-func TestRepositoryDelegatesOnlyThreeProductionLifecycleCommands(t *testing.T) {
+func TestRepositoryDelegatesOnlyDeploy(t *testing.T) {
 	repositoryRoot := testRepositoryRoot(t)
 	makefileDocument, readErr := os.ReadFile(filepath.Join(repositoryRoot, "Makefile"))
 	if readErr != nil {
@@ -274,6 +293,9 @@ func TestRepositoryDelegatesOnlyThreeProductionLifecycleCommands(t *testing.T) {
 	}
 	makefileText := string(makefileDocument)
 	for _, obsoleteTarget := range []string{
+		"\nrelease:",
+		"\npublish:",
+		"\nrelease publish deploy:",
 		"\ncontainer-artifacts:",
 		"\npublish-release:",
 		"\ndeploy-dry-run:",

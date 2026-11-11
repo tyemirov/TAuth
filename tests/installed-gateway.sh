@@ -53,51 +53,6 @@ cc "$fixture_root/gateway.c" -o "$runtime_bin/mprlab-gateway"
 unset MPRLAB_GATEWAY_EXECUTABLE MAKEFLAGS MFLAGS MAKEOVERRIDES TEST_GATEWAY_FAILURE TEST_GATEWAY_VERIFY_CAPTURE DEPLOY_SUDO_PASSWORD_FIXTURE
 export MPRLAB_GATEWAY_OPERATOR_ROOT="$fixture_root/operator with spaces"
 
-for operation in release publish; do
-  expected="$(printf 'cwd=%s\narg=app-%s\narg=--app-root\narg=%s\noperator=%s' \
-    "$application_root" "$operation" "$application_root" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
-  for selection in path explicit; do
-    arguments=()
-    if [ "$selection" = explicit ]; then
-      arguments+=("MPRLAB_GATEWAY_EXECUTABLE=$runtime_bin/mprlab-gateway")
-      command_path="$tools_bin"
-    else
-      command_path="$runtime_bin:$tools_bin"
-    fi
-    actual="$(PATH="$command_path" "$make_command" --no-print-directory -s -C "$application_root" "$operation" "${arguments[@]}")"
-    if [ "$actual" != "$expected" ]; then
-      printf '%s %s: unexpected Gateway invocation\n%s\n' "$operation" "$selection" "$actual" >&2
-      exit 1
-    fi
-  done
-
-  for selection in path explicit; do
-    arguments=()
-    if [ "$selection" = explicit ]; then
-      arguments+=("MPRLAB_GATEWAY_EXECUTABLE=$fixture_root/missing runtime")
-    fi
-    status=0
-    PATH="$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" "$operation" "${arguments[@]}" > "$fixture_root/missing.log" 2>&1 || status=$?
-    if [ "$status" -ne 2 ]; then
-      cat "$fixture_root/missing.log" >&2
-      printf 'missing runtime: expected Make status 2, got %s\n' "$status" >&2
-      exit 1
-    fi
-    grep -F 'Gateway runtime is unavailable:' "$fixture_root/missing.log" >/dev/null
-    if grep -F 'arg=' "$fixture_root/missing.log"; then exit 1; fi
-  done
-
-  status=0
-  TEST_GATEWAY_FAILURE=1 PATH="$runtime_bin:$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" "$operation" > "$fixture_root/failure.log" 2>&1 || status=$?
-  if [ "$status" -ne 2 ]; then
-    cat "$fixture_root/failure.log" >&2
-    printf 'Gateway failure: expected Make status 2, got %s\n' "$status" >&2
-    exit 1
-  fi
-  grep -F 'gateway fixture failure' "$fixture_root/failure.log" >/dev/null
-  grep -F 'Error 42' "$fixture_root/failure.log" >/dev/null
-done
-
 mkdir -p "$MPRLAB_GATEWAY_OPERATOR_ROOT"
 printf 'exit 91\n' > "$application_root/.mprlab/deploy/.env"
 printf 'exit 92\n' > "$MPRLAB_GATEWAY_OPERATOR_ROOT/private.env"
@@ -110,7 +65,7 @@ for selection in path explicit; do
     command_path="$tools_bin"
     gateway_selection="$runtime_bin/mprlab-gateway"
   fi
-expected="$(printf 'cwd=%s\narg=app-deploy\narg=--app-root\narg=%s\noperator=%s\ncapture-inputs=unchanged' \
+expected="$(printf 'cwd=%s\narg=deploy\narg=--app-root\narg=%s\noperator=%s\ncapture-inputs=unchanged' \
   "$application_root" "$application_root" "$MPRLAB_GATEWAY_OPERATOR_ROOT")"
   actual="$(TEST_GATEWAY_VERIFY_CAPTURE=1 TAUTH_TENANT_ENCRYPTION_KEY=inherited-key MPRLAB_TAUTH_MANAGEMENT_URL=inherited-url \
     MPRLAB_TAUTH_PROVISIONING_CREDENTIALS=inherited-map DEPLOY_SUDO_PASSWORD_INHERITED=inherited-sudo \
@@ -134,5 +89,16 @@ TEST_GATEWAY_FAILURE=1 PATH="$runtime_bin:$tools_bin" "$make_command" --no-print
 [ "$status" -eq 2 ]
 grep -F 'gateway fixture failure' "$fixture_root/deploy-failure.log" >/dev/null
 grep -F 'Error 42' "$fixture_root/deploy-failure.log" >/dev/null
+
+for operation in release publish; do
+  status=0
+  PATH="$runtime_bin:$tools_bin" "$make_command" --no-print-directory -s -C "$application_root" "$operation" > "$fixture_root/removed-$operation.log" 2>&1 || status=$?
+  if [ "$status" -ne 2 ]; then
+    printf 'Removed production target %s returned status %s\n' "$operation" "$status" >&2
+    exit 1
+  fi
+  grep -F "No rule to make target" "$fixture_root/removed-$operation.log" >/dev/null
+  if grep -F 'arg=' "$fixture_root/removed-$operation.log"; then exit 1; fi
+done
 
 printf 'Installed Gateway Make integration passed.\n'
