@@ -92,7 +92,11 @@ This is a binding product principle for every user interface.
 
 ## Application Deployment Contract
 
-- Keep `make release && make publish && make deploy` as the production application procedure.
+- Expose only `make deploy` as the production application command.
+- Call the installed `mprlab-gateway deploy --app-root` coordinator from that command.
+- Let Gateway complete missing preparation, publication, deployment, and verification for one selected version.
+- Keep `app-release`, `app-publish`, and `app-deploy` as internal manifest policy identifiers.
+- Give the terminal deployment policy a completion budget for the full pipeline.
 - Seal release artifacts and publish them without a rebuild.
 - Call the installed Gateway directly from `make deploy`.
 - Use the selected `resources.yml` as the only deployment specification.
@@ -106,8 +110,8 @@ This is a binding product principle for every user interface.
 
 ## Selected Manifest Contract
 
-The operator approved the v8 source cutover for this application.
-This cutover preserves existing provider data and the permanent state-v1 contract.
+The application uses the current Gateway v9 selected-manifest contract.
+The current contract preserves existing provider data and permanent state-v1 fields.
 
 - Keep the selected application manifest versionless.
 - Keep `owner`, `release`, and `lifecycle` as the required baseline fields.

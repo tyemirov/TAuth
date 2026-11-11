@@ -90,6 +90,7 @@ mprlab_resources:
         protocol: http
         url: https://tauth-api.mprlab.com/health
     operations:
+    # app-deploy controls the complete deploy coordinator pipeline.
     - name: app-deploy
       polling:
         attempt_limit: 4
@@ -98,7 +99,7 @@ mprlab_resources:
         maximum: 10s
         multiplier: 2
       timeouts:
-        completion: 20m
+        completion: 5h10m
     - name: app-plan-deploy
       polling:
         attempt_limit: 4

@@ -5,6 +5,52 @@ Planning and recurring entries stay in this tracker with unresolved work.
 
 ## BugFixes
 
+- [x] [B148] (P1) Use the current Gateway deployment coordinator.
+  Goal:
+  Run the complete production pipeline through one make deploy command.
+  Evidence:
+  The installed Gateway v9.2.1 rejected the Make wrapper's app-deploy command.
+  The public CLI exposes deploy. Internal manifest phase policy names remain unchanged.
+  Requirements:
+  - Expose only make deploy as the production Make command.
+  - Delegate to the installed Gateway deploy coordinator with the selected Git root.
+  - Give the terminal policy a complete pipeline budget.
+  - Preserve resources, private inputs, keys, retained data, and the shared Caddy policy.
+  - Align current policy and documentation with the single command.
+  Validation:
+  - Reproduce the incorrect CLI call through the real Make entry point with a controlled external runtime.
+  - Verify PATH and explicit runtime selection, paths with spaces, inherited inputs, missing tools, and native failures.
+  - Verify that removed release and publish targets cannot invoke Gateway.
+  - Verify the selected manifest, run make ci, and obtain independent review.
+  Resolution:
+  The only production Make target is deploy.
+  It calls the installed Gateway deploy coordinator with the selected Git root.
+  The manifest keeps the internal phase policy identifiers and gives app-deploy a 5h10m completion budget.
+  The shared Caddy policy, resource identities, private input references, and retained volume are unchanged.
+  Current documentation and repository policy use the single command.
+  Dated qualification records identify their former procedure as historical.
+
+  Validation:
+  The real Make regression failed with app-deploy before the correction.
+  The manifest regression failed because the old 20m coordinator budget did not cover its phases.
+  Both focused targets passed after the correction.
+  Full make ci passed on November 11, 2026.
+
+  The installed Gateway v9.2.1 exposes deploy with app-root and lifecycle contract 4.
+  Independent source review found no implementation regression.
+  Changed prose has no new mechanical language findings.
+
+  Governor reports existing guide differences and dynamic local target inspection limits.
+  Its production delegation errors are cleared.
+  Contract inspection and local tests do not constitute a production rollout.
+  Production execution remains an operator action from clean, synchronized default-branch source.
+
+  Changed files:
+  - `Makefile`, `.mprlab/deploy/resources.yml`, `.mprlab/POLICY.md`, `.mprlab/POLICY.REPOSITORY.md`, and `.mprlab/ISSUES.md`.
+  - `README.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, `docs/deployment.md`, `docs/usage.md`, and `docs/tenant-console-operations.md`.
+  - `docs/automatic-deployment-qualification-2026-09-30.md` and `docs/production-release-qualification-2026-09-30.md`.
+  - `tests/installed-gateway.sh` and `tests/repository_neutrality_contract_test.go`.
+
 - [x] [B147] (P1) Update the host Compose plugin for Caddy configuration.
   Goal: Run the required native Caddy configuration command on tutosh.
   Evidence: Compose 2.20.1 rejected `--no-env-resolution` during service configuration.
