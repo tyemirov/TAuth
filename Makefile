@@ -108,16 +108,16 @@ test-oauth-provider-bootstrap-runtime:
 
 MPRLAB_GATEWAY_EXECUTABLE ?= mprlab-gateway
 
-.PHONY: release publish deploy
+.PHONY: deploy
 
-release publish deploy:
+deploy:
 	@application_root="$$(git rev-parse --show-toplevel)"; \
 	if ! command -v "$(MPRLAB_GATEWAY_EXECUTABLE)" >/dev/null 2>&1; then \
 		printf 'Gateway runtime is unavailable: %s. Install a released runtime and add its command directory to PATH.\n' \
 			"$(MPRLAB_GATEWAY_EXECUTABLE)" >&2; \
 		exit 2; \
 	fi; \
-	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" "app-$@" --app-root "$${application_root}"
+	exec "$(MPRLAB_GATEWAY_EXECUTABLE)" deploy --app-root "$${application_root}"
 
 .PHONY: test-apple-callback-cors
 test-apple-callback-cors:
@@ -172,7 +172,7 @@ test-retention-audit:
 
 .PHONY: test-repository-contract
 test-repository-contract:
-	$(GO) test ./tests -run '^TestRepositoryOwnsVersionlessApplicationResources$$' -count=1
+	$(GO) test ./tests -run '^TestRepository(OwnsVersionlessApplicationResources|DelegatesOnlyDeploy)$$' -count=1
 
 .PHONY: build-test-fixture test-test-fixture test-test-fixture-cli
 build-test-fixture:
