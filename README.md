@@ -135,10 +135,11 @@ Self-hosted integrations must select their own API origin explicitly.
 The [deployment guide](docs/deployment.md) defines the current production lifecycle:
 
 ```sh
-make release && make publish && make deploy
+make deploy
 ```
 
-These repository targets require the installed MPR Lab Gateway and the selected `.mprlab/deploy/resources.yml` manifest.
+This target calls the installed `mprlab-gateway deploy --app-root` coordinator with the selected `.mprlab/deploy/resources.yml` manifest.
+Gateway completes missing preparation, publication, deployment, and verification for one selected version.
 The guide also covers standalone startup, proxy trust, and database retention.
 
 ## Documentation
