@@ -1,7 +1,8 @@
 # Automatic deployment qualification
 
-F018 implements the [production command contract](tenant-console-operations.md#production-command-contract).
-The production application procedure is `make release && make publish && make deploy`.
+This document is the historical qualification record for F018 on September 30, 2026.
+The current [production command contract](tenant-console-operations.md#production-command-contract) uses only `make deploy`.
+The qualification used `make release && make publish && make deploy`.
 The timestamped migration `20260930-tenant-console` runs automatically within deployment.
 Its completion receipt prevents another data transfer during later deployments.
 

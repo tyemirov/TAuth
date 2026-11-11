@@ -9,12 +9,23 @@ The [console runbook](tenant-console-operations.md) owns bootstrap, enrollment, 
 The complete MPR Lab application procedure is:
 
 ```sh
-make release && make publish && make deploy
+make deploy
 ```
 
-`make release` packages the service and website.
-`make publish` publishes those sealed artifacts.
-`make deploy` calls the installed Gateway with the selected application root.
+`make deploy` is the only production Make target.
+It calls the installed `mprlab-gateway deploy --app-root` coordinator with the selected application Git root.
+Gateway completes missing preparation, publication, deployment, and verification for one selected version.
+Verified preparation and publication are reused for unchanged inputs.
+After a failure, run the same command again.
+
+The checkout must be clean and synchronized with its remote default branch.
+The coordinator keeps the selected version and runtime package fixed through the operation.
+Publication uses the sealed artifacts without a rebuild.
+
+The manifest retains `app-release`, `app-publish`, and `app-deploy` as internal phase policy identifiers.
+These identifiers are not CLI commands.
+The root `app-deploy` completion budget is `5h10m` for the complete pipeline.
+The public API route retains its shared Caddy execution policy.
 
 The selected `resources.yml` supplies the deployment specification.
 The existing retained database volume contains tenant settings, users, keys, and sessions.
@@ -47,7 +58,8 @@ Start the service with its selected YAML and retained database:
 tauth --config service.yaml
 ```
 
-The production Gateway targets require an installed `mprlab-gateway` on `PATH`.
+The production target requires an installed Gateway with the `deploy` coordinator on `PATH`.
+The CLI contract was checked against Gateway v9.2.1, lifecycle contract 4.
 `MPRLAB_GATEWAY_EXECUTABLE` can select an explicit installed command.
 A release, publication, deployment, and live-provider qualification each require their own evidence.
 

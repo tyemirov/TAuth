@@ -82,6 +82,7 @@ The preflight builder is generalized under `github.com/tyemirov/utils/preflight`
 ### 2.6 MPR Lab lifecycle
 
 Use the [production lifecycle](deployment.md#production-lifecycle) for release, publication, and deployment.
+Run `make deploy` for the complete pipeline.
 The installed Gateway reads the selected manifest and owns those operations.
 Tenant configuration goes through the authenticated management API.
 

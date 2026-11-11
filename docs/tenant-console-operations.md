@@ -10,9 +10,10 @@ Account linking and password routes are unavailable for this tenant.
 Use the [deployment guide](deployment.md#production-lifecycle) for the current production procedure:
 
 ```sh
-make release && make publish && make deploy
+make deploy
 ```
 
+Gateway completes missing preparation, publication, deployment, and verification through this one command.
 The selected manifest retains the database and existing server encryption key.
 The service applies current schema migrations at startup.
 The completed tenant, App, and application-subject cutovers require no separate executable or migration command.

@@ -78,7 +78,10 @@ The source rehearsal injected the Google identity validator.
 The container checks used imported accounts and test session tokens.
 Neither check proves live Google connectivity.
 
-## Remaining Production Operations
+## Historical remaining production operations
+
+This section records the September 30, 2026 checkpoint.
+The current [deployment procedure](deployment.md#production-lifecycle) uses only `make deploy`.
 
 TAuth v2.2.6 is sealed locally. Publication and production deployment have not run.
 The canonical deployment file has no `TAUTH_TENANT_ENCRYPTION_KEY` assignment.
@@ -89,5 +92,5 @@ The source now defines the [automatic production command contract](tenant-consol
 F018 packages the timestamped migration and prepares the server encryption key and App credentials inside `make deploy`.
 The sealed v2.2.6 artifact predates F018 and does not contain this automation.
 Prepare a new release from the completed source before publication and deployment.
-Use only `make release && make publish && make deploy` for that application operation.
+The procedure at that checkpoint used `make release && make publish && make deploy`.
 Record import, publication, deployment, and live-provider qualification results separately.
