@@ -821,9 +821,8 @@ func TestLoadConfigParsesPlatformNativeGoogleClients(t *testing.T) {
 			},
 		},
 		{
-			Platform:     "android",
-			ClientID:     "android-client.apps.googleusercontent.com",
-			RedirectURIs: []string{"com.promptdew.mobile:/oauth2redirect/google"},
+			Platform: "android",
+			ClientID: "android-client.apps.googleusercontent.com",
 		},
 	}
 
@@ -1408,5 +1407,59 @@ func TestSecurityRejectChallengeTokenConfiguration(t *testing.T) {
 		if _, err := LoadConfig(file.Name()); err == nil || !strings.Contains(err.Error(), "return_challenge_tokens") {
 			t.Fatalf("obsolete configuration was not rejected: %v", err)
 		}
+	}
+}
+
+func TestLoadConfigAllowsDefaultAndroidAuthorizationCode(t *testing.T) {
+	document := FileDocument{Tenants: []FileTenant{buildTestTenant("mobile", []string{"https://mobile.localhost"}, "", "app_session_mobile", "app_refresh_mobile", "mobile-key")}}
+	document.Tenants[0].GoogleNativeClients = []FileNativeGoogleClient{{Platform: "android", ClientID: document.Tenants[0].GoogleWebClientID}}
+	if _, err := LoadConfigFromDocument(document); err != nil {
+		t.Fatalf("Android server audience should match Web client in same tenant: %v", err)
+	}
+	document.Tenants[0].GoogleNativeClients[0].RedirectURIs = []string{"com.demo:/oauth"}
+	if _, err := LoadConfigFromDocument(document); err != nil {
+		t.Fatalf("default Android authorization-code redirects rejected: %v", err)
+	}
+}
+
+func TestLoadConfigNativeGoogleAcquisitionFlows(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		clients []FileNativeGoogleClient
+		valid   bool
+	}{
+		{"omitted Android code", []FileNativeGoogleClient{{Platform: "android", ClientID: "android-native", RedirectURIs: []string{"com.demo:/android"}}}, true},
+		{"explicit Android code", []FileNativeGoogleClient{{Platform: "android", ClientID: "android-native", AcquisitionFlow: NativeGoogleAuthorizationCode, RedirectURIs: []string{"com.demo:/android"}}}, true},
+		{"Android Credential Manager", []FileNativeGoogleClient{{Platform: "android", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager}}, true},
+		{"unknown flow", []FileNativeGoogleClient{{Platform: "android", ClientID: "server-web", AcquisitionFlow: "unknown"}}, false},
+		{"Credential Manager iOS", []FileNativeGoogleClient{{Platform: "ios", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager}}, false},
+		{"Credential Manager desktop", []FileNativeGoogleClient{{Platform: "desktop", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager}}, false},
+		{"Credential Manager redirects", []FileNativeGoogleClient{{Platform: "android", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager, RedirectURIs: []string{"com.demo:/android"}}}, false},
+		{"normalized platform conflicting flows", []FileNativeGoogleClient{{Platform: " Android ", ClientID: "native"}, {Platform: "android", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager}}, false},
+		{"same platform multiple audiences", []FileNativeGoogleClient{{Platform: "android", ClientID: "native"}, {Platform: "android", ClientID: "native-second", AcquisitionFlow: NativeGoogleAuthorizationCode}}, true},
+		{"different platform mixed flows", []FileNativeGoogleClient{{Platform: "ios", ClientID: "native"}, {Platform: "android", ClientID: "server-web", AcquisitionFlow: NativeGoogleCredentialManager}}, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			document := FileDocument{Tenants: []FileTenant{buildTestTenant("mobile", []string{"https://mobile.localhost"}, "", "app_session_mobile", "app_refresh_mobile", "mobile-key")}}
+			document.Tenants[0].GoogleNativeClientID = ""
+			document.Tenants[0].GoogleNativeClients = scenario.clients
+			config, err := LoadConfigFromDocument(document)
+			if !scenario.valid {
+				if err == nil {
+					t.Fatal("invalid flow config accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tenant := range config.Tenants() {
+				for index, client := range tenant.NativeGoogleClients() {
+					if client.AcquisitionFlow() != scenario.clients[index].AcquisitionFlow.Effective() {
+						t.Fatalf("effective flow=%s", client.AcquisitionFlow())
+					}
+				}
+			}
+		})
 	}
 }

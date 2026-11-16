@@ -26,6 +26,7 @@ type consoleHTTP struct {
 	client               *http.Client
 	base, origin, tenant string
 	gatewayURL           string
+	configuration        *appconfig.ApplicationConfig
 }
 
 func (h consoleHTTP) request(method, path string, body any, status int, headers ...string) (map[string]any, http.Header) {
@@ -220,7 +221,7 @@ func withManagementService(t *testing.T, validator authkit.GoogleTokenValidator,
 		defer gatewayListener.Close()
 		client := listener.Client()
 		client.Jar, _ = cookiejar.New(nil)
-		owner := consoleHTTP{t: t, client: client, base: listener.URL, origin: console.TenantOrigins[0], gatewayURL: gatewayListener.URL}
+		owner := consoleHTTP{t: t, client: client, base: listener.URL, origin: console.TenantOrigins[0], gatewayURL: gatewayListener.URL, configuration: config}
 		owner.login("owner", "console-client")
 		owner.request("PUT", controlplane.OwnerPath, nil, 201)
 		scenario(owner)

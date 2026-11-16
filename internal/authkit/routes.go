@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"github.com/tyemirov/tauth/internal/tenants"
 
 	"net/http"
 	"net/url"
@@ -228,25 +229,35 @@ type authenticatedSessionProfile struct {
 	userRoles         []string
 }
 
+type nativeGoogleAcquisitionFlow = tenants.NativeGoogleAcquisitionFlow
+
+const (
+	nativeGoogleAuthorizationCode     nativeGoogleAcquisitionFlow = tenants.NativeGoogleAuthorizationCode
+	nativeGoogleCredentialManager     nativeGoogleAcquisitionFlow = tenants.NativeGoogleCredentialManager
+	errorNativeGooglePlatformRequired                             = "native_google_platform_required"
+)
+
 type nativeGoogleConfigResponse struct {
+	AcquisitionFlow               nativeGoogleAcquisitionFlow  `json:"acquisition_flow"`
 	ClientID                      string                       `json:"client_id"`
 	ClientIDs                     []string                     `json:"client_ids"`
 	Platform                      string                       `json:"platform,omitempty"`
-	RedirectURIs                  []string                     `json:"redirect_uris"`
+	RedirectURIs                  []string                     `json:"redirect_uris,omitempty"`
 	Clients                       []nativeGoogleClientResponse `json:"clients"`
-	AuthorizationEndpoint         string                       `json:"authorization_endpoint"`
-	TokenEndpoint                 string                       `json:"token_endpoint"`
+	AuthorizationEndpoint         string                       `json:"authorization_endpoint,omitempty"`
+	TokenEndpoint                 string                       `json:"token_endpoint,omitempty"`
 	Scopes                        []string                     `json:"scopes"`
-	ResponseType                  string                       `json:"response_type"`
+	ResponseType                  string                       `json:"response_type,omitempty"`
 	NonceRequired                 bool                         `json:"nonce_required"`
-	PKCERequired                  bool                         `json:"pkce_required"`
-	CodeChallengeMethodsSupported []string                     `json:"code_challenge_methods_supported"`
+	PKCERequired                  bool                         `json:"pkce_required,omitempty"`
+	CodeChallengeMethodsSupported []string                     `json:"code_challenge_methods_supported,omitempty"`
 }
 
 type nativeGoogleClientResponse struct {
-	Platform     string   `json:"platform"`
-	ClientID     string   `json:"client_id"`
-	RedirectURIs []string `json:"redirect_uris"`
+	AcquisitionFlow nativeGoogleAcquisitionFlow `json:"acquisition_flow"`
+	Platform        string                      `json:"platform"`
+	ClientID        string                      `json:"client_id"`
+	RedirectURIs    []string                    `json:"redirect_uris,omitempty"`
 }
 
 type nativeAppleConfigResponse struct {
@@ -482,24 +493,32 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorCode})
 			return
 		}
-		scopes := append([]string(nil), googleNativeScopes...)
-		codeChallengeMethods := []string{googleCodeChallengeMethodS256}
+		flow := nativeClients[0].AcquisitionFlow
+		for _, client := range nativeClients[1:] {
+			if client.AcquisitionFlow != flow {
+				contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorNativeGooglePlatformRequired})
+				return
+			}
+		}
 		clientIDs := nativeGoogleClientIDs(nativeClients)
-		redirectURIs := nativeGoogleRedirectURIs(nativeClients)
-		contextGin.JSON(http.StatusOK, nativeGoogleConfigResponse{
-			ClientID:                      clientIDs[0],
-			ClientIDs:                     clientIDs,
-			Platform:                      normalizeNativeGooglePlatform(platform),
-			RedirectURIs:                  redirectURIs,
-			Clients:                       nativeGoogleClientResponses(nativeClients),
-			AuthorizationEndpoint:         googleAuthorizationEndpoint,
-			TokenEndpoint:                 googleTokenEndpoint,
-			Scopes:                        scopes,
-			ResponseType:                  googleOAuthResponseTypeCode,
-			PKCERequired:                  true,
-			NonceRequired:                 true,
-			CodeChallengeMethodsSupported: codeChallengeMethods,
-		})
+		response := nativeGoogleConfigResponse{
+			AcquisitionFlow: flow,
+			ClientID:        clientIDs[0],
+			ClientIDs:       clientIDs,
+			Platform:        normalizeNativeGooglePlatform(platform),
+			Clients:         nativeGoogleClientResponses(nativeClients),
+			Scopes:          append([]string(nil), googleNativeScopes...),
+			NonceRequired:   true,
+		}
+		if flow == nativeGoogleAuthorizationCode {
+			response.RedirectURIs = nativeGoogleRedirectURIs(nativeClients)
+			response.AuthorizationEndpoint = googleAuthorizationEndpoint
+			response.TokenEndpoint = googleTokenEndpoint
+			response.ResponseType = googleOAuthResponseTypeCode
+			response.PKCERequired = true
+			response.CodeChallengeMethodsSupported = []string{googleCodeChallengeMethodS256}
+		}
+		contextGin.JSON(http.StatusOK, response)
 	})
 
 	router.GET("/auth/apple/native/config", func(contextGin *gin.Context) {
@@ -1209,6 +1228,13 @@ func mountAuthRoutes(router gin.IRouter, registry TenantRegistry, users UserStor
 			contextGin.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": errorNativeGooglePlatformNotConfigured})
 			return
 		}
+		for _, client := range nativeClients[1:] {
+			if client.AcquisitionFlow != nativeClients[0].AcquisitionFlow {
+				recordMetric(metricAuthLoginFailure)
+				contextGin.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errorNativeGooglePlatformRequired})
+				return
+			}
+		}
 		if redirectErr := validateNativeGoogleRedirectURI(nativeClients, inbound.RedirectURI); redirectErr != nil {
 			recordMetric(metricAuthLoginFailure)
 			logAuthWarning("auth.login.native.invalid_redirect_uri", redirectErr)
@@ -1807,16 +1833,18 @@ func configuredNativeGoogleClients(config ServerConfig) []NativeGoogleClientConf
 			platform = nativeGoogleDefaultPlatform
 		}
 		clients = append(clients, NativeGoogleClientConfig{
-			Platform:     platform,
-			ClientID:     clientID,
-			RedirectURIs: append([]string(nil), client.RedirectURIs...),
+			AcquisitionFlow: client.AcquisitionFlow.Effective(),
+			Platform:        platform,
+			ClientID:        clientID,
+			RedirectURIs:    append([]string(nil), client.RedirectURIs...),
 		})
 	}
 	legacyClientID := strings.TrimSpace(config.GoogleNativeClientID)
 	if legacyClientID != "" && !nativeGoogleClientIDExists(clients, legacyClientID) {
 		clients = append(clients, NativeGoogleClientConfig{
-			Platform: nativeGoogleDefaultPlatform,
-			ClientID: legacyClientID,
+			AcquisitionFlow: tenants.NativeGoogleAuthorizationCode,
+			Platform:        nativeGoogleDefaultPlatform,
+			ClientID:        legacyClientID,
 		})
 	}
 	return clients
@@ -1871,15 +1899,22 @@ func nativeGoogleClientResponses(clients []NativeGoogleClientConfig) []nativeGoo
 	responses := make([]nativeGoogleClientResponse, 0, len(clients))
 	for _, client := range clients {
 		responses = append(responses, nativeGoogleClientResponse{
-			Platform:     normalizeNativeGooglePlatform(client.Platform),
-			ClientID:     strings.TrimSpace(client.ClientID),
-			RedirectURIs: append([]string(nil), client.RedirectURIs...),
+			AcquisitionFlow: client.AcquisitionFlow,
+			Platform:        normalizeNativeGooglePlatform(client.Platform),
+			ClientID:        strings.TrimSpace(client.ClientID),
+			RedirectURIs:    append([]string(nil), client.RedirectURIs...),
 		})
 	}
 	return responses
 }
 
 func validateNativeGoogleRedirectURI(clients []NativeGoogleClientConfig, redirectURI string) error {
+	if len(clients) > 0 && clients[0].AcquisitionFlow == nativeGoogleCredentialManager {
+		if strings.TrimSpace(redirectURI) != "" || len(nativeGoogleRedirectURIs(clients)) != 0 {
+			return errors.New("auth.login.native.redirect_uri_not_allowed")
+		}
+		return nil
+	}
 	acceptedRedirectURIs := nativeGoogleRedirectURIs(clients)
 	if len(acceptedRedirectURIs) == 0 {
 		return nil

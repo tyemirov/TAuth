@@ -60,9 +60,10 @@ type TenantID string
 
 // NativeGoogleClient represents one accepted installed-app Google audience.
 type NativeGoogleClient struct {
-	platform     string
-	clientID     string
-	redirectURIs []string
+	acquisitionFlow NativeGoogleAcquisitionFlow
+	platform        string
+	clientID        string
+	redirectURIs    []string
 }
 
 // AppleOAuth represents tenant-level Sign in with Apple settings.
@@ -137,6 +138,8 @@ const (
 	errorCodeDuplicateAllowedUser        = "tenant.duplicate_allowed_user"
 	errorCodeMissingAuthProvider         = "tenant.missing_auth_provider"
 	errorCodeInvalidNativeGoogleID       = "tenant.invalid_native_google_client_id"
+	errorCodeInvalidNativeGoogleFlow     = "tenant.invalid_native_google_acquisition_flow"
+	errorCodeConflictingNativeGoogleFlow = "tenant.conflicting_native_google_acquisition_flow"
 	errorCodeInvalidNativePlatform       = "tenant.invalid_native_google_platform"
 	errorCodeInvalidNativeRedirectURI    = "tenant.invalid_native_redirect_uri"
 	errorCodeDuplicateNativeGoogleID     = "tenant.duplicate_native_google_client_id"
@@ -461,9 +464,10 @@ func (tenant Tenant) NativeGoogleClients() []NativeGoogleClient {
 	clients := make([]NativeGoogleClient, len(tenant.nativeGoogleClients))
 	for index, client := range tenant.nativeGoogleClients {
 		clients[index] = NativeGoogleClient{
-			platform:     client.platform,
-			clientID:     client.clientID,
-			redirectURIs: append([]string(nil), client.redirectURIs...),
+			acquisitionFlow: client.acquisitionFlow,
+			platform:        client.platform,
+			clientID:        client.clientID,
+			redirectURIs:    append([]string(nil), client.redirectURIs...),
 		}
 	}
 	return clients
@@ -635,6 +639,11 @@ func (settings EmailDelivery) OperationTimeoutSeconds() int {
 // PasswordResetTTL returns the password-reset challenge lifetime.
 func (settings AccountManagement) PasswordResetTTL() time.Duration {
 	return settings.passwordResetTTL
+}
+
+// AcquisitionFlow returns the configured native credential acquisition flow.
+func (client NativeGoogleClient) AcquisitionFlow() NativeGoogleAcquisitionFlow {
+	return client.acquisitionFlow
 }
 
 // Platform returns the native platform label.
@@ -836,15 +845,24 @@ func parseNativeGoogleClients(raw FileTenant, tenantID TenantID) ([]NativeGoogle
 	legacyClientID := strings.TrimSpace(raw.GoogleNativeClientID)
 	if legacyClientID != "" {
 		clients = append(clients, NativeGoogleClient{
-			platform: defaultNativeGooglePlatform,
-			clientID: legacyClientID,
+			acquisitionFlow: NativeGoogleAuthorizationCode,
+			platform:        defaultNativeGooglePlatform,
+			clientID:        legacyClientID,
 		})
+	}
+	platformFlows := map[string]NativeGoogleAcquisitionFlow{}
+	for _, client := range clients {
+		platformFlows[client.platform] = client.acquisitionFlow
 	}
 	for _, rawClient := range raw.GoogleNativeClients {
 		client, clientErr := parseNativeGoogleClient(rawClient, tenantID)
 		if clientErr != nil {
 			return nil, clientErr
 		}
+		if flow, exists := platformFlows[client.platform]; exists && flow != client.acquisitionFlow {
+			return nil, fmt.Errorf("%w: %s tenant=%s platform=%s", ErrInvalidTenantConfig, errorCodeConflictingNativeGoogleFlow, tenantID, client.platform)
+		}
+		platformFlows[client.platform] = client.acquisitionFlow
 		clients = append(clients, client)
 	}
 	return clients, nil
@@ -859,14 +877,25 @@ func parseNativeGoogleClient(raw FileNativeGoogleClient, tenantID TenantID) (Nat
 	if clientID == "" {
 		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeGoogleID, tenantID, platform)
 	}
+	flow := raw.AcquisitionFlow.Effective()
+	if flow != NativeGoogleAuthorizationCode && flow != NativeGoogleCredentialManager {
+		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s", ErrInvalidTenantConfig, errorCodeInvalidNativeGoogleFlow, tenantID, platform)
+	}
+	if flow == NativeGoogleCredentialManager && platform != "android" {
+		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s reason=credential_manager_requires_android", ErrInvalidTenantConfig, errorCodeInvalidNativeGoogleFlow, tenantID, platform)
+	}
+	if flow == NativeGoogleCredentialManager && len(raw.RedirectURIs) != 0 {
+		return NativeGoogleClient{}, fmt.Errorf("%w: %s tenant=%s platform=%s reason=credential_manager_has_no_redirect", ErrInvalidTenantConfig, errorCodeInvalidNativeRedirectURI, tenantID, platform)
+	}
 	redirectURIs, redirectErr := parseNativeGoogleRedirectURIs(raw.RedirectURIs, tenantID, platform)
 	if redirectErr != nil {
 		return NativeGoogleClient{}, redirectErr
 	}
 	return NativeGoogleClient{
-		platform:     platform,
-		clientID:     clientID,
-		redirectURIs: redirectURIs,
+		acquisitionFlow: flow,
+		platform:        platform,
+		clientID:        clientID,
+		redirectURIs:    redirectURIs,
 	}, nil
 }
 
@@ -1714,9 +1743,10 @@ type FileTenant struct {
 
 // FileNativeGoogleClient represents one raw native Google client entry.
 type FileNativeGoogleClient struct {
-	Platform     string   `json:"platform" yaml:"platform"`
-	ClientID     string   `json:"client_id" yaml:"client_id"`
-	RedirectURIs []string `json:"redirect_uris" yaml:"redirect_uris"`
+	AcquisitionFlow NativeGoogleAcquisitionFlow `json:"acquisition_flow,omitempty" yaml:"acquisition_flow,omitempty"`
+	Platform        string                      `json:"platform" yaml:"platform"`
+	ClientID        string                      `json:"client_id" yaml:"client_id"`
+	RedirectURIs    []string                    `json:"redirect_uris" yaml:"redirect_uris"`
 }
 
 // FileAppleOAuth represents the raw Sign in with Apple tenant block.

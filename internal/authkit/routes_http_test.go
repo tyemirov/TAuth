@@ -353,9 +353,8 @@ func newMobileNativeTestServerConfig() ServerConfig {
 			},
 		},
 		{
-			Platform:     "android",
-			ClientID:     "android-client-id",
-			RedirectURIs: []string{"com.promptdew.mobile:/oauth2redirect/google"},
+			Platform: "android",
+			ClientID: "android-client-id",
 		},
 	}
 	return config
@@ -2602,8 +2601,6 @@ tenants:
           - "https://promptdew.example.com/oauth/google/callback"
       - platform: android
         client_id: "android-client-id"
-        redirect_uris:
-          - "com.promptdew.mobile:/oauth2redirect/google"
     jwt_signing_key: "mobile-key"
     cookie_domain: ""
     session_cookie_name: "app_session_mobile"
@@ -2645,7 +2642,7 @@ tenants:
 		{
 			platform:         "android",
 			expectedClient:   "android-client-id",
-			expectedRedirect: "com.promptdew.mobile:/oauth2redirect/google",
+			expectedRedirect: "",
 		},
 	}
 
@@ -2679,13 +2676,13 @@ tenants:
 			if payload.Platform != testCase.platform {
 				t.Fatalf("expected platform %s, got %s", testCase.platform, payload.Platform)
 			}
-			if !payload.PKCERequired || !stringSliceContains(payload.CodeChallengeMethodsSupported, googleCodeChallengeMethodS256) {
+			if testCase.platform == "ios" && (!payload.PKCERequired || !stringSliceContains(payload.CodeChallengeMethodsSupported, googleCodeChallengeMethodS256)) {
 				t.Fatalf("expected PKCE S256 metadata, got required=%v methods=%#v", payload.PKCERequired, payload.CodeChallengeMethodsSupported)
 			}
-			if payload.ResponseType != googleOAuthResponseTypeCode {
+			if testCase.platform == "ios" && payload.ResponseType != googleOAuthResponseTypeCode {
 				t.Fatalf("expected response type code, got %s", payload.ResponseType)
 			}
-			if !stringSliceContains(payload.RedirectURIs, testCase.expectedRedirect) {
+			if testCase.platform == "ios" && !stringSliceContains(payload.RedirectURIs, testCase.expectedRedirect) {
 				t.Fatalf("expected redirect %s in %#v", testCase.expectedRedirect, payload.RedirectURIs)
 			}
 			if len(payload.Clients) != 1 || payload.Clients[0].Platform != testCase.platform {
@@ -2714,7 +2711,7 @@ func TestHTTPNativeMobileGoogleLoginLifecycleAndSessionCompatibility(t *testing.
 			platform:    "android",
 			token:       "android-token",
 			audience:    "android-client-id",
-			redirectURI: "com.promptdew.mobile:/oauth2redirect/google",
+			redirectURI: "",
 		},
 	}
 

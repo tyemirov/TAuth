@@ -316,11 +316,13 @@ For manual browser verification:
 
 For the customer API example, do these checks against its API origin.
 
-### 5.3 Native installed-app flow (system browser + PKCE)
+### 5.3 Native installed-app Google acquisition
 
-Native apps such as PromptDew must not embed Google sign-in in a web view. Instead, they should:
+Read `acquisition_flow` from discovery and use the configured acquisition method. Configuration defaults to `authorization_code` on every platform. Only Android supports explicit `google_credential_manager`. Each platform has one flow across all its audiences. Both methods return a Google ID token for the same `POST /auth/google/native` exchange.
 
-1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header. For Expo clients, add `?platform=ios` or `?platform=android`.
+For configured `authorization_code` clients on any platform (the default when `acquisition_flow` is omitted):
+
+1. Call `GET /auth/google/native/config` with `X-TAuth-Tenant` when the request has no browser `Origin` header. Select the configured platform with `?platform=ios`, `?platform=android`, or `?platform=desktop`.
 2. Obtain a nonce from `POST /auth/nonce` with the same `X-TAuth-Tenant` header.
 3. Open Google in the system browser with PKCE `S256`, `response_type=code`, `scope=openid email profile`, one configured redirect URI, and the issued `nonce`.
 4. Exchange the authorization code directly with Google and extract the returned `id_token`.
@@ -328,16 +330,16 @@ Native apps such as PromptDew must not embed Google sign-in in a web view. Inste
 6. Reuse the resulting `app_session` / `app_refresh` cookies on subsequent requests.
 
 Desktop clients can use a configured callback such as `http://127.0.0.1:<port>/oauth/google/callback`.
-Mobile clients can use configured custom schemes or HTTPS app links.
+iOS clients can use configured custom schemes or HTTPS app links.
 For this Google exchange, authorization codes and Google refresh tokens stay outside TAuth.
 
 This path validates the `id_token` against the tenant’s optional `google_native_client_id` and/or `google_native_clients` entries. If native clients are absent, `GET /auth/google/native/config` and `POST /auth/google/native` return `404` with `error: "native_google_login_not_configured"`. If a requested platform is absent, they return `404` with `error: "native_google_platform_not_configured"`. Native client IDs must be unique across tenants.
 
-Expo AuthSession recipe:
+iOS Expo AuthSession recipe:
 
 ```ts
 const tenantId = "promptdew";
-const platform = Platform.OS === "ios" ? "ios" : "android";
+const platform = "ios";
 const configResponse = await fetch(
   `${tauthBaseUrl}/auth/google/native/config?platform=${platform}`,
   { headers: { "X-TAuth-Tenant": tenantId }, credentials: "include" },
@@ -367,7 +369,22 @@ const result = await request.promptAsync({
 
 After Google returns a code, the app exchanges that code directly with Google’s token endpoint using the PKCE verifier managed by AuthSession, extracts `id_token`, then posts it to TAuth. TAuth does not return mobile bearer tokens; keep the `Set-Cookie` values in the native cookie jar and send cookies to TAuth and downstream API hosts. Downstream services should validate `app_session` with `pkg/sessionvalidator`; cross-host cookies require a shared `cookie_domain` such as `.example.com`.
 
-TAuth requires the raw issued nonce in the Google authorization request and the `nonce_token` field.
+For Android clients explicitly configured with `acquisition_flow: "google_credential_manager"`, discovery with `?platform=android` returns that flow.
+Obtain a fresh nonce from `POST /auth/nonce`, then use it unchanged in the Google Credential Manager button flow:
+
+```kotlin
+val option = GetSignInWithGoogleOption.Builder(nativeConfig.clientId)
+    .setNonce(issuedNonce)
+    .build()
+val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+val result = credentialManager.getCredential(activity, request)
+val idToken = GoogleIdTokenCredential.createFrom(result.credential.data).idToken
+```
+
+The discovered `client_id` is the server/Web OAuth client ID accepted as the ID-token audience. Register the Android package and signing certificate separately in the same Google project. See [Google’s Credential Manager implementation guide](https://developer.android.com/identity/sign-in/credential-manager-siwg-implementation).
+Post `{ "google_id_token": idToken, "nonce_token": issuedNonce, "platform": "android" }` to TAuth and retain its session cookies in the native cookie jar. Credential Manager discovery and exchange have no redirect URI or code/PKCE step. Android authorization-code clients use their configured native audience, redirect URI, and PKCE.
+
+TAuth requires the raw issued nonce in the Google acquisition request and the `nonce_token` field.
 TAuth consumes the nonce before account or session writes.
 Unknown, expired, cross-tenant, and used nonces return `401` with `error: "invalid_nonce"`.
 Obtain a fresh nonce for each authorization.
@@ -655,7 +672,7 @@ Common failure cases:
 
 ### 6.2a `GET /auth/google/native/config`
 
-Returns the tenant-specific metadata a native client needs before opening the Google authorization URL.
+Returns the tenant-specific Google acquisition contract. Select a configured `platform`; unfiltered discovery with mixed acquisition flows returns `400` and `error: "native_google_platform_required"`.
 
 - **Headers**: send `X-TAuth-Tenant` when the request does not include a browser `Origin`.
 - **Response**: `200 OK`
@@ -665,10 +682,12 @@ Returns the tenant-specific metadata a native client needs before opening the Go
     "client_id": "native-client.apps.googleusercontent.com",
     "client_ids": ["native-client.apps.googleusercontent.com"],
     "platform": "ios",
+    "acquisition_flow": "authorization_code",
     "redirect_uris": ["com.promptdew.mobile://oauth2redirect/google"],
     "clients": [
       {
         "platform": "ios",
+        "acquisition_flow": "authorization_code",
         "client_id": "native-client.apps.googleusercontent.com",
         "redirect_uris": ["com.promptdew.mobile://oauth2redirect/google"]
       }
@@ -688,9 +707,29 @@ Returns the tenant-specific metadata a native client needs before opening the Go
   - `404` with `error: "native_google_platform_not_configured"` when `platform` is requested but not configured
   - tenant-resolution failures when no `Origin` or `X-TAuth-Tenant` can resolve a tenant
 
+Explicit Android Credential Manager response (`?platform=android`):
+
+```json
+{
+  "acquisition_flow": "google_credential_manager",
+  "client_id": "server-web-client.apps.googleusercontent.com",
+  "client_ids": ["server-web-client.apps.googleusercontent.com"],
+  "platform": "android",
+  "clients": [{
+    "acquisition_flow": "google_credential_manager",
+    "platform": "android",
+    "client_id": "server-web-client.apps.googleusercontent.com"
+  }],
+  "scopes": ["openid", "email", "profile"],
+  "nonce_required": true
+}
+```
+
+`authorization_code` responses include authorization/token endpoints, `response_type: "code"`, PKCE S256 metadata, and configured redirects. `google_credential_manager` responses omit those fields at both levels.
+
 ### 6.2b `POST /auth/google/native`
 
-Verifies a Google ID token obtained by a native system-browser flow and mints the standard session cookies.
+Verifies a Google ID token obtained through the discovered native acquisition flow and mints the standard session cookies.
 
 - **Request body**:
 
@@ -705,7 +744,8 @@ Verifies a Google ID token obtained by a native system-browser flow and mints th
 
 - **Validation**:
   - the ID token audience must match the requested platform’s configured native client ID, or any configured native client ID when `platform` is omitted
-  - when `redirect_uri` is provided, it must be one of the configured redirect URIs for the selected native client
+  - mixed acquisition flows require an explicit `platform`; omission returns `400` with `error: "native_google_platform_required"`
+  - authorization-code clients with configured redirects require an exact `redirect_uri`; Credential Manager requires the field to be absent or empty
   - issuer must be Google
   - the ID token must contain a verified email
   - the ID token `nonce` claim must exactly equal `nonce_token`
@@ -1152,7 +1192,7 @@ Use this checklist when integrating:
   - All relevant origins are in the **Authorized JavaScript origins** list.
   - The `aud` claim in the ID token matches the tenant’s `google_web_client_id`.
 - **Native login returns `native_google_login_not_configured`** – Add `google_native_client_id` or `google_native_clients` to the tenant config and ensure the native app sends `X-TAuth-Tenant` when it has no browser `Origin` header.
-- **Native login returns `native_google_platform_not_configured`** – Add a matching `google_native_clients` entry for `platform: "ios"` or `platform: "android"`, or omit `platform` to accept any configured native client audience.
+- **Native login returns `native_google_platform_not_configured`** – Add a matching `google_native_clients` entry for `platform: "ios"` or `platform: "android"`, or omit `platform` when all configured native clients share one acquisition flow. When unfiltered clients span different flows, discovery and exchange require an explicit platform and return `400 native_google_platform_required` if it is absent. Request fields cannot override the configured flow.
 - **Signup returns `password_signup_not_configured`** – Enable both `account_management.enabled` and `account_management.password_signup.enabled`.
 - **Password login returns `account_not_active`** – Complete email verification before logging in with a newly created account.
 - **Unlink returns `last_identity`** – Link another login method before removing the current account's only identity.

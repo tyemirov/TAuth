@@ -86,7 +86,7 @@ func TestApplicationSubjectGoogleHTTP(t *testing.T) {
 			}
 			login := func(subject, email, platform string) string {
 				audience := "android-client-id"
-				redirect := "com.promptdew.mobile:/oauth2redirect/google"
+				redirect := ""
 				if platform == "ios" {
 					audience = "ios-client-id"
 					redirect = "com.promptdew.mobile://oauth2redirect/google"

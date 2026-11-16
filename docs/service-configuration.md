@@ -201,8 +201,8 @@ tenants:
         client_id: "demo-ios.apps.googleusercontent.com"
         redirect_uris: ["com.demo.app://oauth2redirect/google"]
       - platform: "android"
-        client_id: "demo-android.apps.googleusercontent.com"
-        redirect_uris: ["com.demo.app:/oauth2redirect/google"]
+        acquisition_flow: "google_credential_manager"
+        client_id: "demo-server-web.apps.googleusercontent.com"
     apple_oauth:
       enabled: true
       client_id: "com.demo.web"
@@ -241,6 +241,9 @@ tenants:
     allow_insecure_http: true
 ```
 
+Each native Google client accepts optional `acquisition_flow`: `authorization_code` (the default on every platform) or `google_credential_manager`. Authorization-code clients retain their configured native audiences and redirect URIs, including Android. Credential Manager requires `platform: "android"`, a server/Web audience, and no redirects. All audiences for one normalized platform must select the same flow; conflicting flows are rejected before storage. Discovery and provider-management responses always include the effective flow.
+
+
 Rules enforced at the tenant configuration boundary:
 
 - IDs must use lowercase letters, digits, underscores, or hyphens (`demo`, `customer_b`).
@@ -251,6 +254,7 @@ Rules enforced at the tenant configuration boundary:
 - Unlisted users are rejected during Google, Apple, GitHub, and password login with `403` and `error: "user_not_allowed"` when `allowed_users` is set.
 - Each tenant must configure at least one authentication provider. The provider can be browser Google, native Google, Apple, GitHub, or password login.
 - `google_native_client_id` and `google_native_clients` enable the native Google endpoints. Each native Google client ID must be unique across tenants.
+- `google_native_clients[].acquisition_flow` defaults to `authorization_code` for all platforms, including Android. Explicit `google_credential_manager` requires Android and rejects `redirect_uris`; its `client_id` is the server/Web OAuth audience, which can match this tenant’s `google_web_client_id`. Configure the Android package and signing certificate separately in Google. Discovery returns the effective `acquisition_flow` at the response and client levels.
 - `apple_oauth.enabled` gates the browser Apple routes. `apple_oauth.native_client_ids` gates the native Apple routes. Each native Apple client ID must be unique across tenants.
 - Enabled Apple providers require a Services ID, Team ID, and Key ID. They also require a PKCS8 ECDSA private key and an HTTPS callback URI.
 - Durations use Go's `time.ParseDuration` syntax, for example `15m` or `720h`. Zero or negative values are invalid.
@@ -259,7 +263,9 @@ Rules enforced at the tenant configuration boundary:
   Persistent deployments keep credentials, refresh tokens, and profiles in the same database. Startup seeding reconciles the credential table, so users removed from `password_auth.users` can no longer authenticate after restart.
   Startup keeps inactive account credentials and profiles unchanged. An inactive configured account does not prevent startup or pending account disablement recovery.
 - `account_management.enabled` enables the complete account lifecycle. `password_signup.enabled` requires account management.
+- Owners can update native Google, Apple, and email-delivery settings through the [provider draft resource](tenant-console-operations.md#native-providers-and-email-delivery). Omitted fields preserve stored settings; a changed email destination requires an explicit new API-key input. Activation is separate.
 - `email_delivery` configures Pingwin for signup verification, password reset, and password linking. The API key selects the Pingwin tenant. TAuth adds the single-use token to the URL fragment of the matching public page.
+- The official Pingwin client is resolved through `go get github.com/tyemirov/pinguin@latest`. Its canonical send method is `/pingwin.NotificationService/SendNotification`; the integration test checks this literal wire path independently of generated server registration. Pingwin uses plaintext gRPC, so select a private network or approved tunnel and apply the operation deadline to each send.
 - Account management requires all Pingwin settings and challenge URLs. Challenge tokens are delivered only by email. Remove the obsolete `return_challenge_tokens` field from configuration.
 - `session_cookie_name` / `refresh_cookie_name` must be specified for every tenant. Choose distinct cookie names for tenants that share a cookie domain, such as `app_session_notes` and `app_refresh_notes`.
 - `nonce_ttl` defaults to `5m`. The `allow_insecure_http` default is `false`.

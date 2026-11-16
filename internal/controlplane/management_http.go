@@ -204,6 +204,8 @@ func (management *Management) Mount(router *gin.Engine, config authkit.ServerCon
 			methods = "GET, HEAD, POST, OPTIONS"
 		case len(parts) == 1:
 			methods = "GET, HEAD, PATCH, OPTIONS"
+		case len(parts) == 3 && parts[1] == "configuration" && parts[2] == providerResourceSegment:
+			methods = "GET, HEAD, PATCH, OPTIONS"
 		case len(parts) == 2 && parts[1] == "configuration":
 			methods = "GET, HEAD, PUT, OPTIONS"
 		case len(parts) == 2 && (parts[1] == "origin-proofs" || parts[1] == "activations"):

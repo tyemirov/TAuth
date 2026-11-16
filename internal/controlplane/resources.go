@@ -45,6 +45,9 @@ func (management *Management) read(ctx *gin.Context, owner string, parts []strin
 		row, err := store.tenant(ctx.Request.Context(), owner, parts[0])
 		return resourceResult{Status: 200, Body: row, ETag: tenantETag(row.Version)}, err
 	}
+	if len(parts) == 3 && parts[1] == "configuration" && parts[2] == providerResourceSegment {
+		return store.readProviders(ctx, owner, parts[0])
+	}
 	if len(parts) == 2 && parts[1] == "configuration" {
 		view, err := store.configurationView(ctx.Request.Context(), parts[0])
 		return resourceResult{Status: 200, Body: view, ETag: configETag(view.Revision)}, err
@@ -253,6 +256,10 @@ func (management *Management) write(ctx *gin.Context, store *Store, owner string
 			return result, candidate, "", err
 		}
 		return resourceResult{Status: 201, Body: row, Location: TenantsPath + "/" + row.ID, ETag: tenantETag(row.Version)}, candidate, "", nil
+	}
+	if len(parts) == 3 && parts[1] == "configuration" && parts[2] == providerResourceSegment {
+		result, err := store.writeProviders(ctx, owner, parts[0], data)
+		return result, nil, "", err
 	}
 	row, err := store.tenant(ctx.Request.Context(), owner, parts[0])
 	if err != nil {

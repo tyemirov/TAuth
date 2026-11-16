@@ -67,11 +67,13 @@ type EmailChallengeSender interface {
 	SendEmailChallenge(ctx context.Context, request EmailChallengeRequest) error
 }
 
-// NativeGoogleClientConfig configures one accepted native Google OAuth client.
+// NativeGoogleClientConfig configures one accepted Google ID-token audience.
+// AcquisitionFlow defaults to authorization code; Credential Manager uses a server/Web audience without redirects.
 type NativeGoogleClientConfig struct {
-	Platform     string
-	ClientID     string
-	RedirectURIs []string
+	AcquisitionFlow tenants.NativeGoogleAcquisitionFlow
+	Platform        string
+	ClientID        string
+	RedirectURIs    []string
 }
 
 // AppleOAuthConfig configures Sign in with Apple for one tenant.

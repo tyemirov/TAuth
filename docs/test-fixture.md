@@ -5,6 +5,7 @@ The executable creates an isolated encrypted store through TAuth-owned APIs.
 It creates a synthetic owner, App, and active application tenant.
 It also creates a separate reserved console tenant.
 An optional `accounts` mapping creates synthetic active or disabled application accounts.
+An optional `password_users` mapping prepares verified, active password accounts for real service login tests.
 The production service and image do not contain this executable or a fixture command.
 
 ## Build and delivery
@@ -85,6 +86,27 @@ The optional `accounts` mapping uses this additional shape:
 }
 ```
 
+The optional `password_users` mapping has this shape:
+
+```json
+"password_users": {
+  "owner": {
+    "email": "owner@test-fixture.invalid",
+    "display_name": "Fixture owner",
+    "password": "synthetic-fixture-password"
+  }
+}
+```
+
+All three password-user fields are required.
+Passwords must satisfy the current `authkit.HashPassword` policy: at least 15 Unicode code points, valid UTF-8, and at most 72 bytes.
+The tool stores bcrypt hashes in the encrypted tenant password configuration and prepares credentials, accounts, and profiles through current store APIs.
+The plaintext passwords and hashes never appear in the receipt or service YAML.
+Each password-user alias appears in the existing receipt `accounts` mapping with its canonical public user ID.
+Omitting `password_users` preserves the existing provider-only fixture behavior.
+Application signup, account management, and email delivery stay disabled.
+This fixture preparation is separate from development or production owner enrollment.
+
 Each account field is required.
 Account aliases use lowercase letters, digits, and hyphens.
 Each provider subject must be unique and start with `fixture-`.
@@ -93,7 +115,8 @@ Avatar URLs must use HTTPS and the same reserved domains.
 The state must be `active` or `disabled`.
 The tool uses the canonical provider account and disable operations.
 The receipt maps each alias to its public user ID, profile, roles, and state.
-Unknown fields, multiple JSON documents, empty values, and outer whitespace cause an error.
+Aliases must be distinct across both mappings. Email addresses must be unique after lowercase normalization.
+Unknown fields, duplicate JSON property names, null values, multiple JSON documents, empty profile values, and outer profile whitespace cause an error before output creation.
 The application and tenant IDs must differ from `tauth-console`.
 The origin must use HTTP or HTTPS with `localhost` or a literal loopback IP address.
 Paths, credentials, query strings, and fragments are prohibited in the origin.
@@ -161,6 +184,7 @@ CI=1 make ci </dev/null
 The CLI acceptance verifies rejected inputs, existing-data preservation, encrypted secrets, and backend validator authorization.
 The container acceptance builds the current production service image from source.
 It verifies the actual application tenant's nonce and an existing-store restart.
+Password coverage includes wrong-password rejection, login cookies, session restoration, logout, and a public subject matching the receipt before and after restart.
 The consumer must separately verify compatibility with its selected service image and record that image's digest.
 
 The fixture tool does not enroll a production owner or issue browser sessions.

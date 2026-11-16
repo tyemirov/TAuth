@@ -15,7 +15,7 @@ Owners manage Apps and tenants through a web console.
 | Capability | Current contract |
 | --- | --- |
 | Browser login | Google Identity Services popup, Apple redirect, GitHub redirect or popup, and tenant-managed passwords. |
-| Native login | Google system-browser flow with PKCE. Native Apple sign-in on iOS. These paths return TAuth cookies. |
+| Native login | Google authorization code with PKCE on iOS/desktop; Credential Manager on Android. Native Apple sign-in on iOS. These paths return TAuth cookies. |
 | Application sessions | Short-lived HttpOnly session cookies, rotating refresh cookies, session restoration, and logout. |
 | Account lifecycle | Password signup, email verification, recovery, password changes, identity links, display-name changes, disablement, and erasure. |
 | Tenant isolation | Separate accounts, provider bindings, origins, keys, cookie names, sessions, and account policies. |
@@ -26,7 +26,7 @@ Owners manage Apps and tenants through a web console.
 The console authenticates owners through Google.
 Console tenant creation requires a Google Web client ID.
 The service also accepts Apple, GitHub-only, and password configurations through its provisioning contract.
-Console edits preserve provider settings outside its editable fields.
+Console edits preserve provider settings outside their editable fields. The [provider API](docs/tenant-console-operations.md#native-providers-and-email-delivery) supports native Google, Apple, and email-delivery drafts with write-only keys and separate activation.
 
 ## How it fits
 
@@ -80,7 +80,7 @@ The API is at `http://localhost:8082`.
 Both published ports bind to `127.0.0.1`.
 The default console client is the public Google client used by the Ledger demo.
 Each verified Google user can enroll as an owner.
-Valid configuration edits apply automatically to an active tenant.
+Ordinary configuration edits apply automatically to an active tenant. Provider API edits create drafts for separate activation.
 DNS ownership verification is optional evidence.
 
 The first start creates keys in `.cache/tauth-local/runtime.env` and bootstraps the reserved console tenant.
@@ -103,7 +103,7 @@ The local stack does not start Pingwin for account email flows.
   Its frontend and API share a cookie site. The TAuth service can use another site.
 - **Custom browser client:** Use the [browser helper guide](docs/usage.md#4-recommended-integration-tauthjs) and [provider procedures](docs/usage.md#5-google-identity-services-flow).
   Configure the helper's explicit API `baseUrl` and the tenant's exact frontend origins.
-- **Native client:** Follow the [Google system-browser procedure](docs/usage.md#53-native-installed-app-flow-system-browser--pkce) or [native Apple procedure](docs/usage.md#54-sign-in-with-apple).
+- **Native client:** Follow the [native Google procedure](docs/usage.md#53-native-installed-app-google-acquisition) or [native Apple procedure](docs/usage.md#54-sign-in-with-apple).
   Native login retains cookies in the native cookie jar.
 - **OAuth resource client:** Follow [resource authorization](docs/usage.md#56-oauth-resource-authorization) and the [issuer configuration](docs/service-configuration.md#oauth-issuer-and-resource-configuration).
   Protected Go resources use `pkg/oauthvalidator`.

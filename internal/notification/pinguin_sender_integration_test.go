@@ -11,7 +11,9 @@ import (
 	"github.com/tyemirov/pinguin/pkg/grpcapi"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type recordingNotificationService struct {
@@ -110,5 +112,96 @@ func TestPinguinSenderQueuesPasswordChallengeEmails(testingHandle *testing.T) {
 		case <-time.After(time.Second):
 			testingHandle.Fatal("Pinguin did not receive authorization metadata")
 		}
+	}
+}
+
+// The service name is literal: deriving both ends from the same generated SDK
+// would let an obsolete client and fixture agree on the wrong wire contract.
+func TestPinguinSenderCanonicalWireContract(t *testing.T) {
+	for _, scenario := range []struct {
+		name           string
+		responseStatus grpcapi.Status
+		failure        codes.Code
+		deadline       bool
+		wantError      string
+	}{
+		{name: "queued", responseStatus: grpcapi.Status_QUEUED},
+		{name: "sent", responseStatus: grpcapi.Status_SENT},
+		{name: "errored", responseStatus: grpcapi.Status_ERRORED, wantError: "ERRORED"},
+		{name: "unknown", responseStatus: grpcapi.Status_UNKNOWN, wantError: "UNKNOWN"},
+		{name: "rejected_key", failure: codes.Unauthenticated, wantError: "Unauthenticated"},
+		{name: "unavailable", failure: codes.Unavailable, wantError: "Unavailable"},
+		{name: "deadline", deadline: true, wantError: "DeadlineExceeded"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			type observation struct {
+				method          string
+				request         *grpcapi.NotificationRequest
+				authorization   []string
+				tenantSelectors []string
+				remaining       time.Duration
+			}
+			observed := make(chan observation, 1)
+			server := grpc.NewServer(grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
+				method, _ := grpc.MethodFromServerStream(stream)
+				if method != "/pingwin.NotificationService/SendNotification" {
+					return status.Error(codes.Unimplemented, "noncanonical notification service")
+				}
+				request := new(grpcapi.NotificationRequest)
+				if err := stream.RecvMsg(request); err != nil {
+					return err
+				}
+				incoming, _ := metadata.FromIncomingContext(stream.Context())
+				deadline, ok := stream.Context().Deadline()
+				remaining := time.Duration(0)
+				if ok {
+					remaining = time.Until(deadline)
+				}
+				observed <- observation{method: method, request: request, authorization: incoming.Get("authorization"), tenantSelectors: incoming.Get("x-tenant-id"), remaining: remaining}
+				if scenario.deadline {
+					<-stream.Context().Done()
+					return status.FromContextError(stream.Context().Err()).Err()
+				}
+				if scenario.failure != codes.OK {
+					return status.Error(scenario.failure, "injected notification rejection")
+				}
+				return stream.SendMsg(&grpcapi.NotificationResponse{NotificationId: "wire-notification", NotificationType: grpcapi.NotificationType_EMAIL, Status: scenario.responseStatus})
+			}))
+			go func() { _ = server.Serve(listener) }()
+			defer server.Stop()
+			sender, err := NewPinguinEmailChallengeSender(slog.Default(), []PinguinTenantConfig{{TenantID: "wire-tenant", ServerAddress: listener.Addr().String(), APIKey: "wire-api-key", ConnectionTimeoutSeconds: 1, OperationTimeoutSeconds: 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sender.Close()
+			ctx := context.Background()
+			request := authkit.EmailChallengeRequest{Kind: authkit.EmailChallengeKindVerification, TenantID: "wire-tenant", Recipient: "wire@example.com", PublicURL: "https://app.example.com/verify#one-use-challenge", ExpiresAt: time.Now().UTC().Add(time.Hour)}
+			err = sender.SendEmailChallenge(ctx, request)
+			if scenario.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), scenario.wantError) {
+				t.Fatalf("expected %s, got %v", scenario.wantError, err)
+			}
+			select {
+			case wire := <-observed:
+				if wire.method != "/pingwin.NotificationService/SendNotification" || wire.request.NotificationType != grpcapi.NotificationType_EMAIL || wire.request.Recipient != request.Recipient || !strings.Contains(wire.request.Message, request.PublicURL) {
+					t.Fatal("wire method or challenge intent changed")
+				}
+				if len(wire.authorization) != 1 || wire.authorization[0] != "Bearer wire-api-key" || len(wire.tenantSelectors) != 0 {
+					t.Fatal("notification authentication boundary changed")
+				}
+				if wire.remaining <= 0 || wire.remaining > time.Second+100*time.Millisecond {
+					t.Fatalf("missing operation deadline: %s", wire.remaining)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("canonical notification RPC was not observed")
+			}
+		})
 	}
 }

@@ -35,9 +35,9 @@ are public integration surfaces.
 | Method | Path            | Responsibility                                          | Response                                    |
 | ------ | --------------- | ------------------------------------------------------- | ------------------------------------------- |
 | POST   | `/auth/nonce`   | Issue short-lived single-use nonce for Google exchange | `200` JSON `{ nonce }`                       |
-| GET    | `/auth/google/native/config` | Return native Google OAuth metadata for the resolved tenant and optional `platform` | `200` JSON `{ client_id, client_ids, redirect_uris, pkce_required, nonce_required, ... }` |
+| GET    | `/auth/google/native/config` | Return native Google acquisition metadata for the resolved tenant and selected `platform` | `200` JSON `{ acquisition_flow, client_id, client_ids, nonce_required, ... }` |
 | POST   | `/auth/google`  | Verify Google ID token from the web GIS popup flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
-| POST   | `/auth/google/native` | Verify Google ID token from a native system-browser flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
+| POST   | `/auth/google/native` | Verify Google ID token from the selected native acquisition flow, issue access + refresh cookies | `200` JSON `{ user_id, user_email, ... }`   |
 | GET    | `/auth/apple/native/config` | Return native Apple client metadata for the resolved tenant | `200` JSON `{ client_id, client_ids, nonce_required, ... }` |
 | POST   | `/auth/apple/native` | Exchange the native authorization code, verify both ID tokens, and issue session cookies | `200` JSON `{ user_id, user_email, ... }` |
 | GET    | `/auth/apple/start` | Start a Sign in with Apple redirect for the resolved tenant | `302` to Apple authorization endpoint |
@@ -97,20 +97,20 @@ The access cookie authenticates `/me` and any downstream protected routes. The r
 9. Helper functions set `app_session` (path `/`) and `app_refresh` (path `/auth`) cookies with `HttpOnly`, `Secure`, and configured SameSite attributes.
 10. The JSON response mirrors key profile fields (including `avatar_url`) so the browser helper can hydrate UI state.
 
+The owner-scoped `GET/PATCH /api/management/tenants/{tenant_id}/configuration/providers` resource loads the current decrypted tenant configuration and updates only typed native Google, Apple, or email-delivery fields. It uses the shared authorization, mutation transaction, immutable revision, and activation services. Keys are write-only; reads expose presence booleans. A changed email destination requires a supplied API key. Provider patches create drafts for both console and scoped bearer callers. Contribution bindings and unrelated pending drafts prevent a competing writer. The [provider procedure](docs/tenant-console-operations.md#native-providers-and-email-delivery) defines preconditions, omission semantics, activation, and current Apple disable validation.
+
 ### 3.4 Native provider exchange
 
 Installed apps such as PromptDew use the same session issuance path without embedding Google sign-in in a `WKWebView`:
 
-1. The native client resolves tenant metadata from `GET /auth/google/native/config`. Expo iOS/Android clients request `?platform=ios` or `?platform=android`.
+1. The native client resolves tenant metadata from `GET /auth/google/native/config?platform=ios`, `?platform=desktop`, or `?platform=android`. The response and each client expose `acquisition_flow`.
 2. The client obtains a tenant nonce from `POST /auth/nonce`.
-3. Open Google in the system browser with `response_type=code`, PKCE `S256`, `scope=openid email profile`, a configured redirect URI, and the issued nonce.
-4. Google redirects back to a loopback URI for desktop, or to a custom-scheme/app-link URI for mobile.
-5. The native client exchanges the authorization code directly with Google and extracts the returned `id_token`.
-6. The client posts `{ "google_id_token": "...", "nonce_token": "...", "platform": "ios", "redirect_uri": "..." }` to `/auth/google/native`.
-7. TAuth validates the ID token audience, issuer, identity, redirect URI, and tenant allowlist.
-8. TAuth requires the nonce claim to equal the raw issued nonce in `nonce_token`.
-9. TAuth consumes the tenant nonce atomically before account or session writes.
-10. TAuth issues the same access and refresh cookies as the browser flow.
+3. For `authorization_code` (iOS/desktop), the client opens Google in the system browser with PKCE `S256`, the configured redirect URI, and the raw issued nonce. It exchanges the returned authorization code directly with Google for an ID token.
+4. For `google_credential_manager` (Android), the client uses `GetSignInWithGoogleOption` with the discovered server/Web client ID and raw issued nonce. Google returns the ID token through Credential Manager; discovery omits code endpoints, redirects, and PKCE fields.
+5. The client posts the Google ID token, raw `nonce_token`, and selected `platform` to `/auth/google/native`. Authorization-code clients also send their configured `redirect_uri`; Android omits it.
+6. TAuth validates the selected audience, issuer, identity, redirect rule, and tenant allowlist. Mixed acquisition flows require an explicit platform and otherwise return `400 native_google_platform_required`.
+7. TAuth requires the nonce claim to equal the raw issued nonce in `nonce_token`.
+8. TAuth consumes the tenant nonce atomically before account or session writes and issues the same access and refresh cookies as the browser flow.
 
 Unknown, expired, cross-tenant, and used nonces return `401` with `error: "invalid_nonce"`.
 Each Google authorization requires a fresh server-issued nonce.
@@ -488,7 +488,7 @@ Validation rules baked into the loader:
 - Origins are normalized to lowercase and deduplicated within each tenant definition. Entries must be full origins (scheme + host + optional port). When multiple tenants share the same origin, the runtime requires `X-TAuth-Tenant` to be enabled so requests can declare their tenant explicitly.
 - `allowed_users` is optional; when provided, only the listed email addresses may authenticate for the tenant (an empty list denies all logins).
 - Behavior: `allowed_users` absent → allow all; present empty → deny all; present with entries → allow only listed emails.
-- `google_web_client_id` must be present for every tenant. `google_native_client_id` remains the legacy single installed-app audience; `google_native_clients` adds platform-specific audiences and redirect URIs for mobile clients. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants.
+- `google_web_client_id` must be present for every tenant. `google_native_client_id` configures the desktop audience; `google_native_clients` configures platform-specific acquisition. Android requires the server/Web audience and rejects redirect URIs; iOS/desktop use authorization code with PKCE and their configured redirects. These fields enable native installed-app login via `GET /auth/google/native/config` and `POST /auth/google/native`; every configured native client ID must be unique across tenants.
 - `apple_oauth.enabled` gates the browser Apple endpoints. Optional `native_client_ids` gate the native Apple endpoints.
 - Native Apple IDs must be nonempty and unique. A native Apple ID must also be unique across tenants.
 - Enabled Apple providers require a Services ID, Team ID, Key ID, PKCS8 ECDSA private key, and HTTPS callback URI.

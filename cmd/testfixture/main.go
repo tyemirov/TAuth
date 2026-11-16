@@ -44,6 +44,12 @@ type fixtureAccount struct {
 	State       string `json:"state"`
 }
 
+type fixturePasswordUser struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Password    string `json:"password"`
+}
+
 type fixtureAccountReceipt struct {
 	UserID      string   `json:"user_id"`
 	Email       string   `json:"email"`
@@ -55,11 +61,12 @@ type fixtureAccountReceipt struct {
 
 // fixtureRequest is the closed input contract for an isolated application fixture.
 type fixtureRequest struct {
-	Schema   string                    `json:"schema"`
-	TestOnly bool                      `json:"test_only"`
-	AppID    string                    `json:"app_id"`
-	Accounts map[string]fixtureAccount `json:"accounts"`
-	Server   struct {
+	Schema        string                         `json:"schema"`
+	TestOnly      bool                           `json:"test_only"`
+	AppID         string                         `json:"app_id"`
+	Accounts      map[string]fixtureAccount      `json:"accounts"`
+	PasswordUsers map[string]fixturePasswordUser `json:"password_users"`
+	Server        struct {
 		ListenAddr string `json:"listen_addr"`
 	} `json:"server"`
 	Tenant struct {
@@ -126,6 +133,9 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("read fixture input: %w", err)
 	}
+	if err := validateJSONShape(payload); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(strings.NewReader(string(payload)))
 	decoder.DisallowUnknownFields()
 	var request fixtureRequest
@@ -186,6 +196,7 @@ func validateRequest(request fixtureRequest) (tenants.FileTenant, error) {
 	}
 	aliases := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	subjects := map[string]bool{}
+	emails := map[string]bool{}
 	for alias, account := range request.Accounts {
 		if !aliases.MatchString(alias) {
 			return tenants.FileTenant{}, errors.New("accounts requires lowercase fixture aliases")
@@ -203,6 +214,11 @@ func validateRequest(request fixtureRequest) (tenants.FileTenant, error) {
 		if err != nil || address.Address != account.Email || !(strings.HasSuffix(account.Email, "@example.com") || strings.HasSuffix(account.Email, ".invalid")) {
 			return tenants.FileTenant{}, errors.New("accounts requires synthetic example.com or .invalid email addresses")
 		}
+		email := strings.ToLower(account.Email)
+		if emails[email] {
+			return tenants.FileTenant{}, errors.New("fixture account emails must be unique after normalization")
+		}
+		emails[email] = true
 		avatar, err := url.Parse(account.AvatarURL)
 		if err != nil || avatar.Scheme != "https" || !(avatar.Hostname() == "example.com" || strings.HasSuffix(avatar.Hostname(), ".invalid")) || avatar.User != nil {
 			return tenants.FileTenant{}, errors.New("accounts requires synthetic HTTPS avatar URLs")
@@ -213,6 +229,9 @@ func validateRequest(request fixtureRequest) (tenants.FileTenant, error) {
 	}
 
 	application := tenants.FileTenant{ID: request.Tenant.ID, DisplayName: request.Tenant.DisplayName, TenantOrigins: []string{request.Tenant.Origin}, GoogleWebClientID: request.Tenant.GoogleWebClientID, GoogleNativeClientID: request.Tenant.GoogleNativeClientID, JWTSigningKey: request.Tenant.JWTSigningKey, SessionCookieName: request.Tenant.SessionCookieName, RefreshCookieName: request.Tenant.RefreshCookieName, SessionTTL: request.Tenant.SessionTTL, RefreshTTL: request.Tenant.RefreshTTL, NonceTTL: request.Tenant.NonceTTL, AllowInsecureHTTP: true}
+	if err := addPasswordUsers(request, &application, emails); err != nil {
+		return tenants.FileTenant{}, err
+	}
 	if _, err := tenants.LoadResolvedConfig(tenants.FileDocument{Tenants: []tenants.FileTenant{application}}); err != nil {
 		return tenants.FileTenant{}, fmt.Errorf("validate fixture tenant: %w", err)
 	}
@@ -275,7 +294,7 @@ func prepare(request fixtureRequest, application tenants.FileTenant, payload []b
 		return fmt.Errorf("activate fixture application: %w", err)
 	}
 	accounts := map[string]fixtureAccountReceipt{}
-	if len(request.Accounts) > 0 {
+	if len(request.Accounts) > 0 || len(request.PasswordUsers) > 0 {
 		users, err := authkit.NewDatabaseUserStore(ctx, databaseURL)
 		if err != nil {
 			return fmt.Errorf("open fixture accounts: %w", err)
@@ -302,6 +321,25 @@ func prepare(request fixtureRequest, application tenants.FileTenant, payload []b
 			}
 			accounts[alias] = fixtureAccountReceipt{UserID: profile.UserID, Email: profile.UserEmail, DisplayName: profile.DisplayName, AvatarURL: profile.AvatarURL, Roles: profile.Roles, State: profile.State}
 		}
+		for _, configured := range application.PasswordAuth.Users {
+			if err := users.UpsertPasswordCredential(ctx, application.ID, authkit.PasswordCredentialSeed{UserEmail: configured.Email, DisplayName: configured.DisplayName, PasswordHash: configured.PasswordHash}); err != nil {
+				return fmt.Errorf("create fixture password credential: %w", err)
+			}
+			profile, err := users.EnsurePasswordAccount(ctx, application.ID, configured.Email)
+			if err != nil {
+				return fmt.Errorf("resolve fixture password account: %w", err)
+			}
+			userID, roles, err := users.UpsertAccountUser(ctx, application.ID, profile.AccountID, profile.UserEmail, profile.DisplayName, profile.AvatarURL)
+			if err != nil {
+				return fmt.Errorf("create fixture password profile: %w", err)
+			}
+			for alias, user := range request.PasswordUsers {
+				if strings.ToLower(user.Email) == configured.Email {
+					accounts[alias] = fixtureAccountReceipt{UserID: userID, Email: profile.UserEmail, DisplayName: profile.DisplayName, AvatarURL: profile.AvatarURL, Roles: roles, State: profile.State}
+				}
+			}
+		}
+
 	}
 
 	closeErr := store.Close()

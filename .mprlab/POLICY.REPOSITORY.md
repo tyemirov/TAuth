@@ -37,3 +37,48 @@ The current contract preserves existing provider data and permanent state-v1 fie
 - Normalize defaults and inheritance before manifest identity calculation.
 - Add a declaration kind only with one closed shape.
 - Reject obsolete root collection shapes, unknown fields, and `schema_version`.
+
+## Static Website Hosting
+
+Apply this section to deployment or publication work for a browser frontend.
+
+- Use GitHub Pages as the production host for each deployable browser frontend.
+- Declare the browser frontend with a `targets.github_pages.sites[]` declaration in `.mprlab/deploy/resources.yml`.
+- Use `gh-pages` as the publication branch.
+- The GitHub Pages repository can differ from the application repository.
+- Keep API and service routes on hostnames that differ from the website hostname.
+- Reserve the GitHub Pages domain and its `www` hostname for GitHub Pages.
+- Treat a container as an artifact source only when its static output goes to GitHub Pages.
+- Verify publication through the public website and `/.mprlab-release.json`.
+- Run the Governor check after each selected manifest change and before each release, publish, or deploy operation.
+
+## Credential Discovery
+
+Apply this gate when the selected task requires credentials.
+
+- Identify each required environment variable from the active command and repository contract.
+- Treat tracked example and sample environment files as documentation only.
+- Search only for exact variable names. Do not print, copy, or record secret values.
+
+For selected-manifest lifecycle commands:
+
+- Use the selected manifest as the sole lifecycle input authority.
+- Keep `environment.source` optional. Declare each selected file explicitly in the manifest.
+- Use process values before file values for declared environment references.
+- Resolve declared inputs once at the selected manifest boundary.
+- Pass captured inputs to child operations.
+- Use captured values downstream without reading private environment files again.
+- Diagnose missing credentials only through declared process references and the explicitly selected file.
+
+For other commands:
+
+- Use the active command's documented credential sources and standard environment lookup.
+- Diagnose missing credentials only through those declared sources.
+- Do not add a credential parser or another input channel.
+
+For each command:
+
+- Inspect its declared sources before you request a login or report a credential blocker.
+- When available, use a non-mutating authentication command to verify the discovered value.
+- Request new credentials only after each authorized existing input fails verification.
+- Report a credential blocker only after you complete this gate.

@@ -248,6 +248,22 @@ A failed configuration update preserves the previous revision and runtime.
 Edits to a suspended tenant do not resume authentication.
 Session lifetimes range from one minute through one hour. Refresh lifetimes cannot exceed 90 days.
 
+### Native providers and email delivery
+
+Use `GET /api/management/tenants/{tenant_id}/configuration/providers` to read the latest provider revision and configuration ETag. The resource returns effective native Google audiences, public Apple settings, and public email-delivery settings. Apple and email keys appear only as `key_configured` booleans.
+
+Send `PATCH` to the same resource with `If-Match` and the fields to change. Console sessions require the exact console Origin and `X-TAuth-CSRF: 1`. Provisioning bearer credentials require the current owner, App, tenant grant, and `configure` operation; reads require `read`. Bearer requests carry their authorization header without browser Origin or cookies. Credentials are checked again inside the shared mutation transaction.
+
+- `google_native_clients` replaces the complete native Google audience list, including a standalone desktop audience previously configured through `google_native_client_id`. Omitting the list preserves it. Each entry accepts optional `acquisition_flow`, which defaults to `authorization_code` on every platform and retains configured code-flow redirects. Explicit `google_credential_manager` requires Android, a server/Web audience, and no redirects. All audiences for one normalized platform must use the same flow. Responses include the effective flow even when the input omitted it.
+- `apple` accepts partial `enabled`, `client_id` (Services ID), `native_client_ids` (App IDs), `team_id`, `key_id`, `redirect_uri`, and write-only `private_key` fields. Omitted fields preserve stored values. The current tenant schema rejects `enabled: false` while Apple settings remain, returning `422` without erasing credentials. Apple network endpoints, scopes, and server-event settings remain service-owned and unchanged.
+- `email_delivery` accepts partial `server_address`, write-only `api_key`, the three public challenge URLs, and positive `connection_timeout_seconds` / `operation_timeout_seconds`. A changed server address requires an explicit API key in the same request; this prevents forwarding a hidden stored key to a different destination. Omitting the key while retaining the address preserves it.
+
+Unknown fields and explicit `null` values return `400`. Empty keys and invalid canonical tenant settings return `422`. Error responses, audit events, and retry receipts contain no key material. Account flags, password users/hashes, allowed users, signing keys, cookies, and all unrelated canonical settings remain unchanged.
+
+A successful change returns `200` with one new encrypted draft revision and its ETag. Both console and bearer mutations are draft-only. Activate the returned revision through the existing activation resource with a fresh configuration ETag and `Idempotency-Key`; bearer activation separately requires `activate`. Provider edits preserve suspension. Failed runtime construction preserves the active revision and records the failed activation.
+
+A valid no-op returns the existing revision. Missing preconditions return `428`; stale preconditions return `412`, including no-op requests. A pending draft can be edited only when the same provider resource created it. Unrelated pending drafts return `409 management.configuration_draft_conflict`. Contribution-bound tenants return `409 management.configuration_provisioning_bound`: existing credentials do not prove control of the contribution owner/ID tuple. Scoped reads remain available.
+
 ### Application origins
 
 Production addresses require HTTPS and DNS hostnames.

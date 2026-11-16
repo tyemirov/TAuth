@@ -43,6 +43,8 @@ func TestPublicFixtureCLI(t *testing.T) {
 	request := map[string]any{"schema": "tauth.test-fixture.v1", "test_only": true, "app_id": "fixture-app", "server": map[string]any{"listen_addr": ":8081"}, "tenant": map[string]any{"id": "fixture-application", "display_name": "Fixture application", "origin": "http://localhost:32123", "google_web_client_id": "fixture-web.apps.googleusercontent.com", "google_native_client_id": "fixture-native.apps.googleusercontent.com", "jwt_signing_key": "synthetic-fixture-signing-key", "session_cookie_name": "fixture_session", "refresh_cookie_name": "fixture_refresh", "session_ttl": "30m", "refresh_ttl": "720h", "nonce_ttl": "10m"}}
 	request["accounts"] = map[string]any{"writer": map[string]any{"subject": "fixture-writer", "email": "writer@example.com", "display_name": "Writer Block Test", "avatar_url": "https://example.com/avatar.png", "state": "active"}, "disabled": map[string]any{"subject": "fixture-disabled", "email": "disabled@example.com", "display_name": "Disabled writer", "avatar_url": "https://example.com/avatar.png", "state": "disabled"}}
 
+	request["password_users"] = map[string]any{"owner": map[string]any{"email": "owner@test-fixture.invalid", "display_name": "Fixture owner", "password": "fixture-owner-password-only"}}
+
 	invoke := func(input []byte, outputDir string) ([]byte, error) {
 		t.Helper()
 		inputPath := filepath.Join(scratch, "input.json")
@@ -142,7 +144,7 @@ func TestPublicFixtureCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{row.Key, server["tenant_encryption_key"].(string)} {
+	for _, secret := range []string{row.Key, server["tenant_encryption_key"].(string), "fixture-owner-password-only", "password_hash"} {
 		if bytes.Contains(receipt, []byte(secret)) {
 			t.Fatal("receipt contains a secret")
 		}
@@ -155,7 +157,7 @@ func TestPublicFixtureCLI(t *testing.T) {
 		t.Fatalf("receipt identity is incomplete: %v", receiptFields)
 	}
 	accounts := receiptFields["accounts"].(map[string]any)
-	for _, alias := range []string{"writer", "disabled"} {
+	for _, alias := range []string{"writer", "disabled", "owner"} {
 		account := accounts[alias].(map[string]any)
 		if account["user_id"] == "" || account["user_id"] == nil {
 			t.Fatalf("fixture account lacks a user ID: %v", account)
@@ -168,6 +170,7 @@ func TestPublicFixtureCLI(t *testing.T) {
 			t.Fatal(err)
 		}
 		delete(withoutAccounts, "accounts")
+		delete(withoutAccounts, "password_users")
 		input, err := json.Marshal(withoutAccounts)
 		if err != nil {
 			t.Fatal(err)
@@ -188,6 +191,65 @@ func TestPublicFixtureCLI(t *testing.T) {
 			t.Fatal("omitted accounts created application users")
 		}
 	})
+
+	for _, scenario := range []string{"password-null", "password-user-null", "password-field-null", "password-unknown", "password-short", "password-long", "password-email", "password-empty-name", "password-alias", "password-alias-collision", "password-duplicate-email", "provider-password-duplicate-email", "duplicate-alias-json", "duplicate-field-json"} {
+		t.Run(scenario, func(t *testing.T) {
+			var invalid map[string]any
+			if err := json.Unmarshal(encoded, &invalid); err != nil {
+				t.Fatal(err)
+			}
+			users := invalid["password_users"].(map[string]any)
+			owner := users["owner"].(map[string]any)
+			switch scenario {
+			case "password-null":
+				invalid["password_users"] = nil
+			case "password-user-null":
+				users["owner"] = nil
+			case "password-field-null":
+				owner["email"] = nil
+			case "password-unknown":
+				owner["hash"] = "not-accepted"
+			case "password-short":
+				owner["password"] = "too-short"
+			case "password-long":
+				owner["password"] = strings.Repeat("x", 73)
+			case "password-email":
+				owner["email"] = "person@production.example"
+			case "password-empty-name":
+				owner["display_name"] = " "
+			case "password-alias":
+				users["OWNER"] = owner
+			case "password-alias-collision":
+				users["writer"] = owner
+				delete(users, "owner")
+			case "password-duplicate-email":
+				users["another"] = map[string]any{"email": "OWNER@test-fixture.invalid", "display_name": "Another", "password": "fixture-another-password"}
+			case "provider-password-duplicate-email":
+				owner["email"] = "WRITER@example.com"
+			}
+			payload, err := json.Marshal(invalid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "duplicate-alias-json" {
+				payload = bytes.Replace(payload, []byte(`"password_users":{`), []byte(`"password_users":{"owner":{"email":"duplicate@test-fixture.invalid","display_name":"Duplicate","password":"fixture-duplicate-password"},`), 1)
+			}
+			if scenario == "duplicate-field-json" {
+				payload = bytes.Replace(payload, []byte(`"password_users":{`), []byte(`"password_users":{},"password_users":{`), 1)
+			}
+			destination := filepath.Join(scratch, scenario)
+			output, err := invoke(payload, destination)
+			if err == nil {
+				t.Fatal("invalid password fixture accepted")
+			}
+			if bytes.Contains(output, []byte("fixture-owner-password-only")) {
+				t.Fatal("error exposed a password")
+			}
+			if _, err := os.Stat(destination); !os.IsNotExist(err) {
+				t.Fatalf("invalid fixture left output: %v", err)
+			}
+		})
+	}
 
 	databaseBefore, err := os.ReadFile(filepath.Join(outputDir, "tauth.db"))
 	if err != nil {

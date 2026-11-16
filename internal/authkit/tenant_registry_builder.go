@@ -101,9 +101,10 @@ func buildNativeGoogleClientConfigs(clients []tenants.NativeGoogleClient) []Nati
 	configs := make([]NativeGoogleClientConfig, 0, len(clients))
 	for _, client := range clients {
 		configs = append(configs, NativeGoogleClientConfig{
-			Platform:     client.Platform(),
-			ClientID:     client.ClientID(),
-			RedirectURIs: client.RedirectURIs(),
+			AcquisitionFlow: client.AcquisitionFlow(),
+			Platform:        client.Platform(),
+			ClientID:        client.ClientID(),
+			RedirectURIs:    client.RedirectURIs(),
 		})
 	}
 	return configs
