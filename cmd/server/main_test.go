@@ -19,7 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"github.com/tyemirov/pinguin/pkg/grpcapi"
+	"github.com/tyemirov/pingwin/pkg/grpcapi"
 	"github.com/tyemirov/tauth/internal/appconfig"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"github.com/tyemirov/tauth/internal/tenants"

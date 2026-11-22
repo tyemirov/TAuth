@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	pinguinclient "github.com/tyemirov/pinguin/pkg/client"
-	"github.com/tyemirov/pinguin/pkg/grpcapi"
+	pinguinclient "github.com/tyemirov/pingwin/pkg/client"
+	"github.com/tyemirov/pingwin/pkg/grpcapi"
 	"github.com/tyemirov/tauth/internal/authkit"
 )
 
