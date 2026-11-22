@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyemirov/pinguin/pkg/grpcapi"
+	"github.com/tyemirov/pingwin/pkg/grpcapi"
 	"github.com/tyemirov/tauth/internal/authkit"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
